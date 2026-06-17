@@ -278,6 +278,30 @@ MIGRATION = Migration(
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id TEXT PRIMARY KEY,
+            owner_session_hash TEXT NOT NULL DEFAULT '',
+            team_id TEXT NOT NULL DEFAULT '',
+            actor_session_hash TEXT NOT NULL DEFAULT '',
+            actor_session_label TEXT NOT NULL DEFAULT '',
+            actor_member_id TEXT NOT NULL DEFAULT '',
+            actor_role TEXT NOT NULL DEFAULT '',
+            actor_display_name TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL DEFAULT '',
+            request_id TEXT NOT NULL DEFAULT '',
+            correlation_id TEXT NOT NULL DEFAULT '',
+            job_id TEXT NOT NULL DEFAULT '',
+            details_version INTEGER NOT NULL DEFAULT 1,
+            created TEXT NOT NULL,
+            client_ip TEXT NOT NULL DEFAULT '',
+            user_agent TEXT NOT NULL DEFAULT '',
+            details JSONB NOT NULL DEFAULT '{}'::jsonb
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS schedules (
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
@@ -326,6 +350,7 @@ MIGRATION = Migration(
             id TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
             team_id TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL DEFAULT '',
             label TEXT NOT NULL DEFAULT '',
             command_text TEXT NOT NULL,
             schedule_id TEXT NOT NULL UNIQUE,
@@ -336,6 +361,7 @@ MIGRATION = Migration(
             state_reason TEXT NOT NULL DEFAULT '',
             last_error TEXT NOT NULL DEFAULT '',
             options_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            policy_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             consecutive_no_change BIGINT NOT NULL DEFAULT 0,
             consecutive_changed BIGINT NOT NULL DEFAULT 0,
             consecutive_failures BIGINT NOT NULL DEFAULT 0,
@@ -356,9 +382,26 @@ MIGRATION = Migration(
             truncated BOOLEAN NOT NULL DEFAULT FALSE,
             notification_event_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             state_at_fire TEXT NOT NULL DEFAULT '',
+            state_reason TEXT NOT NULL DEFAULT '',
+            fire_kind TEXT NOT NULL DEFAULT 'unclassified',
+            ack_state TEXT NOT NULL DEFAULT 'new',
+            ack_note TEXT NOT NULL DEFAULT '',
+            ack_by TEXT NOT NULL DEFAULT '',
+            ack_at TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
             UNIQUE (watcher_id, run_id),
-            CHECK (diff_kind IN ('signal', 'textual', 'none'))
+            CHECK (diff_kind IN ('signal', 'textual', 'none')),
+            CHECK (
+                fire_kind IN (
+                    'changed',
+                    'recovered',
+                    'failed',
+                    'no_change',
+                    'baseline_created',
+                    'baseline_accepted',
+                    'paused',
+                    'unclassified')),
+            CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))
         )
         """,
         """
@@ -639,6 +682,18 @@ MIGRATION = Migration(
             updated TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS project_reports (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL,
+            draft JSONB NOT NULL DEFAULT '{}'::jsonb,
+            report_format_version INTEGER NOT NULL DEFAULT 1,
+            created TEXT NOT NULL,
+            updated TEXT NOT NULL
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)",
         "CREATE INDEX IF NOT EXISTS idx_runs_session_started ON runs (session_id, started DESC)",
         "CREATE INDEX IF NOT EXISTS idx_runs_session_command_started ON runs (session_id, command, started DESC)",
@@ -736,6 +791,40 @@ MIGRATION = Migration(
         ON notification_events (channel_id, created DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_notification_events_run ON notification_events (run_id)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_personal_created
+        ON audit_events (owner_session_hash, created DESC)
+        WHERE team_id IS NULL OR team_id = ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_team_created
+        ON audit_events (team_id, created DESC)
+        WHERE team_id != ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_actor_member_created
+        ON audit_events (actor_member_id, created DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_actor_session_created
+        ON audit_events (actor_session_hash, created DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_type_created
+        ON audit_events (event_type, created DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_project_created
+        ON audit_events (project_id, created DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_target_created
+        ON audit_events (target_type, target_id, created DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_events_correlation
+        ON audit_events (correlation_id)
+        """,
         "CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules (enabled, next_run_at, owner_kind)",
         """
         CREATE INDEX IF NOT EXISTS idx_schedules_session_updated
@@ -761,6 +850,10 @@ MIGRATION = Migration(
         """
         CREATE INDEX IF NOT EXISTS idx_watchers_team_updated
         ON watchers (team_id, updated DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_watchers_project_updated
+        ON watchers (project_id, updated DESC)
         """,
         "CREATE INDEX IF NOT EXISTS idx_watchers_schedule ON watchers (schedule_id)",
         "CREATE INDEX IF NOT EXISTS idx_watchers_baseline ON watchers (baseline_run_id)",
@@ -952,6 +1045,17 @@ MIGRATION = Migration(
         """,
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated ON evidence_packages (project_id, updated DESC)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_session_project ON evidence_packages (session_id, project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_project_reports_project_updated ON project_reports (project_id, updated DESC)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_reports_personal_unique
+        ON project_reports (session_id, project_id)
+        WHERE team_id IS NULL OR team_id = ''
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_reports_team_unique
+        ON project_reports (team_id, project_id)
+        WHERE team_id != ''
+        """,
         """
         CREATE OR REPLACE FUNCTION findings_legacy_ai_fn()
         RETURNS TRIGGER AS $$

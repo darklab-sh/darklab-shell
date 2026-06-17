@@ -256,6 +256,18 @@ def postgres_jsonb_param(value: Any) -> Any:
     return Jsonb(value)
 
 
+def integrity_error_types(backend: DatabaseBackend) -> tuple[type[BaseException], ...]:
+    if backend == DatabaseBackend.SQLITE:
+        return (sqlite3.IntegrityError,)
+    if backend == DatabaseBackend.POSTGRES:
+        try:
+            from psycopg import IntegrityError as PostgresIntegrityError  # type: ignore[reportMissingImports]
+        except ImportError:
+            return (sqlite3.IntegrityError,)
+        return (sqlite3.IntegrityError, PostgresIntegrityError)
+    return (sqlite3.IntegrityError,)
+
+
 def parse_database_backend(value: Any) -> DatabaseBackend:
     if isinstance(value, DatabaseBackend):
         return value
@@ -738,6 +750,7 @@ def connect_sqlite(path: str, timeout: float = 10) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
 
 

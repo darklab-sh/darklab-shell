@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, request
 from config import CFG
 from core.helpers import get_session_id
 from extensions import limiter
+from services.audit.context import route_audit_fields
 from services.notifications.channels_store import (
     NotificationChannelError,
     create_notification_channel,
@@ -141,7 +142,13 @@ def session_notification_channels_create():
         if scope_error:
             return scope_error
         _require_manage_notifications(scope)
-        channel = create_notification_channel(session_id, data, team_id=scope.team_id if scope else "")
+        channel = create_notification_channel(
+            session_id,
+            data,
+            team_id=scope.team_id if scope else "",
+            audit_fields=route_audit_fields(session_id, request, scope),
+            audit_source="browser",
+        )
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_error(exc)
     return jsonify({"channel": channel}), 201
@@ -163,7 +170,14 @@ def session_notification_channels_update(channel_id):
         if scope_error:
             return scope_error
         _require_manage_notifications(scope)
-        channel = update_notification_channel(session_id, channel_id, data, team_id=scope.team_id if scope else "")
+        channel = update_notification_channel(
+            session_id,
+            channel_id,
+            data,
+            team_id=scope.team_id if scope else "",
+            audit_fields=route_audit_fields(session_id, request, scope),
+            audit_source="browser",
+        )
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_error(exc)
     return jsonify({"channel": channel})
@@ -180,7 +194,13 @@ def session_notification_channels_delete(channel_id):
         if scope_error:
             return scope_error
         _require_manage_notifications(scope)
-        removed = delete_notification_channel(session_id, channel_id, team_id=scope.team_id if scope else "")
+        removed = delete_notification_channel(
+            session_id,
+            channel_id,
+            team_id=scope.team_id if scope else "",
+            audit_fields=route_audit_fields(session_id, request, scope),
+            audit_source="browser",
+        )
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_error(exc)
     return jsonify({"removed": removed})
@@ -197,7 +217,13 @@ def session_notification_channels_test(channel_id):
         if scope_error:
             return scope_error
         _require_manage_notifications(scope)
-        result = send_test_notification(session_id, channel_id, team_id=scope.team_id if scope else "")
+        result = send_test_notification(
+            session_id,
+            channel_id,
+            team_id=scope.team_id if scope else "",
+            audit_fields=route_audit_fields(session_id, request, scope),
+            audit_source="browser",
+        )
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_error(exc)
     return jsonify(result)

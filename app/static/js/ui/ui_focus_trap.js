@@ -19,7 +19,7 @@
 //
 // Shape follows bindPressable / bindDismissible: one function, element +
 // optional opts, idempotent via data-focus-trap-bound, returns a disposable.
-(function (global) {
+const bindFocusTrap = (function () {
   'use strict';
 
   // Matches focusable elements that are actually reachable via keyboard.
@@ -126,5 +126,7 @@
     };
   }
 
-  global.bindFocusTrap = bindFocusTrap;
-})(typeof window !== 'undefined' ? window : globalThis);
+  return bindFocusTrap;
+})();
+
+export { bindFocusTrap };

@@ -103,10 +103,11 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
+| `asset_bundle_mode` | `bundle` | Frontend asset rendering mode. `bundle` renders content-hashed files from `app/static/build/` for bundles, lazy modules, fonts, favicon, and standalone vendor/static assets, and fails if the committed build output is missing or incomplete; `source` keeps local edit-and-refresh work direct by linking ordered CSS sources and emitting each ES module entry so the browser follows its imports. `ASSET_BUNDLE_MODE` can also override this setting |
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag` and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the page entirely and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Matching clients also bypass the per-session AI assist write quota for operator testing, but the global AI write limit still applies |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-session AI assist write quota for operator testing, but the global AI write limit still applies |
 | `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
 | `prometheus_multiproc_dir` | `/tmp/darklab_shell-prom` | Writable shared directory used by `prometheus_client` to aggregate counters and histograms across Gunicorn workers. `PROMETHEUS_MULTIPROC_DIR` overrides this value when set |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
@@ -143,13 +144,18 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
 | `database_postgres_jit` | `false` | Server-side only. Controls whether app-owned Postgres pool connections allow PostgreSQL JIT compilation. The default keeps interactive pages from paying JIT startup cost on complex queries. Can also be set with `DATABASE_POSTGRES_JIT` |
-| `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` means unlimited retention |
+| `permalink_retention_days` | `365` | Delete runs, snapshots, and related run-output artifacts older than this many days at startup and during the scheduler worker's daily retention pass. `0` means unlimited retention |
+| `audit_log_enabled` | `true` | Server-side only. Enables audit event recording. When set to `false`, the audit recorder writes no rows and normal product writes continue; the app logs this once at startup so operators know the compliance trail is disabled |
+| `audit_retention_days` | `90` | Server-side only. Delete audit event rows older than this many days on startup and periodically while the app is running. `0` means unlimited retention |
+| `audit_export_max_rows` | `10000` | Server-side only. Maximum number of audit rows `/diag/audit` CSV/JSON exports return in one request. Values above `200000` are capped, and truncated exports include a marker row or flag |
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
-| `rate_limit_enabled` | `true` | Enables the shared `/runs` and `/api/v1` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
-| `rate_limit_per_minute` | `30` | Max `/runs` and `/api/v1` requests per minute per IP |
-| `rate_limit_per_second` | `5` | Max `/runs` and `/api/v1` requests per second per IP |
+| `rate_limit_enabled` | `true` | Enables the shared HTTP rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
+| `http_rate_limit_per_minute` | `240` | Baseline limit for dynamic app routes that do not already have a tighter route-specific limit. Static assets are exempt, so normal page loads still work while broad scanners hitting random paths are throttled. Set to `0` to disable this baseline while keeping route-specific limits |
+| `http_rate_limit_per_second` | `60` | Baseline burst limit for dynamic app routes that do not already have a tighter route-specific limit. This leaves room for the app's first-load request fan-out while the minute limit still caps sustained unknown-path scans. Set to `0` to disable this baseline while keeping route-specific limits |
+| `rate_limit_per_minute` | `30` | Max command-start and API requests per minute per IP |
+| `rate_limit_per_second` | `5` | Max command-start and API requests per second per IP |
 | `team_read_rate_limit_per_minute` | `180` | Max team-management read requests per minute. The Options Teams tab, desktop HUD scope selector, mobile scope selector, and `/api/v1/teams` list/detail routes use this token-keyed limit |
 | `team_read_rate_limit_per_second` | `20` | Max team-management read requests per second for the same read surfaces |
 | `team_write_rate_limit_per_minute` | `30` | Max team-management write requests per minute for create, join, invite, membership, archive/reactivate, leave, and recovery-code changes |
@@ -227,7 +233,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `interactive_pty_resize_rate_limit_per_minute` | `600` | Max interactive PTY resize requests per minute per IP. This is separate from `/runs` because normal browser layout changes can produce short resize bursts |
 | `interactive_pty_resize_rate_limit_per_second` | `30` | Max interactive PTY resize request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |
-| `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the saved run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` means unlimited |
+| `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the saved run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. Server-side `sort` and `uniq` pipe helpers also use this as their buffered input cap and emit a `[post-filter]` notice when later lines are skipped. `0` means unlimited |
 | `high_volume_output_line_threshold` | `50000` | Browser-facing. Pauses live rendering for brokered command output after this many received lines. Output keeps counting, kill controls stay available, and backend preview/full-output storage still follows the normal output settings. `0` disables the pause |
 | `high_volume_output_status_interval_lines` | `50000` | Browser-facing. When high-volume live-output mode is active, show another status line after this many additional received lines |
 | `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
@@ -269,6 +275,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
 | `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped presets |
+| `report_templates_file` | `report_templates.yaml` | Engagement report template catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped templates |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior. See [docs/notifications.md](docs/notifications.md) for channel setup |
@@ -299,7 +306,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
-| `run_broker_require_redis` | `true` | Requires Redis for brokered live reattachment. Keep enabled for Docker/production deployments; set to `false` only for single-process local development where in-memory replay limitations are acceptable |
+| `run_broker_require_redis` | `true` | Requires Redis for brokered live reattachment. Keep enabled for Docker/production deployments; set to `false` only for single-worker local development where in-memory replay limitations are acceptable. Multi-worker startup still requires Redis for shared active-run state |
 | `run_broker_active_stream_ttl_seconds` | `14400` | Safety TTL for active broker streams, refreshed while a run is active |
 | `run_broker_completed_stream_ttl_seconds` | `3600` | How long completed broker streams remain replayable after history finalization before completed-run restore relies on saved history rows and artifacts |
 | `run_broker_max_replay_bytes` | `10485760` | Maximum replay payload retained per brokered run stream. Replay is also bounded by `max_output_lines`; there is no separate line-limit setting |
@@ -785,7 +792,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
 | `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
 
-If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production overlay currently defaults `WEB_CONCURRENCY` to `8` when that variable is not set.
+If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production overlay currently defaults `WEB_CONCURRENCY` to `8` when that variable is not set. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
 ---
 
@@ -1159,7 +1166,7 @@ presets:
       transcripts: with_findings
       findings: non_false_positive
       artifacts: selectable
-      targets: all
+    targets: all
 ```
 
 Supported selection policies are:
@@ -1174,6 +1181,17 @@ Supported selection policies are:
 
 Preset ids must use lowercase letters, numbers, underscores, or hyphens. Keep the shipped `evidence`, `summary`, `full`, and `redacted` presets if you want old package manifests to stay easy to read.
 
+### Customize Report Templates
+
+Engagement report templates live in `app/conf/report_templates.yaml` by default. Set `report_templates_file` in `config.local.yaml` if you want to keep an operator-managed report template catalog somewhere else:
+
+```yaml
+# app/conf/config.local.yaml
+report_templates_file: report_templates.local.yaml
+```
+
+Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped templates stay available and the server logs `REPORT_TEMPLATES_OVERRIDE_INVALID`.
+
 ### Customize FAQ, Welcome, Commands, Workflows, and Package Presets
 
 - Add FAQ entries in `app/conf/faq.local.yaml`.
@@ -1181,6 +1199,7 @@ Preset ids must use lowercase letters, numbers, underscores, or hyphens. Keep th
 - Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
 - Add deployment-specific workflows in `app/conf/workflows.local.yaml` or through the in-app workflow editor.
 - Add deployment-specific evidence package presets in `app/conf/package_presets.local.yaml` and point `package_presets_file` at that file.
+- Add deployment-specific report templates in `app/conf/report_templates.local.yaml` and point `report_templates_file` at that file.
 
 ---
 
@@ -1196,7 +1215,7 @@ Preset ids must use lowercase letters, numbers, underscores, or hyphens. Keep th
 - [FEATURES.md](FEATURES.md) - full per-feature reference
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide

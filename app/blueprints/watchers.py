@@ -11,6 +11,9 @@ from config import CFG
 from core import database
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
+from services.audit.automation import record_watcher_event, run_now_details
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
 from services.scheduler.commands import ScheduleCommandValidationError
 from services.scheduler.cron import ScheduleCronError
@@ -232,6 +235,13 @@ def watchers_create():
                 conn=conn,
             )
             schedule = schedule_for_watcher(watcher, conn=conn)
+            record_watcher_event(
+                AuditEventType.WATCHER_CREATE,
+                watcher,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                conn=conn,
+            )
             conn.commit()
     except (
         RouteBaselineRunNotFound,
@@ -280,13 +290,27 @@ def watchers_update(watcher_id):
             updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
             if updated is None:
                 raise WatcherNotFound("watcher not found")
+            event_type = AuditEventType.WATCHER_UPDATE
             if route_update.pause_requested:
                 updated = pause_watcher(updated.id, route_update.reason, conn=conn)
+                event_type = AuditEventType.WATCHER_PAUSE
             elif route_update.resume_requested:
                 updated = resume_watcher(updated.id, conn=conn)
+                event_type = AuditEventType.WATCHER_RESUME
             if updated is None:
                 raise WatcherNotFound("watcher not found")
             schedule = schedule_for_watcher(updated, conn=conn)
+            record_watcher_event(
+                event_type,
+                updated,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                details={
+                    "changed_fields": sorted(key for key in route_update.updates if key != "workspace_cwd"),
+                    "reason": route_update.reason if route_update.pause_requested else "",
+                },
+                conn=conn,
+            )
             conn.commit()
     except (
         WatcherNotFound,
@@ -326,6 +350,14 @@ def watchers_delete(watcher_id):
                 conn=conn,
             )
             removed = delete_watcher(watcher.id, conn=conn)
+            record_watcher_event(
+                AuditEventType.WATCHER_DELETE,
+                watcher,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                details={"deleted_count": 1 if removed else 0},
+                conn=conn,
+            )
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ValueError) as exc:
         response = _watcher_error_response(exc)
@@ -399,6 +431,14 @@ def watchers_accept_baseline(watcher_id):
             if accepted is None:
                 raise WatcherNotFound("watcher not found")
             schedule = schedule_for_watcher(accepted, conn=conn)
+            record_watcher_event(
+                AuditEventType.WATCHER_ACCEPT_BASELINE,
+                accepted,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                details={"baseline_run_id": accepted.baseline_run_id},
+                conn=conn,
+            )
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ValueError) as exc:
         response = _watcher_error_response(exc)
@@ -430,6 +470,19 @@ def watchers_run_now(watcher_id):
                 conn=conn,
             )
             status, refreshed, refreshed_schedule, fired_at = fire_watcher_now(conn, watcher)
+            record_watcher_event(
+                AuditEventType.WATCHER_RUN_NOW,
+                refreshed,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                details=run_now_details(
+                    status,
+                    fired_at=fired_at,
+                    run_id=refreshed.last_run_id,
+                    last_error=refreshed.last_error,
+                ),
+                conn=conn,
+            )
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _watcher_error_response(exc)

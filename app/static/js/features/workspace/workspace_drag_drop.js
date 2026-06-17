@@ -1,18 +1,40 @@
+import { workspaceFileList as importedWorkspaceFileList } from '../../core/dom.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+
 let _workspaceDragPath = '';
 let _workspaceDragKind = '';
 
+function _workspaceDragApi() {
+  return typeof window !== 'undefined' ? window : globalThis;
+}
+
+function _workspaceDragFileListRef() {
+  const api = _workspaceDragApi();
+  return api.workspaceFileList
+    || (typeof importedWorkspaceFileList !== 'undefined' && importedWorkspaceFileList)
+    || null;
+}
+
+function _workspaceDragShowConfirm() {
+  return (typeof importedShowConfirm !== 'undefined' && importedShowConfirm)
+    || (typeof _workspaceDragApi().showConfirm === 'function' ? _workspaceDragApi().showConfirm : null);
+}
+
 function _workspaceDragSourceFromEvent(event) {
+  const list = _workspaceDragFileListRef();
   const row = event.target && event.target.closest ? event.target.closest('.workspace-file-row[draggable="true"]') : null;
-  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
+  return row && list && list.contains(row) ? row : null;
 }
 
 function _workspaceDropTargetFromEvent(event) {
+  const list = _workspaceDragFileListRef();
   const row = event.target && event.target.closest ? event.target.closest('[data-workspace-drop-target="folder"]') : null;
-  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
+  return row && list && list.contains(row) ? row : null;
 }
 
 function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
-  if (typeof isWorkspaceReadOnly === 'function' && isWorkspaceReadOnly()) return false;
+  const api = _workspaceDragApi();
+  if (typeof api.isWorkspaceReadOnly === 'function' && api.isWorkspaceReadOnly()) return false;
   const source = String(sourcePath || '').trim();
   const destination = String(destinationPath || '').trim();
   if (!source) return false;
@@ -21,7 +43,9 @@ function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
 }
 
 async function _handleWorkspaceDropMove(event) {
-  if (typeof workspaceCanWrite === 'function' && !workspaceCanWrite('move Files', { toast: true })) return;
+  const api = _workspaceDragApi();
+  const state = api.DarklabWorkspaceState || {};
+  if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) return;
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
   event.preventDefault();
@@ -30,8 +54,9 @@ async function _handleWorkspaceDropMove(event) {
   const source = _workspaceDragPath;
   const kind = _workspaceDragKind === 'folder' ? 'folder' : 'file';
   if (!source) return;
-  const confirmed = typeof showConfirm === 'function'
-    ? await showConfirm({
+  const confirmMove = _workspaceDragShowConfirm();
+  const confirmed = typeof confirmMove === 'function'
+    ? await confirmMove({
         body: {
           text: `Move ${kind} ${source}?`,
           note: destination ? `Destination folder: ${destination}` : 'Destination folder: Files',
@@ -44,14 +69,23 @@ async function _handleWorkspaceDropMove(event) {
     : 'move';
   if (confirmed !== 'move') return;
   try {
-    await moveWorkspacePath(source, destination);
+    const movePath = typeof state.movePath === 'function'
+      ? state.movePath
+      : api.moveWorkspacePath;
+    if (typeof movePath === 'function') await movePath(source, destination);
   } catch (err) {
-    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to move item'), 'error');
+    const message = typeof state.errorMessage === 'function'
+      ? state.errorMessage(err, 'Unable to move item')
+      : 'Unable to move item';
+    if (typeof api._showWorkspaceToast === 'function') api._showWorkspaceToast(message, 'error');
   }
 }
 
-workspaceFileList?.addEventListener('dragstart', event => {
-  if (typeof workspaceCanWrite === 'function' && !workspaceCanWrite('move Files', { toast: true })) {
+const _workspaceDragFileList = _workspaceDragFileListRef();
+
+_workspaceDragFileList?.addEventListener('dragstart', event => {
+  const api = _workspaceDragApi();
+  if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) {
     event.preventDefault();
     return;
   }
@@ -66,15 +100,15 @@ workspaceFileList?.addEventListener('dragstart', event => {
   row.classList.add('workspace-dragging');
 });
 
-workspaceFileList?.addEventListener('dragend', event => {
+_workspaceDragFileList?.addEventListener('dragend', event => {
   const row = _workspaceDragSourceFromEvent(event);
   if (row) row.classList.remove('workspace-dragging');
-  workspaceFileList.querySelectorAll('.workspace-drop-target').forEach(node => node.classList.remove('workspace-drop-target'));
+  _workspaceDragFileList.querySelectorAll('.workspace-drop-target').forEach(node => node.classList.remove('workspace-drop-target'));
   _workspaceDragPath = '';
   _workspaceDragKind = '';
 });
 
-workspaceFileList?.addEventListener('dragover', event => {
+_workspaceDragFileList?.addEventListener('dragover', event => {
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
   event.preventDefault();
@@ -82,7 +116,7 @@ workspaceFileList?.addEventListener('dragover', event => {
   target.classList.add('workspace-drop-target');
 });
 
-workspaceFileList?.addEventListener('dragleave', event => {
+_workspaceDragFileList?.addEventListener('dragleave', event => {
   const target = _workspaceDropTargetFromEvent(event);
   if (!target) return;
   const related = event.relatedTarget;
@@ -90,6 +124,16 @@ workspaceFileList?.addEventListener('dragleave', event => {
   target.classList.remove('workspace-drop-target');
 });
 
-workspaceFileList?.addEventListener('drop', event => {
+_workspaceDragFileList?.addEventListener('drop', event => {
   void _handleWorkspaceDropMove(event);
 });
+
+if (typeof window !== 'undefined') {
+}
+
+export {
+  _handleWorkspaceDropMove,
+  _workspaceCanDropOnFolder,
+  _workspaceDropTargetFromEvent,
+  _workspaceDragSourceFromEvent,
+};

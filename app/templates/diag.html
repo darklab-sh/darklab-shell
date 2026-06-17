@@ -16,11 +16,14 @@
     }
   })();
 </script>
-<link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="stylesheet" href="/static/css/core/fonts.css">
-<link rel="stylesheet" href="/static/css/styles.css">
-<link rel="stylesheet" href="/static/css/terminal_export.css">
-<link rel="stylesheet" href="/static/css/diag.css">
+<link rel="icon" type="image/x-icon" href="{{ static_asset('/static/favicon.ico') }}">
+{% include "app_stylesheets.html" %}
+{% for href in asset_bundle('terminal-export') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
+{% for href in asset_bundle('diag') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
 {% include "theme_vars_style.html" %}
 </head>
 <body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
@@ -31,7 +34,10 @@
       <h1 class="diag-header-title">{{ app_name }}</h1>
       <span class="diag-header-meta">operator diagnostics</span>
     </div>
-    <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+    <div class="diag-header-actions">
+      <a href="/diag/audit" class="btn btn-secondary btn-compact diag-nav-btn">audit log</a>
+      <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+    </div>
   </header>
   <div class="diag-status-bar">
     <span class="diag-live-indicator diag-refreshed-at" aria-live="polite">

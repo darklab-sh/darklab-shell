@@ -1,6 +1,8 @@
 // Active Project HUD/context controller.
 // Loaded before shell_chrome.js; shell chrome supplies HUD elements and refresh hooks.
 
+let exportedDarklabProjectActiveContext = null;
+
 (function projectActiveContextModule(global) {
   'use strict';
 
@@ -95,7 +97,11 @@
     };
   }
 
-  global.DarklabProjectActiveContext = {
+  const DarklabProjectActiveContext = {
     createProjectActiveContextController,
   };
+  exportedDarklabProjectActiveContext = DarklabProjectActiveContext;
 })(globalThis);
+
+export {
+  exportedDarklabProjectActiveContext as DarklabProjectActiveContext,};

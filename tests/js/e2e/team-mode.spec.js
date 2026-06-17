@@ -32,6 +32,9 @@ async function openTeamsOptions(page) {
   await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
   await page.locator('#options-tab-teams').click()
   await expect(page.locator('#options-panel-teams')).toBeVisible()
+  await expect(page.locator('#options-panel-teams')).toHaveAttribute('data-teams-panel-bound', '1', {
+    timeout: 15_000,
+  })
   await expect(page.locator('#options-team-create-btn')).toBeEnabled({ timeout: 15_000 })
 }
 
@@ -47,6 +50,7 @@ async function createTeamFromOptions(page, { name, slug, displayName }) {
   await openTeamsOptions(page)
   await page.locator('#options-team-create-btn').click()
   const form = page.locator('[data-team-form="create"]')
+  await expect(form).toBeVisible()
   await form.locator('[name="name"]').fill(name)
   await form.locator('[name="slug"]').fill(slug)
   await form.locator('[name="display_name"]').fill(displayName)
@@ -80,6 +84,7 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
   await openTeamsOptions(page)
   await page.locator('#options-team-join-btn').click()
   const form = page.locator('[data-team-form="join"]')
+  await expect(form).toBeVisible()
   await form.locator('[name="code"]').fill(code)
   await form.locator('[name="display_name"]').fill(displayName)
   await form.locator('button[type="submit"]').click()
@@ -88,14 +93,43 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
 }
 
 async function switchScopeFromSelector(page, teamId = '') {
-  await page.locator('#team-scope-trigger').click()
   const menu = page.locator('#team-scope-menu')
-  await expect(menu).toBeVisible()
-  const option = teamId
-    ? menu.locator(`[data-team-scope-menu-option="${teamId}"]`)
-    : menu.locator('[data-team-scope-menu-option="personal"]')
-  await option.click()
+  const selector = teamId
+    ? `[data-team-scope-menu-option="${teamId}"]`
+    : '[data-team-scope-menu-option="personal"]'
+  let lastError = null
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await page.locator('#team-scope-trigger').click()
+    await expect(menu).toBeVisible()
+    const option = menu.locator(selector)
+    await expect(option).toBeVisible({ timeout: 10_000 })
+    try {
+      await option.click({ timeout: 5_000 })
+      lastError = null
+      break
+    } catch (err) {
+      lastError = err
+      const currentScope = await page.evaluate(() => {
+        const sessionId = typeof SESSION_ID === 'string' && SESSION_ID ? SESSION_ID : 'anonymous'
+        return localStorage.getItem(`active_team_id:${sessionId}`) || ''
+      }).catch(() => null)
+      if (currentScope === teamId) {
+        lastError = null
+        break
+      }
+      if (await menu.isVisible().catch(() => false)) {
+        await page.keyboard.press('Escape').catch(() => {})
+      }
+    }
+  }
+
+  if (lastError) throw lastError
   await expect(menu).toBeHidden()
+  await expect.poll(() => page.evaluate(() => {
+    const sessionId = typeof SESSION_ID === 'string' && SESSION_ID ? SESSION_ID : 'anonymous'
+    return localStorage.getItem(`active_team_id:${sessionId}`) || ''
+  })).toBe(teamId)
 }
 
 async function historyCommands(page) {
@@ -163,7 +197,6 @@ test.describe('team mode browser flow', () => {
     await expect(page.locator('#mobile-team-scope-label')).toHaveText(teamName)
     await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page, { timeout: 30_000 })
-    await expect(page.locator('#team-scope-label')).toHaveText(teamName)
     await expect(page.locator('#mobile-team-scope-label')).toHaveText(teamName)
     await page.setViewportSize({ width: 1280, height: 720 })
     await expect(page.locator('#team-scope-label')).toHaveText(teamName)

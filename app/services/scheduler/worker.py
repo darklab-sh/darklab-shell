@@ -15,6 +15,7 @@ from config import CFG, resolve_data_dir
 from core import database
 from core.database_backend import DatabaseBackend, is_transient_postgres_error, postgres_advisory_lock_id
 from core.logging_setup import configure_logging
+from services.audit.retention import prune_events
 from services.scheduler import scheduler_cfg
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.recovery import recover_missed_fires
@@ -23,7 +24,9 @@ from services.scheduler.service import due_schedules
 log = logging.getLogger("shell")
 
 DEFAULT_TICK_SECONDS = 5.0
+RETENTION_CHECK_INTERVAL_SECONDS = 86400.0
 _STOP = False
+_last_retention_check_monotonic: float | None = None
 
 
 def _handle_stop(signum, frame):  # noqa: ANN001
@@ -75,6 +78,34 @@ def _is_transient_database_error(exc: BaseException) -> bool:
     return database.DB_BACKEND == DatabaseBackend.POSTGRES and is_transient_postgres_error(exc)
 
 
+def maybe_run_retention(
+    conn,
+    *,
+    now: str | None = None,
+    monotonic_now: float | None = None,
+    cfg: dict | None = None,
+) -> dict[str, int]:
+    """Run run/snapshot and audit retention at most once per day."""
+    global _last_retention_check_monotonic
+
+    current_monotonic = time.monotonic() if monotonic_now is None else float(monotonic_now)
+    if (
+        _last_retention_check_monotonic is not None
+        and current_monotonic - _last_retention_check_monotonic < RETENTION_CHECK_INTERVAL_SECONDS
+    ):
+        return {"runs": 0, "snapshots": 0, "audit_events": 0}
+
+    active_cfg = CFG if cfg is None else cfg
+    pruned = database.prune_retention(conn, cfg=active_cfg)
+    audit_events = prune_events(conn=conn, now=now, cfg=active_cfg)
+    _last_retention_check_monotonic = current_monotonic
+    return {
+        "runs": int(pruned.get("runs", 0)),
+        "snapshots": int(pruned.get("snapshots", 0)),
+        "audit_events": int(audit_events),
+    }
+
+
 @contextmanager
 def acquire_scheduler_lock() -> Iterator[bool]:
     """Try to acquire the one-worker scheduler lock without blocking."""
@@ -118,6 +149,7 @@ def run_once(*, limit: int = 50) -> int:
     fired = 0
     now = datetime.now(timezone.utc).isoformat()
     with database.db_connect() as conn:
+        maybe_run_retention(conn, now=now)
         schedules = due_schedules(conn, now=now, limit=limit)
         log.debug("SCHEDULER_TICK", extra={"now": now, "limit": limit, "due_count": len(schedules)})
         for schedule in schedules:

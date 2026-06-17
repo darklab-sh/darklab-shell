@@ -1,6 +1,8 @@
 // Project workspace in-browser state.
 // Loaded before shell_chrome.js so chrome wiring can avoid owning modal state directly.
 
+let exportedDarklabProjectWorkspaceState = null;
+
 (function projectWorkspaceStateModule(global) {
   'use strict';
 
@@ -133,7 +135,11 @@
     };
   }
 
-  global.DarklabProjectWorkspaceState = {
+  const DarklabProjectWorkspaceState = {
     createProjectWorkspaceState,
   };
+  exportedDarklabProjectWorkspaceState = DarklabProjectWorkspaceState;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceState as DarklabProjectWorkspaceState,};

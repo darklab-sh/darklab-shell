@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
+import {
+  closeActionSheet,
+  openActionSheet,
+} from '../../../app/static/js/ui/ui_action_sheet.js'
 
 const ENTITY = {
   id: 'ent_ip',
@@ -234,9 +238,10 @@ function createController(overrides = {}) {
 }
 
 function loadMobileAtlas(controller) {
+  window.openActionSheet = openActionSheet
+  window.closeActionSheet = closeActionSheet
   return fromDomScripts(
     [
-      'app/static/js/ui/ui_action_sheet.js',
       'app/static/js/features/atlas/atlas_entity_row.js',
       'app/static/js/features/atlas/atlas_mobile.js',
     ],
@@ -255,7 +260,7 @@ function loadMobileAtlas(controller) {
       controller,
     },
     `{
-      mobile: window.DarklabAtlasMobile,
+      mobile: exportedDarklabAtlasMobile,
       openActionSheet: window.openActionSheet,
       closeActionSheet: window.closeActionSheet,
       controller: window.DarklabAtlasOverlay,

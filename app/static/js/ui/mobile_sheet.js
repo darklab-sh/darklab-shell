@@ -15,12 +15,19 @@
 // - Mobile-only: pointer handlers no-op when useMobileTerminalViewportMode()
 //   reports the shell is in desktop mode, so the same modals can stay drag-
 //   immune on desktop.
-(function (global) {
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../features/mobile/mobile_shell_layout.js';
+
+const bindMobileSheet = (function (global) {
   'use strict';
 
   function _isMobileMode() {
-    return typeof global.useMobileTerminalViewportMode === 'function'
-      && global.useMobileTerminalViewportMode();
+    const readMobileMode = (typeof importedUseMobileTerminalViewportMode !== 'undefined' && importedUseMobileTerminalViewportMode)
+      || null;
+    if (typeof readMobileMode === 'function' && readMobileMode()) return true;
+    return !!(typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-terminal-mode'));
   }
 
   function _ensureGrab(sheet) {
@@ -55,6 +62,14 @@
       sheet.style.removeProperty('opacity');
     }
 
+    function fallbackCloseOpenOverlay() {
+      const overlay = sheet.closest?.('.mobile-sheet-overlay.open');
+      if (!overlay) return;
+      overlay.classList.remove('open');
+      overlay.classList.add('u-hidden');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+
     function settle(close) {
       if (close) {
         sheet.style.transition = 'transform 180ms ease, opacity 180ms ease';
@@ -62,7 +77,7 @@
         sheet.style.opacity = '0.98';
         setTimeout(() => {
           clearStyles();
-          onClose();
+          try { onClose(); } finally { fallbackCloseOpenOverlay(); }
         }, 180);
       } else {
         sheet.style.transition = 'transform 160ms ease';
@@ -98,8 +113,22 @@
       settle(dy >= threshold);
     }
 
-    function _windowEnd(e) { endDrag(e.pointerId, false); }
+    function applyPointerPosition(e) {
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      const dy = Math.max(0, e.clientY - drag.startY);
+      drag.dy = dy;
+      if (dy > drag.maxDy) drag.maxDy = dy;
+      if (dy > 0) sheet.style.transform = `translateY(${dy}px)`;
+    }
+
+    function _windowEnd(e) {
+      applyPointerPosition(e);
+      endDrag(e.pointerId, false);
+    }
     function _windowCancel(e) { endDrag(e.pointerId, true); }
+    function _isGrabEvent(e) {
+      return e && (e.target === grab || (typeof e.composedPath === 'function' && e.composedPath().includes(grab)));
+    }
 
     // Safety net: if the sheet is hidden mid-drag (e.g. user taps the X close
     // button or scrim while a finger is still on the grab), the grab's
@@ -123,18 +152,31 @@
       window.addEventListener('pointercancel', _windowCancel, true);
     });
 
-    grab.addEventListener('pointermove', e => {
+    const onPointerMove = e => {
       if (!drag || drag.pointerId !== e.pointerId) return;
-      const dy = Math.max(0, e.clientY - drag.startY);
-      drag.dy = dy;
-      if (dy > drag.maxDy) drag.maxDy = dy;
-      if (dy <= 0) return;
+      applyPointerPosition(e);
+      if (drag.dy <= 0) return;
       e.preventDefault();
-      sheet.style.transform = `translateY(${dy}px)`;
-    });
+    };
+    grab.addEventListener('pointermove', onPointerMove);
 
-    grab.addEventListener('pointerup', e => endDrag(e.pointerId, false));
+    grab.addEventListener('pointerup', e => {
+      applyPointerPosition(e);
+      endDrag(e.pointerId, false);
+    });
     grab.addEventListener('pointercancel', e => endDrag(e.pointerId, true));
+    sheet.addEventListener('pointermove', e => {
+      if (_isGrabEvent(e)) onPointerMove(e);
+    }, true);
+    sheet.addEventListener('pointerup', e => {
+      if (_isGrabEvent(e)) {
+        applyPointerPosition(e);
+        endDrag(e.pointerId, false);
+      }
+    }, true);
+    sheet.addEventListener('pointercancel', e => {
+      if (_isGrabEvent(e)) endDrag(e.pointerId, true);
+    }, true);
 
     grab.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -176,5 +218,7 @@
     return getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden';
   }
 
-  global.bindMobileSheet = bindMobileSheet;
+  return bindMobileSheet;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export { bindMobileSheet };

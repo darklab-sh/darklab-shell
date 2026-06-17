@@ -4,7 +4,10 @@ Project workspace create, update, and delete helpers.
 
 from __future__ import annotations
 
+import logging
+
 from core.database import db_connect
+from core.helpers import get_log_session_id
 from services.projects.models import normalize_project_payload
 from services.projects.preferences import clear_active_project_preference
 from services.projects.queries import get_project
@@ -18,6 +21,9 @@ from services.projects.utils import (
 )
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.metadata import _save_project_note
+from services.watchers.service import clear_project_membership
+
+log = logging.getLogger("shell")
 
 
 def create_project(session_id, data, *, team_id=""):
@@ -99,8 +105,14 @@ def update_project(session_id, project_id, data, *, team_id=""):
     return get_project(session_id, project_id, team_id=team_id)
 
 
-def delete_project(session_id, project_id, *, team_id=""):
-    with db_connect() as conn:
+def delete_project(session_id, project_id, *, team_id="", conn=None):
+    if conn is None:
+        with db_connect() as opened:
+            deleted = delete_project(session_id, project_id, team_id=team_id, conn=opened)
+            if deleted:
+                opened.commit()
+            return deleted
+    else:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT id FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
@@ -152,6 +164,14 @@ def delete_project(session_id, project_id, *, team_id=""):
             )
         conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_auto_promote_rules WHERE project_id = ?", (project_id,))
+        watcher_membership_cleared = clear_project_membership(conn, project_id)
+        if watcher_membership_cleared:
+            log.info("PROJECT_WATCHER_MEMBERSHIP_CLEARED", extra={
+                "project_id": project_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "watcher_count": watcher_membership_cleared,
+            })
         conn.execute(
             "DELETE FROM evidence_packages WHERE session_id = ? AND project_id = ?",
             (session_id, project_id),
@@ -161,5 +181,4 @@ def delete_project(session_id, project_id, *, team_id=""):
             "DELETE FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
             (*owner_params, project_id),
         )
-        conn.commit()
     return True

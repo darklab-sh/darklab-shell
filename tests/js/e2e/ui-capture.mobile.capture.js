@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test'
 
 import {
+  browserSessionId,
   createShareSnapshot,
+  seedProjectActivityFixture,
+  seedProjectMonitoringFixture,
   setComposerValueForTest,
   waitForHistoryRuns,
 } from './helpers.js'
@@ -90,7 +93,7 @@ async function createAndOpenWorkspaceResponseFileMobile(page) {
 
 async function openMobileProjectsWithCaptureProject(page, themeName) {
   const runId = await runCommandMobileAndGetRunId(page, 'hostname')
-  await createCaptureProjectFixture(page, {
+  const project = await createCaptureProjectFixture(page, {
     name: `Mobile Capture ${themeLabel(themeName)}`,
     runIds: [runId],
     target: 'mobile.capture.darklab.sh',
@@ -105,6 +108,71 @@ async function openMobileProjectsWithCaptureProject(page, themeName) {
   await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
   await page.locator('[data-project-mobile-detail-tab="details"]').click()
   await expect(page.locator('#project-mobile-detail-body')).toContainText('mobile.capture.darklab.sh')
+  return project
+}
+
+async function openMobileProjectTabCaptureScene(page, themeName, tabId, testInfo) {
+  const project = await openMobileProjectsWithCaptureProject(page, themeName)
+  const sessionId = await browserSessionId(page)
+  if (tabId === 'monitoring') {
+    seedProjectMonitoringFixture(testInfo, {
+      sessionId,
+      projectId: project.id,
+    })
+  } else if (tabId === 'activity') {
+    seedProjectActivityFixture(testInfo, {
+      sessionId,
+      projectId: project.id,
+    })
+    await page.route('**/projects/**/activity**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        events: [{
+          id: 'aud_capture_mobile',
+          created: '2026-06-06T12:00:00+00:00',
+          event_type: 'finding.review_change',
+          actor: { display_name: 'Capture Reviewer', member_id: '', role: 'owner' },
+          target: { type: 'finding', id: 'finding_capture', href: '' },
+          details: { source: 'capture', review_state: 'confirmed', target: 'mobile.capture.darklab.sh' },
+        }],
+        limit: 25,
+        offset: 0,
+        has_more: false,
+        retention_days: 90,
+      }),
+    }))
+  }
+  if (tabId === 'monitoring' || tabId === 'activity') {
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+  }
+  await page.locator(`[data-project-mobile-detail-tab="${tabId}"]`).click()
+  await expect(page.locator(`[data-project-mobile-detail-tab="${tabId}"]`)).toHaveClass(/\bis-active\b/)
+  const detailBody = page.locator('#project-mobile-detail-body')
+  if (tabId === 'monitoring') {
+    const root = detailBody.locator(`[data-project-monitoring-root="${project.id}"].is-mobile`)
+    await expect(root).toBeVisible({ timeout: 15_000 })
+    await expect(root).toContainText('Ports Browser Watch')
+    await expect(root).toContainText('New open port 443/tcp https')
+    await expect(root.locator('[data-project-monitoring-action="new-monitor"]')).toBeVisible()
+  } else if (tabId === 'activity') {
+    const root = detailBody.locator('[data-project-activity-root]')
+    await expect(root).toBeVisible({ timeout: 15_000 })
+    await expect(root.locator('[data-project-activity-filter="event_type"]')).toBeVisible()
+    await expect(root.locator('[data-project-activity-action="apply"]')).toBeVisible()
+  } else if (tabId === 'report') {
+    const root = detailBody.locator('.project-report-root').first()
+    await expect(root.locator('[data-project-report-metadata="engagement_name"]')).toBeVisible({ timeout: 15_000 })
+    await root.locator('[data-project-report-metadata="engagement_name"]').fill(`Mobile Capture Report ${themeLabel(themeName)}`)
+    await root.locator('[data-project-report-metadata="date_range"]').fill('2026-06-01 to 2026-06-05')
+    await root.locator('[data-project-report-metadata="executive_summary"]').fill('Capture summary for the v2.2 mobile project workspace.')
+    await root.locator('[data-project-report-action="preview"]').click()
+    await expect(root.frameLocator('.project-report-preview-frame').locator('body')).toContainText('Mobile Capture Report', {
+      timeout: 15_000,
+    })
+  }
 }
 
 async function openMobileAtlasWithCaptureData(page) {
@@ -227,6 +295,12 @@ const scenes = [
       ])
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="search"]').click()
+      await page.evaluate(() => {
+        if (typeof window.showSearchBar === 'function' && !document.getElementById('search-input')?.offsetParent) {
+          window.showSearchBar()
+        }
+      })
+      await expect(page.locator('#search-input')).toBeVisible({ timeout: 10_000 })
       await page.locator('#search-input').fill('localhost')
       await expect(page.locator('.tab-panel.active .output mark.search-hl').first()).toBeVisible()
     },
@@ -247,6 +321,33 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await openMobileProjectsWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'project-monitoring-tab',
+    title: 'Projects modal Monitoring tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectTabCaptureScene(page, themeName, 'monitoring', testInfo)
+    },
+  },
+  {
+    slug: 'project-activity-tab',
+    title: 'Projects modal Activity tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectTabCaptureScene(page, themeName, 'activity', testInfo)
+    },
+  },
+  {
+    slug: 'project-report-tab',
+    title: 'Projects modal Report tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectTabCaptureScene(page, themeName, 'report', testInfo)
     },
   },
   {
@@ -518,7 +619,7 @@ const scenes = [
   },
 ]
 
-test('mobile screenshot capture pack', async ({ page }) => {
+test('mobile screenshot capture pack', async ({ page }, testInfo) => {
   test.skip(!process.env.RUN_CAPTURE, 'set RUN_CAPTURE=1 to run the UI screenshot capture pack')
   test.setTimeout(3_600_000)
 
@@ -530,7 +631,7 @@ test('mobile screenshot capture pack', async ({ page }) => {
   for (const themeName of themes) {
     for (const [index, scene] of scenes.entries()) {
       await test.step(`${themeLabel(themeName)} :: ${scene.title}`, async () => {
-        await scene.run(page, themeName)
+        await scene.run(page, themeName, testInfo)
         await saveCapture(page, manifest, {
           ui: 'mobile',
           themeName,

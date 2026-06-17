@@ -1,4 +1,6 @@
 // Files viewer format detection and preview payload shaping.
+let DarklabWorkspaceViewerFormats = null;
+
 (function initWorkspaceViewerFormats(global) {
   function fileExt(path = '') {
     const name = String(path || '').split('/').filter(Boolean).pop() || '';
@@ -159,8 +161,17 @@
     return String(payload?.rawText ?? payload?.text ?? '');
   }
 
-  global.DarklabWorkspaceViewerFormats = {
+  DarklabWorkspaceViewerFormats = {
     viewerPayload,
     viewerRawText,
   };
-})(typeof window !== 'undefined' ? window : this);
+})(typeof window !== 'undefined' ? window : globalThis);
+
+const viewerPayload = DarklabWorkspaceViewerFormats ? DarklabWorkspaceViewerFormats.viewerPayload : null;
+const viewerRawText = DarklabWorkspaceViewerFormats ? DarklabWorkspaceViewerFormats.viewerRawText : null;
+
+export {
+  DarklabWorkspaceViewerFormats,
+  viewerPayload,
+  viewerRawText,
+};

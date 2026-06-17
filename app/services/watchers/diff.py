@@ -21,7 +21,7 @@ def diff_runs(
     baseline_run: dict[str, Any],
     current_run: dict[str, Any],
     *,
-    options: dict[str, bool] | None = None,
+    options: dict[str, Any] | None = None,
     conn=None,
 ):
     return diff_with_classifiers(baseline_run, current_run, options=options, conn=conn)

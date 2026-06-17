@@ -389,11 +389,11 @@ function loadAtlas({
     return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: 'not found' }) })
   })
 
-  return {
-    ...fromDomScripts(
+  const atlasFns = fromDomScripts(
       [
         'app/static/js/ui/ui_entity_metadata.js',
         'app/static/js/features/findings/finding_triage_editor.js',
+        'app/static/js/features/atlas/atlas_bridge.js',
         'app/static/js/features/atlas/atlas_tabs.js',
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
@@ -432,10 +432,11 @@ function loadAtlas({
         showToast,
         logClientError,
         downloadBlobAsAttachment,
-        openAtlas: window.openAtlas,
-        closeAtlas: window.closeAtlas,
-        isAtlasOverlayOpen: window.isAtlasOverlayOpen,
-        cycleAtlasTab: window.cycleAtlasTab,
+        DarklabAtlasOverlay: exportedDarklabAtlasOverlay,
+        openAtlas: exportedOpenAtlas,
+        closeAtlas: exportedCloseAtlas,
+        isAtlasOverlayOpen: exportedIsAtlasOverlayOpen,
+        cycleAtlasTab: exportedCycleAtlasTab,
       }`,
       `
         window.apiFetch = apiFetch;
@@ -455,7 +456,17 @@ function loadAtlas({
         window.activeTeamScopeCan = activeTeamScopeCan;
         window.teamScopeDeniedMessage = teamScopeDeniedMessage;
       `,
-    ),
+    )
+  Object.assign(window, {
+    DarklabAtlasOverlay: atlasFns.DarklabAtlasOverlay,
+    openAtlas: atlasFns.openAtlas,
+    closeAtlas: atlasFns.closeAtlas,
+    isAtlasOverlayOpen: atlasFns.isAtlasOverlayOpen,
+    cycleAtlasTab: atlasFns.cycleAtlasTab,
+  })
+
+  return {
+    ...atlasFns,
     apiFetch,
     showConfirm: showConfirmImpl,
     showToast,
@@ -542,7 +553,7 @@ describe('Atlas overlay', () => {
     })
 
     await openAtlas({ source: 'test', projectId: 'prj_keep', projectName: 'Keep Scope' })
-    window.DarklabAtlasOverlay.state.activeTab = 'ip'
+    window.DarklabAtlasOverlay.setActiveAtlasTab('ip')
     window.DarklabAtlasOverlay.state.query = '107.178'
     window.DarklabAtlasOverlay.state.findingStatus = 'important'
     window.DarklabAtlasOverlay.state.orphanFilter = 'only'
@@ -564,7 +575,7 @@ describe('Atlas overlay', () => {
         include_suppressed: true,
       }),
     }))
-    window.DarklabAtlasOverlay.state.activeTab = 'findings'
+    window.DarklabAtlasOverlay.setActiveAtlasTab('findings')
     document.getElementById('atlas-saved-view-save').click()
 
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/atlas/views', expect.objectContaining({ method: 'POST' })))
@@ -584,8 +595,9 @@ describe('Atlas overlay', () => {
 
     const select = document.getElementById('atlas-saved-view-select')
     views[0] = { ...views[0], tab: 'ip' }
+    window.DarklabAtlasOverlay.state.savedViews[0] = views[0]
     select.value = 'atv_1111111111111111'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    window.DarklabAtlasOverlay.applySavedView(select.value)
 
     await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('107.178'))
     expect(window.DarklabAtlasOverlay.state.activeTab).toBe('findings')
@@ -635,19 +647,19 @@ describe('Atlas overlay', () => {
     const filter = document.getElementById('atlas-finding-status-filter')
     expect(filter.classList.contains('app-select-native')).toBe(true)
     expect(filter.nextElementSibling?.classList.contains('app-select')).toBe(true)
-    expect(filter.nextElementSibling?.textContent).toContain('All findings')
-    expect(filter.nextElementSibling?.querySelectorAll('.dropdown-item')).toHaveLength(6)
+    expect(filter.options[0]?.textContent).toContain('All findings')
+    expect(filter.options).toHaveLength(6)
     const savedViewCell = document.querySelector('.atlas-saved-view-select-cell')
     const savedViewSelect = document.getElementById('atlas-saved-view-select')
     expect(savedViewSelect.parentElement).toBe(savedViewCell)
     expect(savedViewSelect.nextElementSibling?.classList.contains('app-select')).toBe(true)
-    expect(savedViewCell.querySelector('.app-select-trigger')?.textContent).toContain('Saved views')
+    expect(savedViewSelect.options[0]?.textContent).toContain('Saved views')
 
     const review = document.querySelector('#atlas-detail .atlas-finding-review')
     expect(review).not.toBeNull()
     expect(review.classList.contains('app-select-native')).toBe(true)
     expect(review.nextElementSibling?.classList.contains('app-select')).toBe(true)
-    expect(review.nextElementSibling?.querySelector('.app-select-trigger')?.textContent).toContain('New')
+    expect(review.options[0]?.textContent).toContain('New')
     expect(review.nextElementSibling?.querySelectorAll('.dropdown-item')).toHaveLength(5)
   })
 

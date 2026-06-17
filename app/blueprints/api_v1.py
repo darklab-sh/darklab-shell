@@ -20,6 +20,10 @@ from extensions import limiter
 from services.api_v1.auth import ApiAuthError, current_api_session, require_api_auth
 from services.api_v1.openapi import openapi_spec
 from services.api_v1.serialization import artifact_summary, json_error, run_summary
+from services.audit.automation import record_schedule_event, record_watcher_event, run_now_details
+from services.audit.context import request_audit_fields, route_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.commands.registry import (
     interactive_pty_spec_for_command,
     runtime_missing_command_message,
@@ -154,6 +158,7 @@ from blueprints.run import (  # noqa: PLC0415
     _history_safe_command_for_storage,
     _prepare_command_input,
     _prepare_real_command,
+    _ensure_scanner_process_group_current,
     _signal_process_group,
     _start_real_command_process,
     _workspace_cwd_value,
@@ -298,6 +303,59 @@ def _api_actor_log_fields(actor: dict[str, Any] | None) -> dict[str, Any]:
         "actor_member_id": str(actor.get("id") or ""),
         "actor_role": str(actor.get("role") or ""),
     }
+
+
+def _api_actor_audit_fields(
+    session_token: str,
+    *,
+    team_id: str = "",
+    actor: dict[str, Any] | None = None,
+    actor_member_id: str = "",
+    actor_role: str = "",
+    actor_display_name: str = "",
+) -> dict[str, Any]:
+    actor_member_id = actor_member_id or str((actor or {}).get("id") or "")
+    actor_role = actor_role or str((actor or {}).get("role") or "")
+    actor_display_name = actor_display_name or str(
+        (actor or {}).get("display_name") or (actor or {}).get("name") or ""
+    )
+    return {
+        "session_id": session_token,
+        "actor_session_id": session_token,
+        "team_id": team_id,
+        "actor_member_id": actor_member_id,
+        "actor_role": actor_role,
+        "actor_display_name": actor_display_name,
+        **request_audit_fields(request),
+    }
+
+
+def _record_api_team_audit(
+    event_type: AuditEventType,
+    *,
+    session_token: str,
+    team_id: str,
+    actor: dict[str, Any] | None = None,
+    actor_member_id: str = "",
+    actor_role: str = "",
+    actor_display_name: str = "",
+    details: dict[str, Any] | None = None,
+    conn=None,
+) -> None:
+    record_event(
+        event_type,
+        target_id=team_id,
+        details={"source": "api_v1", **(details or {})},
+        conn=conn,
+        **_api_actor_audit_fields(
+            session_token,
+            team_id=team_id,
+            actor=actor,
+            actor_member_id=actor_member_id,
+            actor_role=actor_role,
+            actor_display_name=actor_display_name,
+        ),
+    )
 
 
 def _api_team_log_fields(
@@ -1230,6 +1288,15 @@ def api_teams_create():
                 display_name=str(data.get("display_name") or ""),
             )
             detail = team_storage.team_detail(conn, team["id"], current_session_token=session_id)
+            _record_api_team_audit(
+                AuditEventType.TEAM_CREATE,
+                session_token=session_id,
+                team_id=team["id"],
+                actor_member_id=team.get("creator_member_id", ""),
+                actor_role="owner",
+                details={"role": "owner"},
+                conn=conn,
+            )
             conn.commit()
         _log_api_team_event(
             "create",
@@ -1277,6 +1344,20 @@ def api_teams_update(team_id: str):
             if status == "archived":
                 paused = pause_team_watchers_and_schedules(conn, team_id, reason="team_archived")
             detail = team_storage.team_detail(conn, team_id, current_session_token=session_id)
+            event_type = AuditEventType.TEAM_ARCHIVE if status == "archived" else AuditEventType.TEAM_REACTIVATE
+            _record_api_team_audit(
+                event_type,
+                session_token=session_id,
+                team_id=team_id,
+                actor=actor,
+                details={
+                    "status": team["status"],
+                    "to_state": team["status"],
+                    "paused_watchers": paused["watchers"],
+                    "paused_schedules": paused["schedules"],
+                },
+                conn=conn,
+            )
             conn.commit()
         if status == "archived":
             log.info(
@@ -1327,6 +1408,14 @@ def api_teams_invites_create(team_id: str):
                 max_uses=int(data.get("max_uses") or 1),
                 label=str(data.get("label") or ""),
             )
+            _record_api_team_audit(
+                AuditEventType.TEAM_INVITE,
+                session_token=session_id,
+                team_id=team_id,
+                actor=actor,
+                details={"target_invite_id": invite["id"], "role": role},
+                conn=conn,
+            )
             conn.commit()
         _log_api_team_event(
             "invite_create",
@@ -1355,6 +1444,15 @@ def api_teams_invites_revoke(team_id: str, invite_id: str):
             if not invite or str(invite["team_id"] or "") != team_id:
                 raise TeamNotFound("Team invite not found.")
             removed = team_storage.revoke_team_invite(conn, invite_id)
+            if removed:
+                _record_api_team_audit(
+                    AuditEventType.TEAM_REVOKE,
+                    session_token=session_id,
+                    team_id=team_id,
+                    actor=actor,
+                    details={"target_invite_id": invite_id, "kind": "invite"},
+                    conn=conn,
+                )
             conn.commit()
         _log_api_team_event(
             "invite_revoke",
@@ -1391,6 +1489,16 @@ def api_teams_join():
                 display_name=str(data.get("display_name") or ""),
             )
             detail = team_storage.team_detail(conn, member["team_id"], current_session_token=session_id)
+            _record_api_team_audit(
+                AuditEventType.TEAM_JOIN,
+                session_token=session_id,
+                team_id=member["team_id"],
+                actor_member_id=member["id"],
+                actor_role=str(member.get("role") or ""),
+                actor_display_name=str(member.get("display_name") or ""),
+                details={"target_member_id": member["id"], "role": str(member.get("role") or ""), "kind": "invite"},
+                conn=conn,
+            )
             conn.commit()
         _log_api_team_event(
             "invite_redeem",
@@ -1429,6 +1537,21 @@ def api_teams_members_update(team_id: str, member_id: str):
                 role=new_role if "role" in data else None,
                 display_name=str(data.get("display_name")) if "display_name" in data else None,
             )
+            if not member:
+                raise TeamNotFound("Team member not found.")
+            if "role" in data and str(target["role"] or "") != str(member["role"] or ""):
+                _record_api_team_audit(
+                    AuditEventType.TEAM_ROLE_CHANGE,
+                    session_token=session_id,
+                    team_id=team_id,
+                    actor=actor,
+                    details={
+                        "target_member_id": member_id,
+                        "from_role": str(target["role"] or ""),
+                        "to_role": str(member["role"] or ""),
+                    },
+                    conn=conn,
+                )
             conn.commit()
         _log_api_team_event(
             "member_update",
@@ -1467,6 +1590,15 @@ def api_teams_members_remove(team_id: str, member_id: str):
             elif actor["id"] != member_id:
                 require_capability(actor["role"], Capability.MANAGE_MEMBERS)
             removed = team_storage.soft_remove_team_member(conn, member_id)
+            if removed:
+                _record_api_team_audit(
+                    AuditEventType.TEAM_MEMBER_REMOVE,
+                    session_token=session_id,
+                    team_id=team_id,
+                    actor=actor,
+                    details={"target_member_id": member_id, "role": str(target["role"] or "")},
+                    conn=conn,
+                )
             conn.commit()
         _log_api_team_event(
             "member_remove",
@@ -1497,6 +1629,15 @@ def api_teams_leave(team_id: str):
         with db_connect() as conn:
             actor = _api_team_member(conn, team_id, session_id)
             removed = team_storage.soft_remove_team_member(conn, actor["id"])
+            if removed:
+                _record_api_team_audit(
+                    AuditEventType.TEAM_LEAVE,
+                    session_token=session_id,
+                    team_id=team_id,
+                    actor=actor,
+                    details={"target_member_id": actor["id"], "role": str(actor.get("role") or "")},
+                    conn=conn,
+                )
             conn.commit()
         _log_api_team_event("leave", session_token=session_id, team_id=team_id, actor=actor)
         return jsonify({"removed": removed})
@@ -1519,6 +1660,14 @@ def api_teams_recovery_rotate(team_id: str):
                 conn,
                 team_id=team_id,
                 created_by_member_id=actor["id"],
+            )
+            _record_api_team_audit(
+                AuditEventType.TEAM_RECOVERY_ROTATE,
+                session_token=session_id,
+                team_id=team_id,
+                actor=actor,
+                details={"target_recovery_id": recovery["id"]},
+                conn=conn,
             )
             conn.commit()
         _log_api_team_event(
@@ -1554,6 +1703,20 @@ def api_teams_recovery_redeem():
                 display_name=str(data.get("display_name") or ""),
             )
             detail = team_storage.team_detail(conn, member["team_id"], current_session_token=session_id)
+            _record_api_team_audit(
+                AuditEventType.TEAM_RECOVERY_REDEEM,
+                session_token=session_id,
+                team_id=member["team_id"],
+                actor_member_id=member["id"],
+                actor_role=str(member.get("role") or ""),
+                actor_display_name=str(member.get("display_name") or ""),
+                details={
+                    "target_member_id": member["id"],
+                    "role": str(member.get("role") or ""),
+                    "kind": "recovery",
+                },
+                conn=conn,
+            )
             conn.commit()
         _log_api_team_event(
             "recovery_redeem",
@@ -1896,6 +2059,7 @@ def api_project_runs(project_id):
         project_id,
         limit=normalize_page_limit(request.args.get("limit"), 50, 100),
         offset=normalize_page_offset(request.args.get("offset")),
+        query=request.args.get("q") or "",
         team_id=owner_scope.team_id,
     )
     if runs is None:
@@ -1973,11 +2137,21 @@ def api_schedule_create():
             session_id,
             command_validator=validate_schedule_command,
         )
-        schedule = create_schedule(
-            session_id,
-            team_id=owner_scope.team_id,
-            **payload,
-        )
+        with db_connect() as conn:
+            schedule = create_schedule(
+                session_id,
+                team_id=owner_scope.team_id,
+                **payload,
+                conn=conn,
+            )
+            record_schedule_event(
+                AuditEventType.SCHEDULE_CREATE,
+                schedule,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                conn=conn,
+            )
+            conn.commit()
     except (
         ApiAuthError,
         TeamPermissionDenied,
@@ -2021,7 +2195,18 @@ def api_schedule_update(schedule_id):
             session_id,
             command_validator=validate_schedule_command,
         )
-        updated = update_schedule(schedule.id, updates)
+        with db_connect() as conn:
+            updated = update_schedule(schedule.id, updates, conn=conn)
+            if updated is not None:
+                record_schedule_event(
+                    AuditEventType.SCHEDULE_UPDATE,
+                    updated,
+                    audit_fields=route_audit_fields(session_id, request, owner_scope),
+                    source="api_v1",
+                    details={"changed_fields": sorted(key for key in updates if key != "workspace_cwd")},
+                    conn=conn,
+                )
+            conn.commit()
     except (
         ApiAuthError,
         TeamPermissionDenied,
@@ -2052,7 +2237,17 @@ def api_schedule_delete(schedule_id):
         schedule = _schedule_for_api_session(schedule_id, session_id, team_id=owner_scope.team_id)
     except (ApiAuthError, TeamPermissionDenied) as exc:
         return _schedule_api_error(exc)
-    removed = delete_schedule(schedule.id)
+    with db_connect() as conn:
+        removed = delete_schedule(schedule.id, conn=conn)
+        record_schedule_event(
+            AuditEventType.SCHEDULE_DELETE,
+            schedule,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+            source="api_v1",
+            details={"deleted_count": 1 if removed else 0},
+            conn=conn,
+        )
+        conn.commit()
     log.info("API_SCHEDULE_DELETED", extra=_api_schedule_log_payload(schedule, session_id=session_id, removed=removed))
     return jsonify({"removed": removed})
 
@@ -2067,6 +2262,19 @@ def api_schedule_run_now(schedule_id):
         schedule = _schedule_for_api_session(schedule_id, session_id, team_id=owner_scope.team_id)
         with db_connect() as conn:
             status, refreshed, fired_at = fire_schedule_now(conn, schedule)
+            record_schedule_event(
+                AuditEventType.SCHEDULE_RUN_NOW,
+                refreshed or schedule,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                details=run_now_details(
+                    status,
+                    fired_at=fired_at,
+                    run_id=(refreshed or schedule).last_run_id,
+                    last_error=(refreshed or schedule).last_error,
+                ),
+                conn=conn,
+            )
             conn.commit()
     except (ApiAuthError, TeamPermissionDenied, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_api_error(exc)
@@ -2164,6 +2372,13 @@ def api_watcher_create():
                 conn=conn,
             )
             schedule = get_schedule(watcher.schedule_id, conn=conn)
+            record_watcher_event(
+                AuditEventType.WATCHER_CREATE,
+                watcher,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                conn=conn,
+            )
             conn.commit()
     except (
         ApiAuthError,
@@ -2222,13 +2437,27 @@ def api_watcher_update(watcher_id):
             updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
             if updated is None:
                 raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
+            event_type = AuditEventType.WATCHER_UPDATE
             if route_update.pause_requested:
                 updated = pause_watcher(updated.id, route_update.reason, conn=conn)
+                event_type = AuditEventType.WATCHER_PAUSE
             elif route_update.resume_requested:
                 updated = resume_watcher(updated.id, conn=conn)
+                event_type = AuditEventType.WATCHER_RESUME
             if updated is None:
                 raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
             schedule = get_schedule(updated.schedule_id, conn=conn)
+            record_watcher_event(
+                event_type,
+                updated,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                details={
+                    "changed_fields": sorted(key for key in route_update.updates if key != "workspace_cwd"),
+                    "reason": route_update.reason if route_update.pause_requested else "",
+                },
+                conn=conn,
+            )
             conn.commit()
     except (
         ApiAuthError,
@@ -2264,6 +2493,14 @@ def api_watcher_delete(watcher_id):
                 conn=conn,
             )
             removed = delete_watcher(watcher.id, conn=conn)
+            record_watcher_event(
+                AuditEventType.WATCHER_DELETE,
+                watcher,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                details={"deleted_count": 1 if removed else 0},
+                conn=conn,
+            )
             conn.commit()
     except (ApiAuthError, TeamPermissionDenied, WatcherError, ScheduleError, ValueError) as exc:
         return _watcher_api_error(exc)
@@ -2286,6 +2523,19 @@ def api_watcher_run_now(watcher_id):
                 conn=conn,
             )
             status, refreshed, refreshed_schedule, fired_at = fire_watcher_now(conn, watcher)
+            record_watcher_event(
+                AuditEventType.WATCHER_RUN_NOW,
+                refreshed,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                details=run_now_details(
+                    status,
+                    fired_at=fired_at,
+                    run_id=refreshed.last_run_id,
+                    last_error=refreshed.last_error,
+                ),
+                conn=conn,
+            )
             conn.commit()
     except (ApiAuthError, TeamPermissionDenied, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _watcher_api_error(exc)
@@ -2352,6 +2602,14 @@ def api_watcher_accept_baseline(watcher_id):
             if accepted is None:
                 raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
             schedule = get_schedule(accepted.schedule_id, conn=conn)
+            record_watcher_event(
+                AuditEventType.WATCHER_ACCEPT_BASELINE,
+                accepted,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="api_v1",
+                details={"baseline_run_id": accepted.baseline_run_id},
+                conn=conn,
+            )
             conn.commit()
     except (ApiAuthError, TeamPermissionDenied, WatcherError, ScheduleError, ValueError) as exc:
         return _watcher_api_error(exc)
@@ -2382,7 +2640,13 @@ def api_notification_channel_create():
     try:
         session_id = _require_session_id()
         owner_scope = _require_notification_manage_scope()
-        channel = create_notification_channel(session_id, _json_body(), team_id=owner_scope.team_id)
+        channel = create_notification_channel(
+            session_id,
+            _json_body(),
+            team_id=owner_scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+            audit_source="api_v1",
+        )
     except ApiAuthError as exc:
         return _api_json_error(exc.code, exc.message, exc.status_code)
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
@@ -2402,7 +2666,14 @@ def api_notification_channel_update(channel_id):
     try:
         session_id = _require_session_id()
         owner_scope = _require_notification_manage_scope()
-        channel = update_notification_channel(session_id, channel_id, _json_body(), team_id=owner_scope.team_id)
+        channel = update_notification_channel(
+            session_id,
+            channel_id,
+            _json_body(),
+            team_id=owner_scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+            audit_source="api_v1",
+        )
     except ApiAuthError as exc:
         return _api_json_error(exc.code, exc.message, exc.status_code)
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
@@ -2422,7 +2693,13 @@ def api_notification_channel_delete(channel_id):
     try:
         session_id = _require_session_id()
         owner_scope = _require_notification_manage_scope()
-        removed = delete_notification_channel(session_id, channel_id, team_id=owner_scope.team_id)
+        removed = delete_notification_channel(
+            session_id,
+            channel_id,
+            team_id=owner_scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+            audit_source="api_v1",
+        )
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_api_error(exc)
     log.info("API_NOTIFICATION_CHANNEL_DELETED", extra={
@@ -2440,7 +2717,13 @@ def api_notification_channel_test(channel_id):
     try:
         session_id = _require_session_id()
         owner_scope = _require_notification_manage_scope()
-        result = send_test_notification(session_id, channel_id, team_id=owner_scope.team_id)
+        result = send_test_notification(
+            session_id,
+            channel_id,
+            team_id=owner_scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+            audit_source="api_v1",
+        )
     except (NotificationChannelError, TeamPermissionDenied, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_api_error(exc)
     log.info("API_NOTIFICATION_CHANNEL_TESTED", extra={
@@ -2775,6 +3058,12 @@ def api_run_cancel(run_id):
     if not pid:
         return _api_json_error("not_found", "No active process found for run.", 404)
     try:
+        _ensure_scanner_process_group_current(
+            run_id,
+            pid,
+            session_id,
+            team_id=owner_scope.team_id if owner_scope.is_team else "",
+        )
         _signal_process_group(pid)
         publish_run_event(run_id, "killed", {"api": True})
     except ProcessLookupError as exc:

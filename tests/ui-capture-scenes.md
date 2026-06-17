@@ -19,6 +19,8 @@ of truth for scene intent.
   desktop only.
 - `scripts/capture_ui_screenshots.sh --ui mobile --theme charcoal_amber` —
   single theme, mobile only.
+- `scripts/capture_ui_screenshots.sh --asset-bundle-mode source` — render
+  through source assets for quick local UI checks.
 - `scripts/capture_ui_screenshots.sh --out-dir /tmp/ui-review-2026-04-20` —
   override the output directory.
 
@@ -113,31 +115,31 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 15 | `files-panel-response-file` | `/` | Files panel open after `curl -L -o response.html https://noc.darklab.sh` creates a session file. | File row `response.html` visible; usage summary reflects one file; read-only viewer opens `response.html`; Files panel chrome matches theme. |
 | 16 | `workflow-modal-example` | `/` | First workflow modal open from the rail. | Step-row two-row grid; per-step ▶ run button present; step body readable; modal card max-width. |
 | 17 | `projects-modal` | `/` | Projects modal open with an active capture project and target. | Active project title/status, target row, details tab alignment, desktop project chrome, and theme contrast. |
-| 18 | `atlas-modal` | `/` | Session Entity Atlas open on Hosts/IPs with mocked entity and intel data. | Atlas tab strip, full-row entity list, detail pane, compact intel summary, and provider cards all fit without crowding. |
-| 19 | `run-comparison-modal` | `/` | Run comparison modal open with a mocked nmap diff. | Split-pane controls, changed-line colors, finding/artifact cards, dropdown placement, and compare controls inside the viewport. |
-| 20 | `interactive-pty-run` | `/` | Desktop PTY modal for `mtr --interactive darklab.sh`. | Tab-scoped terminal overlay, PTY screen text, kill/close affordances, and theme contrast. |
-| 21 | `history-drawer` | `/` | History drawer open with one loaded run. | Chrome-row background matches the HUD/rail family; starred rows with amber left-edge stripe; action buttons (restore / permalink / star / delete) revealed on hover (hover state may or may not be captured). |
-| 22 | `history-drawer-snapshot-row` | `/` | History drawer showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; snapshot row does not show the run-only star/restore affordances. |
-| 23 | `history-drawer-search-chip` | `/` | History drawer with `host` search applied and filter chip visible. | Active filter chip shows the current query; chip dismissal glyph (`✕`) visible; filtered row count reflects the query. |
-| 24 | `history-drawer-delete-all-confirmation` | `/` | History drawer + delete-all confirm modal stacked. | Confirm card sits above the drawer with backdrop dim; three buttons (`Cancel` / `Delete non-favorites` / `Delete all`) all fit on one row at 1024-wide. |
-| 25 | `history-drawer-delete-confirmation` | `/` | History drawer + single-row delete confirm. | Confirm modal with 2-action horizontal layout; row being deleted still visible behind backdrop. |
-| 26 | `options-modal` | `/` | Options modal open from the rail. | Themed native form controls (`<select>`, `<input type="checkbox">`); `.form-*` class group rendering; modal close button in the top-right corner. |
-| 27 | `session-token-clear-confirmation` | `/` | Options modal with the session-token clear confirm open. | Confirm copy warns that the token is not recoverable from the app; `Copy token` keeps the dialog open; `Clear token` reads as destructive; `Cancel` is default focus. |
-| 28 | `theme-modal` | `/` | Theme picker open from the rail. | Theme cards each render a mini terminal preview (with traffic-light dots); selected card has a visible selection ring; grid alignment. |
-| 29 | `faq-modal` | `/` | FAQ modal open from the rail. | Accordion `▸ / ▾` glyphs on each FAQ item; first item expanded by default; clickable command chips render as primitives. |
-| 30 | `shortcuts-overlay` | `/` | Keyboard shortcuts overlay (the `?` surface). | Transparent overlay with grouped sections (`Terminal:`, `Tabs:`, `UI:`); section titles styled in blue; key chords left-aligned, descriptions right-aligned; grid alignment holds across themes. |
-| 31 | `line-numbers-enabled` | `/` | Transcript with line-number prefix on. | Prefix width stable; content left-edge aligned to prefix right edge; `body.ln-on` rule visible. |
-| 32 | `timestamps-enabled` | `/` | Transcript with elapsed-timestamp prefix on. | Timestamp prefix rendering; four ping lines with their timings; prefix visually distinct from content. |
-| 33 | `line-numbers-and-timestamps-enabled` | `/` | Both prefixes stacked. | Combined prefix width accommodates both; content wraps correctly inside the remaining width (regression target for the mobile-overflow fix). |
-| 34 | `snapshot-page` | `/share/:id` | Permalink landing page from `/share`. | Expiry line promoted above the run-meta row; share-unredacted-vs-redacted treatment visible; page-level save menu present. |
-| 35 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured prompt username/domain (not a bare `$`); header metadata alignment; green border removed from the page title. |
-| 36 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
-| 37 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
-| 38 | `status-monitor-constellation-active-hours` | `/` | Status Monitor open against 30 days of business-hours run history. | Constellation X axis auto-fit to roughly `HH:MM–HH:MM` (the active hours line); meta line reads `HH:MM–HH:MM · N plotted`; legend `Active hours` toggle present with `aria-pressed="false"`; daylight gradient backdrop visible behind stars; ambient stars fill the chrome at idle edges. |
-| 39 | `status-monitor-constellation-full-day` | `/` | Status Monitor open with the same fixture and the legend toggle flipped to Full day. | X axis spans `0–24` with the `24` label suppressed; meta line reads `N plotted · last X days`; toggle now reads `Full day` with `aria-pressed="true"`; gradient backdrop covers the full sweep so noon sits at the visual midpoint. |
-| 40 | `status-monitor-constellation-sparse` | `/` | Status Monitor open against a fresh session with no run history yet. | No real stars; ambient stars visible across the canvas; gradient backdrop legible against the panel background; "Run history will populate this constellation." sparse-message visible; meta reads `awaiting run history · last X days`. |
+| 18 | `project-monitoring-tab` | `/` | Projects modal open on the Monitoring tab with seeded watcher fires. | Monitor cards, grouped cards, filters, timeline rows, status/severity/ack badges, and the `New monitor` action all fit without crowding. |
+| 19 | `project-activity-tab` | `/` | Projects modal open on the Activity tab with project-scoped audit rows. | Filters, table height, collapsed safe-details controls, actor/target copy, and retention note spacing stay aligned. |
+| 20 | `project-report-tab` | `/` | Projects modal open on the Report tab with a generated preview. | Metadata editor, section controls, evidence selectors, preview pane, and report toolbar share one readable two-column layout. |
+| 21 | `atlas-modal` | `/` | Session Entity Atlas open on Hosts/IPs with mocked entity and intel data. | Atlas tab strip, full-row entity list, detail pane, compact intel summary, and provider cards all fit without crowding. |
+| 22 | `run-comparison-modal` | `/` | Run comparison modal open with a mocked nmap diff. | Split-pane controls, changed-line colors, finding/artifact cards, dropdown placement, and compare controls inside the viewport. |
+| 23 | `interactive-pty-run` | `/` | Desktop PTY modal for `mtr --interactive darklab.sh`. | Tab-scoped terminal overlay, PTY screen text, kill/close affordances, and theme contrast. |
+| 24 | `history-drawer` | `/` | History drawer open with one loaded run. | Chrome-row background matches the HUD/rail family; starred rows with amber left-edge stripe; action buttons (restore / permalink / star / delete) revealed on hover (hover state may or may not be captured). |
+| 25 | `history-drawer-snapshot-row` | `/` | History drawer showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; snapshot row does not show the run-only star/restore affordances. |
+| 26 | `history-drawer-search-chip` | `/` | History drawer with `host` search applied and filter chip visible. | Active filter chip shows the current query; chip dismissal glyph (`✕`) visible; filtered row count reflects the query. |
+| 27 | `history-drawer-delete-all-confirmation` | `/` | History drawer + delete-all confirm modal stacked. | Confirm card sits above the drawer with backdrop dim; three buttons (`Cancel` / `Delete non-favorites` / `Delete all`) all fit on one row at 1024-wide. |
+| 28 | `history-drawer-delete-confirmation` | `/` | History drawer + single-row delete confirm. | Confirm modal with 2-action horizontal layout; row being deleted still visible behind backdrop. |
+| 29 | `options-modal` | `/` | Options modal open from the rail. | Themed native form controls (`<select>`, `<input type="checkbox">`); `.form-*` class group rendering; modal close button in the top-right corner. |
+| 30 | `session-token-clear-confirmation` | `/` | Options modal with the session-token clear confirm open. | Confirm copy warns that the token is not recoverable from the app; `Copy token` keeps the dialog open; `Clear token` reads as destructive; `Cancel` is default focus. |
+| 31 | `theme-modal` | `/` | Theme picker open from the rail. | Theme cards each render a mini terminal preview (with traffic-light dots); selected card has a visible selection ring; grid alignment. |
+| 32 | `faq-modal` | `/` | FAQ modal open from the rail. | Accordion `▸ / ▾` glyphs on each FAQ item; first item expanded by default; clickable command chips render as primitives. |
+| 33 | `shortcuts-overlay` | `/` | Keyboard shortcuts overlay (the `?` surface). | Transparent overlay with grouped sections (`Terminal:`, `Tabs:`, `UI:`); section titles styled in blue; key chords left-aligned, descriptions right-aligned; grid alignment holds across themes. |
+| 34 | `line-numbers-enabled` | `/` | Transcript with line-number prefix on. | Prefix width stable; content left-edge aligned to prefix right edge; `body.ln-on` rule visible. |
+| 35 | `timestamps-enabled` | `/` | Transcript with elapsed-timestamp prefix on. | Timestamp prefix rendering; four ping lines with their timings; prefix visually distinct from content. |
+| 36 | `line-numbers-and-timestamps-enabled` | `/` | Both prefixes stacked. | Combined prefix width accommodates both; content wraps correctly inside the remaining width (regression target for the mobile-overflow fix). |
+| 37 | `snapshot-page` | `/share/:id` | Permalink landing page from `/share`. | Expiry line promoted above the run-meta row; share-unredacted-vs-redacted treatment visible; page-level save menu present. |
+| 38 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured prompt username/domain (not a bare `$`); header metadata alignment; green border removed from the page title. |
+| 39 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
+| 40 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
 
-## Mobile pack (30 scenes)
+## Mobile pack (33 scenes)
 
 Order matches the scene array in `tests/js/e2e/ui-capture.mobile.capture.js`.
 Mobile viewport: iPhone 15 Pro Max–class (430 × 932 @ 3x, final images 1290 ×
@@ -155,26 +157,29 @@ Mobile viewport: iPhone 15 Pro Max–class (430 × 932 @ 3x, final images 1290 �
 | 08 | `search-open-active-match` | `/` | Mobile search bar open with `localhost` matches. | Counter visible (`1 of 3` or similar); two-row reflow (input row + controls row); match highlight stays legible on the active match. |
 | 09 | `files-panel-response-file` | `/` | Files panel open from the mobile menu after `curl -L -o response.html https://noc.darklab.sh` creates a session file. | `response.html` row visible; viewer opens without clipping; Files panel spacing and actions remain thumb-friendly. |
 | 10 | `projects-modal` | `/` | Projects sheet open with an active capture project and target. | List-to-detail Projects flow, active project title/status, target row, tab strip, and mobile sheet spacing. |
-| 11 | `atlas-modal` | `/` | Session Entity Atlas sheet drilled into a Hosts/IPs entity with mocked intel data. | Mobile Atlas filters and overflow actions open correctly before drill-in; the detail view shows the entity summary and an expanded provider card without clipping. |
-| 12 | `run-comparison-modal` | `/` | Mobile Run Comparison sheet open with a mocked nmap diff. | Unified/mobile compare layout, dropdown/action placement, changed-line colors, and finding/artifact cards below the transcript. |
-| 13 | `line-numbers-enabled` | `/` | Mobile transcript with line-number prefix. | Prefix renders inside the mobile viewport; content wraps at the correct visible edge (not shifted off-screen). |
-| 14 | `timestamps-enabled` | `/` | Mobile transcript with elapsed-timestamp prefix. | Same wrap-inside-viewport assertion as above; timestamp column readable on narrow widths. |
-| 15 | `line-numbers-and-timestamps-enabled` | `/` | Mobile with both prefixes stacked. | Combined prefix width does not push content off-screen; content wraps correctly. |
-| 16 | `history-panel` | `/` | Mobile full History panel open. | Chrome-row background matches the mobile menu/HUD family; starred rows with amber left-edge stripe; row actions stay thumb-friendly; mobile filter toggle is visible. |
-| 17 | `history-panel-snapshot-row` | `/` | Mobile History panel showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; row height and action wrapping remain comfortable at 430px width. |
-| 18 | `history-panel-search-filters-expanded` | `/` | History panel with search `host` + filters expanded. | Advanced filter panel visible; filter-root input populated; panel body remains scrollable. |
-| 19 | `history-panel-search-chip` | `/` | History panel with search `host` and active-filter chip. | Chip shows the active query; panel height stays stable; matching rows remain visible. |
-| 20 | `history-panel-delete-all-confirmation` | `/` | History panel delete-all confirm. | Three buttons (`Cancel` / `Delete non-favorites` / `Delete all`) fit on one row at 393–430px widths (regression target for the `.modal-actions-wrap` tightening). |
-| 21 | `history-panel-delete-confirmation` | `/` | History panel single-row delete confirm. | Two-action confirm stacked on mobile; row being deleted still rendered behind the scrim. |
-| 22 | `menu-modal` | `/` | Mobile hamburger bottom-sheet. | Session group (search / line numbers / timestamps submenu); overlay entries (history, workflows, options, theme, FAQ, diag); grab handle at the top; close glyph in the header; `.sheet-close` styling matches desktop modal-close treatment. |
-| 23 | `workflows-modal` | `/` | Mobile workflows modal. | Step-row layout reflows for narrow viewport; per-step ▶ run button reachable; modal body scrollable. |
-| 24 | `options-modal` | `/` | Mobile options modal. | Form controls render natively in the mobile sheet; modal close reachable with thumb; session-token button visibility follows token state. |
-| 25 | `session-token-clear-confirmation` | `/` | Mobile options modal with the session-token clear confirm open. | Confirm copy warns that the token is not recoverable from the app; actions stack cleanly; `Copy token`, `Cancel`, and destructive `Clear token` remain readable. |
-| 26 | `theme-modal` | `/` | Mobile theme picker. | Theme cards stack or grid in the narrow viewport; selected card ring visible; traffic-light dots in each preview. |
-| 27 | `faq-modal` | `/` | Mobile FAQ modal. | Accordion glyphs; modal body scrollable; close button reachable. |
-| 28 | `snapshot-page` | `/share/:id` | Mobile snapshot landing page. | Header metadata stacks vertically; save menu reachable; prompt prefix matches the shell's. |
-| 29 | `permalink-page` | `/history/:id` | Mobile permalink landing page. | Same as snapshot page plus the run permalink semantics. |
-| 30 | `diag-page` | `/diag` | Mobile diag page. | `.diag-topbar` sibling wrapper keeps the sticky header legible on iOS Safari (the unscoped `mobile.css:84` rule that used to collapse the header is avoided by this structure); back-button visible at mobile/touch breakpoints. |
+| 11 | `project-monitoring-tab` | `/` | Projects sheet open on the Monitoring tab with seeded watcher fires. | Monitor cards, filters, timeline rows, status badges, action buttons, and the `New monitor` action remain readable in the mobile detail sheet. |
+| 12 | `project-activity-tab` | `/` | Projects sheet open on the Activity tab. | Mobile activity filters, action buttons, loading/empty-state spacing, and tab chrome stay thumb-friendly. |
+| 13 | `project-report-tab` | `/` | Projects sheet open on the Report tab with a generated preview. | Report metadata fields, selection controls, preview action, and rendered preview stack without clipping. |
+| 14 | `atlas-modal` | `/` | Session Entity Atlas sheet drilled into a Hosts/IPs entity with mocked intel data. | Mobile Atlas filters and overflow actions open correctly before drill-in; the detail view shows the entity summary and an expanded provider card without clipping. |
+| 15 | `run-comparison-modal` | `/` | Mobile Run Comparison sheet open with a mocked nmap diff. | Unified/mobile compare layout, dropdown/action placement, changed-line colors, and finding/artifact cards below the transcript. |
+| 16 | `line-numbers-enabled` | `/` | Mobile transcript with line-number prefix. | Prefix renders inside the mobile viewport; content wraps at the correct visible edge (not shifted off-screen). |
+| 17 | `timestamps-enabled` | `/` | Mobile transcript with elapsed-timestamp prefix. | Same wrap-inside-viewport assertion as above; timestamp column readable on narrow widths. |
+| 18 | `line-numbers-and-timestamps-enabled` | `/` | Mobile with both prefixes stacked. | Combined prefix width does not push content off-screen; content wraps correctly. |
+| 19 | `history-panel` | `/` | Mobile full History panel open. | Chrome-row background matches the mobile menu/HUD family; starred rows with amber left-edge stripe; row actions stay thumb-friendly; mobile filter toggle is visible. |
+| 20 | `history-panel-snapshot-row` | `/` | Mobile History panel showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; row height and action wrapping remain comfortable at 430px width. |
+| 21 | `history-panel-search-filters-expanded` | `/` | History panel with search `host` + filters expanded. | Advanced filter panel visible; filter-root input populated; panel body remains scrollable. |
+| 22 | `history-panel-search-chip` | `/` | History panel with search `host` and active-filter chip. | Chip shows the active query; panel height stays stable; matching rows remain visible. |
+| 23 | `history-panel-delete-all-confirmation` | `/` | History panel delete-all confirm. | Three buttons (`Cancel` / `Delete non-favorites` / `Delete all`) fit on one row at 393–430px widths (regression target for the `.modal-actions-wrap` tightening). |
+| 24 | `history-panel-delete-confirmation` | `/` | History panel single-row delete confirm. | Two-action confirm stacked on mobile; row being deleted still rendered behind the scrim. |
+| 25 | `menu-modal` | `/` | Mobile hamburger bottom-sheet. | Session group (search / line numbers / timestamps submenu); overlay entries (history, workflows, options, theme, FAQ, diag); grab handle at the top; close glyph in the header; `.sheet-close` styling matches desktop modal-close treatment. |
+| 26 | `workflows-modal` | `/` | Mobile workflows modal. | Step-row layout reflows for narrow viewport; per-step ▶ run button reachable; modal body scrollable. |
+| 27 | `options-modal` | `/` | Mobile options modal. | Form controls render natively in the mobile sheet; modal close reachable with thumb; session-token button visibility follows token state. |
+| 28 | `session-token-clear-confirmation` | `/` | Mobile options modal with the session-token clear confirm open. | Confirm copy warns that the token is not recoverable from the app; actions stack cleanly; `Copy token`, `Cancel`, and destructive `Clear token` remain readable. |
+| 29 | `theme-modal` | `/` | Mobile theme picker. | Theme cards stack or grid in the narrow viewport; selected card ring visible; traffic-light dots in each preview. |
+| 30 | `faq-modal` | `/` | Mobile FAQ modal. | Accordion glyphs; modal body scrollable; close button reachable. |
+| 31 | `snapshot-page` | `/share/:id` | Mobile snapshot landing page. | Header metadata stacks vertically; save menu reachable; prompt prefix matches the shell's. |
+| 32 | `permalink-page` | `/history/:id` | Mobile permalink landing page. | Same as snapshot page plus the run permalink semantics. |
+| 33 | `diag-page` | `/diag` | Mobile diag page. | `.diag-topbar` sibling wrapper keeps the sticky header legible on iOS Safari (the unscoped `mobile.css:84` rule that used to collapse the header is avoided by this structure); back-button visible at mobile/touch breakpoints. |
 
 ## Reporting regressions
 

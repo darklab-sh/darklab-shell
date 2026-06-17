@@ -484,6 +484,35 @@ class TestInteractivePtyRuns:
         assert resp.status_code == 404
         rejected_claim_owner.assert_not_called()
 
+    def test_stream_interactive_pty_throttles_owner_liveness_refresh(self):
+        client = get_client()
+        events = [
+            'data: {"type":"output","text":"one"}\n\n',
+            'data: {"type":"output","text":"two"}\n\n',
+            'data: {"type":"output","text":"three"}\n\n',
+        ]
+
+        with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run.stream_pty_events", return_value=iter(events)), \
+             mock.patch("blueprints.run.claim_pty_stream_owner"), \
+             mock.patch("blueprints.run._active_run_owner_touch_monotonic", side_effect=[100.0, 101.0, 105.0]), \
+             mock.patch("blueprints.run.active_run_touch_owner") as touch_owner:
+            resp = client.get(
+                "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
+                headers={
+                    "X-Session-ID": "sess-pty-owner",
+                    "X-Client-ID": "client-1",
+                },
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert body == "".join(events)
+        assert touch_owner.call_args_list == [
+            mock.call("pty-run-owner", "client-1", "tab-1"),
+            mock.call("pty-run-owner", "client-1", "tab-1"),
+        ]
+
     def test_snapshot_interactive_pty_returns_terminal_resume_state(self):
         client = get_client()
 
@@ -662,7 +691,21 @@ class TestRunStreaming:
              mock.patch("blueprints.run.active_run_remove") as active_remove, \
              mock.patch(
                  "blueprints.run._finalize_completed_run",
-                 return_value={"elapsed": 0.2, "active_project_link": None},
+                 return_value={
+                     "elapsed": 0.2,
+                     "active_project_link": {
+                         "project_id": "proj-worker",
+                         "project_name": "Worker Project",
+                         "discovered_target_count": 2,
+                         "linked_entity_count": 1,
+                         "rejected_entity_count": 3,
+                     },
+                     "finalize_summary": {
+                         "project_auto_promote_count": 2,
+                         "project_auto_promote_promoted_count": 1,
+                         "project_auto_promote_project_ids": ["proj-auto"],
+                     },
+                 },
              ) as finalize:
             run_routes._brokered_real_run_worker(
                 run_id="run-broker-worker",
@@ -685,12 +728,35 @@ class TestRunStreaming:
         capture.finalize()
 
         event_types = [event_type for _, event_type, _ in published]
-        assert event_types == ["notice", "notice", "notice", "output", "exit"]
-        assert [payload["text"] for _, event_type, payload in published if event_type == "notice"] == [
+        assert event_types == [
+            "notice",
+            "notice",
+            "notice",
+            "output",
+            "notice",
+            "notice",
+            "notice",
+            "notice",
+            "notice",
+            "exit",
+        ]
+        notice_payloads = [payload for _, event_type, payload in published if event_type == "notice"]
+        assert [payload["text"] for payload in notice_payloads] == [
             "[var] HOST=darklab.sh",
             "[notice] rewritten for safety",
             "[workspace] writing scan.txt",
+            "[project] linked run to Worker Project",
+            "[project] discovered 2 targets for Worker Project",
+            "[project] linked 1 Atlas entity to Worker Project",
+            "[project] skipped 3 Atlas entities for Worker Project because the project link limit was reached",
+            "[project] auto-promoted 2 Atlas entities",
         ]
+        assert notice_payloads[3]["project_linked"] is True
+        assert notice_payloads[4]["target_count"] == 2
+        assert notice_payloads[5]["entity_count"] == 1
+        assert notice_payloads[6]["reason"] == "project_link_limit"
+        assert notice_payloads[7]["project_ids"] == ["proj-auto"]
+        assert notice_payloads[7]["promoted_count"] == 1
         assert [payload["text"] for _, event_type, payload in published if event_type == "output"] == [
             "keep this\n",
         ]
@@ -701,6 +767,28 @@ class TestRunStreaming:
         assert fake_proc.stdout.closed is True
         pid_pop.assert_called_once_with("run-broker-worker")
         active_remove.assert_called_once_with("run-broker-worker")
+
+    def test_synthetic_sort_and_uniq_postfilters_cap_buffer_and_emit_notice(self):
+        with mock.patch.dict("blueprints.run.CFG", {"max_output_lines": 3}):
+            sort_filter = run_routes._SyntheticPostFilterProcessor({"kind": "sort"})
+            uniq_filter = run_routes._SyntheticPostFilterProcessor({"kind": "uniq", "count": True})
+
+        for line in ["gamma\n", "alpha\n", "beta\n", "delta\n", "epsilon\n"]:
+            assert sort_filter.process_output_line(line) == []
+        for line in ["same\n", "same\n", "other\n", "other\n", "late\n"]:
+            assert uniq_filter.process_output_line(line) == []
+
+        assert sort_filter.finalize_output_lines() == [
+            "[post-filter] output truncated to 3 lines before sort; 2 later lines were skipped.\n",
+            "alpha\n",
+            "beta\n",
+            "gamma\n",
+        ]
+        assert uniq_filter.finalize_output_lines() == [
+            "[post-filter] output truncated to 3 lines before uniq; 2 later lines were skipped.\n",
+            "      2 same\n",
+            "      1 other\n",
+        ]
 
     def test_broker_worker_times_out_and_publishes_timeout_notice(self):
         fake_proc = _FakeProc(lines=["late output\n"], returncode=None, wait_returncode=-15)

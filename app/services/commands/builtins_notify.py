@@ -144,8 +144,17 @@ def _parse_events(parts: list[str]) -> dict[str, Any]:
     return payload
 
 
-def _channel_for_session(channel_id: str, session_id: str) -> dict[str, Any]:
-    for channel in list_notification_channels(session_id):
+def _audit_fields(session_id: str, *, team_id: str = "", team_role: str = "") -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "actor_session_id": session_id,
+        "team_id": team_id,
+        "actor_role": team_role,
+    }
+
+
+def _channel_for_session(channel_id: str, session_id: str, *, team_id: str = "") -> dict[str, Any]:
+    for channel in list_notification_channels(session_id, team_id=team_id):
         if str(channel.get("id") or "") == channel_id:
             return channel
     raise BuiltinNotifyError(f"notification channel not found: {channel_id}")
@@ -184,8 +193,8 @@ def _format_config(value: Any) -> str:
     return ", ".join(f"{key}={value[key]}" for key in sorted(value))
 
 
-def _notify_lines(session_id: str) -> list[dict[str, object]]:
-    channels = list_notification_channels(session_id)
+def _notify_lines(session_id: str, *, team_id: str = "") -> list[dict[str, object]]:
+    channels = list_notification_channels(session_id, team_id=team_id)
     if not channels:
         return [
             output_line(
@@ -236,7 +245,7 @@ def _info_lines(channel: dict[str, Any]) -> list[dict[str, object]]:
     ]
 
 
-def _create_channel(parts: list[str], session_id: str) -> list[dict[str, object]]:
+def _create_channel(parts: list[str], session_id: str, *, team_id: str = "", team_role: str = "") -> list[dict[str, object]]:
     payload = _parse_create_or_update(parts, create=True)
     kind = str(payload.get("kind") or "").strip().lower()
     if CHANNEL_SECRET_FIELDS.get(kind):
@@ -248,7 +257,13 @@ def _create_channel(parts: list[str], session_id: str) -> list[dict[str, object]
                 "builtin-note",
             ),
         ]
-    channel = create_notification_channel(session_id, payload)
+    channel = create_notification_channel(
+        session_id,
+        payload,
+        team_id=team_id,
+        audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
+        audit_source="terminal_builtin",
+    )
     log.info("BUILTIN_NOTIFY_CREATED", extra={
         "session": get_log_session_id(session_id),
         "source": "builtin",
@@ -263,12 +278,19 @@ def _create_channel(parts: list[str], session_id: str) -> list[dict[str, object]
     ]
 
 
-def _update_channel(parts: list[str], session_id: str) -> list[dict[str, object]]:
+def _update_channel(parts: list[str], session_id: str, *, team_id: str = "", team_role: str = "") -> list[dict[str, object]]:
     channel_id = _notify_ref(parts, "Usage: notify update <id> [--label TEXT] [--trigger NAME] [--config KEY=VALUE]")
     payload = _parse_create_or_update(parts, create=False)
     if not payload:
         raise BuiltinNotifyError("notify update: use --label, --trigger, --config, or --muted")
-    channel = update_notification_channel(session_id, channel_id, payload)
+    channel = update_notification_channel(
+        session_id,
+        channel_id,
+        payload,
+        team_id=team_id,
+        audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
+        audit_source="terminal_builtin",
+    )
     log.info("BUILTIN_NOTIFY_UPDATED", extra={
         "session": get_log_session_id(session_id),
         "source": "builtin",
@@ -278,9 +300,9 @@ def _update_channel(parts: list[str], session_id: str) -> list[dict[str, object]
     return [output_line(f"notify: updated {channel_id}", "builtin-success")]
 
 
-def _events_lines(session_id: str, parts: list[str]) -> list[dict[str, object]]:
+def _events_lines(session_id: str, parts: list[str], *, team_id: str = "") -> list[dict[str, object]]:
     params = _parse_events(parts)
-    data = list_notification_events(session_id, **params)
+    data = list_notification_events(session_id, team_id=team_id, **params)
     events = data.get("events") or []
     if not events:
         return [output_line("notify: no delivery events matched.", "builtin-note")]
@@ -299,7 +321,7 @@ def _events_lines(session_id: str, parts: list[str]) -> list[dict[str, object]]:
     return lines
 
 
-def run_builtin_notify(command: str, session_id: str) -> list[dict[str, object]]:
+def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team_role: str = "") -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "list"
     if subcommand in {"help", "-h", "--help"}:
@@ -316,16 +338,27 @@ def run_builtin_notify(command: str, session_id: str) -> list[dict[str, object]]
         return [output_line(_durable_session_error(session_id))]
     try:
         if subcommand in {"list", "ls"}:
-            return _notify_lines(session_id)
+            return _notify_lines(session_id, team_id=team_id)
         if subcommand == "create":
-            return _create_channel(parts, session_id)
+            return _create_channel(parts, session_id, team_id=team_id, team_role=team_role)
         if subcommand == "update":
-            return _update_channel(parts, session_id)
+            return _update_channel(parts, session_id, team_id=team_id, team_role=team_role)
         if subcommand == "info":
-            return _info_lines(_channel_for_session(_notify_ref(parts, "Usage: notify info <id>"), session_id))
+            return _info_lines(_channel_for_session(
+                _notify_ref(parts, "Usage: notify info <id>"),
+                session_id,
+                team_id=team_id,
+            ))
         if subcommand == "mute":
             channel_id = _notify_ref(parts, "Usage: notify mute <id>")
-            channel = update_notification_channel(session_id, channel_id, {"muted": True})
+            channel = update_notification_channel(
+                session_id,
+                channel_id,
+                {"muted": True},
+                team_id=team_id,
+                audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
+                audit_source="terminal_builtin",
+            )
             log.info("BUILTIN_NOTIFY_MUTED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -334,7 +367,14 @@ def run_builtin_notify(command: str, session_id: str) -> list[dict[str, object]]
             return [output_line(f"notify: muted {channel.get('id', channel_id)}", "builtin-success")]
         if subcommand == "unmute":
             channel_id = _notify_ref(parts, "Usage: notify unmute <id>")
-            channel = update_notification_channel(session_id, channel_id, {"muted": False})
+            channel = update_notification_channel(
+                session_id,
+                channel_id,
+                {"muted": False},
+                team_id=team_id,
+                audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
+                audit_source="terminal_builtin",
+            )
             log.info("BUILTIN_NOTIFY_UNMUTED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -343,7 +383,13 @@ def run_builtin_notify(command: str, session_id: str) -> list[dict[str, object]]
             return [output_line(f"notify: unmuted {channel.get('id', channel_id)}", "builtin-success")]
         if subcommand == "delete":
             channel_id = _notify_ref(parts, "Usage: notify delete <id>")
-            removed = delete_notification_channel(session_id, channel_id)
+            removed = delete_notification_channel(
+                session_id,
+                channel_id,
+                team_id=team_id,
+                audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
+                audit_source="terminal_builtin",
+            )
             log.info("BUILTIN_NOTIFY_DELETED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -354,7 +400,13 @@ def run_builtin_notify(command: str, session_id: str) -> list[dict[str, object]]
             return [output_line(message, "builtin-success" if removed else "builtin-note")]
         if subcommand == "test":
             channel_id = _notify_ref(parts, "Usage: notify test <id>")
-            result = send_test_notification(session_id, channel_id)
+            result = send_test_notification(
+                session_id,
+                channel_id,
+                team_id=team_id,
+                audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
+                audit_source="terminal_builtin",
+            )
             lines = [output_line(f"notify: queued {result.get('queued', 0)} test event(s)", "builtin-success")]
             for event in result.get("events") or []:
                 lines.append(output_line(
@@ -365,7 +417,7 @@ def run_builtin_notify(command: str, session_id: str) -> list[dict[str, object]]
                     lines.append(output_line(f"  error: {event.get('last_error')}", "builtin-note"))
             return lines
         if subcommand == "events":
-            return _events_lines(session_id, parts)
+            return _events_lines(session_id, parts, team_id=team_id)
         return [
             output_line(f"notify: unknown subcommand '{subcommand}'"),
             *_notify_usage(),

@@ -2,10 +2,41 @@
 //
 // The mobile status pill reflects the active tab only; this surface gives a
 // system-level signal that work is happening on a backgrounded tab.
-(function initMobileRunningIndicator(global) {
-  if (typeof document === 'undefined') return;
+import {
+  getActiveTabId as importedGetActiveTabId,
+  getTabs as importedGetTabs,
+  onUiEvent as importedOnUiEvent,
+} from '../../core/state.js';
+import { activateTab as importedActivateTab } from '../../tabs.js';
 
-  function createMobileRunningIndicator({
+const global = typeof window !== 'undefined' ? window : globalThis;
+let createMobileRunningIndicator = null;
+
+function _mobileRunningGetTabs() {
+  if (typeof importedGetTabs !== 'undefined' && typeof importedGetTabs === 'function') return importedGetTabs();
+  return null;
+}
+
+function _mobileRunningGetActiveTabId() {
+  if (typeof importedGetActiveTabId !== 'undefined' && typeof importedGetActiveTabId === 'function') {
+    return importedGetActiveTabId();
+  }
+  return null;
+}
+
+function _mobileRunningActivateTab(tabId, options) {
+  const activate = typeof importedActivateTab === 'function' ? importedActivateTab : null;
+  if (typeof activate === 'function') activate(tabId, options);
+}
+
+function _mobileRunningOnUiEvent(name, handler) {
+  const subscribe = typeof importedOnUiEvent === 'function' ? importedOnUiEvent : null;
+  if (typeof subscribe === 'function') subscribe(name, handler);
+}
+
+if (typeof document !== 'undefined') {
+
+  createMobileRunningIndicator = function createMobileRunningIndicator({
     tabsBarEl = null,
     terminalBarEl = null,
   } = {}) {
@@ -56,9 +87,9 @@
 
     function runningNonActiveTabs() {
       if (!tabsBarEl) return [];
-      const tabsList = (typeof global.getTabs === 'function') ? global.getTabs() : null;
+      const tabsList = _mobileRunningGetTabs();
       if (!Array.isArray(tabsList)) return [];
-      const activeId = (typeof global.getActiveTabId === 'function') ? global.getActiveTabId() : null;
+      const activeId = _mobileRunningGetActiveTabId();
       const byId = new Map(tabsList.map(t => [t.id, t]));
       // Tab-row order is the visual order, not the array order. Drag-reorder
       // mutates the DOM but not the underlying tabs array.
@@ -88,8 +119,7 @@
       if (running.length === 0) return;
       const next = running[runningCycleIdx % running.length];
       runningCycleIdx += 1;
-      const activate = (typeof global.activateTab === 'function') ? global.activateTab : null;
-      if (activate) activate(next.id, { focusComposer: false });
+      _mobileRunningActivateTab(next.id, { focusComposer: false });
       // activateTab uses smooth scroll, but iOS Safari can drop the first call
       // on a cold horizontal scroll container. Direct scrollLeft always lands.
       scrollTabIntoView(next.id);
@@ -165,19 +195,16 @@
         scrollSyncTimer = setTimeout(sync, 120);
       }, { passive: true });
     }
-    if (typeof global.onUiEvent === 'function') {
-      global.onUiEvent('app:tab-created', () => sync());
-      global.onUiEvent('app:tab-closed', () => sync());
-      global.onUiEvent('app:tab-status-changed', () => sync());
-      global.onUiEvent('app:tab-activated', () => sync());
-      global.onUiEvent('app:tab-order-changed', () => sync());
-    }
+    _mobileRunningOnUiEvent('app:tab-created', () => sync());
+    _mobileRunningOnUiEvent('app:tab-closed', () => sync());
+    _mobileRunningOnUiEvent('app:tab-status-changed', () => sync());
+    _mobileRunningOnUiEvent('app:tab-activated', () => sync());
+    _mobileRunningOnUiEvent('app:tab-order-changed', () => sync());
     sync();
 
     return { sync };
-  }
-
-  global.DarklabMobileRunningIndicator = {
-    create: createMobileRunningIndicator,
   };
-})(typeof window !== 'undefined' ? window : this);
+
+}
+
+export { createMobileRunningIndicator };

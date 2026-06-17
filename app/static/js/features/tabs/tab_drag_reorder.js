@@ -1,8 +1,64 @@
+import { tabsBar as importedTabsBar } from '../../core/dom.js';
+import { getActiveTabId as importedGetActiveTabId } from '../../core/state.js';
+import {
+  ensureActiveTabVisible as importedEnsureActiveTabVisible,
+  syncTabOrderFromDom as importedSyncTabOrderFromDom,
+  updateTabScrollButtons as importedUpdateTabScrollButtons,
+} from '../../tabs_bridge.js';
+import { refocusComposerAfterAction as importedRefocusComposerAfterAction } from '../../ui/ui_helpers.js';
+
+const TAB_DRAG_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
 const _TOUCH_TAB_DRAG_THRESHOLD = 14;
 const _TOUCH_TAB_DRAG_HOLD_MS = 180;
 const _POINTER_TAB_DRAG_THRESHOLD = 6;
+
+function _tabDragTabsBar() {
+  return (typeof importedTabsBar !== 'undefined' && importedTabsBar)
+    || TAB_DRAG_GLOBAL.tabsBar
+    || null;
+}
+
+function _tabDragActiveTabId() {
+  if (typeof importedGetActiveTabId !== 'undefined' && typeof importedGetActiveTabId === 'function') {
+    return importedGetActiveTabId();
+  }
+  return TAB_DRAG_GLOBAL.activeTabId ?? null;
+}
+
+function _tabDragUpdateTabScrollButtons() {
+  const update = (typeof importedUpdateTabScrollButtons !== 'undefined' && importedUpdateTabScrollButtons)
+    || (typeof TAB_DRAG_GLOBAL.updateTabScrollButtons === 'function'
+      ? TAB_DRAG_GLOBAL.updateTabScrollButtons
+      : null);
+  if (typeof update === 'function') update();
+}
+
+function _tabDragSyncTabOrderFromDom() {
+  const sync = (typeof importedSyncTabOrderFromDom !== 'undefined' && importedSyncTabOrderFromDom)
+    || (typeof TAB_DRAG_GLOBAL.syncTabOrderFromDom === 'function'
+      ? TAB_DRAG_GLOBAL.syncTabOrderFromDom
+      : null);
+  if (typeof sync === 'function') sync();
+}
+
+function _tabDragEnsureActiveTabVisible(tabId) {
+  const ensureVisible = (typeof importedEnsureActiveTabVisible !== 'undefined' && importedEnsureActiveTabVisible)
+    || (typeof TAB_DRAG_GLOBAL.ensureActiveTabVisible === 'function'
+      ? TAB_DRAG_GLOBAL.ensureActiveTabVisible
+      : null);
+  if (typeof ensureVisible === 'function') ensureVisible(tabId);
+}
+
+function _tabDragRefocusComposerAfterAction() {
+  const refocus = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction)
+    || (typeof TAB_DRAG_GLOBAL.refocusComposerAfterAction === 'function'
+      ? TAB_DRAG_GLOBAL.refocusComposerAfterAction
+      : null);
+  if (typeof refocus === 'function') refocus();
+}
 
 function _syncTabDraggable(tab) {
   if (!tab) return;
@@ -10,15 +66,17 @@ function _syncTabDraggable(tab) {
 }
 
 function _clearTabDropIndicators() {
-  if (!tabsBar) return;
-  tabsBar.querySelectorAll('.tab-drop-before, .tab-drop-after').forEach(node => {
+  const bar = _tabDragTabsBar();
+  if (!bar) return;
+  bar.querySelectorAll('.tab-drop-before, .tab-drop-after').forEach(node => {
     node.classList.remove('tab-drop-before', 'tab-drop-after');
   });
 }
 
 function _tabFromClientX(clientX, excludeId = null) {
-  if (!tabsBar) return null;
-  const nodes = [...tabsBar.querySelectorAll('.tab')];
+  const bar = _tabDragTabsBar();
+  if (!bar) return null;
+  const nodes = [...bar.querySelectorAll('.tab')];
   return nodes.find(node => {
     if (!node || node.dataset.id === excludeId) return false;
     const rect = node.getBoundingClientRect();
@@ -27,8 +85,9 @@ function _tabFromClientX(clientX, excludeId = null) {
 }
 
 function _edgeTabFromClientX(clientX, excludeId = null) {
-  if (!tabsBar) return null;
-  const nodes = [...tabsBar.querySelectorAll('.tab')].filter(node => node && node.dataset.id !== excludeId);
+  const bar = _tabDragTabsBar();
+  if (!bar) return null;
+  const nodes = [...bar.querySelectorAll('.tab')].filter(node => node && node.dataset.id !== excludeId);
   if (!nodes.length) return null;
   const first = nodes[0];
   const last = nodes[nodes.length - 1];
@@ -40,7 +99,8 @@ function _edgeTabFromClientX(clientX, excludeId = null) {
 }
 
 function _reorderDraggedTab(dragged, target, clientX) {
-  if (!dragged || !target || !tabsBar || dragged === target) return false;
+  const bar = _tabDragTabsBar();
+  if (!dragged || !target || !bar || dragged === target) return false;
   const rect = target.getBoundingClientRect();
   const after = clientX > rect.left + (rect.width / 2);
   const noChange = after
@@ -53,19 +113,20 @@ function _reorderDraggedTab(dragged, target, clientX) {
   _clearTabDropIndicators();
   target.classList.add(after ? 'tab-drop-after' : 'tab-drop-before');
   if (after) {
-    if (target.nextSibling !== dragged) tabsBar.insertBefore(dragged, target.nextSibling);
+    if (target.nextSibling !== dragged) bar.insertBefore(dragged, target.nextSibling);
   } else if (target !== dragged.nextSibling) {
-    tabsBar.insertBefore(dragged, target);
+    bar.insertBefore(dragged, target);
   }
   return true;
 }
 
 function _touchDragAutoScroll(clientX) {
-  if (!tabsBar || typeof tabsBar.scrollBy !== 'function') return;
-  const rect = tabsBar.getBoundingClientRect();
+  const bar = _tabDragTabsBar();
+  if (!bar || typeof bar.scrollBy !== 'function') return;
+  const rect = bar.getBoundingClientRect();
   const edge = 36;
-  if (clientX <= rect.left + edge) tabsBar.scrollBy({ left: -18, behavior: 'auto' });
-  else if (clientX >= rect.right - edge) tabsBar.scrollBy({ left: 18, behavior: 'auto' });
+  if (clientX <= rect.left + edge) bar.scrollBy({ left: -18, behavior: 'auto' });
+  else if (clientX >= rect.right - edge) bar.scrollBy({ left: 18, behavior: 'auto' });
 }
 
 function _getTrackedTouchPoint(e, touchId = null) {
@@ -98,8 +159,9 @@ function _cleanupTouchDrag() {
   document.removeEventListener('touchend', _onTouchDragEnd);
   document.removeEventListener('touchcancel', _onTouchDragEnd);
   _clearTabDropIndicators();
-  tabsBar?.classList.remove('tabs-bar-touch-sorting');
-  tabsBar?.classList.remove('tabs-bar-desktop-sorting');
+  const bar = _tabDragTabsBar();
+  bar?.classList.remove('tabs-bar-touch-sorting');
+  bar?.classList.remove('tabs-bar-desktop-sorting');
   _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging', 'tab-pointer-dragging');
   if (_touchDragState.holdTimer) clearTimeout(_touchDragState.holdTimer);
   _touchDragState = null;
@@ -136,7 +198,7 @@ function _onTouchDragMove(e) {
     _touchDragState.active = true;
     if (typeof e.preventDefault === 'function') e.preventDefault();
     if (typeof e.stopPropagation === 'function') e.stopPropagation();
-    tabsBar?.classList.add('tabs-bar-desktop-sorting');
+    _tabDragTabsBar()?.classList.add('tabs-bar-desktop-sorting');
     _touchDragState.tab.classList.add('tab-dragging', 'tab-pointer-dragging');
   }
   if (typeof e.preventDefault === 'function') e.preventDefault();
@@ -148,27 +210,28 @@ function _onTouchDragMove(e) {
     const changed = _reorderDraggedTab(dragged, target, clientX);
     if (changed) _touchDragState.moved = true;
   } else if (edgeDrop && edgeDrop.target !== dragged) {
-    const firstTab = tabsBar.querySelector('.tab');
-    const lastTab = tabsBar.querySelector('.tab:last-of-type');
+    const bar = _tabDragTabsBar();
+    const firstTab = bar ? bar.querySelector('.tab') : null;
+    const lastTab = bar ? bar.querySelector('.tab:last-of-type') : null;
     const noChange = (!edgeDrop.after && firstTab === dragged) || (edgeDrop.after && lastTab === dragged);
     if (noChange) {
       _clearTabDropIndicators();
-      updateTabScrollButtons();
+      _tabDragUpdateTabScrollButtons();
       return;
     }
     _clearTabDropIndicators();
     edgeDrop.target.classList.add(edgeDrop.after ? 'tab-drop-after' : 'tab-drop-before');
     if (edgeDrop.after) {
-      tabsBar.appendChild(dragged);
-    } else {
-      tabsBar.insertBefore(dragged, tabsBar.querySelector('.tab'));
+      bar.appendChild(dragged);
+    } else if (bar) {
+      bar.insertBefore(dragged, bar.querySelector('.tab'));
     }
     _touchDragState.moved = true;
   } else {
     _clearTabDropIndicators();
   }
   _touchDragAutoScroll(clientX);
-  updateTabScrollButtons();
+  _tabDragUpdateTabScrollButtons();
 }
 
 function _onTouchDragEnd(e) {
@@ -183,11 +246,12 @@ function _onTouchDragEnd(e) {
   _cleanupTouchDrag();
   _syncTabDraggable(state.tab);
   if (!moved) return;
-  syncTabOrderFromDom();
-  updateTabScrollButtons();
-  ensureActiveTabVisible(activeTabId);
+  _tabDragSyncTabOrderFromDom();
+  _tabDragUpdateTabScrollButtons();
+  const currentActiveTabId = _tabDragActiveTabId();
+  _tabDragEnsureActiveTabVisible(currentActiveTabId);
   _tabDragSuppressClickUntil = Date.now() + (state.source === 'touch' ? 220 : 140);
-  if (state.id === activeTabId) refocusComposerAfterAction();
+  if (typeof window !== 'undefined')  if (state.id === currentActiveTabId) _tabDragRefocusComposerAfterAction();
 }
 
 function _startTouchTabDrag(tab, id, e) {
@@ -222,7 +286,7 @@ function _startTouchTabDrag(tab, id, e) {
       if (!_touchDragState || _touchDragState.id !== id || _touchDragState.tab !== tab) return;
       _touchDragState.holdTimer = null;
       _touchDragState.active = true;
-      tabsBar?.classList.add('tabs-bar-touch-sorting');
+      _tabDragTabsBar()?.classList.add('tabs-bar-touch-sorting');
       _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
     }, _TOUCH_TAB_DRAG_HOLD_MS);
   }
@@ -243,3 +307,24 @@ function bindTabDragReorder(tab, id) {
   tab.addEventListener('pointerdown', e => _startTouchTabDrag(tab, id, e));
   tab.addEventListener('touchstart', e => _startTouchTabDrag(tab, id, e), { passive: false });
 }
+
+if (typeof window !== 'undefined') {
+}
+
+export {
+  _POINTER_TAB_DRAG_THRESHOLD,
+  _TOUCH_TAB_DRAG_HOLD_MS,
+  _TOUCH_TAB_DRAG_THRESHOLD,
+  _cleanupTouchDrag,
+  _clearTabDropIndicators,
+  _edgeTabFromClientX,
+  _getTrackedTouchPoint,
+  _onTouchDragEnd,
+  _onTouchDragMove,
+  _reorderDraggedTab,
+  _startTouchTabDrag,
+  _syncTabDraggable,
+  _tabFromClientX,
+  _touchDragAutoScroll,
+  bindTabDragReorder,
+};

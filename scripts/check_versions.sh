@@ -44,6 +44,9 @@ GITHUB_CLONE_BRANCH_PATTERN = re.compile(
 GO_STABLE_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 CI_IMAGE_VAR_PATTERN = re.compile(r"^\s{2}(CI_[A-Z0-9_]+):\s*[\"']?([^\"'\n#]+)[\"']?\s*(?:#.*)?$")
 CI_IMAGE_REF_PATTERN = re.compile(r"^\s*image:\s*\$([A-Z0-9_]+)\s*(?:#.*)?$")
+GO_MODULE_GITHUB_RELEASES = {
+    "github.com/urlscan/urlscan-cli": ("urlscan", "urlscan-cli"),
+}
 
 
 def _escape_go_module_path(path: str) -> str:
@@ -136,6 +139,17 @@ def _latest_rubygems_version(gem: str) -> str:
 
 def _latest_golang_version(module: str, debug: bool = False) -> str:
     module_root = _go_module_root(module)
+    github_release = GO_MODULE_GITHUB_RELEASES.get(module_root)
+    if github_release is not None:
+        owner, repo = github_release
+        latest = _latest_github_release_version(owner, repo)
+        if debug:
+            print(f"  debug: go package={module}")
+            print(f"  debug: go module={module_root}")
+            print(f"  debug: github releases repo={owner}/{repo}")
+            print(f"  debug: github releases selected={latest}")
+        return latest
+
     url = f"https://proxy.golang.org/{_escape_go_module_path(module_root)}/@v/list"
     try:
         with urllib.request.urlopen(url, timeout=3) as resp:
@@ -631,8 +645,9 @@ def main() -> int:
         "are reported as unknown."
     )
     print(
-        "- The Go check uses go.dev for the toolchain and the public Go module proxy for "
-        "module pins; module checks only consider stable release tags."
+        "- The Go check uses go.dev for the toolchain, GitHub Releases for modules that "
+        "publish installable CLI tags there, and the public Go module proxy for other "
+        "module pins; proxy module checks only consider stable release tags."
     )
     print(
         "- The Node check reads package.json/package-lock.json dependencies and "

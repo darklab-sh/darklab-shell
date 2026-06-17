@@ -1,6 +1,7 @@
 // Session Entity Atlas detail rendering helpers.
 
-(function initAtlasEntityDetail(global) {
+const _darklabGlobal = window;
+
   function text(value, fallback = '') {
     return String(value ?? '').trim() || fallback;
   }
@@ -199,7 +200,7 @@
       );
       const summary = node('div', 'atlas-intel-summary', text(snapshot.summary, 'No summary'));
       const meta = node('div', 'atlas-muted', `Fetched ${formatDate(snapshot.fetched_at)}`);
-      const disclosure = global.bindDisclosure?.(toggle, {
+      const disclosure = _darklabGlobal.bindDisclosure?.(toggle, {
         panel: body,
         openClass: null,
         hiddenClass: 'u-hidden',
@@ -372,8 +373,8 @@
 
   function verificationStatusLabel(value) {
     const normalized = text(value, 'not_started');
-    if (global.DarklabFindingTriageEditor && typeof global.DarklabFindingTriageEditor.verificationStatusLabel === 'function') {
-      return global.DarklabFindingTriageEditor.verificationStatusLabel(normalized);
+    if (_darklabGlobal.DarklabFindingTriageEditor && typeof _darklabGlobal.DarklabFindingTriageEditor.verificationStatusLabel === 'function') {
+      return _darklabGlobal.DarklabFindingTriageEditor.verificationStatusLabel(normalized);
     }
     return normalized.replace(/_/g, ' ');
   }
@@ -557,8 +558,8 @@
       const menu = detailActionMenu(menuItems);
       if (menu) actions.appendChild(menu);
       container.append(actions);
-      if (typeof global.enhanceAppSelects === 'function') {
-        global.enhanceAppSelects(actions);
+      if (typeof _darklabGlobal.enhanceAppSelects === 'function') {
+        _darklabGlobal.enhanceAppSelects(actions);
       }
     }
     container.append(meta);
@@ -687,7 +688,7 @@
     return wrap;
   }
 
-  global.DarklabAtlasDetail = {
+  const DarklabAtlasDetail = {
     renderDetail,
     renderFindingDetail,
     reviewStateSelect,
@@ -696,4 +697,15 @@
     text,
     node,
   };
-})(typeof window !== 'undefined' ? window : globalThis);
+
+
+export {
+  DarklabAtlasDetail,
+  formatCount,
+  formatDate,
+  node,
+  renderDetail,
+  renderFindingDetail,
+  reviewStateSelect,
+  text,
+};

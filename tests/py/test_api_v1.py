@@ -3,11 +3,14 @@ import json
 import sqlite3
 import stat
 import sys
+import threading
+import urllib.request
 import uuid
 from dataclasses import fields
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
 import app as shell_app
@@ -16,6 +19,7 @@ import core.process as process
 from core.database import DB_PATH
 from services.scheduler.models import CADENCE_PRESETS, Schedule
 from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
+from werkzeug.serving import make_server
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -27,6 +31,28 @@ if str(CLI_SRC) not in sys.path:
 def get_client():
     shell_app.app.config["TESTING"] = True
     return shell_app.app.test_client()
+
+
+class _LiveCliServer:
+    def __init__(self) -> None:
+        self._server = make_server("127.0.0.1", 0, shell_app.app, threaded=True)
+        host, port = self._server.server_address[:2]
+        self.base_url = f"http://{host}:{port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+
+
+def _live_session_token(base_url: str) -> str:
+    with urllib.request.urlopen(f"{base_url}/session/token/generate", timeout=5) as resp:  # nosec B310 - local test server
+        payload = json.loads(resp.read().decode("utf-8"))
+    return str(payload["session_token"])
 
 
 def _token(client):
@@ -72,6 +98,36 @@ def _ai_assist_count_for_run(run_id: str) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT COUNT(*) FROM ai_run_assists WHERE run_id = ?", (run_id,)).fetchone()
     return int(row[0] if row else 0)
+
+
+def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict[str, Any]]:
+    where: list[str] = []
+    params: list[str] = []
+    if target_id:
+        where.append("target_id = ?")
+        params.append(target_id)
+    if event_type:
+        where.append("event_type = ?")
+        params.append(event_type)
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT event_type, target_type, target_id, team_id, actor_member_id, actor_role, details "
+            "FROM audit_events" + where_sql + " ORDER BY created, id",
+            params,
+        ).fetchall()
+    return [
+        {
+            "event_type": row[0],
+            "target_type": row[1],
+            "target_id": row[2],
+            "team_id": row[3],
+            "actor_member_id": row[4],
+            "actor_role": row[5],
+            "details": json.loads(row[6] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 def _create_project(client, token, *, name="API Project"):
@@ -653,6 +709,23 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
             headers=_headers(recovery_token),
             json={"code": rotated_code, "display_name": "Recovered owner"},
         )
+        recovered_members = json.loads(recovered.data)["members"]
+        recovered_owner = next(item for item in recovered_members if item["display_name"] == "Recovered owner")
+        removed = client.delete(
+            f"/api/v1/teams/{team_id}/members/{operator_member['id']}",
+            headers=_headers(owner_token),
+        )
+        archived = client.patch(
+            f"/api/v1/teams/{team_id}",
+            headers=_headers(owner_token),
+            json={"status": "archived"},
+        )
+        reactivated = client.patch(
+            f"/api/v1/teams/{team_id}",
+            headers=_headers(owner_token),
+            json={"status": "active"},
+        )
+        left = client.post(f"/api/v1/teams/{team_id}/leave", headers=_headers(recovery_token))
 
     assert created.status_code == 201
     assert payload["team"]["member"]["role"] == "owner"
@@ -676,7 +749,15 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert rotated.status_code == 200
     assert json.loads(rotated.data)["recovery_code"].startswith("trec_")
     assert recovered.status_code == 200
-    assert any(item["display_name"] == "Recovered owner" for item in json.loads(recovered.data)["members"])
+    assert recovered_owner["role"] == "owner"
+    assert removed.status_code == 200
+    assert json.loads(removed.data)["removed"] is True
+    assert archived.status_code == 200
+    assert json.loads(archived.data)["team"]["status"] == "archived"
+    assert reactivated.status_code == 200
+    assert json.loads(reactivated.data)["team"]["status"] == "active"
+    assert left.status_code == 200
+    assert json.loads(left.data)["removed"] is True
     team_actions = [
         call.kwargs["extra"]
         for call in mock_info.call_args_list
@@ -690,6 +771,10 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
         "invite_revoke",
         "recovery_rotate",
         "recovery_redeem",
+        "member_remove",
+        "update",
+        "update",
+        "leave",
     ]
     assert {event["source"] for event in team_actions} == {"api_v1"}
     assert team_actions[0]["team_id"] == team_id
@@ -698,6 +783,39 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert team_actions[3]["actor_member_id"] == payload["team"]["member"]["id"]
     assert team_actions[3]["target_member_id"] == operator_member["id"]
     assert team_actions[4]["target_invite_id"] == invite_payload["id"]
+    audit_rows = _audit_event_rows(target_id=team_id)
+    assert [row["event_type"] for row in audit_rows] == [
+        "team.create",
+        "team.invite",
+        "team.join",
+        "team.role_change",
+        "team.revoke",
+        "team.recovery_rotate",
+        "team.recovery_redeem",
+        "team.member_remove",
+        "team.archive",
+        "team.reactivate",
+        "team.leave",
+    ]
+    assert {row["target_type"] for row in audit_rows} == {"team"}
+    assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
+    assert audit_rows[2]["details"]["kind"] == "invite"
+    assert audit_rows[3]["details"] == {
+        "source": "api_v1",
+        "target_member_id": operator_member["id"],
+        "from_role": "operator",
+        "to_role": "admin",
+    }
+    assert audit_rows[6]["details"]["kind"] == "recovery"
+    assert audit_rows[6]["details"]["target_member_id"] == recovered_owner["id"]
+    assert audit_rows[7]["details"]["target_member_id"] == operator_member["id"]
+    assert audit_rows[8]["details"]["status"] == "archived"
+    assert audit_rows[9]["details"]["status"] == "active"
+    assert audit_rows[10]["details"]["target_member_id"] == recovered_owner["id"]
+    audit_rows_json = json.dumps(audit_rows)
+    assert recovery_code not in audit_rows_json
+    assert rotated_code not in audit_rows_json
+    assert invite_payload["code"] not in audit_rows_json
     rejected = [
         call.kwargs["extra"]
         for call in mock_warning.call_args_list
@@ -1810,6 +1928,7 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
         lambda requested_run_id, session_id: 4321 if requested_run_id == run_id and session_id == token else None,
     )
     monkeypatch.setattr(api_blueprint, "publish_run_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(api_blueprint, "_ensure_scanner_process_group_current", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(api_blueprint, "_signal_process_group", lambda pid: killed.update({"pid": pid}))
 
     owner_active = client.get("/api/v1/runs", headers=_headers(token))
@@ -1835,6 +1954,41 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     assert json.loads(owner_cancel.data) == {"killed": True, "id": run_id}
     assert killed["pid"] == 4321
     assert cross_cancel.status_code == 404
+
+
+def test_api_v1_cancel_skips_signal_when_scanner_pid_start_time_changed(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+    run_id = "api_cancel_reused_" + uuid.uuid4().hex[:8]
+    published = []
+
+    monkeypatch.setattr(
+        api_blueprint,
+        "active_runs_for_session",
+        lambda session_id, **_kwargs: [{"run_id": run_id, "command": "sleep 30"}] if session_id == token else [],
+    )
+    monkeypatch.setattr(
+        api_blueprint,
+        "pid_for_session",
+        lambda requested_run_id, session_id: 4321 if requested_run_id == run_id and session_id == token else None,
+    )
+    monkeypatch.setattr(api_blueprint, "publish_run_event", lambda *args, **_kwargs: published.append(args))
+    monkeypatch.setattr(
+        api_blueprint,
+        "_ensure_scanner_process_group_current",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ProcessLookupError("stale pid")),
+    )
+    signal_process_group = mock.Mock()
+    monkeypatch.setattr(api_blueprint, "_signal_process_group", signal_process_group)
+
+    resp = client.post(f"/api/v1/runs/{run_id}/cancel", headers=_headers(token))
+
+    assert resp.status_code == 200
+    assert json.loads(resp.data) == {"killed": True, "id": run_id}
+    assert published == [(run_id, "killed", {"api": True})]
+    signal_process_group.assert_not_called()
 
 
 def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
@@ -1888,6 +2042,8 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
             (project["id"], run_id),
         ).fetchone()
 
+    assert link is not None
+    assert row is not None
     assert link["project_id"] == project["id"]
     assert row[0] == "manual"
 
@@ -1999,6 +2155,19 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     assert fires["fires"][0]["status"] == "fired"
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
+    audit_rows = _audit_event_rows(target_id=schedule["id"])
+    assert [row["event_type"] for row in audit_rows] == [
+        "schedule.create",
+        "schedule.update",
+        "schedule.run_now",
+        "schedule.delete",
+    ]
+    assert {row["target_type"] for row in audit_rows} == {"schedule"}
+    assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
+    assert audit_rows[1]["details"]["changed_fields"] == ["enabled", "label"]
+    assert audit_rows[2]["details"]["run_id"] == "run_api_schedule"
+    assert audit_rows[3]["details"]["deleted_count"] == 1
+    assert "echo scheduled api" not in json.dumps(audit_rows)
 
     team_owner = _token(client)
     team_viewer = _token(client)
@@ -2039,6 +2208,13 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
     assert json.loads(team_deleted.data) == {"removed": True}
+    team_audit_rows = _audit_event_rows(target_id=team_schedule["id"])
+    assert [row["event_type"] for row in team_audit_rows] == [
+        "schedule.create",
+        "schedule.run_now",
+        "schedule.delete",
+    ]
+    assert {row["details"]["source"] for row in team_audit_rows} == {"api_v1"}
 
 
 def test_api_v1_schedules_reject_invalid_body_and_disallowed_command(monkeypatch):
@@ -2099,8 +2275,9 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     token = _token(client)
     other_token = _token(client)
     baseline_run_id = _seed_run(token, command="nmap -sV darklab.sh", output="22/tcp open ssh")
+    launched_run_id = "run_api_watcher_" + uuid.uuid4().hex[:8]
     monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
-    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_watcher")
+    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: launched_run_id)
 
     create = client.post(
         "/api/v1/watchers",
@@ -2111,6 +2288,11 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
             "label": "API Watcher",
             "timezone": "UTC",
             "options": {"suppress_removals": True, "notify_metadata_changes": False},
+            "policy": {
+                "ignore_line_patterns": ["timing jitter"],
+                "alert_after_repeated_changes": 2,
+                "alert_signal_classes": ["ports"],
+            },
         },
     )
     watcher = json.loads(create.data)["watcher"]
@@ -2120,6 +2302,8 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert watcher["baseline_run_id"] == baseline_run_id
     assert watcher["state"] == "ok"
     assert watcher["options"]["suppress_removals"] is True
+    assert watcher["policy"]["alert_after_repeated_changes"] == 2
+    assert watcher["policy"]["alert_signal_classes"] == ["ports"]
     assert watcher["schedule"]["owner_kind"] == "watcher"
     assert "session_token" not in watcher
 
@@ -2152,11 +2336,17 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     )["watcher"]
     fired = json.loads(client.post(f"/api/v1/watchers/{watcher['id']}/run-now", headers=_headers(token)).data)
     fires = json.loads(client.get(f"/api/v1/watchers/{watcher['id']}/fires", headers=_headers(token)).data)
+    _seed_run(
+        token,
+        run_id=launched_run_id,
+        command="nmap -sV darklab.sh",
+        output="22/tcp open ssh\n443/tcp open https",
+    )
     accepted = json.loads(
         client.post(
             f"/api/v1/watchers/{watcher['id']}/accept-baseline",
             headers=_headers(token),
-            json={"run_id": "run_api_watcher"},
+            json={"run_id": launched_run_id},
         ).data
     )["watcher"]
     deleted = json.loads(client.delete(f"/api/v1/watchers/{watcher['id']}", headers=_headers(token)).data)
@@ -2179,12 +2369,29 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     assert resumed["state"] == "ok"
     assert resumed["schedule"]["enabled"] is True
     assert fired["status"] == "fired"
-    assert fired["watcher"]["last_run_id"] == "run_api_watcher"
+    assert fired["watcher"]["last_run_id"] == launched_run_id
     assert fires["total"] == 1
-    assert fires["fires"][0]["run_id"] == "run_api_watcher"
-    assert accepted["baseline_run_id"] == "run_api_watcher"
+    assert fires["fires"][0]["run_id"] == launched_run_id
+    assert accepted["baseline_run_id"] == launched_run_id
     assert deleted == {"removed": True}
     assert deleted_detail.status_code == 404
+    audit_rows = _audit_event_rows(target_id=watcher["id"])
+    assert [row["event_type"] for row in audit_rows] == [
+        "watcher.create",
+        "watcher.pause",
+        "watcher.resume",
+        "watcher.run_now",
+        "watcher.accept_baseline",
+        "watcher.delete",
+    ]
+    assert {row["target_type"] for row in audit_rows} == {"watcher"}
+    assert {row["details"]["source"] for row in audit_rows} == {"api_v1"}
+    assert audit_rows[0]["details"]["baseline_run_id"] == baseline_run_id
+    assert audit_rows[1]["details"]["reason"] == "operator check"
+    assert audit_rows[3]["details"]["run_id"] == launched_run_id
+    assert audit_rows[4]["details"]["baseline_run_id"] == launched_run_id
+    assert audit_rows[5]["details"]["deleted_count"] == 1
+    assert "nmap -sV darklab.sh" not in json.dumps(audit_rows)
 
     team_owner = _token(client)
     team_viewer = _token(client)
@@ -2235,6 +2442,13 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
     assert json.loads(team_deleted.data) == {"removed": True}
+    team_audit_rows = _audit_event_rows(target_id=team_watcher["id"])
+    assert [row["event_type"] for row in team_audit_rows] == [
+        "watcher.create",
+        "watcher.run_now",
+        "watcher.delete",
+    ]
+    assert {row["details"]["source"] for row in team_audit_rows} == {"api_v1"}
 
 
 def test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline(monkeypatch):
@@ -2887,6 +3101,7 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "id": "wtr_cli",
         "state": "ok",
         "state_reason": "",
+        "project_id": "prj_cli",
         "baseline_run_id": "run_base",
         "last_run_id": "",
         "last_diff_summary": {
@@ -2896,6 +3111,11 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "label": "Hourly Watch",
         "command_text": "nmap -sV darklab.sh",
         "options": {"suppress_removals": True, "notify_metadata_changes": False},
+        "policy": {
+            "ignore_line_patterns": ["^Host is up"],
+            "alert_after_repeated_changes": 2,
+            "alert_signal_classes": ["ports"],
+        },
         "consecutive_no_change": 2,
         "consecutive_changed": 1,
         "consecutive_failures": 0,
@@ -2929,12 +3149,14 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                     "cron_expr": None,
                     "cadence_preset": "hourly",
                     "label": "Hourly Watch",
+                    "project_id": body.get("project_id"),
                     "timezone": None,
                     "enabled": True,
                     "options": {
                         "suppress_removals": bool(body.get("command")),
                         "notify_metadata_changes": False,
                     },
+                    "policy": body.get("policy"),
                 }
                 if body.get("command"):
                     expected_body["command"] = "nmap -sV darklab.sh"
@@ -2947,6 +3169,17 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                 return {"watcher": watcher}
             if path == "/watchers/wtr_cli" and method == "PATCH":
                 assert body is not None
+                if "project_id" in body:
+                    return {"watcher": {**watcher, "project_id": body["project_id"]}}
+                if "policy" in body:
+                    assert body["policy"] == {
+                        "ignore_line_patterns": ["^Host is up", "^RTT jitter"],
+                        "alert_after_repeated_changes": 3,
+                        "alert_signal_classes": ["findings", "ports"],
+                    }
+                    return {"watcher": {**watcher, "policy": body["policy"]}}
+                if body.get("resume") is True:
+                    return {"watcher": {**watcher, "state": "ok"}}
                 state = "paused" if body.get("state") == "paused" else "ok"
                 return {"watcher": {**watcher, "state": state}}
             if path == "/watchers/wtr_cli/run-now":
@@ -2960,6 +3193,9 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                 return {
                     "fires": [{
                         "created": "2026-05-20T00:00:00+00:00",
+                        "fire_kind": "changed",
+                        "state_reason": "diff_detected",
+                        "ack_state": "new",
                         "diff_kind": "textual",
                         "state_at_fire": "changed",
                         "run_id": "run_fire",
@@ -2983,7 +3219,15 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "hourly",
         "--label",
         "Hourly Watch",
+        "--project",
+        "prj_cli",
         "--suppress-removals",
+        "--ignore-line-pattern",
+        "^Host is up",
+        "--alert-after-repeated-changes",
+        "2",
+        "--alert-signal-class",
+        "ports",
         "--",
         "nmap",
         "-sV",
@@ -3014,9 +3258,15 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert "Cadence" in info_output
     assert "Health" in info_output
     assert "Recent Fires" in info_output
+    assert "prj_cli" in info_output
     assert "2026-05-20 00:00:00 UTC" in info_output
+    assert "diff_detected" in info_output
+    assert "new" in info_output
     assert "nmap -sV darklab.sh" in info_output
     assert "suppress-removals" in info_output
+    assert "ignore-line-patterns: ^Host is up" in info_output
+    assert "alert-after-repeated-changes: 2" in info_output
+    assert "alert-signal-classes: ports" in info_output
     assert cli_main.main(["watch", "pause", "wtr_cli"]) == 0
     assert "paused" in capsys.readouterr().out
     assert cli_main.main(["watch", "resume", "wtr_cli"]) == 0
@@ -3024,9 +3274,31 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert cli_main.main(["watch", "run", "wtr_cli"]) == 0
     assert "fire: fired" in capsys.readouterr().out
     assert cli_main.main(["watch", "fires", "wtr_cli", "--limit", "5"]) == 0
-    assert "textual" in capsys.readouterr().out
+    fires_output = capsys.readouterr().out
+    assert "textual" in fires_output
+    assert "changed" in fires_output
+    assert "diff_detected" in fires_output
+    assert "new" in fires_output
     assert cli_main.main(["watch", "accept", "wtr_cli", "--run-id", "run_fire"]) == 0
     assert "run_fire" in capsys.readouterr().out
+    assert cli_main.main(["watch", "set-project", "wtr_cli", "--clear"]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
+    assert cli_main.main([
+        "watch",
+        "set-policy",
+        "wtr_cli",
+        "--ignore-line-pattern",
+        "^Host is up",
+        "--ignore-line-pattern",
+        "^RTT jitter",
+        "--alert-after-repeated-changes",
+        "3",
+        "--alert-signal-class",
+        "findings",
+        "--alert-signal-class",
+        "ports",
+    ]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "delete", "wtr_cli", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
@@ -3043,6 +3315,9 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "/watchers/wtr_cli/run-now",
         "/watchers/wtr_cli/fires",
         "/watchers/wtr_cli/accept-baseline",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli",
         "/watchers/wtr_cli",
     ]
 
@@ -3138,6 +3413,7 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "WatcherFirePage",
         "WatcherOptions",
         "WatcherPage",
+        "WatcherPolicy",
         "WatcherResponse",
         "WatcherRunNowResponse",
         "WatcherUpdateRequest",
@@ -3738,6 +4014,31 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                     "has_more": False,
                 }
             if path == "/history":
+                if params and params.get("run_kind"):
+                    assert params == {
+                        "project_id": None,
+                        "since": None,
+                        "until": None,
+                        "limit": 50,
+                        "offset": 0,
+                        "run_kind": "external",
+                    }
+                    return {
+                        "runs": [{
+                            "id": "run_external",
+                            "status": "succeeded",
+                            "exit_code": 0,
+                            "finished": "2026-05-19T00:00:03+00:00",
+                            "command": "nmap darklab.sh",
+                        }],
+                    }
+                assert params == {
+                    "project_id": None,
+                    "since": None,
+                    "until": None,
+                    "limit": 50,
+                    "offset": 0,
+                }
                 return {
                     "runs": [
                         {
@@ -3878,6 +4179,8 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     ndjson_lines = capsys.readouterr().out.splitlines()
     assert json.loads(ndjson_lines[0])["id"] == "run_old"
     assert json.loads(ndjson_lines[1])["id"] == "run_cli"
+    assert cli_main.main(["history", "--type", "runs_external"]) == 0
+    assert "run_external" in capsys.readouterr().out
     assert cli_main.main(["grep", "needle", "--context", "1"]) == 0
     assert "run_cli:2: needle here" in capsys.readouterr().out
     assert cli_main.main(["output", "run_cli"]) == 0
@@ -3921,6 +4224,42 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "fnd_cli" in finding_output
     assert cli_main.main(["project", "missing"]) == 1
     assert "not_found: missing" in capsys.readouterr().err
+
+
+def test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    shell_app.app.config["TESTING"] = True
+    server = _LiveCliServer()
+    server.start()
+    try:
+        token = _live_session_token(server.base_url)
+        run_id = _seed_run(
+            token,
+            run_id=f"live_cli_{uuid.uuid4().hex[:12]}",
+            command="echo live-cli",
+            output="live cli ok",
+        )
+
+        monkeypatch.setenv("DARKLAB_API_URL", server.base_url)
+        monkeypatch.setenv("DARKLAB_TOKEN", token)
+        monkeypatch.delenv("DARKLAB_TEAM", raising=False)
+
+        assert cli_main.main(["whoami", "--format", "json"]) == 0
+        whoami = json.loads(capsys.readouterr().out)
+        assert whoami["token_created"]
+        assert whoami["last_seen_at"]
+
+        assert cli_main.main(["history", "--type", "external", "--format", "json"]) == 0
+        history = json.loads(capsys.readouterr().out)
+        assert any(run["id"] == run_id and run["command"] == "echo live-cli" for run in history["runs"])
+
+        assert cli_main.main(["output", run_id]) == 0
+        assert capsys.readouterr().out == "live cli ok\n"
+
+        assert cli_main.main(["show", f"missing_{run_id}"]) == 1
+        assert "not_found: Run not found." in capsys.readouterr().err
+    finally:
+        server.stop()
 
 
 def test_darklab_cli_tail_text_does_not_double_space_output(capsys):

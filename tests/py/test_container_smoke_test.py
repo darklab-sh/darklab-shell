@@ -548,7 +548,7 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     requirements_key = _smoke_image_cache_key(tmp_path, dockerfile)
     assert requirements_key != original_key
 
-    dockerfile.write_text("FROM python:3.14.5-slim\n", encoding="utf-8")
+    dockerfile.write_text("FROM python:3.14.6-slim\n", encoding="utf-8")
     dockerfile_key = _smoke_image_cache_key(tmp_path, dockerfile)
     assert dockerfile_key != requirements_key
 

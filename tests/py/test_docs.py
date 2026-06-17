@@ -31,26 +31,24 @@ Part 4 — ARCHITECTURE.md HTTP route inventory:
   grouped by feature rather than app registration order, so this check enforces
   coverage only, not ordering.
 
-Part 5 — temporary release draft files:
-  Version branches can carry paired draft artifacts while the release is being
-  prepared, but official docs must not link to those transient files.
-
-Part 6 — operator configuration docs:
+Part 5 — operator configuration docs:
   Operator-facing defaults from app/config.py's load_config() defaults must
   be represented in the checked-in app/conf/config.yaml reference and the
   CONFIGURATION.md "## Application Settings" table.
 
-Part 7 — team-mode scope predicates:
+Part 6 — team-mode scope predicates:
   Team-visible run queries must use the shared owner-scope predicates instead
   of directly combining a caller's session token with a team id.
 
-Part 8 — related-doc navigation:
+Part 7 — related-doc navigation:
   Every "## Related Docs" section must link to every tracked project Markdown
-  file except release drafts and itself. README.md's "## Documentation Map"
-  follows the same inventory.
+  file except itself. README.md's "## Documentation Map" follows the same
+  inventory.
 """
 
 import ast
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -66,10 +64,12 @@ _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
 _CONFIGURATION = _REPO_ROOT / "CONFIGURATION.md"
 _DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
+_FEATURES = _REPO_ROOT / "FEATURES.md"
 _README = _REPO_ROOT / "README.md"
+_THEME = _REPO_ROOT / "THEME.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
-_RELEASE_DRAFTS_DIR = _REPO_ROOT / "docs" / "release-drafts"
+_ASSET_MANIFEST = _REPO_ROOT / "app" / "static" / "build" / "manifest.json"
 
 _DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
     r"\b(?:runs|r)\.session_id\s*=\s*\?.{0,240}\b(?:runs|r)\.team_id\s*=\s*\?"
@@ -412,7 +412,7 @@ def _tracked_markdown_docs() -> list[str]:
     return [
         path for path in _git_tracked_files()
         if path.endswith(".md")
-        and not path.startswith("docs/release-drafts/")
+        and not _is_release_draft_path(path)
     ]
 
 
@@ -839,8 +839,6 @@ class TestDocumentedCombinedTotals:
 # parent directory below).
 _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
     "app/blueprints/__init__.py",     # empty package marker
-    "docs/release-drafts/v2.1-merge-request.md",   # temporary branch artifact
-    "docs/release-drafts/v2.1-release-notes.md",   # temporary branch artifact
 })
 
 # Directories whose individual files are intentionally collapsed into a
@@ -849,10 +847,42 @@ _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
 # the per-file leaf check for everything beneath it.
 _PROJECT_STRUCTURE_OPAQUE_DIRS = frozenset({
     "app/conf/themes",                # theme YAMLs — covered by themes/ entry
+    "app/static/build",               # generated hashed bundles/static assets
     "app/static/fonts",               # vendored binary font files
     "assets",                         # README demo videos
     "tests/js/e2e/fixtures",          # binary screenshot fixtures
 })
+
+_PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE = re.compile(
+    r"^app/static/build/([a-z0-9-]+)\.([0-9a-f]{12}|<hash>)\.(css|js)$"
+)
+_PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE = re.compile(
+    r"^app/static/build/[a-z0-9-]+\.[0-9a-f]{12}\.(css|js)$"
+)
+_TEMPLATE_STATIC_URL_RE = re.compile(r"['\"](/(?:static|vendor)/[^'\"]+)['\"]")
+
+
+def _asset_source_path(source: str) -> Path:
+    if source.startswith("/static/"):
+        return _REPO_ROOT / "app" / "static" / source.removeprefix("/static/")
+    if source.startswith("/vendor/fonts/"):
+        return _REPO_ROOT / "app" / "static" / source.removeprefix("/vendor/")
+    if source.startswith("/vendor/"):
+        return _REPO_ROOT / "app" / "static" / "js" / "vendor" / source.removeprefix("/vendor/")
+    raise AssertionError(f"Unsupported asset source in manifest: {source}")
+
+
+def _template_static_url_violations() -> list[str]:
+    violations: list[str] = []
+    templates_root = _REPO_ROOT / "app" / "templates"
+    for template in sorted(templates_root.rglob("*.html")):
+        rel = template.relative_to(_REPO_ROOT).as_posix()
+        for line_no, line in enumerate(template.read_text(encoding="utf-8").splitlines(), start=1):
+            if "static_asset(" in line or "asset_bundle(" in line:
+                continue
+            for match in _TEMPLATE_STATIC_URL_RE.finditer(line):
+                violations.append(f"{rel}:{line_no}: {match.group(1)}")
+    return violations
 
 
 def _git_tracked_files() -> list[str]:
@@ -950,13 +980,25 @@ def _is_under_opaque_dir(path: str) -> bool:
     return any(path == d or path.startswith(d + "/") for d in _PROJECT_STRUCTURE_OPAQUE_DIRS)
 
 
+def _is_release_draft_path(path: str) -> bool:
+    return path.startswith("docs/release-drafts/")
+
+
+def _canonical_project_structure_path(path: str) -> str:
+    match = _PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE.match(path)
+    if match:
+        name, _hash_or_placeholder, extension = match.groups()
+        return f"app/static/build/{name}.<hash>.{extension}"
+    return path
+
+
 def _display_target_for_project_structure(path: str) -> str | None:
-    if path in _PROJECT_STRUCTURE_EXCLUSIONS:
+    if path in _PROJECT_STRUCTURE_EXCLUSIONS or _is_release_draft_path(path):
         return None
     for opaque_dir in sorted(_PROJECT_STRUCTURE_OPAQUE_DIRS):
         if path == opaque_dir or path.startswith(opaque_dir + "/"):
             return opaque_dir
-    return path
+    return _canonical_project_structure_path(path)
 
 
 def _expected_project_structure_order(tracked: list[str]) -> list[str]:
@@ -1010,14 +1052,92 @@ class TestProjectStructureCoverage:
     """The README's project-structure tree must list every git-tracked file
     so contributors land on a complete navigation map."""
 
+    def test_asset_manifest_source_hashes_match_current_sources(self):
+        manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
+        stale = []
+        for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
+            source_hashes = bundle.get("source_hashes") or {}
+            for source, expected_hash in sorted(source_hashes.items()):
+                path = _asset_source_path(source)
+                actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                if actual_hash != expected_hash:
+                    stale.append(f"{bundle_name}: {source}")
+        assert not stale, (
+            "Asset manifest source hashes are stale. Run assets:sync:\n"
+            + "\n".join(f"  {item}" for item in stale)
+        )
+
+    def test_asset_manifest_esm_bundles_do_not_include_lazy_sources(self):
+        manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
+        config = json.loads((_REPO_ROOT / "assets.config.json").read_text(encoding="utf-8"))
+        lazy_sources = set(config.get("lazy") or [])
+        eager_lazy_sources = []
+        for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
+            if bundle.get("type") != "esm":
+                continue
+            for source in sorted(bundle.get("sources") or []):
+                if source in lazy_sources:
+                    eager_lazy_sources.append(f"{bundle_name}: {source}")
+        assert not eager_lazy_sources, (
+            "ESM bundles include assets configured as lazy. Run assets:sync "
+            "after removing the eager import, or remove the source from "
+            "assets.config.json lazy:\n"
+            + "\n".join(f"  {item}" for item in eager_lazy_sources)
+        )
+
+    def test_asset_build_output_does_not_depend_on_cwd(self, tmp_path):
+        if shutil.which("node") is None:
+            pytest.skip("node is not available")
+        if not (_REPO_ROOT / "node_modules" / "esbuild").exists():
+            pytest.skip("node dependencies are not installed")
+
+        root_out = tmp_path / "from-root"
+        scripts_out = tmp_path / "from-scripts"
+        script = _REPO_ROOT / "scripts" / "build_assets.mjs"
+        subprocess.run(
+            ["node", str(script), "--out-dir", str(root_out)],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["node", str(script), "--out-dir", str(scripts_out)],
+            cwd=str(_REPO_ROOT / "scripts"),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        root_files = sorted(path.relative_to(root_out) for path in root_out.rglob("*") if path.is_file())
+        scripts_files = sorted(path.relative_to(scripts_out) for path in scripts_out.rglob("*") if path.is_file())
+        changed = [
+            str(path)
+            for path in root_files
+            if path in scripts_files
+            and (root_out / path).read_bytes() != (scripts_out / path).read_bytes()
+        ]
+        assert root_files == scripts_files and not changed, (
+            "Asset build output depends on the current working directory:\n"
+            + "\n".join(f"  changed: {path}" for path in changed)
+            + "\n"
+            + "\n".join(f"  root-only: {path}" for path in sorted(set(root_files) - set(scripts_files)))
+            + "\n"
+            + "\n".join(f"  scripts-only: {path}" for path in sorted(set(scripts_files) - set(root_files)))
+        )
+
+    def test_asset_build_logs_esm_bundle_failure_context(self):
+        script = (_REPO_ROOT / "scripts" / "build_assets.mjs").read_text(encoding="utf-8")
+        assert "[assets] ESM bundle failed" in script
+        for field in ("bundle:", "entry,", "out_dir:", "check_only:", "message:"):
+            assert field in script
+
     def test_no_files_missing_from_structure(self):
         listed = set(_parse_project_structure_tree(_README.read_text()))
         tracked = _git_tracked_files()
         missing = sorted(
             path for path in tracked
-            if path not in listed
-            and path not in _PROJECT_STRUCTURE_EXCLUSIONS
-            and not _is_under_opaque_dir(path)
+            if (target := _display_target_for_project_structure(path)) is not None
+            and target not in listed
         )
         assert not missing, (
             "Files missing from README.md '## Project Structure' tree:\n"
@@ -1041,17 +1161,37 @@ class TestProjectStructureCoverage:
         README tree must correspond to a real git-tracked file or directory.
         Subtree-internal paths beneath an opaque dir are exempt because the
         README intentionally only names the parent."""
+        template_static_url_violations = _template_static_url_violations()
+        assert not template_static_url_violations, (
+            "Templates must resolve /static/ and /vendor/ URLs through "
+            "static_asset() or asset_bundle() so immutable cache headers always "
+            "have content-hashed or versioned URLs:\n"
+            + "\n".join(f"  {violation}" for violation in template_static_url_violations)
+        )
         listed = _parse_project_structure_tree(_README.read_text())
         listed_set = set(listed)
+        literal_hashed_build_assets = sorted(
+            p for p in listed_set
+            if _PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE.match(p)
+        )
+        assert not literal_hashed_build_assets, (
+            "README.md '## Project Structure' should use <hash> placeholders "
+            "for generated build assets instead of commit-specific filenames:\n"
+            + "\n".join(f"  {p}" for p in literal_hashed_build_assets)
+        )
         tracked = set(_git_tracked_files())
         untracked = set(_git_untracked_files())
         # Allow any directory that contains tracked files, including every
         # intermediate ancestor (so '.gitlab' resolves via
         # '.gitlab/merge_request_templates/Default.md').
-        valid = tracked | untracked | _all_ancestor_dirs(tracked | untracked) | {"."}
+        valid_files = {
+            _canonical_project_structure_path(p)
+            for p in tracked | untracked
+        }
+        valid = valid_files | _all_ancestor_dirs(valid_files) | {"."}
         unknown = sorted(
             p for p in listed_set
-            if p not in valid
+            if _canonical_project_structure_path(p) not in valid
             and not _is_under_opaque_dir(p)
             # Some entries describe files that don't ship in git but are
             # created at runtime (data/history.db) or as user-created
@@ -1069,7 +1209,10 @@ class TestProjectStructureCoverage:
         )
 
     def test_structure_order_matches_git_file_listing(self):
-        listed = _parse_project_structure_tree(_README.read_text())
+        listed = [
+            _canonical_project_structure_path(path)
+            for path in _parse_project_structure_tree(_README.read_text())
+        ]
         tracked = _git_tracked_files()
         expected = _expected_project_structure_order(tracked)
         expected_set = set(expected)
@@ -1113,60 +1256,7 @@ class TestArchitectureRouteInventory:
         )
 
 
-# ── Part 5: release-draft docs ───────────────────────────────────────────────
-
-class TestReleaseDraftDocs:
-    """Release branches can keep temporary MR/release-note drafts in-repo
-    without making them part of the official documentation map."""
-
-    def test_temporary_branch_artifacts_stay_out_of_official_docs(self):
-        if not _RELEASE_DRAFTS_DIR.exists():
-            pytest.skip("No release draft directory in this checkout")
-
-        official_docs = [
-            _README,
-            _CONTRIBUTING,
-            _DOC_STANDARDS,
-            _TESTS_README,
-            _ARCHITECTURE,
-            _CONFIGURATION,
-            _REPO_ROOT / "FEATURES.md",
-            _REPO_ROOT / "THEME.md",
-        ]
-        offenders = [
-            _markdown_path_for(path)
-            for path in official_docs
-            if "docs/release-drafts/" in path.read_text()
-        ]
-        assert not offenders, "Official docs must not reference temporary release draft files: " + ", ".join(offenders)
-
-    def test_release_drafts_are_paired_by_version(self):
-        if not _RELEASE_DRAFTS_DIR.exists():
-            pytest.skip("No release draft directory in this checkout")
-
-        drafts = sorted(path.name for path in _RELEASE_DRAFTS_DIR.glob("v*.md"))
-        versions: dict[str, set[str]] = {}
-        malformed = []
-        for filename in drafts:
-            match = re.match(r"^(v\d+\.\d+)-(merge-request|release-notes)\.md$", filename)
-            if not match:
-                malformed.append(filename)
-                continue
-            versions.setdefault(match.group(1), set()).add(match.group(2))
-
-        missing = [
-            f"  {version}: expected merge-request and release-notes drafts, found {sorted(kinds)}"
-            for version, kinds in sorted(versions.items())
-            if kinds != {"merge-request", "release-notes"}
-        ]
-        assert not malformed and not missing, (
-            "Release draft files must be paired as "
-            "vX.Y-merge-request.md and vX.Y-release-notes.md:\n"
-            + "\n".join([*(f"  malformed: {name}" for name in malformed), *missing])
-        )
-
-
-# ── Part 6: operator configuration docs ──────────────────────────────────────
+# ── Part 5: operator configuration docs ──────────────────────────────────────
 
 class TestOperatorConfigurationDocs:
     """Operator-facing config defaults must stay represented in both the
@@ -1191,7 +1281,7 @@ class TestOperatorConfigurationDocs:
         )
 
 
-# ── Part 7: team-mode scope predicates ───────────────────────────────────────
+# ── Part 6: team-mode scope predicates ───────────────────────────────────────
 
 class TestTeamModeScopePredicates:
     def test_direct_team_run_predicates_use_owner_scope_helpers(self):
@@ -1214,7 +1304,7 @@ class TestTeamModeScopePredicates:
         )
 
 
-# ── Part 8: related-doc navigation ───────────────────────────────────────────
+# ── Part 7: related-doc navigation ───────────────────────────────────────────
 
 class TestRelatedDocsNavigation:
     def test_related_docs_sections_list_project_markdown_files(self):
@@ -1242,7 +1332,7 @@ class TestRelatedDocsNavigation:
                 if not missing and not extra:
                     issues.append(
                         f"{path} Related Docs order drift. Keep links in git ls-files order, "
-                        "excluding release drafts and the current file."
+                        "excluding the current file."
                     )
         assert not issues, "\n\n".join(issues)
 
@@ -1252,5 +1342,5 @@ class TestRelatedDocsNavigation:
         links = _documentation_map_links(_README)
         assert links == expected, (
             "README.md '## Documentation Map' drift. Keep links in git ls-files "
-            "order, excluding release drafts and README.md itself."
+            "order, excluding README.md itself."
         )

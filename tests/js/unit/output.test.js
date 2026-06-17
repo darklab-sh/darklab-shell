@@ -1,6 +1,15 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } = {}) {
+function loadOutputFns({
+  appConfig = {},
+  extraGlobals = {},
+  AnsiUpCtor = null,
+  publishPromptGlobal = true,
+} = {}) {
+  if (!Object.prototype.hasOwnProperty.call(extraGlobals, 'getCommandOutcomeSummariesPreference')) {
+    delete window.getCommandOutcomeSummariesPreference
+  }
+
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -12,7 +21,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
   }
 
   return fromDomScripts(
-    ['app/static/js/core/run_output_model.js', 'app/static/js/core/output_core.js', 'app/static/js/output.js'],
+    ['app/static/js/core/run_output_model.js', 'app/static/js/core/output_core.js', 'app/static/js/output_bridge.js', 'app/static/js/output.js'],
     {
       document,
       AnsiUp: AnsiUpCtor || FakeAnsiUp,
@@ -43,7 +52,37 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     _showOutputEntityMenu,
     _getTabs: () => tabs,
   }`,
-    'setTabs(tabs); setActiveTabId(activeTabId);',
+    `setTabs(tabs); setActiveTabId(activeTabId);
+     window.APP_CONFIG = APP_CONFIG;
+     window.getOutput = getOutput;
+     window.getTabs = getTabs;
+     window.getTab = getTab;
+     if (${publishPromptGlobal ? 'true' : 'false'}) window.shellPromptWrap = shellPromptWrap;
+     else delete window.shellPromptWrap;
+     if (typeof _workspaceCwd === 'function') window._workspaceCwd = _workspaceCwd;
+     if (typeof workspaceDisplayPath === 'function') window.workspaceDisplayPath = workspaceDisplayPath;
+     if (__darklabExtractGlobals.bindPressable) {
+       window.bindPressable = __darklabExtractGlobals.bindPressable;
+       globalThis.bindPressable = __darklabExtractGlobals.bindPressable;
+     } else if (typeof bindPressable === 'function') {
+       window.bindPressable = bindPressable;
+     }
+     if (typeof activateFaqCommandChip === 'function') window.activateFaqCommandChip = activateFaqCommandChip;
+     if (typeof copyTextToClipboard === 'function') window.copyTextToClipboard = copyTextToClipboard;
+     if (typeof showToast === 'function') window.showToast = showToast;
+     if (typeof refreshSearchDiscoverabilityUi === 'function') window.refreshSearchDiscoverabilityUi = refreshSearchDiscoverabilityUi;
+     if (typeof scheduleSearchDiscoverabilityRefresh === 'function') {
+       window.scheduleSearchDiscoverabilityRefresh = scheduleSearchDiscoverabilityRefresh;
+     }
+     if (typeof runSearch === 'function') window.runSearch = runSearch;
+     if (typeof isSearchBarOpen === 'function') window.isSearchBarOpen = isSearchBarOpen;
+     if (typeof updateOutputFollowButton === 'function') window.updateOutputFollowButton = updateOutputFollowButton;
+     if (typeof mountShellPrompt === 'function') window.mountShellPrompt = mountShellPrompt;
+     if (typeof getCommandOutcomeSummariesPreference === 'function') {
+       window.getCommandOutcomeSummariesPreference = getCommandOutcomeSummariesPreference;
+     } else {
+       window.getCommandOutcomeSummariesPreference = () => 'on';
+     }`,
   )
 }
 
@@ -51,6 +90,7 @@ describe('appendLine', () => {
   beforeEach(() => {
     delete document._darklabHighVolumeOutputBound
     delete document._darklabOutputEntityTokensBound
+    delete window.shellPromptWrap
     document.body.className = ''
     document.body.innerHTML = `
       <div id="out" class="output">
@@ -105,6 +145,19 @@ describe('appendLine', () => {
     expect(blankPrompt.querySelector('.line-content')?.firstElementChild?.classList.contains('prompt-prefix')).toBe(true)
     expect(_getTabs()[0].rawLines[0].cls).toBe('prompt-echo')
     expect(_getTabs()[0].rawLines[0].text).toContain('nmap darklab.sh')
+  })
+
+  it('keeps the live prompt after blank prompt echoes without the legacy prompt global', () => {
+    const { appendLine } = loadOutputFns({ publishPromptGlobal: false })
+    const out = document.getElementById('out')
+    const prompt = document.getElementById('shell-prompt-wrap')
+
+    expect(window.shellPromptWrap).toBeUndefined()
+    appendLine('', 'prompt-echo', 'tab-1')
+    appendLine('', 'prompt-echo', 'tab-1')
+
+    expect(out.lastElementChild).toBe(prompt)
+    expect([...out.children].slice(0, -1).every(node => node.classList.contains('prompt-echo'))).toBe(true)
   })
 
   it('round trips wire event input through fromWireLineEvent before rendering', () => {
@@ -230,7 +283,7 @@ describe('appendLine', () => {
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {
     const { appendLine } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/output_core.js', 'app/static/js/output.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/output_core.js', 'app/static/js/output_bridge.js', 'app/static/js/output.js'],
       {
         document,
         activeTabId: 'tab-1',
@@ -242,7 +295,10 @@ describe('appendLine', () => {
       `{
       appendLine,
     }`,
-      'setTabs(tabs); setActiveTabId(activeTabId);',
+      `setTabs(tabs); setActiveTabId(activeTabId);
+       window.APP_CONFIG = APP_CONFIG;
+       window.getOutput = getOutput;
+       window.shellPromptWrap = shellPromptWrap;`,
     )
 
     appendLine('plain <b>text</b>', '', 'tab-1')
@@ -312,6 +368,36 @@ describe('appendLine', () => {
     expect(tableHeader.textContent).toContain('id')
     expect(tableHeader.textContent).toContain('kind')
     expect(activateFaqCommandChip).not.toHaveBeenCalled()
+  })
+
+  it('renders ANSI-styled structured builtin rows through ansi_to_html', () => {
+    class TableAnsiUp {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(text) {
+        return String(text || '')
+          .replace(/\x1b\[4m([^\x1b]+)\x1b\[0m/g, '<u>$1</u>')
+          .replace(/\x1b\[36m([^\x1b]+)\x1b\[0m/g, '<span class="cyan">$1</span>')
+      }
+    }
+    const { appendLine } = loadOutputFns({
+      AnsiUpCtor: TableAnsiUp,
+      appConfig: { max_output_lines: 20 },
+    })
+
+    appendLine('  \x1b[4mrun\x1b[0m  command', 'builtin-table-header', 'tab-1')
+    appendLine('  \x1b[36mrun-abcd\x1b[0m  ping darklab.sh', 'builtin-table-row', 'tab-1')
+
+    const header = document.querySelector('.line.builtin-table-header .line-content')
+    const row = document.querySelector('.line.builtin-table-row .line-content')
+    expect(header?.textContent).toContain('run  command')
+    expect(header?.textContent).not.toContain('[4m')
+    expect(header?.querySelector('u')?.textContent).toBe('run')
+    expect(row?.textContent).toContain('run-abcd  ping darklab.sh')
+    expect(row?.textContent).not.toContain('[36m')
+    expect(row?.querySelector('.cyan')?.textContent).toBe('run-abcd')
   })
 
   it('trims old lines and keeps rawLines in sync', () => {

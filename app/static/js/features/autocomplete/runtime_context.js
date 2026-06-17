@@ -1,11 +1,117 @@
 // Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup.
 
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import {
+  APP_STATE_API as importedAppStateApi,
+  getActiveTabId as importedGetActiveTabId,
+  getTab as importedGetTab,
+} from '../../core/state.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from '../../runtime_bridge.js';
+import { getOutput as importedGetOutput } from '../../tabs.js';
+import {
+  _cliConfigEntries as importedCliConfigEntries,
+  _cliThemeDescription as importedCliThemeDescription,
+  _cliThemeEntries as importedCliThemeEntries,
+  _cliThemeSlug as importedCliThemeSlug,
+} from '../terminal/local_commands.js';
+import {
+  getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
+  getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
+  getWorkspaceDirectoryEntries as importedGetWorkspaceDirectoryEntries,
+} from '../workspace/workspace_autocomplete_cache.js';
+import {
+  _readAutocompleteProjects as importedReadAutocompleteProjects,
+  _readAutocompleteSchedules as importedReadAutocompleteSchedules,
+  _readAutocompleteWatchers as importedReadAutocompleteWatchers,
+} from './suggestions.js';
+import {
+  _runtimeWorkflowContext as importedRuntimeWorkflowContext,
+  hasWorkflowHandler as importedHasWorkflowHandler,
+} from '../workflows/workflows_bridge.js';
+
+const RUNTIME_CONTEXT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _runtimeGlobalFunction(name) {
+  const fn = RUNTIME_CONTEXT_GLOBAL && RUNTIME_CONTEXT_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _runtimeApiFetch(url, options) {
+  const api = (
+    typeof importedRuntimeApiFetch === 'function'
+    && typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+  )
+    ? importedRuntimeApiFetch
+    : _runtimeGlobalFunction('apiFetch');
+  if (typeof api === 'function') return options === undefined ? api(url) : api(url, options);
+  return Promise.reject(new Error('apiFetch unavailable'));
+}
+
+function _runtimeLogClientError(context, err, details = {}) {
+  const logger = (
+    typeof importedRuntimeLogClientError === 'function'
+    && typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+  )
+    ? importedRuntimeLogClientError
+    : _runtimeGlobalFunction('logClientError');
+  if (typeof logger === 'function') logger(context, err, details);
+}
+
+function _runtimeState() {
+  const importedApi = typeof importedAppStateApi !== 'undefined' ? importedAppStateApi : null;
+  const api = importedApi || RUNTIME_CONTEXT_GLOBAL.APP_STATE_API || null;
+  if (api && typeof api.getState === 'function') return api.getState();
+  return RUNTIME_CONTEXT_GLOBAL.APP_STATE || {};
+}
+
+function _runtimeWorkspaceCacheApi() {
+  return {
+    getDirectoryEntries: (typeof importedGetWorkspaceDirectoryEntries !== 'undefined' && importedGetWorkspaceDirectoryEntries)
+      || _runtimeGlobalFunction('getWorkspaceDirectoryEntries'),
+    getDirectoryHints: (typeof importedGetWorkspaceAutocompleteDirectoryHints !== 'undefined' && importedGetWorkspaceAutocompleteDirectoryHints)
+      || _runtimeGlobalFunction('getWorkspaceAutocompleteDirectoryHints'),
+    getFileHints: (typeof importedGetWorkspaceAutocompleteFileHints !== 'undefined' && importedGetWorkspaceAutocompleteFileHints)
+      || _runtimeGlobalFunction('getWorkspaceAutocompleteFileHints'),
+  };
+}
+
 function _runtimeHint(value, description = '', insertValue = null, label = null, hintOnly = null) {
   const item = { value, description };
   if (insertValue != null) item.insertValue = insertValue;
   if (label != null) item.label = label;
   if (hintOnly != null) item.hintOnly = !!hintOnly;
   return item;
+}
+
+function _runtimeAppConfig() {
+  const readConfig = typeof importedGetAppConfig !== 'undefined' ? importedGetAppConfig : null;
+  if (typeof readConfig === 'function') return readConfig();
+  return RUNTIME_CONTEXT_GLOBAL.APP_CONFIG || {};
+}
+
+function _runtimeActiveTabId() {
+  const readActiveTabId = _runtimeGlobalFunction('getActiveTabId')
+    || (typeof importedGetActiveTabId !== 'undefined' && importedGetActiveTabId);
+  if (typeof readActiveTabId === 'function') return readActiveTabId();
+  return RUNTIME_CONTEXT_GLOBAL.activeTabId || null;
+}
+
+function _runtimeGetTab(tabId) {
+  const readTab = _runtimeGlobalFunction('getTab')
+    || (typeof importedGetTab !== 'undefined' && importedGetTab);
+  return typeof readTab === 'function' ? readTab(tabId) : null;
+}
+
+function _runtimeGetOutput(tabId) {
+  const readOutput = _runtimeGlobalFunction('getOutput')
+    || (typeof importedGetOutput !== 'undefined' && importedGetOutput);
+  return typeof readOutput === 'function' ? readOutput(tabId) : null;
 }
 
 function _runtimePlaceholderHint(value, description = '') {
@@ -43,11 +149,12 @@ function _runtimeContextSpec({
 }
 
 function isWorkspaceFeatureEnabled() {
-  return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
+  return _runtimeAppConfig().workspace_enabled === true;
 }
 
 function isTourFeatureEnabled() {
-  return !(typeof APP_CONFIG !== 'undefined' && APP_CONFIG) || APP_CONFIG.tour_enabled === true;
+  const config = _runtimeAppConfig();
+  return !config || config.tour_enabled === true;
 }
 
 function _runtimeSpecEnabledForFeatures(root, spec) {
@@ -137,8 +244,9 @@ function _runtimeMergeContextSpec(baseSpec = {}, overlaySpec = {}) {
 }
 
 function _runtimeActiveBuiltinRoots(baseRegistry = {}) {
+  const state = _runtimeState();
   const roots = new Set(
-    Array.isArray(acBuiltinCommandRoots) ? acBuiltinCommandRoots.map(root => String(root || '')) : [],
+    Array.isArray(state.acBuiltinCommandRoots) ? state.acBuiltinCommandRoots.map(root => String(root || '')) : [],
   );
   Object.entries(baseRegistry || {}).forEach(([root, spec]) => {
     if (spec && typeof spec === 'object' && String(spec.description || '').startsWith('built-in:')) {
@@ -154,9 +262,9 @@ function _runtimeBuiltinDescription(root, baseRegistry = {}) {
 
 function _runtimeAllowedCommandRoots() {
   const roots = new Set();
-  const source = allowedCommandsFaqData && Array.isArray(allowedCommandsFaqData.commands)
-    ? allowedCommandsFaqData.commands
-    : [];
+  const getFaqData = _runtimeGlobalFunction('getAllowedCommandsFaqData');
+  const faqData = getFaqData ? getFaqData() : null;
+  const source = faqData && Array.isArray(faqData.commands) ? faqData.commands : [];
   source.forEach((command) => {
     const root = String(command || '').trim().split(/\s+/, 1)[0].toLowerCase();
     if (root) roots.add(root);
@@ -208,9 +316,11 @@ function _runtimeWorkspaceFilePathHints() {
 }
 
 function _runtimeWorkspaceCwd() {
-  if (typeof _workspaceCwd === 'function') return _workspaceCwd(activeTabId);
-  if (typeof getTab === 'function') {
-    const tab = getTab(activeTabId);
+  const tabId = _runtimeActiveTabId();
+  const readWorkspaceCwd = _runtimeGlobalFunction('_workspaceCwd');
+  if (readWorkspaceCwd) return readWorkspaceCwd(tabId);
+  if (tabId) {
+    const tab = _runtimeGetTab(tabId);
     const parts = String(tab && tab.workspaceCwd || '').split('/').filter(Boolean);
     return parts.join('/');
   }
@@ -235,8 +345,9 @@ function _runtimeWorkspaceDirectHintFromPath(item, cwd = '', kind = 'file') {
 }
 
 function _runtimeNormalizeWorkspaceCommandPath(path = '', cwd = '') {
-  if (typeof normalizeWorkspaceCommandPath === 'function') {
-    return String(normalizeWorkspaceCommandPath(path, cwd) || '').split('/').filter(Boolean).join('/');
+  const normalize = _runtimeGlobalFunction('normalizeWorkspaceCommandPath');
+  if (normalize) {
+    return String(normalize(path, cwd) || '').split('/').filter(Boolean).join('/');
   }
   const raw = String(path ?? '').trim();
   const baseParts = raw.startsWith('/') ? [] : String(cwd || '').split('/').filter(Boolean);
@@ -272,9 +383,10 @@ function _runtimeWorkspaceCompletionParts(token = '') {
 }
 
 function _runtimeWorkspaceAllHints(kind = 'file') {
+  const workspaceCache = _runtimeWorkspaceCacheApi();
   return kind === 'directory'
-    ? (typeof getWorkspaceAutocompleteDirectoryHints === 'function' ? getWorkspaceAutocompleteDirectoryHints() : [])
-    : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
+    ? (typeof workspaceCache.getDirectoryHints === 'function' ? workspaceCache.getDirectoryHints() : [])
+    : (typeof workspaceCache.getFileHints === 'function' ? workspaceCache.getFileHints() : []);
 }
 
 function _runtimeWorkspaceHintDescription(path = '', kind = 'file') {
@@ -301,8 +413,9 @@ function _runtimeWorkspaceEntryValue(parts, name, wantedKind) {
 
 function _runtimeWorkspaceScopedHints(kind = 'file', token = '') {
   const parts = _runtimeWorkspaceCompletionParts(token);
-  if (!parts || typeof getWorkspaceDirectoryEntries !== 'function') return [];
-  const entries = getWorkspaceDirectoryEntries(parts.resolvedDirectory) || {};
+  const getDirectoryEntries = _runtimeWorkspaceCacheApi().getDirectoryEntries;
+  if (!parts || typeof getDirectoryEntries !== 'function') return [];
+  const entries = getDirectoryEntries(parts.resolvedDirectory) || {};
   const hints = [];
   _runtimeWorkspaceCompletionKinds(kind).forEach((wantedKind) => {
     const source = wantedKind === 'directory' ? entries.folders : entries.files;
@@ -321,12 +434,13 @@ function _runtimeWorkspaceScopedHints(kind = 'file', token = '') {
 
 function _runtimeWorkspaceEntryHints(kind = 'file') {
   const cwd = _runtimeWorkspaceCwd();
-  if (typeof getWorkspaceDirectoryEntries === 'function') {
-    const entries = getWorkspaceDirectoryEntries(cwd) || {};
+  const workspaceCache = _runtimeWorkspaceCacheApi();
+  if (typeof workspaceCache.getDirectoryEntries === 'function') {
+    const entries = workspaceCache.getDirectoryEntries(cwd) || {};
     const source = kind === 'directory' ? entries.folders : entries.files;
     const allHints = kind === 'directory'
-      ? (typeof getWorkspaceAutocompleteDirectoryHints === 'function' ? getWorkspaceAutocompleteDirectoryHints() : [])
-      : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
+      ? (typeof workspaceCache.getDirectoryHints === 'function' ? workspaceCache.getDirectoryHints() : [])
+      : (typeof workspaceCache.getFileHints === 'function' ? workspaceCache.getFileHints() : []);
     return (Array.isArray(source) ? source : []).map((entry) => {
       const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
       const name = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
@@ -338,13 +452,13 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
     }).filter(Boolean);
   }
   if (kind === 'directory') {
-    if (typeof getWorkspaceAutocompleteDirectoryHints !== 'function') return [];
-    return getWorkspaceAutocompleteDirectoryHints()
+    if (typeof workspaceCache.getDirectoryHints !== 'function') return [];
+    return workspaceCache.getDirectoryHints()
       .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd, 'directory'))
       .filter(Boolean);
   }
-  if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
-  return getWorkspaceAutocompleteFileHints()
+  if (typeof workspaceCache.getFileHints !== 'function') return [];
+  return workspaceCache.getFileHints()
     .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
     .filter(Boolean);
 }
@@ -443,7 +557,19 @@ function _runtimeWorkspaceNavigableDirectoryHints() {
 }
 
 function _runtimeThemeContext() {
-  const themeHints = _cliThemeEntries().map(entry => _runtimeHint(_cliThemeSlug(entry), _cliThemeDescription(entry)));
+  const themeEntries = _runtimeGlobalFunction('_cliThemeEntries')
+    || (typeof importedCliThemeEntries === 'function' ? importedCliThemeEntries : null);
+  const themeSlug = _runtimeGlobalFunction('_cliThemeSlug')
+    || (typeof importedCliThemeSlug === 'function' ? importedCliThemeSlug : null);
+  const themeDescription = _runtimeGlobalFunction('_cliThemeDescription')
+    || (typeof importedCliThemeDescription === 'function' ? importedCliThemeDescription : null);
+  const themeHints = (
+    typeof themeEntries === 'function'
+    && typeof themeSlug === 'function'
+    && typeof themeDescription === 'function'
+  )
+    ? themeEntries().map(entry => _runtimeHint(themeSlug(entry), themeDescription(entry)))
+    : [];
   const argHints = {
     list: [],
     current: [],
@@ -459,7 +585,9 @@ function _runtimeThemeContext() {
 }
 
 function _runtimeConfigContext() {
-  const entries = _cliConfigEntries();
+  const configEntries = _runtimeGlobalFunction('_cliConfigEntries')
+    || (typeof importedCliConfigEntries === 'function' ? importedCliConfigEntries : null);
+  const entries = typeof configEntries === 'function' ? configEntries() : [];
   const optionHints = entries.map(entry => _runtimeHint(entry.key, entry.description));
   const argHints = {
     list: [],
@@ -483,7 +611,7 @@ function _runtimeConfigContext() {
 }
 
 function _runtimeVariableHints(description = 'Session variable') {
-  const variables = Array.isArray(sessionVariables) ? sessionVariables : [];
+  const variables = Array.isArray(_runtimeState().sessionVariables) ? _runtimeState().sessionVariables : [];
   return variables.map(variable => {
     const name = String(variable && variable.name || '').trim();
     const value = String(variable && variable.value || '').trim();
@@ -529,7 +657,7 @@ function _runtimeVarContext() {
 }
 
 function _runtimeWordlistContext() {
-  const wordlists = (typeof acWordlists !== 'undefined' && Array.isArray(acWordlists)) ? acWordlists : [];
+  const wordlists = Array.isArray(_runtimeState().acWordlists) ? _runtimeState().acWordlists : [];
   const categoryHints = [];
   const seenCategories = new Set();
   wordlists.forEach((item) => {
@@ -552,7 +680,9 @@ function _runtimeWordlistContext() {
 
 function _runtimeProjectRefHints(statuses = []) {
   const wanted = new Set((Array.isArray(statuses) ? statuses : []).map(status => String(status || '').toLowerCase()));
-  const projects = typeof _readAutocompleteProjects === 'function' ? _readAutocompleteProjects() : [];
+  const readProjects = (typeof importedReadAutocompleteProjects !== 'undefined' && importedReadAutocompleteProjects)
+    || _runtimeGlobalFunction('_readAutocompleteProjects');
+  const projects = readProjects ? readProjects() : [];
   return projects
     .filter((project) => {
       const status = String(project && project.status || '').toLowerCase();
@@ -592,7 +722,9 @@ function _runtimeProjectContext(baseSpec = {}) {
 }
 
 function _runtimeScheduleHints() {
-  const schedules = typeof _readAutocompleteSchedules === 'function' ? _readAutocompleteSchedules() : [];
+  const readSchedules = (typeof importedReadAutocompleteSchedules !== 'undefined' && importedReadAutocompleteSchedules)
+    || _runtimeGlobalFunction('_readAutocompleteSchedules');
+  const schedules = readSchedules ? readSchedules() : [];
   return schedules
     .map((schedule) => {
       const value = String(schedule && schedule.id || '').trim();
@@ -621,7 +753,9 @@ function _runtimeScheduleContext(baseSpec = {}) {
 }
 
 function _runtimeWatcherHints() {
-  const watchers = typeof _readAutocompleteWatchers === 'function' ? _readAutocompleteWatchers() : [];
+  const readWatchers = (typeof importedReadAutocompleteWatchers !== 'undefined' && importedReadAutocompleteWatchers)
+    || _runtimeGlobalFunction('_readAutocompleteWatchers');
+  const watchers = readWatchers ? readWatchers() : [];
   return watchers
     .map((watcher) => {
       const value = String(watcher && watcher.id || '').trim();
@@ -663,8 +797,11 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   if (baseRegistry.wordlist) {
     context.wordlist = _runtimeMergeContextSpec(baseRegistry.wordlist, _runtimeWordlistContext());
   }
-  if (baseRegistry.workflow) {
-    context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, _runtimeWorkflowContext());
+  const workflowContext = (typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('_runtimeWorkflowContext'))
+    ? importedRuntimeWorkflowContext
+    : _runtimeGlobalFunction('_runtimeWorkflowContext');
+  if (baseRegistry.workflow && workflowContext) {
+    context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, workflowContext());
   }
   if (baseRegistry.project) {
     context.project = _runtimeProjectContext(baseRegistry.project);
@@ -768,7 +905,7 @@ function getRuntimeAutocompleteItems(ctx, buildItem, filterItems) {
   const braced = afterDollar.startsWith('{');
   const query = braced ? afterDollar.slice(1) : afterDollar;
   if (!/^\{?[A-Za-z_][A-Za-z0-9_]*$/.test(afterDollar) && afterDollar !== '{') return [];
-  const variables = Array.isArray(sessionVariables) ? sessionVariables : [];
+  const variables = Array.isArray(_runtimeState().sessionVariables) ? _runtimeState().sessionVariables : [];
   const items = variables.map(variable => {
     const name = String(variable && variable.name || '').trim();
     if (!name) return null;
@@ -786,16 +923,17 @@ function getRuntimeAutocompleteItems(ctx, buildItem, filterItems) {
 }
 
 async function loadSessionVariables() {
+  const state = _runtimeState();
   try {
-    const resp = await apiFetch('/session/variables');
+    const resp = await _runtimeApiFetch('/session/variables');
     if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    sessionVariables = Array.isArray(data.variables) ? data.variables : [];
+    state.sessionVariables = Array.isArray(data.variables) ? data.variables : [];
   } catch (err) {
-    logClientError('failed to load /session/variables', err);
-    sessionVariables = [];
+    _runtimeLogClientError('failed to load /session/variables', err);
+    state.sessionVariables = [];
   }
-  return sessionVariables;
+  return state.sessionVariables;
 }
 
 // ── Output-context grep suggestions ──
@@ -864,10 +1002,9 @@ function extractGrepOutputTokens(text, maxItems = GREP_OUTPUT_TOKEN_LIMIT) {
 // Read the active tab's rendered output text, excluding the echoed command
 // lines so we suggest from results, not from the user's own typed commands.
 function _activeTabOutputText() {
-  if (typeof getOutput !== 'function') return '';
-  const id = typeof activeTabId !== 'undefined' ? activeTabId : null;
+  const id = _runtimeActiveTabId();
   if (!id) return '';
-  const out = getOutput(id);
+  const out = _runtimeGetOutput(id);
   if (!out || typeof out.querySelectorAll !== 'function') return '';
   return Array.from(out.querySelectorAll('.line'))
     .filter((line) => line instanceof Element && !line.classList.contains('prompt-echo'))
@@ -891,3 +1028,18 @@ function getGrepOutputSuggestions(ctx, buildItem, filterItems, maxItems = GREP_O
   }));
   return filterItems(items, ctx.currentToken);
 }
+
+export {
+  _runtimeContextSpec,
+  _runtimeHint,
+  _runtimePlaceholderHint,
+  extractGrepOutputTokens,
+  getGrepOutputSuggestions,
+  getRuntimeAutocompleteContext,
+  getRuntimeAutocompleteItems,
+  getWorkspaceAutocompleteFlagFileHints,
+  getWorkspaceAutocompletePathHints,
+  isTourFeatureEnabled,
+  isWorkspaceFeatureEnabled,
+  loadSessionVariables,
+};

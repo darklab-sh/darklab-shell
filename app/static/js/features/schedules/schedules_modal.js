@@ -1,4 +1,27 @@
 // Browser schedules modal and handoff actions.
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import {
+  loadScheduleAutocompleteHints as importedLoadScheduleAutocompleteHints,
+} from '../autocomplete/suggestions.js';
+import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_details.js';
+import {
+  fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
+} from '../run-comparison/history_compare_renderer.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { refocusComposerAfterAction as importedRefocusComposerAfterAction, syncModalOverlayState as importedSyncModalOverlayState } from '../../ui/ui_helpers.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import {
+  hasHistoryPanelHandler as importedHasHistoryPanelHandler,
+  refreshHistoryPanel as importedRefreshHistoryPanel,
+} from '../history/history_panel_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from '../../runtime_bridge.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
 
 const SCHEDULES_DEFAULT_CRON = '0 * * * *';
 const SCHEDULES_FIRES_LIMIT = 20;
@@ -24,6 +47,8 @@ const SCHEDULES_COMMON_TIMEZONES = [
   'Australia/Sydney',
 ];
 
+const SCHEDULES_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
 let _schedulesState = {
   schedules: [],
   selectedId: '',
@@ -42,6 +67,80 @@ let _schedulesState = {
   formDirty: false,
   discardPromptOpen: false,
 };
+
+function _scheduleAppConfig() {
+  if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
+  return SCHEDULES_GLOBAL.APP_CONFIG || null;
+}
+
+function _scheduleApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || (typeof SCHEDULES_GLOBAL.apiFetch === 'function' ? SCHEDULES_GLOBAL.apiFetch : null);
+  if (!fetcher) return Promise.reject(new Error('apiFetch is not available'));
+  return fetcher(...args);
+}
+
+function _scheduleRefocusComposerAfterAction(options) {
+  const refocus = typeof importedRefocusComposerAfterAction === 'function'
+    ? importedRefocusComposerAfterAction
+    : (typeof SCHEDULES_GLOBAL.refocusComposerAfterAction === 'function' ? SCHEDULES_GLOBAL.refocusComposerAfterAction : null);
+  if (refocus) refocus(options);
+}
+
+function _scheduleSyncModalOverlayState() {
+  const sync = typeof importedSyncModalOverlayState === 'function'
+    ? importedSyncModalOverlayState
+    : null;
+  if (sync) sync();
+}
+
+function _scheduleShowConfirm(options) {
+  const confirm = typeof SCHEDULES_GLOBAL.showConfirm === 'function' ? SCHEDULES_GLOBAL.showConfirm : null;
+  return confirm ? confirm(options) : Promise.resolve(null);
+}
+
+function _scheduleBindDismissible(overlay, options) {
+  const bind = typeof importedBindDismissible === 'function'
+    ? importedBindDismissible
+    : (typeof SCHEDULES_GLOBAL.bindDismissible === 'function' ? SCHEDULES_GLOBAL.bindDismissible : null);
+  return bind ? bind(overlay, options) : null;
+}
+
+function _scheduleEmitUiEvent(name, detail) {
+  const emit = typeof importedEmitUiEvent === 'function'
+    ? importedEmitUiEvent
+    : (typeof SCHEDULES_GLOBAL.emitUiEvent === 'function' ? SCHEDULES_GLOBAL.emitUiEvent : null);
+  if (emit) emit(name, detail);
+}
+
+function _scheduleOpenHistoryRunDetails(runId) {
+  const open = typeof importedOpenHistoryRunDetails === 'function'
+    ? importedOpenHistoryRunDetails
+    : (typeof SCHEDULES_GLOBAL.openHistoryRunDetails === 'function' ? SCHEDULES_GLOBAL.openHistoryRunDetails : null);
+  if (open) open({ id: runId || '' });
+}
+
+function _scheduleFetchAndRenderHistoryComparison(...args) {
+  const compare = typeof importedFetchAndRenderHistoryComparison === 'function'
+    ? importedFetchAndRenderHistoryComparison
+    : (typeof SCHEDULES_GLOBAL.fetchAndRenderHistoryComparison === 'function'
+        ? SCHEDULES_GLOBAL.fetchAndRenderHistoryComparison
+        : null);
+  if (!compare) return Promise.reject(new Error('Run comparison is not available.'));
+  return compare(...args);
+}
+
+function _scheduleLoadAutocompleteHints() {
+  const load = typeof importedLoadScheduleAutocompleteHints === 'function'
+    ? importedLoadScheduleAutocompleteHints
+    : (typeof SCHEDULES_GLOBAL.loadScheduleAutocompleteHints === 'function' ? SCHEDULES_GLOBAL.loadScheduleAutocompleteHints : null);
+  return load ? load() : Promise.resolve();
+}
 
 function _scheduleEls() {
   return {
@@ -65,11 +164,7 @@ function _schedulePresetFor(schedule) {
 }
 
 function _scheduleDefaultTimezone() {
-  const configured = String(
-    typeof APP_CONFIG !== 'undefined' && APP_CONFIG
-      ? APP_CONFIG.scheduler_default_timezone || ''
-      : '',
-  ).trim();
+  const configured = String(_scheduleAppConfig()?.scheduler_default_timezone || '').trim();
   return configured || 'UTC';
 }
 
@@ -91,7 +186,7 @@ function _selectedSchedule() {
 }
 
 async function _scheduleJson(url, options = {}) {
-  const resp = await apiFetch(url, options);
+  const resp = await _scheduleApiFetch(url, options);
   let data = {};
   try {
     data = await resp.json();
@@ -107,11 +202,39 @@ async function _scheduleJson(url, options = {}) {
 }
 
 function _scheduleToast(message, tone = 'success') {
-  if (typeof showToast === 'function') showToast(message, tone);
+  const toast = typeof importedShowToast === 'function'
+    ? importedShowToast
+    : (typeof SCHEDULES_GLOBAL.showToast === 'function' ? SCHEDULES_GLOBAL.showToast : null);
+  if (toast) toast(message, tone);
 }
 
 function _scheduleClientError(context, err) {
-  if (typeof logClientError === 'function') logClientError(context, err);
+  const log = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedRuntimeLogClientError === 'function'
+      ? importedRuntimeLogClientError
+      : null
+  ) || (typeof SCHEDULES_GLOBAL.logClientError === 'function' ? SCHEDULES_GLOBAL.logClientError : null);
+  if (log) log(context, err);
+}
+
+function _scheduleCloseMajorOverlays() {
+  const close = (typeof importedCloseMajorOverlays === 'function' && importedCloseMajorOverlays)
+    || SCHEDULES_GLOBAL._closeMajorOverlays;
+  if (typeof close === 'function') close();
+}
+
+function _scheduleRefreshHistoryPanel() {
+  if (
+    typeof importedHasHistoryPanelHandler === 'function'
+    && importedHasHistoryPanelHandler('refreshHistoryPanel')
+    && typeof importedRefreshHistoryPanel === 'function'
+  ) {
+    return importedRefreshHistoryPanel();
+  }
+  if (typeof SCHEDULES_GLOBAL.refreshHistoryPanel === 'function') return SCHEDULES_GLOBAL.refreshHistoryPanel();
+  return null;
 }
 
 function _scheduleDateLabel(value) {
@@ -193,8 +316,11 @@ function _scheduleFireStatusTone(status) {
 
 function _bindSchedulePressable(el, onActivate, options = {}) {
   if (!el || typeof onActivate !== 'function') return;
-  if (typeof bindPressable === 'function') {
-    bindPressable(el, { refocusComposer: false, ...options, onActivate });
+  const bind = typeof importedBindPressable === 'function'
+    ? importedBindPressable
+    : (typeof SCHEDULES_GLOBAL.bindPressable === 'function' ? SCHEDULES_GLOBAL.bindPressable : null);
+  if (bind) {
+    bind(el, { refocusComposer: false, ...options, onActivate });
     return;
   }
   el.addEventListener('click', onActivate);
@@ -233,9 +359,7 @@ function _changeScheduleFiresPage(direction) {
 async function _openScheduleRun(runId) {
   const closed = await closeSchedulesModal({ refocus: false });
   if (!closed) return;
-  if (typeof openHistoryRunDetails === 'function') {
-    openHistoryRunDetails({ id: runId || '' });
-  }
+  _scheduleOpenHistoryRunDetails(runId);
 }
 
 async function _compareScheduleFireToPrevious(fire = {}, previousFire = {}) {
@@ -245,19 +369,10 @@ async function _compareScheduleFireToPrevious(fire = {}, previousFire = {}) {
     _scheduleToast('Choose two completed schedule fires to compare.', 'error');
     return;
   }
-  const compareFn = typeof fetchAndRenderHistoryComparison === 'function'
-    ? fetchAndRenderHistoryComparison
-    : typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
-      ? window.fetchAndRenderHistoryComparison
-      : null;
-  if (!compareFn) {
-    _scheduleToast('Run comparison is not available.', 'error');
-    return;
-  }
   const closed = await closeSchedulesModal({ refocus: false });
   if (!closed) return;
   try {
-    await compareFn(previousRunId, runId);
+    await _scheduleFetchAndRenderHistoryComparison(previousRunId, runId);
   } catch (err) {
     _scheduleClientError('failed to compare schedule fire to previous fire', err);
     _scheduleToast(err?.message || 'Could not open run comparison', 'error');
@@ -270,7 +385,7 @@ function _setSchedulesOpen(open) {
   overlay.classList.toggle('u-hidden', !open);
   overlay.classList.toggle('open', !!open);
   overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
-  window.syncModalOverlayState?.();
+  _scheduleSyncModalOverlayState();
   if (open) _focusSchedulesModal();
 }
 
@@ -343,10 +458,9 @@ function _scheduleHasUnsavedChanges() {
 async function _confirmScheduleDiscardChanges() {
   if (!_scheduleHasUnsavedChanges()) return true;
   if (_schedulesState.discardPromptOpen) return false;
-  if (typeof showConfirm !== 'function') return true;
   _schedulesState.discardPromptOpen = true;
   try {
-    const choice = await showConfirm({
+    const choice = await _scheduleShowConfirm({
       body: 'Discard unsaved schedule changes?',
       tone: 'warning',
       actions: [
@@ -354,7 +468,7 @@ async function _confirmScheduleDiscardChanges() {
         { id: 'discard', label: 'Discard changes', role: 'destructive' },
       ],
     });
-    return choice === 'discard';
+    return choice === null ? true : choice === 'discard';
   } finally {
     _schedulesState.discardPromptOpen = false;
   }
@@ -366,9 +480,7 @@ async function closeSchedulesModal({ refocus = true, force = false } = {}) {
   _schedulesState.cleanDraft = null;
   _schedulesState.formDirty = false;
   _setSchedulesOpen(false);
-  if (refocus && typeof refocusComposerAfterAction === 'function') {
-    refocusComposerAfterAction({ preventScroll: true, defer: true });
-  }
+  if (refocus) _scheduleRefocusComposerAfterAction({ preventScroll: true, defer: true });
   return true;
 }
 
@@ -918,9 +1030,7 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
   try {
     const data = await _scheduleJson('/schedules', { cache: 'no-store' });
     _schedulesState.schedules = Array.isArray(data.schedules) ? data.schedules : [];
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:schedules-rendered', { items: _schedulesState.schedules.slice() });
-    }
+    _scheduleEmitUiEvent('app:schedules-rendered', { items: _schedulesState.schedules.slice() });
     _schedulesState.missingScheduleId = '';
     const requestedId = String(selectId || '');
     const currentId = String(selectId || _schedulesState.selectedId || '');
@@ -966,7 +1076,7 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
 async function openSchedulesModal(options = {}) {
   const { overlay } = _scheduleEls();
   if (!overlay) return;
-  if (typeof _closeMajorOverlays === 'function') _closeMajorOverlays();
+  _scheduleCloseMajorOverlays();
   _setSchedulesOpen(true);
   _schedulesState.mode = options.command ? 'new' : 'view';
   _schedulesState.selectedId = String(options.scheduleId || '');
@@ -1002,8 +1112,8 @@ async function _saveScheduleForm(event) {
     _scheduleToast(isNew ? 'Schedule created' : 'Schedule saved');
     _schedulesState.mode = 'view';
     await refreshSchedulesModal({ selectId: schedule.id || selected?.id || '' });
-    if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
-    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+    _scheduleLoadAutocompleteHints().catch(() => {});
+    _scheduleRefreshHistoryPanel();
   } catch (err) {
     _scheduleClientError(isNew ? 'failed to create schedule' : 'failed to update schedule', err);
     _scheduleToast(err?.message || 'Could not save schedule', 'error');
@@ -1016,25 +1126,23 @@ async function _saveScheduleForm(event) {
 async function _deleteSelectedSchedule(schedule) {
   if (!schedule) return;
   let confirmed = true;
-  if (typeof showConfirm === 'function') {
-    const choice = await showConfirm({
-      body: `Delete schedule "${_scheduleTitle(schedule)}"?`,
-      tone: 'danger',
-      actions: [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'delete', label: 'Delete', role: 'destructive' },
-      ],
-    });
-    confirmed = choice === 'delete';
-  }
+  const choice = await _scheduleShowConfirm({
+    body: `Delete schedule "${_scheduleTitle(schedule)}"?`,
+    tone: 'danger',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'delete', label: 'Delete', role: 'destructive' },
+    ],
+  });
+  if (choice !== null) confirmed = choice === 'delete';
   if (!confirmed) return;
   try {
     await _scheduleJson(`/schedules/${encodeURIComponent(schedule.id)}`, { method: 'DELETE' });
     _scheduleToast('Schedule deleted');
     _schedulesState.selectedId = '';
     await refreshSchedulesModal();
-    if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
-    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+    _scheduleLoadAutocompleteHints().catch(() => {});
+    _scheduleRefreshHistoryPanel();
   } catch (err) {
     _scheduleClientError('failed to delete schedule', err);
     _scheduleToast(err?.message || 'Could not delete schedule', 'error');
@@ -1051,8 +1159,8 @@ async function _patchSelectedSchedule(schedule, updates, successMessage) {
     });
     _scheduleToast(successMessage);
     await refreshSchedulesModal({ selectId: response.schedule?.id || schedule.id });
-    if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
-    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+    _scheduleLoadAutocompleteHints().catch(() => {});
+    _scheduleRefreshHistoryPanel();
   } catch (err) {
     _scheduleClientError('failed to update schedule', err);
     _scheduleToast(err?.message || 'Could not update schedule', 'error');
@@ -1065,7 +1173,7 @@ async function _runSelectedSchedule(schedule) {
     const data = await _scheduleJson(`/schedules/${encodeURIComponent(schedule.id)}/run-now`, { method: 'POST' });
     _scheduleToast(data.status === 'fired' ? 'Schedule fired' : 'Schedule skipped');
     await refreshSchedulesModal({ selectId: schedule.id });
-    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+    _scheduleRefreshHistoryPanel();
   } catch (err) {
     _scheduleClientError('failed to run schedule now', err);
     _scheduleToast(err?.message || 'Could not fire schedule', 'error');
@@ -1101,6 +1209,8 @@ async function _newSchedule(command = '') {
 function _bindSchedulesModal() {
   const { overlay, newBtn, refreshBtn } = _scheduleEls();
   if (!overlay) return;
+  if (overlay.dataset.schedulesModalBound === '1') return;
+  overlay.dataset.schedulesModalBound = '1';
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
       closeSchedulesModal();
@@ -1134,18 +1244,20 @@ function _bindSchedulesModal() {
   refreshBtn?.addEventListener('click', async () => {
     if (await _confirmScheduleDiscardChanges()) refreshSchedulesModal({ selectId: _schedulesState.selectedId });
   });
-  if (typeof bindDismissible === 'function') {
-    bindDismissible(overlay, {
-      level: 'modal',
-      isOpen: isSchedulesOverlayOpen,
-      onClose: closeSchedulesModal,
-      closeButtons: overlay.querySelectorAll('.schedules-close, .sheet-grab'),
-    });
-  }
+  _scheduleBindDismissible(overlay, {
+    level: 'modal',
+    isOpen: isSchedulesOverlayOpen,
+    onClose: closeSchedulesModal,
+    closeButtons: overlay.querySelectorAll('.schedules-close, .sheet-grab'),
+  });
 }
 
-document.addEventListener('DOMContentLoaded', _bindSchedulesModal);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _bindSchedulesModal);
+else _bindSchedulesModal();
 
-window.openSchedulesModal = openSchedulesModal;
-window.closeSchedulesModal = closeSchedulesModal;
-window.isSchedulesOverlayOpen = isSchedulesOverlayOpen;
+
+export {
+  openSchedulesModal,
+  closeSchedulesModal,
+  isSchedulesOverlayOpen,
+};

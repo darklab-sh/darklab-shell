@@ -1,0 +1,29 @@
+templates:
+  - id: standard
+    label: Standard engagement report
+    description: Core engagement handoff with scope, methodology, findings, runs, artifacts, and appendix.
+    sections:
+      - type: cover
+        title: Cover
+        enabled: true
+      - type: executive_summary
+        title: Executive summary
+        enabled: true
+      - type: scope_targets
+        title: Scope and targets
+        enabled: true
+      - type: methodology
+        title: Methodology
+        enabled: true
+      - type: findings_by_severity
+        title: Findings by severity
+        enabled: true
+      - type: included_runs
+        title: Included runs
+        enabled: true
+      - type: artifacts
+        title: Artifacts
+        enabled: true
+      - type: appendix
+        title: Appendix
+        enabled: true

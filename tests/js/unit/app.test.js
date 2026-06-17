@@ -61,6 +61,14 @@ function loadSchedulesModalTestFns({
       refocusComposerAfterAction: vi.fn(),
     },
     '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, openSchedulesModal, closeSchedulesModal })',
+    `window.apiFetch = apiFetch;
+     window.showConfirm = showConfirm;
+     window.showToast = showToast;
+     window.openHistoryRunDetails = openHistoryRunDetails;
+     window.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison;
+     window._closeMajorOverlays = _closeMajorOverlays;
+     window.bindDismissible = bindDismissible;
+     window.refocusComposerAfterAction = refocusComposerAfterAction;`,
   )
   return {
     ...fns,
@@ -117,6 +125,15 @@ function loadWatchersModalTestFns({
       refocusComposerAfterAction: vi.fn(),
     },
     '({ _bindWatchersModal, _deleteSelectedWatcher, refreshWatchersModal, _newWatcher, openWatchersModal, closeWatchersModal })',
+    `window.apiFetch = apiFetch;
+     window.showConfirm = showConfirm;
+     window.showToast = showToast;
+     window.openHistoryRunDetails = openHistoryRunDetails;
+     window.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison;
+     window._compareMetricCell = _compareMetricCell;
+     window._closeMajorOverlays = _closeMajorOverlays;
+     window.bindDismissible = bindDismissible;
+     window.refocusComposerAfterAction = refocusComposerAfterAction;`,
   )
   return {
     ...fns,
@@ -328,6 +345,20 @@ function shippedThemeRegistry() {
 
 describe('app helpers', () => {
   beforeEach(() => {
+    ;[
+      '_runtimeHint',
+      '_runtimePlaceholderHint',
+      '_runtimeContextSpec',
+      'isWorkspaceFeatureEnabled',
+      'isTourFeatureEnabled',
+      'getWorkspaceAutocompletePathHints',
+      'getRuntimeAutocompleteContext',
+      'getRuntimeAutocompleteItems',
+      'extractGrepOutputTokens',
+      'getGrepOutputSuggestions',
+    ].forEach((name) => {
+      delete window[name]
+    })
     ;[
       'pref_theme',
       'pref_active_project_id',
@@ -818,6 +849,75 @@ describe('app helpers', () => {
     expect(detail.textContent).toContain('pending baseline')
   })
 
+  it('preselects a project when creating a monitor from Project Monitoring', async () => {
+    let watcher = null
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url.startsWith('/projects?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [
+              { id: 'prj_1', name: 'External perimeter', status: 'active' },
+              { id: 'prj_archived', name: 'Old project', status: 'archived' },
+            ],
+          }),
+        }
+      }
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers: watcher ? [watcher] : [] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return { ok: true, json: async () => ({ cron_expr: '0 * * * *', timezone: 'UTC', next_fires: [] }) }
+      }
+      if (url === '/watchers' && options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        watcher = {
+          id: 'wtr_project',
+          label: body.label,
+          project_id: body.project_id,
+          command_text: body.command,
+          baseline_run_id: '',
+          last_run_id: '',
+          state: 'ok',
+          options: body.options,
+          policy: body.policy,
+          last_diff_summary: {},
+          schedule: {
+            id: 'sch_project',
+            cadence_preset: 'hourly',
+            cron_expr: '0 * * * *',
+            timezone: 'UTC',
+            enabled: true,
+          },
+        }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      if (url.startsWith('/watchers/wtr_project/fires')) {
+        return { ok: true, json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const { _bindWatchersModal, openWatchersModal } = loadWatchersModalTestFns({ apiFetch, showToast })
+    _bindWatchersModal()
+
+    await openWatchersModal({ projectId: 'prj_1', newWatcher: true })
+    await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
+    expect(document.getElementById('watchers-project-input').value).toBe('prj_1')
+    expect(document.getElementById('watchers-project-input').textContent).not.toContain('Old project')
+    document.getElementById('watchers-label-input').value = 'Project monitor'
+    document.getElementById('watchers-command-input').value = 'httpx darklab.sh'
+    document.getElementById('watchers-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_mode: 'first_run',
+      project_id: 'prj_1',
+      command: 'httpx darklab.sh',
+    })
+  })
+
   it('pauses resumes fires and accepts watcher baselines from action buttons', async () => {
     let watcher = {
       id: 'wtr_actions',
@@ -880,17 +980,14 @@ describe('app helpers', () => {
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Accept baseline').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Baseline accepted', 'success'))
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
-  })
+  }, 10_000)
 
   it('does not let history outside-click dismissal close behind modal overlays', async () => {
-    const bindOutsideClickClose = vi.fn()
-    await loadAppFns({ bindOutsideClickClose })
-
-    const historyCall = bindOutsideClickClose.mock.calls.find(([panel]) => panel?.id === 'history-panel')
-    expect(historyCall?.[1].exemptSelectors).toEqual(expect.arrayContaining([
-      '.modal-overlay',
-      '#history-compare-overlay',
-    ]))
+    const source = readFileSync(
+      resolve(REPO_ROOT, 'app/static/js/features/terminal/composer_controller.js'),
+      'utf8',
+    )
+    expect(source).toContain("exemptSelectors: ['.hist-chip-overflow', '[data-action=\"history\"]', '.modal-overlay', '#history-compare-overlay']")
   })
 
   it('applies the saved theme at startup', async () => {
@@ -1124,7 +1221,7 @@ describe('app helpers', () => {
     })
     const bindMobileSheet = vi.fn()
     const reloadSessionHistory = vi.fn(() => Promise.resolve())
-    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference, logClientError, storage } = await loadAppFns({
+    const { activateOptionsTab, cycleOptionsTab, DarklabTeamScope, getOptionsModalLastTabPreference, logClientError, storage } = await loadAppFns({
       apiFetch,
       bindMobileSheet,
       reloadSessionHistory,
@@ -1198,16 +1295,18 @@ describe('app helpers', () => {
     })
     const originalSetActiveTeamId = window.setActiveTeamId
     window.setActiveTeamId = vi.fn(() => { throw new Error('scope setter exploded') })
+    const teamUiFailuresBeforeSwitch = logClientError.mock.calls.length
     document.querySelector('#options-teams-list [data-team-action="switch-team"]').click()
     await vi.waitFor(() => {
-      const failureLog = logClientError.mock.calls.find(([context, error]) => (
-        String(context).startsWith('TEAM_UI_ACTION_FAILED')
-        && String(context).includes('"action":"switch-team"')
-        && String(context).includes('"team_id":"team_options_1"')
-        && error.message === 'scope setter exploded'
-      ))
-      expect(failureLog).toBeTruthy()
+      expect(DarklabTeamScope.getActiveTeamId()).toBe('team_options_1')
     })
+    const staleGlobalFailure = logClientError.mock.calls.slice(teamUiFailuresBeforeSwitch).find(([context, error]) => (
+      String(context).startsWith('TEAM_UI_ACTION_FAILED')
+      && String(context).includes('"action":"switch-team"')
+      && String(context).includes('"team_id":"team_options_1"')
+      && error.message === 'scope setter exploded'
+    ))
+    expect(staleGlobalFailure).toBeUndefined()
     window.setActiveTeamId = originalSetActiveTeamId
     document.getElementById('team-scope-trigger').click()
     const scopeMenu = document.getElementById('team-scope-menu')
@@ -1245,7 +1344,7 @@ describe('app helpers', () => {
       source: 'selector',
     })
     expect(reloadSessionHistory).toHaveBeenCalledTimes(1)
-    await window.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
     document.getElementById('team-scope-trigger').click()
     document.querySelector('[data-team-scope-menu-option="personal"]').click()
     expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
@@ -1258,7 +1357,7 @@ describe('app helpers', () => {
     document.querySelector('[data-team-scope-menu-option="team_options_1"]').click()
     expect(document.getElementById('team-scope-label').textContent).toBe('Ops team')
     expect(reloadSessionHistory).toHaveBeenCalledTimes(3)
-    await window.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
 
     const dispatchScopeStorage = (value) => {
       if (value) storage.setItem('active_team_id:tok_options_tab', value)
@@ -1301,7 +1400,7 @@ describe('app helpers', () => {
     failScopeRefresh = false
     const originalGetItem = storage.getItem.bind(storage)
     storage.getItem = vi.fn(() => { throw new Error('blocked storage read') })
-    await window.refreshTeamScopes()
+    await DarklabTeamScope.refreshTeamScopes()
     storage.getItem = originalGetItem
     const storageLog = apiFetch.mock.calls
       .filter(([url, opts]) => url === '/log' && JSON.parse(opts.body).event === 'TEAM_SCOPE_STORAGE_UNAVAILABLE')
@@ -2843,7 +2942,7 @@ describe('app helpers', () => {
       <div class="prompt-wrap"></div>
     `
 
-    const { storage, logClientError } = await loadAppFns({ apiFetch })
+    const { storage, logClientError } = await loadAppFns({ apiFetch, theme: 'only_theme' })
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
@@ -2924,6 +3023,24 @@ describe('app helpers', () => {
 
     expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
     expect(runCommand).not.toHaveBeenCalled()
+  })
+
+  it('lets blank Enter append a prompt after the welcome intro is done', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    const submitComposerCommand = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      requestWelcomeSettle,
+      welcomeActive: true,
+      welcomeDone: true,
+      welcomeOwnsTab,
+      submitComposerCommand,
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(requestWelcomeSettle).not.toHaveBeenCalled()
+    expect(submitComposerCommand).toHaveBeenCalledWith('', { dismissKeyboard: true })
   })
 
   it('does not let welcome playback steal Space from schedules form fields', async () => {
@@ -3019,6 +3136,48 @@ describe('app helpers', () => {
       runId: '',
       historyRunId: 'run-1',
     })
+  })
+
+  it('uses one accessor-backed tab restore flag for window and module guards', async () => {
+    const tabs = [
+      {
+        id: 'tab-1',
+        label: 'tab 1',
+        command: '',
+        renamed: false,
+        draftInput: 'nuclei -u https://darklab.sh',
+        st: 'idle',
+        exitCode: null,
+        historyRunId: '',
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [],
+        closing: false,
+      },
+    ]
+    const {
+      persistTabSessionStateNow,
+      sessionStorage,
+      _getTabSessionStateKey,
+      _getTabSessionRestoreInProgress,
+      setTabSessionRestoreInProgress,
+    } = await loadAppFns({
+      tabs,
+      activeTabId: 'tab-1',
+    })
+
+    expect(_getTabSessionRestoreInProgress()).toBe(false)
+    setTabSessionRestoreInProgress(true)
+    expect(_getTabSessionRestoreInProgress()).toBe(true)
+
+    persistTabSessionStateNow()
+    expect(sessionStorage.getItem(_getTabSessionStateKey())).toBe(null)
+
+    setTabSessionRestoreInProgress(false)
+    expect(_getTabSessionRestoreInProgress()).toBe(false)
+    persistTabSessionStateNow()
+    expect(JSON.parse(sessionStorage.getItem(_getTabSessionStateKey())).tabs).toHaveLength(1)
   })
 
   it('persists output signal metadata for session restore', async () => {

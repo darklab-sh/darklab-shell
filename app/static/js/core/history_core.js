@@ -275,6 +275,8 @@ var DarklabHistoryCore = (function (global) {
     rootMatches,
     summaryLabel,
   });
-  global.DarklabHistoryCore = api;
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { activeFilterItems, buildRequestUrl, commandRecallHistory, commandRootsFromRuns, compareDateGroupLabel, compareFormatDate, compareFormatDelta, compareFormatDuration, elapsedLabel, elapsedSeconds, exitClass, exitCodeNumber, exitLabel, hasActiveServerFilters, hasAnyFilters, historyLimit, isFailedExitCode, isGracefulTerminationExitCode, labelForType, normalizeFilterValue, relativeTime, resetRunOnlyFilters, rootMatches, summaryLabel } = DarklabHistoryCore;
+export { DarklabHistoryCore };

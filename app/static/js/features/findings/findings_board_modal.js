@@ -1,9 +1,46 @@
 // First-class findings triage board modal.
 // Reuses the shared project findings board adapter so list and board surfaces
 // keep the same review-state grouping rules.
+import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
+import { apiFetch as importedApiFetch } from '../../session.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncModalOverlayState as importedSyncModalOverlayState,
+} from '../../ui/ui_helpers.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from '../history/history_restore.js';
+import { DarklabProjectFindingsData as importedProjectFindingsData } from '../projects/project_findings_data.js';
+import {
+  DarklabTeamScope as importedTeamScope,
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from './finding_triage_editor.js';
+
+let exportedOpenFindingsBoard = null;
+let exportedCloseFindingsBoard = null;
+let exportedIsFindingsBoardOpen = null;
 
 (function findingsBoardModalModule(global) {
   'use strict';
+  const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
+  const emitUiEvent = (typeof importedEmitUiEvent !== 'undefined' && importedEmitUiEvent) || null;
+  const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
+  const projectFindingsData = (typeof importedProjectFindingsData !== 'undefined' && importedProjectFindingsData) || {};
+  const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
+  const restoreHistoryRunIntoTab = (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab) || null;
+  const syncModalOverlayState = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState) || null;
+  const teamScope = (typeof importedTeamScope !== 'undefined' && importedTeamScope)
+    || {
+      activeTeamScopeCan: (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+        || null,
+      deniedMessage: (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+        || null,
+    };
 
   const overlay = document.getElementById('findings-board-overlay');
   const modal = document.getElementById('findings-board-modal');
@@ -24,6 +61,12 @@
   ]);
   const COLUMN_LIMIT = 200;
   const PAGE_LIMIT = 200;
+  const COLUMN_STATE_QUERIES = Object.freeze([
+    { column: 'new', states: ['new'] },
+    { column: 'reviewed', states: ['reviewed', 'important'] },
+    { column: 'false_positive', states: ['false_positive'] },
+    { column: 'needs_followup', states: ['needs_followup'] },
+  ]);
   const LINE_OPEN_EVENT = 'app:findings-board-open-run';
 
   const state = {
@@ -37,26 +80,27 @@
     findings: [],
     total: 0,
     hasMore: false,
+    columnTotals: null,
     draggedId: '',
   };
 
   function api() {
-    return typeof apiFetch === 'function' ? apiFetch : global.apiFetch;
+    return importedApiFetch;
   }
 
   function boardApi() {
-    return global.DarklabProjectFindingsData || {};
+    return projectFindingsData || {};
   }
 
   function canTriageFindings() {
-    return typeof global.activeTeamScopeCan === 'function'
-      ? global.activeTeamScopeCan('triage_findings')
+    return teamScope && typeof teamScope.activeTeamScopeCan === 'function'
+      ? teamScope.activeTeamScopeCan('triage_findings')
       : true;
   }
 
   function triageDeniedMessage() {
-    return typeof global.teamScopeDeniedMessage === 'function'
-      ? global.teamScopeDeniedMessage('triage team findings')
+    return teamScope && typeof teamScope.deniedMessage === 'function'
+      ? teamScope.deniedMessage('triage team findings')
       : "View-only team members can't triage team findings. Switch to Personal or ask for operator access.";
   }
 
@@ -84,9 +128,9 @@
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
-    if (refocus && typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({ defer: true });
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
+    if (refocus && typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ defer: true });
     }
   }
 
@@ -96,7 +140,7 @@
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
     state.open = true;
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
     refreshBtn?.focus?.({ preventScroll: true });
   }
 
@@ -148,6 +192,27 @@
   function findingById(findingId) {
     const normalized = String(findingId || '');
     return state.findings.find(finding => String(finding && finding.id || '') === normalized) || null;
+  }
+
+  function endpointUrl(endpoint = '') {
+    return new URL(String(endpoint || ''), global.location?.origin || 'http://localhost');
+  }
+
+  function endpointPath(url) {
+    return `${url.pathname}${url.search || ''}`;
+  }
+
+  function hasReviewStateFilter(endpoint = '') {
+    return endpointUrl(endpoint).searchParams.has('review_state');
+  }
+
+  function endpointWithReviewState(endpoint = '', reviewState = '') {
+    const url = endpointUrl(endpoint);
+    url.searchParams.delete('review_state');
+    url.searchParams.set('review_state', String(reviewState || 'new'));
+    url.searchParams.set('limit', String(PAGE_LIMIT));
+    url.searchParams.set('offset', '0');
+    return endpointPath(url);
   }
 
   function setFindingReviewState(findingId, reviewState) {
@@ -225,8 +290,8 @@
     const chips = [];
     const status = String(triage.verification_status || finding.verification_status || 'not_started');
     if (status && status !== 'not_started') {
-      const label = global.DarklabFindingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
-      const tone = global.DarklabFindingTriageEditor?.verificationStatusTone?.(status) || 'muted';
+      const label = findingTriageEditor?.verificationStatusLabel?.(status) || status.replace(/_/g, ' ');
+      const tone = findingTriageEditor?.verificationStatusTone?.(status) || 'muted';
       chips.push(boardBadge(label, tone));
     }
     if (triage.has_remediation) chips.push(boardBadge('remediation', 'muted'));
@@ -374,7 +439,15 @@
       return;
     }
     const columns = boardApi().boardColumnsFromFindings
-      ? boardApi().boardColumnsFromFindings(state.findings, { limit: COLUMN_LIMIT }).columns
+      ? boardApi().boardColumnsFromFindings(state.findings, { limit: COLUMN_LIMIT }).columns.map((column) => {
+          if (!state.columnTotals || typeof state.columnTotals !== 'object') return column;
+          const total = Number(state.columnTotals[column.state] ?? column.total ?? 0);
+          return {
+            ...column,
+            total,
+            truncated: total > column.cards.length || !!column.truncated,
+          };
+        })
       : [];
     const board = document.createElement('div');
     board.className = 'project-finding-board findings-board-grid';
@@ -383,24 +456,74 @@
     bodyEl.appendChild(board);
   }
 
+  async function fetchFindings(endpoint) {
+    const resp = await api()(endpoint, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  }
+
+  function applySinglePage(data = {}) {
+    state.findings = Array.isArray(data.findings) ? data.findings : [];
+    state.total = Number(data.total || state.findings.length || 0);
+    state.hasMore = !!data.has_more;
+    state.columnTotals = null;
+  }
+
+  async function loadSinglePageFindings() {
+    const data = await fetchFindings(state.endpoint);
+    applySinglePage(data);
+  }
+
+  async function loadColumnPageFindings() {
+    const requests = COLUMN_STATE_QUERIES.flatMap(({ column, states }) => (
+      states.map(reviewState => ({ column, endpoint: endpointWithReviewState(state.endpoint, reviewState) }))
+    ));
+    const pages = await Promise.all(requests.map(async request => ({
+      ...request,
+      data: await fetchFindings(request.endpoint),
+    })));
+    const seenIds = new Set();
+    const findings = [];
+    const columnTotals = COLUMN_STATE_QUERIES.reduce((acc, item) => {
+      acc[item.column] = 0;
+      return acc;
+    }, {});
+    let total = 0;
+    let hasMore = false;
+    pages.forEach(({ column, data }) => {
+      const rows = Array.isArray(data.findings) ? data.findings : [];
+      const pageTotal = Number(data.total || rows.length || 0);
+      columnTotals[column] = Number(columnTotals[column] || 0) + pageTotal;
+      total += pageTotal;
+      hasMore = hasMore || !!data.has_more;
+      rows.forEach((finding) => {
+        const findingId = String(finding && finding.id || '');
+        if (findingId && seenIds.has(findingId)) return;
+        if (findingId) seenIds.add(findingId);
+        findings.push(finding);
+      });
+    });
+    state.findings = findings;
+    state.total = total;
+    state.hasMore = hasMore;
+    state.columnTotals = columnTotals;
+  }
+
   async function loadFindings() {
     if (!state.endpoint) return;
     setBusy(true);
     showMessage('');
     render();
     try {
-      const resp = await api()(state.endpoint, { cache: 'no-store' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      state.findings = Array.isArray(data.findings) ? data.findings : [];
-      state.total = Number(data.total || state.findings.length || 0);
-      state.hasMore = !!data.has_more;
+      if (hasReviewStateFilter(state.endpoint)) await loadSinglePageFindings();
+      else await loadColumnPageFindings();
     } catch (err) {
       state.findings = [];
       state.total = 0;
       state.hasMore = false;
+      state.columnTotals = null;
       showMessage(err && err.message ? err.message : 'Could not load findings.', 'error');
-      if (typeof global.logClientError === 'function') global.logClientError('failed to load findings board', err);
+      if (typeof importedLogClientError === 'function') importedLogClientError('failed to load findings board', err);
     } finally {
       setBusy(false);
       render();
@@ -419,11 +542,21 @@
     setFindingReviewState(findingId, reviewState);
     render();
     try {
-      const resp = await api()(`/findings/${encodeURIComponent(findingId)}/review`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ review_state: reviewState }),
-      });
+      const projectScoped = state.source === 'project' && state.projectId;
+      const resp = await api()(
+        projectScoped
+          ? `/projects/${encodeURIComponent(state.projectId)}/findings/review`
+          : `/findings/${encodeURIComponent(findingId)}/review`,
+        {
+          method: projectScoped ? 'POST' : 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            projectScoped
+              ? { finding_ids: [findingId], review_state: reviewState }
+              : { review_state: reviewState },
+          ),
+        },
+      );
       if (!resp.ok) {
         let message = `HTTP ${resp.status}`;
         try {
@@ -434,46 +567,51 @@
         throw new Error(message);
       }
       const data = await resp.json().catch(() => null);
-      if (data && data.finding) setFindingReviewState(findingId, data.finding.review_state || reviewState);
+      const authoritativeReviewState = data && data.finding
+        ? data.finding.review_state
+        : data?.review_state;
+      setFindingReviewState(findingId, authoritativeReviewState || reviewState);
+      if (projectScoped && data && Number(data.counts?.updated || 0) <= 0) {
+        throw new Error('Finding was no longer available in this project.');
+      }
       showMessage('');
-      if (typeof global.emitUiEvent === 'function') {
-        global.emitUiEvent('app:project-workspace-mutated', {
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-workspace-mutated', {
           reason: 'finding-review-updated',
           project_id: state.projectId,
           finding_id: findingId,
         });
       }
+      render();
     } catch (err) {
       setFindingReviewState(findingId, previousReviewState || 'new');
       showMessage(err && err.message ? err.message : 'Could not update finding review state.', 'error');
-      if (typeof global.logClientError === 'function') global.logClientError('failed to update findings board review state', err);
-    } finally {
+      if (typeof importedLogClientError === 'function') importedLogClientError('failed to update findings board review state', err);
       render();
     }
   }
-
   async function openFindingTriage(findingId) {
     const finding = findingById(findingId);
     if (!finding) {
       showMessage('Finding is missing its details.', 'error');
       return;
     }
-    if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+    if (!findingTriageEditor || typeof findingTriageEditor.open !== 'function') {
       showMessage('Finding triage editor is not available.', 'error');
       return;
     }
     showMessage('');
-    await global.DarklabFindingTriageEditor.open(finding, {
+    await findingTriageEditor.open(finding, {
       canEdit: canTriageFindings(),
       onSaved: async (triage) => {
-        const compact = typeof global.DarklabFindingTriageEditor.compactTriage === 'function'
-          ? global.DarklabFindingTriageEditor.compactTriage(triage)
+        const compact = typeof findingTriageEditor.compactTriage === 'function'
+          ? findingTriageEditor.compactTriage(triage)
           : triage;
         updateFindingTriage(findingId, compact);
         render();
         showMessage('Finding triage saved.');
-        if (typeof global.emitUiEvent === 'function') {
-          global.emitUiEvent('app:project-workspace-mutated', {
+        if (typeof emitUiEvent === 'function') {
+          emitUiEvent('app:project-workspace-mutated', {
             reason: 'finding-triage-updated',
             project_id: state.projectId,
             finding_id: findingId,
@@ -485,19 +623,20 @@
 
   async function openFindingsBoard(options = {}) {
     if (!overlay || !bodyEl) return false;
-    if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
-    if (typeof global.blurVisibleComposerInputIfMobile === 'function') global.blurVisibleComposerInputIfMobile();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     state.endpoint = endpointFromOptions(options);
     state.findings = [];
     state.total = 0;
     state.hasMore = false;
+    state.columnTotals = null;
     show();
     await loadFindings();
     return true;
   }
 
-  if (overlay && typeof global.bindDismissible === 'function') {
-    global.bindDismissible(overlay, {
+  if (overlay && typeof bindDismissible === 'function') {
+    bindDismissible(overlay, {
       level: 'modal',
       isOpen,
       onClose: closeFindingsBoard,
@@ -529,9 +668,9 @@
     if (action.dataset.findingsBoardAction === 'open-run') {
       event.preventDefault();
       let opened = false;
-      if (typeof global.restoreHistoryRunIntoTab === 'function') {
+      if (typeof restoreHistoryRunIntoTab === 'function') {
         const lineIndex = Number(action.dataset.lineIndex || '');
-        void global.restoreHistoryRunIntoTab({
+        void restoreHistoryRunIntoTab({
           id: action.dataset.runId || '',
           command: action.dataset.runCommand || '',
           full_output_available: true,
@@ -597,7 +736,13 @@
     void persistReviewState(findingId, reviewState, previous);
   });
 
-  global.openFindingsBoard = openFindingsBoard;
-  global.closeFindingsBoard = closeFindingsBoard;
-  global.isFindingsBoardOpen = isOpen;
+  exportedOpenFindingsBoard = openFindingsBoard;
+  exportedCloseFindingsBoard = closeFindingsBoard;
+  exportedIsFindingsBoardOpen = isOpen;
 })(globalThis);
+
+export {
+  exportedOpenFindingsBoard as openFindingsBoard,
+  exportedCloseFindingsBoard as closeFindingsBoard,
+  exportedIsFindingsBoardOpen as isFindingsBoardOpen,
+};

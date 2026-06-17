@@ -1,12 +1,130 @@
 // ── Shared autocomplete logic ──
-const autocompleteCore = typeof DarklabAutocompleteCore !== 'undefined' ? DarklabAutocompleteCore : null;
+import { DarklabAutocompleteCore as importedAutocompleteCore } from '../../core/autocomplete_core.js';
+import { APP_STATE_API as importedAppStateApi, onUiEvent as importedOnUiEvent } from '../../core/state.js';
+import { hasPendingTerminalConfirm as importedHasPendingTerminalConfirm } from '../../runner_bridge.js';
+import {
+  apiFetch as importedApiFetch,
+  getSessionId as importedGetSessionId,
+  logClientError as importedLogClientError,
+} from '../../runtime_bridge.js';
+import {
+  getGrepOutputSuggestions as importedGetGrepOutputSuggestions,
+  getRuntimeAutocompleteContext as importedGetRuntimeAutocompleteContext,
+  getRuntimeAutocompleteItems as importedGetRuntimeAutocompleteItems,
+  getWorkspaceAutocompleteFlagFileHints as importedGetWorkspaceAutocompleteFlagFileHints,
+  getWorkspaceAutocompletePathHints as importedGetWorkspaceAutocompletePathHints,
+} from './runtime_context.js';
+import {
+  getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
+  getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
+} from '../workspace/workspace_autocomplete_cache.js';
+
+const AUTOCOMPLETE_SUGGESTIONS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _autocompleteGlobalFunction(name) {
+  const fn = AUTOCOMPLETE_SUGGESTIONS_GLOBAL && AUTOCOMPLETE_SUGGESTIONS_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+const autocompleteCore = typeof importedAutocompleteCore !== 'undefined' && importedAutocompleteCore
+  ? importedAutocompleteCore
+  : AUTOCOMPLETE_SUGGESTIONS_GLOBAL.DarklabAutocompleteCore;
+
+function _autocompleteState() {
+  const api = importedAppStateApi || AUTOCOMPLETE_SUGGESTIONS_GLOBAL.APP_STATE_API || null;
+  if (api && typeof api.getState === 'function') return api.getState();
+  return AUTOCOMPLETE_SUGGESTIONS_GLOBAL.APP_STATE || {};
+}
+
+function _autocompleteApiFetch(url, options) {
+  const api = (typeof importedApiFetch === 'function' && importedApiFetch)
+    || _autocompleteGlobalFunction('apiFetch');
+  if (typeof api !== 'function') return Promise.reject(new Error('apiFetch unavailable'));
+  return options === undefined ? api(url) : api(url, options);
+}
+
+function _autocompleteLogClientError(context, err) {
+  const log = (typeof importedLogClientError === 'function' && importedLogClientError)
+    || _autocompleteGlobalFunction('logClientError');
+  if (typeof log === 'function') log(context, err);
+}
+
+function _autocompleteSessionId() {
+  if (typeof importedGetSessionId === 'function') return String(importedGetSessionId() || '');
+  return String(AUTOCOMPLETE_SUGGESTIONS_GLOBAL.SESSION_ID || '');
+}
 
 function _isAutocompleteBlockedByTerminalConfirm() {
-  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
+  const hasPending = (typeof importedHasPendingTerminalConfirm !== 'undefined' && importedHasPendingTerminalConfirm)
+    || _autocompleteGlobalFunction('hasPendingTerminalConfirm');
+  return typeof hasPending === 'function' && hasPending();
 }
 
 function _isAutocompleteBlockedByActiveRun() {
-  return typeof isActiveTabRunning === 'function' && isActiveTabRunning();
+  const isRunning = _autocompleteGlobalFunction('isActiveTabRunning');
+  return typeof isRunning === 'function' && isRunning();
+}
+
+function _autocompleteWorkspaceCacheApi() {
+  return {
+    getDirectoryHints: (typeof importedGetWorkspaceAutocompleteDirectoryHints !== 'undefined' && importedGetWorkspaceAutocompleteDirectoryHints)
+      || _autocompleteGlobalFunction('getWorkspaceAutocompleteDirectoryHints'),
+    getFileHints: (typeof importedGetWorkspaceAutocompleteFileHints !== 'undefined' && importedGetWorkspaceAutocompleteFileHints)
+      || _autocompleteGlobalFunction('getWorkspaceAutocompleteFileHints'),
+  };
+}
+
+function _autocompleteOnUiEvent(name, handler) {
+  const onEvent = (typeof importedOnUiEvent !== 'undefined' && importedOnUiEvent)
+    || _autocompleteGlobalFunction('onUiEvent');
+  if (typeof onEvent === 'function') onEvent(name, handler);
+}
+
+function _autocompleteWorkspacePathHints(kind, token) {
+  const readHints = (
+    typeof importedGetWorkspaceAutocompletePathHints !== 'undefined'
+    && importedGetWorkspaceAutocompletePathHints
+  ) || _autocompleteGlobalFunction('getWorkspaceAutocompletePathHints');
+  return typeof readHints === 'function' ? readHints(kind, token) : [];
+}
+
+function _autocompleteWorkspaceFlagFileHints(token) {
+  const readHints = (
+    typeof importedGetWorkspaceAutocompleteFlagFileHints !== 'undefined'
+    && importedGetWorkspaceAutocompleteFlagFileHints
+  )
+    || _autocompleteGlobalFunction('getWorkspaceAutocompleteFlagFileHints');
+  if (typeof readHints === 'function') return readHints(token);
+  const getFileHints = _autocompleteWorkspaceCacheApi().getFileHints;
+  return typeof getFileHints === 'function' ? getFileHints() : [];
+}
+
+function _autocompleteRuntimeContext(registry) {
+  const readContext = (
+    typeof importedGetRuntimeAutocompleteContext !== 'undefined'
+    && importedGetRuntimeAutocompleteContext
+  ) || _autocompleteGlobalFunction('getRuntimeAutocompleteContext');
+  return typeof readContext === 'function' ? readContext(registry) : {};
+}
+
+function _autocompleteRuntimeItems(ctx) {
+  const readItems = (
+    typeof importedGetRuntimeAutocompleteItems !== 'undefined'
+    && importedGetRuntimeAutocompleteItems
+  ) || _autocompleteGlobalFunction('getRuntimeAutocompleteItems');
+  return typeof readItems === 'function'
+    ? readItems(ctx, autocompleteCore.buildItem, autocompleteCore.filterItems)
+    : [];
+}
+
+function _autocompleteGrepOutputSuggestions(ctx) {
+  const readItems = (
+    typeof importedGetGrepOutputSuggestions !== 'undefined'
+    && importedGetGrepOutputSuggestions
+  ) || _autocompleteGlobalFunction('getGrepOutputSuggestions');
+  return typeof readItems === 'function'
+    ? readItems(ctx, autocompleteCore.buildItem, autocompleteCore.filterItems)
+    : [];
 }
 
 function _autocompleteTokenContext(value, cursorPos) {
@@ -234,17 +352,16 @@ function setWatcherAutocompleteWatchers(items) {
 }
 
 function loadProjectAutocompleteTargets() {
-  if (typeof apiFetch !== 'function') return Promise.resolve(_readProjectTargets());
-  const projectListRequest = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
+  const projectListRequest = _autocompleteApiFetch('/projects?include_archived=1', { cache: 'no-store' })
     .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { projects: [] }))
     .then(data => setProjectAutocompleteProjects(data && data.projects));
-  const activeTargetRequest = apiFetch('/projects/active', { cache: 'no-store' })
+  const activeTargetRequest = _autocompleteApiFetch('/projects/active', { cache: 'no-store' })
     .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { project: null }))
     .then((data) => {
       const project = data && data.project && typeof data.project === 'object' ? data.project : null;
       const projectId = project && project.id ? String(project.id) : '';
       if (!projectId) return setProjectAutocompleteTargets([]);
-      return apiFetch(`/projects/${encodeURIComponent(projectId)}/targets?limit=200`, { cache: 'no-store' })
+      return _autocompleteApiFetch(`/projects/${encodeURIComponent(projectId)}/targets?limit=200`, { cache: 'no-store' })
         .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { targets: [] }))
         .then(targetData => setProjectAutocompleteTargets(targetData && targetData.targets));
     })
@@ -253,31 +370,29 @@ function loadProjectAutocompleteTargets() {
     .catch((err) => {
       setProjectAutocompleteProjects([]);
       setProjectAutocompleteTargets([]);
-      if (typeof logClientError === 'function') logClientError('failed to load project autocomplete targets', err);
+      _autocompleteLogClientError('failed to load project autocomplete targets', err);
       return _readProjectTargets();
     });
 }
 
 function loadScheduleAutocompleteHints() {
-  if (typeof apiFetch !== 'function') return Promise.resolve(_readAutocompleteSchedules());
-  return apiFetch('/schedules', { cache: 'no-store' })
+  return _autocompleteApiFetch('/schedules', { cache: 'no-store' })
     .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { schedules: [] }))
     .then(data => setScheduleAutocompleteSchedules(data && data.schedules))
     .catch((err) => {
       setScheduleAutocompleteSchedules([]);
-      if (typeof logClientError === 'function') logClientError('failed to load schedule autocomplete hints', err);
+      _autocompleteLogClientError('failed to load schedule autocomplete hints', err);
       return _readAutocompleteSchedules();
     });
 }
 
 function loadWatcherAutocompleteHints() {
-  if (typeof apiFetch !== 'function') return Promise.resolve(_readAutocompleteWatchers());
-  return apiFetch('/watchers', { cache: 'no-store' })
+  return _autocompleteApiFetch('/watchers', { cache: 'no-store' })
     .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { watchers: [] }))
     .then(data => setWatcherAutocompleteWatchers(data && data.watchers))
     .catch((err) => {
       setWatcherAutocompleteWatchers([]);
-      if (typeof logClientError === 'function') logClientError('failed to load watcher autocomplete hints', err);
+      _autocompleteLogClientError('failed to load watcher autocomplete hints', err);
       return _readAutocompleteWatchers();
     });
 }
@@ -290,10 +405,8 @@ function _autocompleteReloadProjectTargets() {
   loadProjectAutocompleteTargets().catch(() => {});
 }
 
-if (typeof onUiEvent === 'function') {
-  onUiEvent('app:active-project-changed', _autocompleteReloadProjectTargets);
-  onUiEvent('app:project-workspace-changed', _autocompleteReloadProjectTargets);
-}
+_autocompleteOnUiEvent('app:active-project-changed', _autocompleteReloadProjectTargets);
+_autocompleteOnUiEvent('app:project-workspace-changed', _autocompleteReloadProjectTargets);
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('storage', (event) => {
@@ -305,14 +418,14 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
       payload = {};
     }
     const payloadSession = payload && typeof payload.session_id === 'string' ? payload.session_id : '';
-    if (payloadSession && typeof SESSION_ID !== 'undefined' && payloadSession !== SESSION_ID) return;
+    const sessionId = _autocompleteSessionId();
+    if (payloadSession && sessionId && payloadSession !== sessionId) return;
     _autocompleteReloadProjectTargets();
   });
 }
 
 function loadRecentValues() {
-  if (typeof apiFetch !== 'function') return Promise.resolve(_readRecentValues());
-  return apiFetch('/session/recent-values')
+  return _autocompleteApiFetch('/session/recent-values')
     .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : {}))
     .then((data) => {
       if (data && data.values && typeof data.values === 'object') _setRecentValuesByKind(data.values);
@@ -320,15 +433,15 @@ function loadRecentValues() {
       return _readRecentValues();
     })
     .catch((err) => {
-      if (typeof logClientError === 'function') logClientError('failed to load recent values', err);
+      _autocompleteLogClientError('failed to load recent values', err);
       return _readRecentValues();
     });
 }
 
 function _persistRecentValues(items) {
   const values = autocompleteCore.normalizeRecentValueList(items);
-  if (!values.length || typeof apiFetch !== 'function') return Promise.resolve(null);
-  const request = apiFetch('/session/recent-values', {
+  if (!values.length) return Promise.resolve(null);
+  const request = _autocompleteApiFetch('/session/recent-values', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ values }),
@@ -339,7 +452,7 @@ function _persistRecentValues(items) {
       return data;
     })
     .catch((err) => {
-      if (typeof logClientError === 'function') logClientError('failed to save recent values', err);
+      _autocompleteLogClientError('failed to save recent values', err);
       return null;
     });
   const tracked = request.finally(() => {
@@ -808,7 +921,8 @@ function _projectTargetAutocompleteItems(ctx, allowedTypes = []) {
 
 function _wordlistAutocompleteItems(ctx, categories = []) {
   const categorySet = new Set(autocompleteCore.normalizeWordlistCategories(categories));
-  const source = (typeof acWordlists !== 'undefined' && Array.isArray(acWordlists)) ? acWordlists : [];
+  const state = _autocompleteState();
+  const source = Array.isArray(state.acWordlists) ? state.acWordlists : [];
   const filtered = source.filter((item) => {
     if (!categorySet.size) return true;
     const itemCategories = autocompleteCore.normalizeWordlistCategories(item && (item.wordlist_category || item.category));
@@ -895,21 +1009,23 @@ function _workspaceAutocompleteHintsForFlag(spec, trigger, ctx = null) {
   const flags = Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [];
   const normalizedTrigger = String(trigger || '');
   if (!flags.some(flag => String(flag || '') === normalizedTrigger)) return null;
-  if (ctx && typeof getWorkspaceAutocompleteFlagFileHints === 'function') {
-    const hints = getWorkspaceAutocompleteFlagFileHints(ctx.currentToken);
+  if (ctx) {
+    const hints = _autocompleteWorkspaceFlagFileHints(ctx.currentToken);
     return Array.isArray(hints) ? hints : [];
   }
-  if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
-  const hints = getWorkspaceAutocompleteFileHints();
+  const getFileHints = _autocompleteWorkspaceCacheApi().getFileHints;
+  if (typeof getFileHints !== 'function') return [];
+  const hints = getFileHints();
   return Array.isArray(hints) ? hints : [];
 }
 
 function _workspaceAutocompleteEntryHints() {
-  const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
-    ? getWorkspaceAutocompleteFileHints()
+  const workspaceCache = _autocompleteWorkspaceCacheApi();
+  const fileHints = typeof workspaceCache.getFileHints === 'function'
+    ? workspaceCache.getFileHints()
     : [];
-  const directoryHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
-    ? getWorkspaceAutocompleteDirectoryHints()
+  const directoryHints = typeof workspaceCache.getDirectoryHints === 'function'
+    ? workspaceCache.getDirectoryHints()
     : [];
   return [
     ...(Array.isArray(fileHints) ? fileHints : []),
@@ -954,8 +1070,7 @@ function _workspaceAutocompletePathHintsForContext(ctx, spec) {
   if (!String(ctx.currentToken || '').includes('/')) return null;
   const kind = _autocompleteWorkspacePathKind(ctx, spec);
   if (!kind) return null;
-  if (typeof getWorkspaceAutocompletePathHints !== 'function') return [];
-  const hints = getWorkspaceAutocompletePathHints(kind, ctx.currentToken);
+  const hints = _autocompleteWorkspacePathHints(kind, ctx.currentToken);
   return Array.isArray(hints) ? hints : [];
 }
 
@@ -1005,10 +1120,9 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
 }
 
 function _getAutocompleteRegistry() {
-  const yamlRegistry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
-  const runtimeRegistry = typeof getRuntimeAutocompleteContext === 'function'
-    ? getRuntimeAutocompleteContext(yamlRegistry)
-    : {};
+  const state = _autocompleteState();
+  const yamlRegistry = state.acContextRegistry || {};
+  const runtimeRegistry = _autocompleteRuntimeContext(yamlRegistry);
   return _mergeAutocompleteRegistry(yamlRegistry, runtimeRegistry);
 }
 
@@ -1028,6 +1142,27 @@ function processPendingRecentValueCommands() {
   if (!acPendingRecentValueCommands.length || !_autocompleteRegistryHasEntries()) return [];
   const pending = acPendingRecentValueCommands.splice(0, acPendingRecentValueCommands.length);
   return pending.flatMap(command => rememberRecentValuesFromCommand(command, { skipQueue: true }));
+}
+
+function setAutocompleteCatalog(data = {}) {
+  const next = {
+    acSuggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+    acContextRegistry: data.context && typeof data.context === 'object' ? data.context : {},
+    acWordlists: Array.isArray(data.wordlists) ? data.wordlists : [],
+    acSpecialCommands: data.special_commands || [],
+    acBuiltinCommandRoots: data.builtin_command_roots || [],
+  };
+  const api = importedAppStateApi || AUTOCOMPLETE_SUGGESTIONS_GLOBAL.APP_STATE_API || null;
+  if (api && typeof api.getState === 'function') Object.assign(api.getState(), next);
+  if (AUTOCOMPLETE_SUGGESTIONS_GLOBAL) {
+    AUTOCOMPLETE_SUGGESTIONS_GLOBAL.acSuggestions = next.acSuggestions;
+    AUTOCOMPLETE_SUGGESTIONS_GLOBAL.acContextRegistry = next.acContextRegistry;
+    AUTOCOMPLETE_SUGGESTIONS_GLOBAL.acWordlists = next.acWordlists;
+    AUTOCOMPLETE_SUGGESTIONS_GLOBAL.acSpecialCommands = next.acSpecialCommands;
+    AUTOCOMPLETE_SUGGESTIONS_GLOBAL.acBuiltinCommandRoots = next.acBuiltinCommandRoots;
+  }
+  processPendingRecentValueCommands();
+  return next;
 }
 
 function _contextClosedByTokenArity(ctx, spec) {
@@ -1406,8 +1541,8 @@ function _buildPipeAutocomplete(ctx) {
   const contextItems = _buildContextAutocomplete(ctx);
   // Only grep takes a free-text pattern, so it is the only pipe helper that
   // benefits from output-derived token suggestions.
-  if (ctx.commandRoot === 'grep' && typeof getGrepOutputSuggestions === 'function') {
-    const outputItems = getGrepOutputSuggestions(ctx, autocompleteCore.buildItem, autocompleteCore.filterItems);
+  if (ctx.commandRoot === 'grep') {
+    const outputItems = _autocompleteGrepOutputSuggestions(ctx);
     return _mergePipeItems(contextItems, outputItems);
   }
   return contextItems;
@@ -1416,7 +1551,9 @@ function _buildPipeAutocomplete(ctx) {
 function _buildFlatAutocomplete(value) {
   const q = String(value || '').trim();
   if (!q) return [];
-  return autocompleteCore.filterItems(((typeof acSuggestions !== 'undefined' && acSuggestions) || []), q).slice(0, 24);
+  const state = _autocompleteState();
+  const suggestions = Array.isArray(state.acSuggestions) ? state.acSuggestions : [];
+  return autocompleteCore.filterItems(suggestions, q).slice(0, 24);
 }
 
 function getAutocompleteMatches(value, cursorPos) {
@@ -1424,9 +1561,7 @@ function getAutocompleteMatches(value, cursorPos) {
   const text = String(value || '');
   const ctx = _autocompleteTokenContext(text, cursorPos);
   const pipeCtx = _autocompletePipeContext(text, cursorPos);
-  const runtimeItems = !pipeCtx && typeof getRuntimeAutocompleteItems === 'function'
-    ? getRuntimeAutocompleteItems(ctx, autocompleteCore.buildItem, autocompleteCore.filterItems)
-    : [];
+  const runtimeItems = !pipeCtx ? _autocompleteRuntimeItems(ctx) : [];
   let items = runtimeItems.length ? runtimeItems : (pipeCtx ? _buildPipeAutocomplete(pipeCtx) : _buildContextAutocomplete(ctx));
   if (!items.length && !pipeCtx) items = _buildFlatAutocomplete(text);
 
@@ -1456,3 +1591,26 @@ function getAutocompleteMatches(value, cursorPos) {
 function limitAutocompleteMatchesForDisplay(items, maxItems = 12) {
   return autocompleteCore.limitItemsForDisplay(items, maxItems);
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    getAutocompleteMatches,
+    limitAutocompleteMatchesForDisplay,
+  });
+}
+
+export {
+  _readRecentValues,
+  _readAutocompleteProjects,
+  _readAutocompleteSchedules,
+  _readAutocompleteWatchers,
+  _autocompleteTokenContext,
+  flushRecentValues,
+  getAutocompleteMatches,
+  limitAutocompleteMatchesForDisplay,
+  loadScheduleAutocompleteHints,
+  loadRecentValues,
+  loadWatcherAutocompleteHints,
+  rememberRecentValuesFromCommand,
+  setAutocompleteCatalog,
+};

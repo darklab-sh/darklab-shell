@@ -1,6 +1,6 @@
 // Project target editor copy and value validation.
 
-window.ProjectTargetValidation = (() => {
+const ProjectTargetValidation = (() => {
   const TARGET_TYPES = [
     { value: 'domain', label: 'domain' },
     { value: 'url', label: 'url' },
@@ -106,3 +106,23 @@ window.ProjectTargetValidation = (() => {
     notesValidationError,
   };
 })();
+
+
+const {
+  TARGET_NOTES_MAX_LENGTH,
+  TARGET_TYPES,
+  TARGET_VALUE_HELP,
+  helpForType,
+  notesValidationError,
+  valueValidationError,
+} = ProjectTargetValidation;
+
+export {
+  ProjectTargetValidation,
+  TARGET_NOTES_MAX_LENGTH,
+  TARGET_TYPES,
+  TARGET_VALUE_HELP,
+  helpForType,
+  notesValidationError,
+  valueValidationError,
+};

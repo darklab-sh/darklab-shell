@@ -1,134 +1,58 @@
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const ENTITY_METADATA_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
-const UI_ACTION_SHEET_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_action_sheet.js'), 'utf8')
-const ATLAS_ENTITY_ROW_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/features/atlas/atlas_entity_row.js'), 'utf8')
-const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
-  'utf8',
-)
+const readScriptSource = relativePath => stripEsmExports(readFileSync(resolve(REPO_ROOT, relativePath), 'utf8'))
+const ENTITY_METADATA_SRC = readScriptSource('app/static/js/ui/ui_entity_metadata.js')
+const UI_ACTION_SHEET_SRC = readScriptSource('app/static/js/ui/ui_action_sheet.js')
+const ATLAS_ENTITY_ROW_SRC = readScriptSource('app/static/js/features/atlas/atlas_entity_row.js')
+const PROJECT_TARGET_VALIDATION_SRC = readScriptSource('app/static/js/features/projects/project_target_validation.js')
 const PROJECTS_CSS = readFileSync(resolve(REPO_ROOT, 'app/static/css/features/projects.css'), 'utf8')
-const PROJECT_ACTIVE_CONTEXT_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_active_context.js'),
-  'utf8',
+const PROJECT_ACTIVE_CONTEXT_SRC = readScriptSource('app/static/js/features/projects/project_active_context.js')
+const PROJECT_WORKSPACE_CONSTANTS_SRC = readScriptSource('app/static/js/features/projects/project_workspace_constants.js')
+const PROJECT_WORKSPACE_STATE_SRC = readScriptSource('app/static/js/features/projects/project_workspace_state.js')
+const PROJECT_SHARED_UI_SRC = readScriptSource('app/static/js/features/projects/project_shared_ui.js')
+const PROJECT_DETAILS_SRC = readScriptSource('app/static/js/features/projects/project_details.js')
+const PROJECT_LIST_SRC = readScriptSource('app/static/js/features/projects/project_list.js')
+const PROJECT_NAVIGATION_SRC = readScriptSource('app/static/js/features/projects/project_navigation.js')
+const PROJECT_ENTITY_EDITOR_SRC = readScriptSource('app/static/js/features/projects/project_entity_editor.js')
+const PROJECT_WORKSPACE_ACTIONS_SRC = readScriptSource('app/static/js/features/projects/project_workspace_actions.js')
+const PROJECT_WORKSPACE_SHELL_SRC = readScriptSource('app/static/js/features/projects/project_workspace_shell.js')
+const PROJECT_WORKSPACE_LIFECYCLE_SRC = readScriptSource('app/static/js/features/projects/project_workspace_lifecycle.js')
+const PROJECT_WORKSPACE_RENDERER_SRC = readScriptSource('app/static/js/features/projects/project_workspace_renderer.js')
+const PROJECT_WORKSPACE_BOOTSTRAP_SRC = readScriptSource('app/static/js/features/projects/project_workspace_bootstrap.js')
+const PROJECT_NESTED_SHEETS_SRC = readScriptSource('app/static/js/features/projects/project_nested_sheets.js')
+const PROJECT_WORKSPACE_EVENTS_SRC = readScriptSource('app/static/js/features/projects/project_workspace_events.js')
+const PROJECT_TARGETS_SRC = readScriptSource('app/static/js/features/projects/project_targets.js')
+const PROJECT_RUNS_SRC = readScriptSource('app/static/js/features/projects/project_runs.js')
+const PROJECT_MOBILE_COMPARE_SRC = readScriptSource('app/static/js/features/projects/project_mobile_compare.js')
+const PROJECT_MOBILE_SHELL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_shell.js')
+const PROJECT_MOBILE_DETAIL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_detail.js')
+const PROJECT_FINDINGS_DATA_SRC = readScriptSource('app/static/js/features/projects/project_findings_data.js')
+const PROJECT_FILTERS_SRC = readScriptSource('app/static/js/features/projects/project_filters.js')
+const PROJECT_ENTITIES_SRC = readScriptSource('app/static/js/features/projects/project_entities.js')
+const PROJECT_FINDINGS_SRC = readScriptSource('app/static/js/features/projects/project_findings.js')
+const PROJECT_FINDINGS_BOARD_SRC = readScriptSource('app/static/js/features/projects/project_findings_board.js')
+const FINDING_TRIAGE_EDITOR_SRC = readScriptSource('app/static/js/features/findings/finding_triage_editor.js')
+const FINDINGS_BOARD_MODAL_SRC = readScriptSource('app/static/js/features/findings/findings_board_modal.js')
+const PROJECT_ARTIFACTS_SRC = readScriptSource('app/static/js/features/projects/project_artifacts.js')
+const PROJECT_PACKAGES_SRC = readScriptSource('app/static/js/features/projects/project_packages.js')
+const PROJECT_REPORT_SRC = readScriptSource('app/static/js/features/projects/project_report.js')
+const PROJECT_ACTIVITY_SRC = readScriptSource('app/static/js/features/projects/project_activity.js')
+const PROJECT_CONTEXT_BRIDGE_SRC = readScriptSource('app/static/js/features/projects/project_context_bridge.js')
+const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').replace(
+  '\n})(globalThis);',
+  `
+  global.__darklabShellChromeExports = {
+    openProjectWorkspace,
+    openProjectAutoPromoteRuleFromAtlas,
+    refreshProjectWorkspace,
+  };
+})(globalThis);`,
 )
-const PROJECT_WORKSPACE_CONSTANTS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_constants.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_STATE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_state.js'),
-  'utf8',
-)
-const PROJECT_SHARED_UI_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_shared_ui.js'),
-  'utf8',
-)
-const PROJECT_DETAILS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_details.js'),
-  'utf8',
-)
-const PROJECT_LIST_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_list.js'),
-  'utf8',
-)
-const PROJECT_NAVIGATION_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_navigation.js'),
-  'utf8',
-)
-const PROJECT_ENTITY_EDITOR_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_entity_editor.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_ACTIONS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_actions.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_SHELL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_shell.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_LIFECYCLE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_lifecycle.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_RENDERER_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_renderer.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_BOOTSTRAP_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_bootstrap.js'),
-  'utf8',
-)
-const PROJECT_NESTED_SHEETS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_nested_sheets.js'),
-  'utf8',
-)
-const PROJECT_WORKSPACE_EVENTS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_events.js'),
-  'utf8',
-)
-const PROJECT_TARGETS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_targets.js'),
-  'utf8',
-)
-const PROJECT_RUNS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_runs.js'),
-  'utf8',
-)
-const PROJECT_MOBILE_COMPARE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_compare.js'),
-  'utf8',
-)
-const PROJECT_MOBILE_SHELL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_shell.js'),
-  'utf8',
-)
-const PROJECT_MOBILE_DETAIL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_detail.js'),
-  'utf8',
-)
-const PROJECT_FINDINGS_DATA_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_data.js'),
-  'utf8',
-)
-const PROJECT_FILTERS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_filters.js'),
-  'utf8',
-)
-const PROJECT_ENTITIES_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_entities.js'),
-  'utf8',
-)
-const PROJECT_FINDINGS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings.js'),
-  'utf8',
-)
-const PROJECT_FINDINGS_BOARD_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_board.js'),
-  'utf8',
-)
-const FINDING_TRIAGE_EDITOR_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/findings/finding_triage_editor.js'),
-  'utf8',
-)
-const FINDINGS_BOARD_MODAL_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/findings/findings_board_modal.js'),
-  'utf8',
-)
-const PROJECT_ARTIFACTS_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_artifacts.js'),
-  'utf8',
-)
-const PROJECT_PACKAGES_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/features/projects/project_packages.js'),
-  'utf8',
-)
-const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
@@ -294,6 +218,7 @@ function loadShellChrome({
         <div id="project-package-manifest-modal">
           <span id="project-package-manifest-title"></span>
           <button class="project-package-manifest-close" type="button"></button>
+          <div id="project-package-manifest-summary"></div>
           <pre id="project-package-manifest-json"></pre>
         </div>
       </div>
@@ -310,6 +235,7 @@ function loadShellChrome({
           <form id="project-entity-editor-form">
             <input id="project-entity-labels">
             <textarea id="project-entity-note"></textarea>
+            <section id="project-entity-activity"></section>
             <button class="project-entity-editor-cancel" type="button"></button>
             <button id="project-entity-submit" type="submit"></button>
           </form>
@@ -358,8 +284,11 @@ function loadShellChrome({
       setItem: vi.fn(),
       removeItem: vi.fn(),
     },
+    __darklabExtractPreferGlobalThis: true,
     tabs: [],
     recentPreviewHistory: [],
+    apiFetch,
+    logClientError,
     renderHudClock: null,
     toggleRailCollapsed: null,
     openStatusMonitor,
@@ -449,6 +378,11 @@ function loadShellChrome({
       const APP_CONFIG = global.APP_CONFIG || {};
       window.bindPressable = bindPressable;
       window.bindDisclosure = bindDisclosure;
+      window.apiFetch = apiFetch;
+      window.logClientError = logClientError;
+      window.bindOutsideClickClose = bindOutsideClickClose;
+      window.downloadUrlAsAttachment = downloadUrlAsAttachment;
+      window.downloadBlobAsAttachment = downloadBlobAsAttachment;
       global.bindDisclosure = bindDisclosure;
       window.bindDismissible = global.bindDismissible;
       window.bindMobileSheet = global.bindMobileSheet;
@@ -458,40 +392,113 @@ function loadShellChrome({
       ${ENTITY_METADATA_SRC}
       ${UI_ACTION_SHEET_SRC}
       ${ATLAS_ENTITY_ROW_SRC}
-      global.openActionSheet = window.openActionSheet;
-      global.closeActionSheet = window.closeActionSheet;
+      global.openActionSheet = openActionSheet;
+      global.closeActionSheet = closeActionSheet;
+      window.openActionSheet = openActionSheet;
+      window.closeActionSheet = closeActionSheet;
       ${PROJECT_TARGET_VALIDATION_SRC}
       ${PROJECT_WORKSPACE_CONSTANTS_SRC}
+      global.DarklabProjectWorkspaceConstants = exportedDarklabProjectWorkspaceConstants;
+      window.DarklabProjectWorkspaceConstants = exportedDarklabProjectWorkspaceConstants;
       ${PROJECT_WORKSPACE_STATE_SRC}
+      global.DarklabProjectWorkspaceState = exportedDarklabProjectWorkspaceState;
+      window.DarklabProjectWorkspaceState = exportedDarklabProjectWorkspaceState;
       ${PROJECT_ACTIVE_CONTEXT_SRC}
-      ${PROJECT_SHARED_UI_SRC}
-      ${PROJECT_DETAILS_SRC}
-      ${PROJECT_LIST_SRC}
-      ${PROJECT_NAVIGATION_SRC}
-      ${PROJECT_ENTITY_EDITOR_SRC}
-      ${PROJECT_WORKSPACE_ACTIONS_SRC}
-      ${PROJECT_WORKSPACE_SHELL_SRC}
-      ${PROJECT_WORKSPACE_LIFECYCLE_SRC}
-      ${PROJECT_WORKSPACE_RENDERER_SRC}
-      ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
-      ${PROJECT_NESTED_SHEETS_SRC}
+      global.DarklabProjectActiveContext = exportedDarklabProjectActiveContext;
+      window.DarklabProjectActiveContext = exportedDarklabProjectActiveContext;
       ${FINDING_TRIAGE_EDITOR_SRC}
-      global.DarklabFindingTriageEditor = window.DarklabFindingTriageEditor;
+      global.DarklabFindingTriageEditor = DarklabFindingTriageEditor;
+      window.DarklabFindingTriageEditor = DarklabFindingTriageEditor;
+      global.verificationStatusLabel = DarklabFindingTriageEditor.verificationStatusLabel;
+      global.verificationStatusTone = DarklabFindingTriageEditor.verificationStatusTone;
+      window.verificationStatusLabel = DarklabFindingTriageEditor.verificationStatusLabel;
+      window.verificationStatusTone = DarklabFindingTriageEditor.verificationStatusTone;
+      ${PROJECT_SHARED_UI_SRC}
+      global.DarklabProjectSharedUi = exportedDarklabProjectSharedUi;
+      window.DarklabProjectSharedUi = exportedDarklabProjectSharedUi;
+      ${PROJECT_DETAILS_SRC}
+      global.DarklabProjectDetails = exportedDarklabProjectDetails;
+      window.DarklabProjectDetails = exportedDarklabProjectDetails;
+      ${PROJECT_LIST_SRC}
+      global.DarklabProjectList = exportedDarklabProjectList;
+      window.DarklabProjectList = exportedDarklabProjectList;
+      ${PROJECT_NAVIGATION_SRC}
+      global.DarklabProjectNavigation = exportedDarklabProjectNavigation;
+      window.DarklabProjectNavigation = exportedDarklabProjectNavigation;
+      ${PROJECT_ENTITY_EDITOR_SRC}
+      global.DarklabProjectEntityEditor = exportedDarklabProjectEntityEditor;
+      window.DarklabProjectEntityEditor = exportedDarklabProjectEntityEditor;
+      ${PROJECT_WORKSPACE_ACTIONS_SRC}
+      global.DarklabProjectWorkspaceActions = exportedDarklabProjectWorkspaceActions;
+      window.DarklabProjectWorkspaceActions = exportedDarklabProjectWorkspaceActions;
+      ${PROJECT_WORKSPACE_SHELL_SRC}
+      global.DarklabProjectWorkspaceShell = exportedDarklabProjectWorkspaceShell;
+      window.DarklabProjectWorkspaceShell = exportedDarklabProjectWorkspaceShell;
+      ${PROJECT_WORKSPACE_LIFECYCLE_SRC}
+      global.DarklabProjectWorkspaceLifecycle = exportedDarklabProjectWorkspaceLifecycle;
+      window.DarklabProjectWorkspaceLifecycle = exportedDarklabProjectWorkspaceLifecycle;
+      ${PROJECT_WORKSPACE_RENDERER_SRC}
+      global.DarklabProjectWorkspaceRenderer = exportedDarklabProjectWorkspaceRenderer;
+      window.DarklabProjectWorkspaceRenderer = exportedDarklabProjectWorkspaceRenderer;
+      ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
+      global.DarklabProjectWorkspaceBootstrap = exportedDarklabProjectWorkspaceBootstrap;
+      window.DarklabProjectWorkspaceBootstrap = exportedDarklabProjectWorkspaceBootstrap;
+      ${PROJECT_NESTED_SHEETS_SRC}
+      global.DarklabProjectNestedSheets = exportedDarklabProjectNestedSheets;
+      window.DarklabProjectNestedSheets = exportedDarklabProjectNestedSheets;
       ${PROJECT_WORKSPACE_EVENTS_SRC}
+      global.DarklabProjectWorkspaceEvents = exportedDarklabProjectWorkspaceEvents;
+      window.DarklabProjectWorkspaceEvents = exportedDarklabProjectWorkspaceEvents;
       ${PROJECT_TARGETS_SRC}
+      global.DarklabProjectTargets = exportedDarklabProjectTargets;
+      window.DarklabProjectTargets = exportedDarklabProjectTargets;
       ${PROJECT_RUNS_SRC}
+      global.DarklabProjectRuns = exportedDarklabProjectRuns;
+      window.DarklabProjectRuns = exportedDarklabProjectRuns;
       ${PROJECT_MOBILE_COMPARE_SRC}
+      global.DarklabProjectMobileCompare = exportedDarklabProjectMobileCompare;
+      window.DarklabProjectMobileCompare = exportedDarklabProjectMobileCompare;
       ${PROJECT_MOBILE_SHELL_SRC}
+      global.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
+      window.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
       ${PROJECT_MOBILE_DETAIL_SRC}
+      global.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
+      window.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
       ${PROJECT_FINDINGS_DATA_SRC}
+      global.DarklabProjectFindingsData = exportedDarklabProjectFindingsData;
+      window.DarklabProjectFindingsData = exportedDarklabProjectFindingsData;
       ${PROJECT_FILTERS_SRC}
+      global.DarklabProjectFilters = exportedDarklabProjectFilters;
+      window.DarklabProjectFilters = exportedDarklabProjectFilters;
       ${PROJECT_ENTITIES_SRC}
+      global.DarklabProjectEntities = exportedDarklabProjectEntities;
+      window.DarklabProjectEntities = exportedDarklabProjectEntities;
       ${PROJECT_FINDINGS_SRC}
+      global.DarklabProjectFindings = exportedDarklabProjectFindings;
+      window.DarklabProjectFindings = exportedDarklabProjectFindings;
       ${PROJECT_FINDINGS_BOARD_SRC}
+      global.DarklabProjectFindingsBoard = exportedDarklabProjectFindingsBoard;
+      window.DarklabProjectFindingsBoard = exportedDarklabProjectFindingsBoard;
       ${FINDINGS_BOARD_MODAL_SRC}
       ${PROJECT_ARTIFACTS_SRC}
+      global.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
+      window.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
       ${PROJECT_PACKAGES_SRC}
+      global.DarklabProjectPackages = exportedDarklabProjectPackages;
+      window.DarklabProjectPackages = exportedDarklabProjectPackages;
+      ${PROJECT_REPORT_SRC}
+      global.DarklabProjectReport = exportedDarklabProjectReport;
+      window.DarklabProjectReport = exportedDarklabProjectReport;
+      ${PROJECT_ACTIVITY_SRC}
+      global.DarklabProjectActivity = exportedDarklabProjectActivity;
+      window.DarklabProjectActivity = exportedDarklabProjectActivity;
+      ${PROJECT_CONTEXT_BRIDGE_SRC}
+      var openFindingsBoard = exportedOpenFindingsBoard;
       ${SHELL_CHROME_SRC}
+      global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
+      global.openProjectAutoPromoteRuleFromAtlas = global.__darklabShellChromeExports.openProjectAutoPromoteRuleFromAtlas;
+      global.refreshProjectWorkspace = global.__darklabShellChromeExports.refreshProjectWorkspace;
+      global.openFindingsBoard = exportedOpenFindingsBoard;
     `,
   )(
     global,
@@ -582,6 +589,7 @@ function loadShellChrome({
     bindDismissible,
     bindMobileSheet,
     projectFindingsData: global.DarklabProjectFindingsData,
+    openFindingsBoard: global.openFindingsBoard,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
@@ -593,7 +601,7 @@ function loadShellChrome({
 describe('shell chrome rail sections', () => {
   it('opens Status Monitor and Findings Board from the desktop rail nav item', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (String(url).startsWith('/atlas/findings')) {
         return Promise.resolve({
           ok: true,
@@ -837,6 +845,46 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-4')).toContain('4 artifacts')
     expect(rowText('project-4')).toContain('5 packages')
     expect(rowText('project-4')).not.toContain('99 entities')
+    const desktopTabsWrap = document.querySelector('.project-explorer-tabs-wrap')
+    const desktopTabs = document.querySelector('.project-explorer-tabs')
+    expect(desktopTabsWrap?.classList.contains('tab-strip-wrap')).toBe(true)
+    expect(desktopTabsWrap?.contains(desktopTabs)).toBe(true)
+    const projectTabsScrollLeft = desktopTabsWrap.querySelector('[data-project-tabs-scroll="left"]')
+    const projectTabsScrollRight = desktopTabsWrap.querySelector('[data-project-tabs-scroll="right"]')
+    expect(projectTabsScrollLeft.textContent).toBe('')
+    expect(projectTabsScrollRight.textContent).toBe('')
+    let projectTabsScrollLeftValue = 0
+    Object.defineProperty(desktopTabs, 'clientWidth', { configurable: true, get: () => 120 })
+    Object.defineProperty(desktopTabs, 'scrollWidth', { configurable: true, get: () => 420 })
+    Object.defineProperty(desktopTabs, 'scrollLeft', {
+      configurable: true,
+      get: () => projectTabsScrollLeftValue,
+      set: value => { projectTabsScrollLeftValue = value },
+    })
+    desktopTabs.scrollBy = vi.fn(({ left }) => {
+      projectTabsScrollLeftValue += left
+      desktopTabs.dispatchEvent(new Event('scroll'))
+    })
+    desktopTabs.dispatchEvent(new Event('scroll'))
+    expect(projectTabsScrollLeft.classList.contains('u-hidden')).toBe(false)
+    expect(projectTabsScrollRight.classList.contains('u-hidden')).toBe(false)
+    expect(projectTabsScrollLeft.disabled).toBe(true)
+    expect(projectTabsScrollRight.disabled).toBe(false)
+    projectTabsScrollRight.click()
+    expect(desktopTabs.scrollBy).toHaveBeenCalled()
+    projectTabsScrollLeftValue = 240
+    document.querySelector('[data-project-tab="report"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-tab="report"]').classList.contains('is-active')).toBe(true)
+    expect(document.querySelector('.project-explorer-tabs').scrollLeft).toBe(240)
+    const activeReportTab = document.querySelector('[data-project-tab="report"]')
+    const activeReportTabs = document.querySelector('.project-explorer-tabs')
+    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, cancelable: true })
+    activeReportTab.dispatchEvent(pointerDown)
+    expect(pointerDown.defaultPrevented).toBe(true)
+    activeReportTab.click()
+    await tick()
+    expect(document.querySelector('.project-explorer-tabs')).toBe(activeReportTabs)
     expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (3 · 2 new · 1 high)')
     expect(orderedProjectIds()).toEqual(['project-1', 'project-4', 'project-2', 'project-3'])
 
@@ -1301,7 +1349,7 @@ describe('shell chrome project workspace', () => {
         labels: [{ label: 'current' }],
       },
     ]
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
@@ -1485,7 +1533,7 @@ describe('shell chrome project workspace', () => {
       pattern: 'darklab.sh',
       filters: {},
     }]
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
@@ -1662,7 +1710,8 @@ describe('shell chrome project workspace', () => {
         },
       }],
     }
-    const apiFetch = vi.fn((url) => {
+    let mobileFindingReviewState = 'triaged'
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
@@ -1671,6 +1720,19 @@ describe('shell chrome project workspace', () => {
       }
       if (url === '/projects/project-1/summary') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(summary) })
+      }
+      if (url === '/projects/project-1/findings/review' && options.method === 'POST') {
+        const payload = JSON.parse(options.body || '{}')
+        mobileFindingReviewState = String(payload.review_state || mobileFindingReviewState)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            review_state: mobileFindingReviewState,
+            counts: { updated: 1, not_found: 0 },
+            results: [{ finding_id: 'finding-1', status: 'updated' }],
+          }),
+        })
       }
       if (String(url).startsWith('/projects/project-1/findings')) {
         return Promise.resolve({
@@ -1688,7 +1750,7 @@ describe('shell chrome project workspace', () => {
               raw_line: '443/tcp open https',
               line_number: 4,
               scope: 'finding',
-              review_state: 'triaged',
+              review_state: mobileFindingReviewState,
               labels: [{ label: 'important' }],
               note: { body: 'Finding note' },
             }],
@@ -1798,9 +1860,9 @@ describe('shell chrome project workspace', () => {
       reviewSelect.dispatchEvent(new Event('change', { bubbles: true }))
       await tick()
       await tick()
-      expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/review', expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({ review_state: 'reviewed' }),
+      expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ finding_ids: ['finding-1'], review_state: 'reviewed' }),
       }))
       expect(detailBody.querySelector('.project-mobile-row-badge')?.textContent).toBe('reviewed')
       actionSheet.click()
@@ -1887,10 +1949,12 @@ describe('shell chrome project workspace', () => {
     }
     const projectEvents = new Function(
       'globalThis',
-      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn globalThis.DarklabProjectWorkspaceEvents;`,
-    )(sandbox)
+      'window',
+      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn exportedDarklabProjectWorkspaceEvents;`,
+    )(sandbox, sandbox)
     const setProjectWorkspaceMessage = vi.fn()
     const controller = projectEvents.createProjectWorkspaceEventsController({
+      findingTriageEditor: editor,
       filteredProjectFindings: () => [finding],
       mobileView: () => 'detail',
       projectFindingItems: () => [],
@@ -1944,7 +2008,7 @@ describe('shell chrome project workspace', () => {
         labels: [{ label: 'baseline' }],
       }],
     }
-    const apiFetch = vi.fn((url) => {
+    const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
@@ -2684,9 +2748,10 @@ describe('shell chrome project workspace', () => {
 
     await shell.refreshProjectWorkspace()
     await tick()
-    await tick()
 
-    expect(document.getElementById('project-explorer-body').textContent).toContain('new finding after relink')
+    await vi.waitFor(() => {
+      expect(document.getElementById('project-explorer-body').textContent).toContain('new finding after relink')
+    })
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('old finding should not persist')
   })
 
@@ -3115,7 +3180,7 @@ describe('shell chrome project workspace', () => {
         status: 'draft',
         updated: '2026-05-07T00:02:12Z',
         manifest: {
-          package_format_version: 1,
+          package_format_version: 2,
           preset: 'evidence',
           redaction_mode: 'raw',
           include_private_notes: true,
@@ -3134,6 +3199,38 @@ describe('shell chrome project workspace', () => {
             finding_ids: ['finding-1'],
             artifact_ids: ['artifact-1'],
             target_ids: ['target-1'],
+          },
+          provenance: {
+            schema_version: 1,
+            kind: 'evidence_package',
+            build: {
+              redaction_mode: 'raw',
+              include_private_notes: true,
+              preset: 'evidence',
+              selected_entity_counts: {
+                run_ids: 2,
+                transcript_run_ids: 2,
+                finding_ids: 1,
+                artifact_ids: 1,
+                target_ids: 1,
+              },
+            },
+            sources: {
+              project_links: {
+                origin_sources: ['manual'],
+                counts_by_origin: { manual: 2 },
+              },
+            },
+            privacy: {
+              redaction_mode: 'raw',
+              private_notes_included: true,
+            },
+          },
+          import_hints: {
+            schema_version: 1,
+            kind: 'evidence_package_import_hints',
+            mode: 'preview_only',
+            warnings: [],
           },
         },
       },
@@ -3361,6 +3458,40 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ ok: true }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/activity?')) {
+        const params = new URL(`https://example.test${url}`).searchParams
+        const targetType = params.get('target_type') || ''
+        const targetId = params.get('target_id') || ''
+        const events = targetType === 'finding' && targetId === 'finding-1'
+          ? [{
+              id: 'aud-finding-review',
+              created: '2026-06-06T08:16:44.000000+00:00',
+              event_type: 'finding.review_change',
+              actor: { display_name: 'nona', role: 'owner' },
+              target: { type: 'finding', id: 'finding-1' },
+              details: { review_state: 'reviewed', updated_count: 1 },
+            }]
+          : targetId === 'finding-1'
+            ? [{
+                id: 'aud-project-same-id',
+                created: '2026-06-06T08:15:44.000000+00:00',
+                event_type: 'project.link',
+                actor: { display_name: 'nona', role: 'owner' },
+                target: { type: 'project', id: 'finding-1' },
+                details: { source: 'same id should not show' },
+              }]
+            : []
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            events,
+            has_more: targetType === 'finding' && targetId === 'finding-1',
+            limit: Number(params.get('limit') || 5),
+            offset: Number(params.get('offset') || 0),
+            retention_days: 90,
+          }),
         })
       }
       if (url === '/projects/project-1/links' && options.method === 'DELETE') {
@@ -3657,7 +3788,7 @@ describe('shell chrome project workspace', () => {
           status: 'draft',
           updated: '2026-05-07T00:03:12Z',
           manifest: {
-            package_format_version: 1,
+            package_format_version: 2,
             preset: payload.preset,
             counts: {
               runs: payload.selection.run_ids.length,
@@ -3728,6 +3859,15 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-explorer-meta-row')?.classList.contains('panel-row')).toBe(true)
     expect(Array.from(document.querySelectorAll('.project-explorer-section-heading'))
       .some(heading => heading.textContent.includes('New'))).toBe(true)
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('project-workspace-overlay'),
+      expect.objectContaining({
+        level: 'modal',
+        isOpen: expect.any(Function),
+        onClose: expect.any(Function),
+        closeButtons: null,
+      }),
+    )
     expect(bindDismissible).toHaveBeenCalledWith(
       document.getElementById('project-target-editor-overlay'),
       expect.objectContaining({ level: 'modal' }),
@@ -3898,6 +4038,27 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-entity-editor-subtitle').textContent).toContain('missing security header')
     expect(document.getElementById('project-entity-labels').value).toBe('old-label')
     expect(document.getElementById('project-entity-note').value).toBe('Old finding note')
+    await vi.waitFor(() => {
+      expect(document.getElementById('project-entity-activity').textContent).toContain('Finding Review Change')
+    })
+    expect(document.getElementById('project-entity-activity').textContent).toContain('review state: reviewed')
+    expect(document.getElementById('project-entity-activity').textContent).not.toContain('same id should not show')
+    expect(document.querySelector('.project-entity-activity-row')?.classList.contains('panel-row')).toBe(true)
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/activity?target_type=finding&target_id=finding-1&limit=5&offset=0',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    document.querySelector('[data-project-entity-activity-action="open-project-activity"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
+    expect(document.querySelector('[data-project-tab="activity"]').classList.contains('is-active')).toBe(true)
+    expect(document.querySelector('[data-project-activity-filter="target_type"]').value).toBe('finding')
+    expect(document.querySelector('[data-project-activity-filter="target_id"]').value).toBe('finding-1')
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    document.querySelector('[data-project-action="edit-finding-metadata"][data-finding-id="finding-1"]').click()
+    await tick()
     document.getElementById('project-entity-labels').value = 'important, retest, Important'
     document.getElementById('project-entity-note').value = 'Needs retest'
     document.getElementById('project-entity-editor-form')
@@ -4299,6 +4460,7 @@ describe('shell chrome project workspace', () => {
     }))
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
     expect(document.getElementById('project-explorer-body').textContent).toContain('approved')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('source: manual')
     expect(document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]')).not.toBeNull()
     expectProjectPressablesBound(['.project-package-action'])
     document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]').click()
@@ -4308,7 +4470,9 @@ describe('shell chrome project workspace', () => {
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(true)
-    expect(document.getElementById('project-package-manifest-json').textContent).toContain('"package_format_version": 1')
+    expect(document.getElementById('project-package-manifest-summary').textContent).toContain('Provenance summary')
+    expect(document.getElementById('project-package-manifest-summary').textContent).toContain('manual (2)')
+    expect(document.getElementById('project-package-manifest-json').textContent).toContain('"package_format_version": 2')
     const manifestDismissible = dismissibles.find(item => item.el === document.getElementById('project-package-manifest-overlay'))
     expect(manifestDismissible?.options.isOpen()).toBe(true)
     document.querySelector('.project-package-manifest-close').click()
@@ -4549,6 +4713,10 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"estimated_archive"')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"transcript_run_ids"')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Best-guess ZIP size')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Provenance summary')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain(
+      'Project-link origin details are added',
+    )
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     await tick()
@@ -4569,6 +4737,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1'])
     expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
     expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('handoff')
     expect(document.getElementById('project-explorer-body').textContent).toContain('note')
 
     document.querySelector('[data-project-tab="runs"]').click()
@@ -4683,9 +4852,9 @@ describe('shell chrome project workspace', () => {
     reviewControl.value = 'important'
     reviewControl.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/review', expect.objectContaining({
-      method: 'PUT',
-      body: JSON.stringify({ review_state: 'important' }),
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ finding_ids: ['finding-1'], review_state: 'important' }),
     }))
     expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
     expect(document.querySelector('.project-finding-review')?.value).toBe('important')
@@ -4825,6 +4994,19 @@ describe('shell chrome project workspace', () => {
             targets: projectTargets,
             artifacts: [],
             packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/findings/review' && options.method === 'POST') {
+        const payload = JSON.parse(options.body || '{}')
+        const authoritativeReviewState = payload.finding_ids.includes('finding-high') ? 'new' : payload.review_state
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            review_state: authoritativeReviewState,
+            counts: { updated: payload.finding_ids.length, not_found: 0 },
+            results: payload.finding_ids.map(findingId => ({ finding_id: findingId, status: 'updated' })),
           }),
         })
       }
@@ -5020,13 +5202,17 @@ describe('shell chrome project workspace', () => {
     boardReview.value = 'false_positive'
     boardReview.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-high/review', expect.objectContaining({
-      method: 'PUT',
-      body: JSON.stringify({ review_state: 'false_positive' }),
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ finding_ids: ['finding-high'], review_state: 'false_positive' }),
     }))
+    await tick()
+    expect(document.querySelector(
+      '#findings-board-body [data-findings-board-review][data-finding-id="finding-high"]',
+    )?.value).toBe('new')
 
     shell.restoreHistoryRunIntoTab.mockClear()
-    document.querySelector('#findings-board-body [data-findings-board-action="open-run"]').click()
+    document.querySelector('#findings-board-body [data-findings-board-action="open-run"][data-run-id="run-old"]').click()
     await tick()
     expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
       {
@@ -5040,6 +5226,59 @@ describe('shell chrome project workspace', () => {
       },
     )
     expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('loads Findings Board project data with a separate cap for each review column', async () => {
+    const newFindings = Array.from({ length: 200 }, (_, index) => ({
+      id: `finding-new-${index}`,
+      title: `New issue ${index}`,
+      review_state: 'new',
+    }))
+    const reviewedFinding = {
+      id: 'finding-reviewed-after-cap',
+      title: 'Reviewed issue after the New page',
+      review_state: 'reviewed',
+    }
+    const apiFetch = vi.fn((url) => {
+      const target = new URL(String(url), 'http://localhost')
+      if (!target.pathname.startsWith('/projects/project-1/findings')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }
+      const reviewState = target.searchParams.get('review_state')
+      const payload = {
+        new: { findings: newFindings, total: 1001, limit: 200, offset: 0, has_more: true },
+        reviewed: { findings: [reviewedFinding], total: 1, limit: 200, offset: 0, has_more: false },
+        important: { findings: [], total: 0, limit: 200, offset: 0, has_more: false },
+        false_positive: { findings: [], total: 0, limit: 200, offset: 0, has_more: false },
+        needs_followup: { findings: [], total: 0, limit: 200, offset: 0, has_more: false },
+      }[reviewState] || { findings: newFindings, total: 1002, limit: 200, offset: 0, has_more: true }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openFindingsBoard({
+      source: 'project-workspace',
+      projectId: 'project-1',
+      projectName: 'Large Project',
+    })
+    await tick()
+
+    const requestUrls = apiFetch.mock.calls.map(([url]) => String(url))
+    expect(requestUrls).toEqual(expect.arrayContaining([
+      '/projects/project-1/findings?limit=200&offset=0&review_state=new',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=reviewed',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=important',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=false_positive',
+      '/projects/project-1/findings?limit=200&offset=0&review_state=needs_followup',
+    ]))
+    const columns = Array.from(document.querySelectorAll('#findings-board-body .project-finding-board-column'))
+    const reviewedColumn = columns.find(column => (
+      column.querySelector('.project-finding-board-column-header h3')?.textContent === 'Reviewed'
+    ))
+    expect(reviewedColumn?.querySelector('.project-finding-board-column-count')?.textContent).toBe('1')
+    expect(reviewedColumn?.textContent).toContain('Reviewed issue after the New page')
+    expect(document.getElementById('findings-board-subtitle').textContent)
+      .toContain('1,002 findings · showing first 201')
   })
 
   it('locks finding review dropdowns and board dragging for view-only team members', async () => {

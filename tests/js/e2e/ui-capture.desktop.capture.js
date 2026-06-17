@@ -1,12 +1,15 @@
 import { test, expect } from '@playwright/test'
 
 import {
+  browserSessionId,
   createShareSnapshot,
   clickHistoryRunMenuAction,
   openRailAction,
   openHistory,
   openHistoryWithEntries,
   runCommand,
+  seedProjectActivityFixture,
+  seedProjectMonitoringFixture,
   setComposerValueForTest,
   waitForHistoryRuns,
 } from './helpers.js'
@@ -85,7 +88,7 @@ async function prepareStatusMonitorTelemetryScene(page) {
 }
 
 async function waitForStatusMonitorTelemetry(page) {
-  await expect(page.locator('#status-monitor')).toBeVisible()
+  await expect(page.locator('#status-monitor')).toBeVisible({ timeout: 15_000 })
   await page.evaluate(async () => {
     if (typeof window.refreshStatusMonitor === 'function') {
       await window.refreshStatusMonitor()
@@ -120,7 +123,7 @@ async function createAndOpenWorkspaceResponseFile(page) {
 
 async function openProjectsModalWithCaptureProject(page, themeName) {
   const runId = await runCaptureCommandAndGetRunId(page, 'hostname')
-  await createCaptureProjectFixture(page, {
+  const project = await createCaptureProjectFixture(page, {
     name: `Capture Project ${themeLabel(themeName)}`,
     runIds: [runId],
     target: 'capture.darklab.sh',
@@ -131,6 +134,51 @@ async function openProjectsModalWithCaptureProject(page, themeName) {
   await page.locator('[data-project-tab="details"]').click()
   await expect(page.locator('#project-explorer-body')).toContainText(`Capture Project ${themeLabel(themeName)}`)
   await expect(page.locator('#project-explorer-body')).toContainText('capture.darklab.sh')
+  return project
+}
+
+async function openProjectTabCaptureScene(page, themeName, tabId, testInfo) {
+  const project = await openProjectsModalWithCaptureProject(page, themeName)
+  const sessionId = await browserSessionId(page)
+  if (tabId === 'monitoring') {
+    seedProjectMonitoringFixture(testInfo, {
+      sessionId,
+      projectId: project.id,
+    })
+  } else if (tabId === 'activity') {
+    seedProjectActivityFixture(testInfo, {
+      sessionId,
+      projectId: project.id,
+    })
+  }
+  if (tabId === 'monitoring' || tabId === 'activity') {
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+  }
+  await page.locator(`[data-project-tab="${tabId}"]`).click()
+  await expect(page.locator(`[data-project-tab="${tabId}"]`)).toHaveClass(/\bis-active\b/)
+  if (tabId === 'monitoring') {
+    const root = page.locator(`[data-project-monitoring-root="${project.id}"]`)
+    await expect(root).toBeVisible({ timeout: 15_000 })
+    await expect(root).toContainText('Ports Browser Watch')
+    await expect(root).toContainText('New open port 443/tcp https')
+    await expect(root.locator('[data-project-monitoring-action="new-monitor"]')).toBeVisible()
+  } else if (tabId === 'activity') {
+    const root = page.locator('[data-project-activity-root]')
+    await expect(root).toBeVisible({ timeout: 15_000 })
+    await expect(root.locator('.project-activity-row').first()).toBeVisible({ timeout: 15_000 })
+  } else if (tabId === 'report') {
+    const root = page.locator('.project-report-root').first()
+    await expect(root.locator('[data-project-report-metadata="engagement_name"]')).toBeVisible({ timeout: 15_000 })
+    await root.locator('[data-project-report-metadata="engagement_name"]').fill(`Capture Report ${themeLabel(themeName)}`)
+    await root.locator('[data-project-report-metadata="date_range"]').fill('2026-06-01 to 2026-06-05')
+    await root.locator('[data-project-report-metadata="executive_summary"]').fill('Capture summary for the v2.2 project workspace.')
+    await root.locator('[data-project-report-action="preview"]').click()
+    await expect(root.frameLocator('.project-report-preview-frame').locator('body')).toContainText('Capture Report', {
+      timeout: 15_000,
+    })
+  }
 }
 
 async function openAtlasModalWithCaptureData(page) {
@@ -355,6 +403,33 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await openProjectsModalWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'project-monitoring-tab',
+    title: 'Main UI - Projects modal Monitoring tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openProjectTabCaptureScene(page, themeName, 'monitoring', testInfo)
+    },
+  },
+  {
+    slug: 'project-activity-tab',
+    title: 'Main UI - Projects modal Activity tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openProjectTabCaptureScene(page, themeName, 'activity', testInfo)
+    },
+  },
+  {
+    slug: 'project-report-tab',
+    title: 'Main UI - Projects modal Report tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openProjectTabCaptureScene(page, themeName, 'report', testInfo)
     },
   },
   {
@@ -598,7 +673,10 @@ const scenes = [
       await freshCaptureHome(page, { themeName })
       await prepareStatusMonitorTelemetryScene(page)
       await runLongCaptureCommand(page)
-      await page.locator('#hud-status-cell').click()
+      await page.evaluate(async () => {
+        if (typeof window.openStatusMonitor !== 'function') throw new Error('openStatusMonitor is not available')
+        await window.openStatusMonitor({ source: 'capture' })
+      })
       await waitForStatusMonitorTelemetry(page)
     },
   },
@@ -614,7 +692,7 @@ const scenes = [
   },
 ]
 
-test('desktop screenshot capture pack', async ({ page }) => {
+test('desktop screenshot capture pack', async ({ page }, testInfo) => {
   test.skip(!process.env.RUN_CAPTURE, 'set RUN_CAPTURE=1 to run the UI screenshot capture pack')
   test.setTimeout(3_600_000)
 
@@ -626,7 +704,7 @@ test('desktop screenshot capture pack', async ({ page }) => {
   for (const themeName of themes) {
     for (const [index, scene] of scenes.entries()) {
       await test.step(`${themeLabel(themeName)} :: ${scene.title}`, async () => {
-        await scene.run(page, themeName)
+        await scene.run(page, themeName, testInfo)
         await saveCapture(page, manifest, {
           ui: 'desktop',
           themeName,

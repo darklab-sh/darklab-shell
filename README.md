@@ -40,21 +40,34 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
-- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; the generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
-- **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
-- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, and draft evidence packages without copying the source records. Active projects can auto-link completed runs and the Atlas entities those runs produce, and Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes. Rules set to apply to new runs watch future runs in the same personal or team scope and can add matches to the rule's project even when another project is active. When a rule matches entities for the active project, those links are confirmed as rule-created links instead of entering the normal confirm/dismiss queue. Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, and evidence packages, manual run-link actions can include the entities found in the same run, run-unlink actions can clean up same-run disposable entity links from the project with a separate curated-entity opt-in and finding-impact counts, terminal `project link run last` stays scoped to the current tab, terminal `project rename` handles quick name changes, project rows show run/finding/artifact/package scale before opening them, project views hide suppressed Atlas noise by default, expose paged, filterable finding review in list or board form, artifact review, cached entity intel context, metadata editing, and project-scoped Atlas exports, and package exports preserve selected project evidence through operator-configured presets with raw transcript pages, cleaner manifest line indexes, polled archive builds, raw artifacts, or redacted text/JSON artifact derivatives
+- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
+- **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. File writes, folder creation, moves, and deletes create audit-log rows with path/count/size metadata but not file contents. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
+- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, packages, and reports without copying the source records.
+  - Active projects can auto-link completed runs and the Atlas entities those runs produce. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
+  - Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, evidence packages, and readable report exports.
+  - Project views hide suppressed Atlas noise by default and expose paged finding review in list or board form, artifact review, cached entity intel context, metadata editing, project-scoped Atlas exports, and target/finding provenance context.
+  - The Monitoring tab shows project-linked watcher checks with status totals, grouped monitor cards, severity and top-signal summaries, filters, current triage state, Run Details and Compare links, safe missing-run states when older baseline or current runs have been deleted, and a **New monitor** action that opens the watcher form already linked to the project.
+  - Evidence packages preserve selected project evidence through operator-configured presets, provenance-aware manifests, import hints, raw transcript pages, cleaner manifest line indexes, polled archive builds, safe audit correlation, raw artifacts, or redacted text/JSON artifact derivatives.
+  - The Activity tab shows safe project audit rows with filters, paging, collapsed details, and mobile rows, so project users can review what changed without opening operator diagnostics. Metadata edit sheets also show a small Recent activity panel for the item you're editing, with a jump into the filtered Activity tab.
+  - The Report tab turns selected project material into a narrative engagement report with explicit draft saves, section ordering, paged included-evidence controls for large projects, HTML preview, markdown/HTML archive export, safe audit correlation for job-backed exports, and browser Print/PDF.
 - **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, team-scope sharing for live PTY sessions, and completed transcripts saved back into normal history
-- **Session tokens and teams** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, saved options, and team memberships across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. The Options **Teams** tab and `/api/v1/teams` cover team creation, invites, member edits, recovery codes, archive/reactivate, and shared scope management; `darklab team ...` covers script-friendly team creation, invites, joins, member edits, recovery codes, and saved CLI scope; and the terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation. Team scopes share team-owned runs while they're still running, plus History, Run Details, Files, Projects, project targets, finding review, labels, notes, cached Atlas intel, linked-run artifacts, evidence packages, shared workflows, schedules, watchers, notification delivery history, completed-run AI assists, and explicit team secrets while keeping personal work separate. Archived teams stay visible for review and reactivation, and Files stays readable, but archived teams cannot be used for active team work, invites, membership edits, invite revocation, recovery-code rotation, or file changes until reactivated. Reactivating an archived team restores access, but schedules and watchers paused by archival stay paused until someone resumes them. Team roles keep viewers read-only while operators, admins, and owners handle the write actions their roles allow; view-only team scope disables destructive/write, suppression, finding-review, history metadata edit and delete, share snapshot, and write-only select-mode controls where possible and explains role denials when a stale action is rejected. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
+- **Session tokens and teams** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, saved options, and team memberships across browsers and devices.
+  - A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor.
+  - The Options **Teams** tab and `/api/v1/teams` cover team creation, invites, member edits, recovery codes, archive/reactivate, shared scope management, a Recent activity preview for owners/admins, and an owner/admin Activity subtab for safe team-governance audit rows. `darklab team ...` covers script-friendly team creation, invites, joins, member edits, recovery codes, and saved CLI scope; the terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation.
+  - Team scopes share team-owned runs while they're still running, plus History, Run Details, Files, Projects, project targets, finding review, labels, notes, cached Atlas intel, linked-run artifacts, evidence packages, shared workflows, schedules, watchers, notification delivery history, completed-run AI assists, and explicit team secrets while keeping personal work separate.
+  - Archived teams stay visible for review and reactivation, and Files stays readable, but archived teams cannot be used for active team work, invites, membership edits, invite revocation, recovery-code rotation, or file changes until reactivated. Reactivating an archived team restores access, but schedules and watchers paused by archival stay paused until someone resumes them.
+  - Team roles keep viewers read-only while operators, admins, and owners handle the write actions their roles allow; view-only team scope disables destructive/write, suppression, finding-review, history metadata edit and delete, share snapshot, and write-only select-mode controls where possible and explains role denials when a stale action is rejected.
+  - `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; app-native intel response bodies are omitted from share/styled export surfaces, while local text exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion, using command-root-only titles and exit/elapsed summaries without sending anything outside the browser
-- **Outbound notifications** — durable `tok_` sessions and active teams can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, terminal `notify` management, retries, and delivery audit rows
+- **Outbound notifications** — durable `tok_` sessions and active teams can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, terminal `notify` management, retries, delivery audit rows, and audit-log entries for channel config changes that do not store secret values
 - **Scheduled runs** — durable `tok_` sessions can save recurring commands in the active personal or team scope with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
-- **Watchers** — durable `tok_` sessions can turn a command or completed run in the active personal or team scope into a recurring change monitor, capture the first successful run as the baseline when needed, review the latest diff and fire audit from the browser, pause/resume checks, and accept the latest run as the new baseline when a change is expected
+- **Watchers** — durable `tok_` sessions can turn a command or completed run in the active personal or team scope into a recurring change monitor, capture the first successful run as the baseline when needed, link checks to Projects from the Watchers modal or `darklab watch`, review latest diffs and fire timelines from the Watchers modal or Project Monitoring tab, tune noise with per-watcher policies, triage expected or resolved fires without changing the baseline, pause/resume checks, and accept the latest run as the new baseline when a change is expected
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior, command outcome summaries, and default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` (with `--json` for a machine-readable entry), `commands search <term>`, and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, subcommands, and per-tool knowledge guidance (notes, gotchas, safe defaults, and artifact behavior) from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, manage team scope, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
 - **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. Users can save personal or team-scoped workflows with `{{variables}}`, edit/delete them above the built-ins, and run them from the terminal with `workflow list/show/run`
-- **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
+- **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting for commands, APIs, and dynamic app routes, shared PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, an IP-gated `/diag/audit` viewer for filtered audit rows and capped CSV/JSON downloads, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
 - **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite by default, Postgres for larger deployments, optional large-body offload under `data_dir/body-store`, and configurable retention pruning via `permalink_retention_days`
@@ -93,7 +106,7 @@ Before you begin, make sure you have:
 - Python 3.14+
 - pip3
 - Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- (Optional) Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. If not configured or available, the app falls back to in-process mode
+- Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. Redis is required when `WEB_CONCURRENCY` is greater than `1`; single-worker local development can run without Redis and use in-process state.
 
 Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter, redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
 
@@ -151,7 +164,7 @@ At a high level:
 
 - the browser renders the shell UI and reads SSE output streams
 - Flask/Gunicorn handles routes, validation, built-in commands, and run setup
-- Redis coordinates shared worker state such as rate limits, run replay, and kill tracking
+- Redis coordinates shared worker state such as rate limits, run replay, and kill tracking. A baseline dynamic-route throttle also rejects noisy HTTP scans before they can crowd out normal command start or kill requests.
 - SQLite or Postgres plus output files store history and share data
 - real commands run in subprocesses, not inside the web worker
 
@@ -393,7 +406,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [DOC_STANDARDS.md](DOC_STANDARDS.md) - Documentation structure, preferred templates, and review rules for ongoing doc updates
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
-- [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](TODO.md) - Backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
@@ -424,7 +437,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── .markdownlint-cli2.jsonc    # markdownlint-cli2 config — Markdown lint rules used by npm run lint:md
 ├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
 ├── .tooling/                   # Developer/test/lint tool configuration; app runtime config lives under app/conf/
-│   ├── eslint.config.js        # ESLint config — indentation, quotes, and semicolon rules for JS tooling/test files
+│   ├── eslint.config.js        # ESLint config — browser globals plus JS tooling/test style rules
 │   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
 │   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
 │   ├── playwright.capture.mobile.config.js  # Playwright config for the mobile UI screenshot capture pipeline
@@ -477,6 +490,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── config.yaml             # Application configuration (see CONFIGURATION.md)
 │   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
 │   │   ├── package_presets.yaml    # Evidence package preset catalog used by the package wizard
+│   │   ├── report_templates.yaml   # Engagement report template catalog used by Project reports
 │   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── themes/                 # Built-in theme definitions (one YAML per theme — apricot_sand, charcoal_amber, darklab_obsidian, etc.)
@@ -490,6 +504,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── database.py         # DB connection, schema init, retention pruning
 │   │   ├── database_backend.py # Backend enum, dialect helpers, pool setup, and storage diagnostics boundary
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
+│   │   ├── http_rate_limit.py  # Baseline dynamic-route throttle for scanner-resistant request handling
 │   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
 │   │   ├── migrations/         # Postgres schema migration registry and runner
 │   │   │   ├── __init__.py     # Ordered Postgres migration list
@@ -521,9 +536,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0025_team_scope_workspace_metadata.py # Postgres team-owned workspace-file metadata
 │   │   │   ├── v0026_project_auto_promote_rules.py # Postgres Project auto-promote rules
 │   │   │   ├── v0027_atlas_import_sources.py # Postgres Atlas import draft, batch, and source-link tables
-│   │   │   └── v0028_finding_triage_details.py # Postgres finding remediation and verification table
+│   │   │   ├── v0028_finding_triage_details.py # Postgres finding remediation and verification table
+│   │   │   ├── v0029_project_reports.py # Postgres Project report draft table
+│   │   │   ├── v0030_audit_events.py # Postgres audit event table and indexes
+│   │   │   ├── v0031_run_output_summary_status.py # Postgres run-output summary backfill status markers
+│   │   │   ├── v0032_watcher_monitoring_phase0.py # Postgres watcher monitoring project-link and fire-triage schema
+│   │   │   └── v0033_watcher_monitoring_policy.py # Postgres watcher monitoring policy controls
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
-│   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
+│   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
 │   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
@@ -560,6 +580,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── materializer.py # Run-output entity materialization into the Atlas tables
 │   │   │   ├── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
 │   │   │   └── scope.py        # Shared Atlas owner and source-scope predicates
+│   │   ├── audit/
+│   │   │   ├── __init__.py     # Audit event service package exports
+│   │   │   ├── automation.py   # Shared schedule and watcher audit-event helpers
+│   │   │   ├── context.py      # Request, scope, and actor context helpers for audit rows
+│   │   │   ├── models.py       # Audit event types, target types, and recording-mode registry
+│   │   │   ├── queries.py      # Audit event filtering and row serialization helpers
+│   │   │   ├── recorder.py     # Bounded audit recorder with hashed session identity
+│   │   │   └── retention.py    # Audit retention pruning and disabled-state startup warning
 │   │   ├── commands/
 │   │   │   ├── __init__.py     # Command service package marker
 │   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar
@@ -601,7 +629,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
 │   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
 │   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
-│   │   │   └── models.py       # Shared diff result dataclass and diff-kind constants
+│   │   │   ├── models.py       # Shared diff result dataclass and diff-kind constants
+│   │   │   └── rollups.py      # Watcher-fire severity and top-signal rollups for dashboards and digests
 │   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
@@ -672,12 +701,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
+│   │   │   ├── monitoring.py   # Project Monitoring tab payload, watcher status cards, and fire timeline helpers
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
 │   │   │   ├── package_rendering.py # Evidence package HTML, Markdown, JSON, and transcript export helpers
 │   │   │   ├── packages.py     # Evidence package payload, manifest, redaction, and archive-name helpers
 │   │   │   ├── preferences.py  # Project-related session preference helpers
+│   │   │   ├── provenance.py   # Safe project-link provenance shaping helpers
 │   │   │   ├── queries.py      # Project list, summary, run, entity, and artifact query helpers
 │   │   │   ├── scope.py        # Project personal/team owner-scope SQL helpers
 │   │   │   ├── slugs.py        # Project slug normalization and allocation helpers
@@ -689,6 +720,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
 │   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
 │   │   │   └── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
+│   │   ├── reports/
+│   │   │   ├── __init__.py     # Public report helper exports
+│   │   │   ├── composition.py  # Report composition context helpers
+│   │   │   ├── export.py       # Report archive bundle helpers
+│   │   │   ├── jobs.py         # Async report archive export job helpers
+│   │   │   ├── models.py       # Report draft, section, selection, and export preference models
+│   │   │   ├── redaction.py    # Report redaction-rule wrapper
+│   │   │   ├── rendering.py    # Report Markdown and HTML rendering helpers
+│   │   │   ├── storage.py      # Owner-scoped report draft persistence helpers
+│   │   │   └── templates.py    # Config-backed report template catalog loader
 │   │   ├── runs/
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
@@ -754,6 +795,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── __init__.py     # Workspace service package marker
 │   │       └── files.py        # App-mediated personal/team workspace path, quota, and cleanup helpers
 │   ├── static/
+│   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/
 │   │   │   ├── core/
 │   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
@@ -778,7 +820,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   └── components.css # Tabs, search UI, permalink surfaces, toast, and shared menu components
 │   │   │   ├── shell-chrome.css # Desktop shell: left rail, tabbar row, and bottom HUD bar
 │   │   │   ├── shell.css       # Terminal shell frame, panels, generic modal foundations, and utility buttons
-│   │   │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
+│   │   │   ├── styles.css      # Compatibility CSS entrypoint; templates link modular CSS files directly
 │   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── favicon.ico         # Site favicon
@@ -786,13 +828,15 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
 │   │       ├── autocomplete.js # Command autocomplete dropdown
-│   │       ├── controller.js   # Initialization and event wiring (loads after app.js)
+│   │       ├── controller.js   # Initialization and event wiring imported by shell_bootstrap.entry.js
+│   │       ├── controller_action_bridge.js # Controller action bridge for ESM-loaded runtime helpers
 │   │       ├── core/
 │   │       │   ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
 │   │       │   ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
 │   │       │   ├── config.js   # APP_CONFIG bootstrap reader
 │   │       │   ├── dom.js      # Shared DOM element references
 │   │       │   ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
+│   │       │   ├── lazy_assets.js # Small loader for rarely-used scripts and modules
 │   │       │   ├── output_core.js # Pure output prompt/signal helpers shared by output.js and unit harnesses
 │   │       │   ├── run_output_model.js # Browser-side typed run-output line-event schema and legacy compatibility helpers
 │   │       │   ├── runner_core.js # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
@@ -801,46 +845,59 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── state.js    # Shared app-state store/accessors
 │   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
 │   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
+│   │       ├── e2e_test_hooks.js # Test-only browser hooks used by Playwright and unit harnesses
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
-│   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
+│   │       ├── export_pdf.js   # Lazy-loaded shared PDF export module
 │   │       ├── features/
 │   │       │   ├── atlas/
-│   │       │   │   ├── atlas_entity_detail.js # Session Entity Atlas entity detail rendering helpers
-│   │       │   │   ├── atlas_entity_row.js # Shared Atlas entity rows used by Atlas and Projects
-│   │       │   │   ├── atlas_mobile.js # Mobile Session Entity Atlas list/detail, filters, and action-sheet controller
-│   │       │   │   ├── atlas_overlay.js # Session Entity Atlas overlay controller and route wiring
+│   │       │   │   ├── atlas_bridge.js # Atlas ESM bridge for lazy overlay modules
+│   │       │   │   ├── atlas_entity_detail.js # Lazy-loaded Session Entity Atlas entity detail rendering helpers
+│   │       │   │   ├── atlas_entity_row.js # Lazy-loaded shared Atlas entity rows used by Atlas and Projects
+│   │       │   │   ├── atlas_mobile.js # Lazy-loaded mobile Session Entity Atlas list/detail, filters, and action-sheet controller
+│   │       │   │   ├── atlas_mobile_bridge.js # Atlas mobile ESM bridge for lazy mobile views
+│   │       │   │   ├── atlas_overlay.js # Lazy-loaded Session Entity Atlas overlay controller and route wiring
 │   │       │   │   └── atlas_tabs.js # Session Entity Atlas tab metadata and count helpers
 │   │       │   ├── autocomplete/
 │   │       │   │   ├── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
 │   │       │   │   └── suggestions.js # Command autocomplete suggestion resolution, recent values, and value-slot application
 │   │       │   ├── command-registry/
-│   │       │   │   └── command_registry.js # FAQ command helpers plus Command Registry and Command Catalog modal logic
+│   │       │   │   ├── command_registry.js # Lazy-loaded Command Registry and Command Catalog modal logic
+│   │       │   │   ├── command_registry_bridge.js # Command registry ESM bridge for lazy command catalog UI
+│   │       │   │   └── faq_helpers.js # FAQ command chips, allowed-command summary, and limits rendering
 │   │       │   ├── findings/
 │   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
-│   │       │   │   └── findings_board_modal.js # Top-level Findings Board modal and drag/drop review updates
+│   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
 │   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
 │   │       │   │   ├── history_links.js # History run permalink and snapshot link helpers
 │   │       │   │   ├── history_mutations.js # History delete/clear confirmations and loading overlay helpers
+│   │       │   │   ├── history_panel_bridge.js # History panel ESM bridge for lazy history UI wiring
 │   │       │   │   ├── history_project_actions.js # History project filter options and add-run-to-project flows
 │   │       │   │   ├── history_recall.js # Command recall history and prompt navigation helpers
 │   │       │   │   ├── history_restore.js # Restoring saved runs into terminal tabs and source-line highlighting
+│   │       │   │   ├── history_restore_bridge.js # History restore ESM bridge for saved-session hydration
 │   │       │   │   ├── history_rows.js # History drawer run/snapshot rows, metadata badges, and row action menus
-│   │       │   │   ├── history_run_details.js # Run Details modal rendering, tabs, loading, and actions
+│   │       │   │   ├── history_run_details.js # Lazy-loaded Run Details modal rendering, tabs, loading, and actions
+│   │       │   │   ├── history_run_modal_state_bridge.js # History modal-state ESM bridge for run-detail views
 │   │       │   │   └── history_search.js # Ctrl+R reverse-history search dropdown and keyboard handling
 │   │       │   ├── mobile/
 │   │       │   │   ├── mobile_menu_actions.js # Mobile hamburger menu action dispatch
 │   │       │   │   ├── mobile_running_indicator.js # Mobile background-running tab chip and tab-edge glow behavior
-│   │       │   │   └── mobile_shell_layout.js # Mobile shell DOM reparenting, viewport mode, and keyboard state
+│   │       │   │   ├── mobile_shell_layout.js # Mobile shell DOM reparenting, viewport mode, and keyboard state
+│   │       │   │   └── mobile_shell_layout_bridge.js # Mobile shell-layout ESM bridge for lazy mobile chrome
 │   │       │   ├── preferences/
 │   │       │   │   ├── notification_channels.js # Options modal outbound notification channel list, editor, mute, delete, and test-send helpers
 │   │       │   │   ├── preferences.js # Session preference loading, persistence, and Options modal control syncing
+│   │       │   │   ├── secrets_bridge.js # Secrets preference-panel ESM bridge
 │   │       │   │   ├── secrets_panel.js # Options modal encrypted secret list, replace, delete, and terminal value prompt helpers
+│   │       │   │   ├── session_token_bridge.js # Session-token preference-panel ESM bridge
 │   │       │   │   ├── session_token_controls.js # Options modal session token generation, migration, and clearing controls
 │   │       │   │   └── teams_panel.js # Options modal team creation, members, invites, recovery, and scope actions
 │   │       │   ├── projects/
 │   │       │   │   ├── project_active_context.js # Active Project HUD context, refresh, and target discovery helpers
-│   │       │   │   ├── project_artifacts.js # Project Artifacts rows, status badges, preview, and download helpers
+│   │       │   │   ├── project_activity.js # Lazy-loaded Project Activity tab filters, paging, rows, and safe audit details
+│   │       │   │   ├── project_artifacts.js # Lazy-loaded Project Artifacts rows, status badges, preview, and download helpers
+│   │       │   │   ├── project_context_bridge.js # Project context ESM bridge for workspace-aware actions
 │   │       │   │   ├── project_details.js # Project Details labels, notes autosave, and target section rendering
 │   │       │   │   ├── project_entities.js # Project Entities rows, rules, picker, export, and Atlas handoff helpers
 │   │       │   │   ├── project_entity_editor.js # Project metadata editor lifecycle and save flow
@@ -848,13 +905,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_findings.js # Project Findings rows, bulk review toolbar, and review controls
 │   │       │   │   ├── project_findings_board.js # Project Findings board columns, cards, and card actions
 │   │       │   │   ├── project_findings_data.js # Project Findings cache, filtered results, and loading helpers
+│   │       │   │   ├── project_hud_bridge.js # Project HUD ESM bridge for lazy workspace status UI
 │   │       │   │   ├── project_list.js # Project list/sidebar ordering, sections, and desktop/mobile row rendering
 │   │       │   │   ├── project_mobile_compare.js # Project mobile run comparison sheet
 │   │       │   │   ├── project_mobile_detail.js # Project mobile detail tab bodies, rows, and action sheets
 │   │       │   │   ├── project_mobile_shell.js # Project mobile view state, create form, and project list composition
+│   │       │   │   ├── project_monitoring.js # Lazy-loaded Project Monitoring filters, grouped cards, policy chips, timeline, run actions, and triage controls
 │   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
 │   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
-│   │       │   │   ├── project_packages.js # Evidence package rows, manifest preview, wizard, and download helpers
+│   │       │   │   ├── project_packages.js # Lazy-loaded evidence package rows, manifest preview, wizard, and download helpers
+│   │       │   │   ├── project_report.js # Lazy-loaded Project Report tab editor, preview, export, and print/PDF helpers
 │   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
 │   │       │   │   ├── project_shared_ui.js # Shared Project formatting, metadata chips, rows, and button helpers
 │   │       │   │   ├── project_target_validation.js # Project target editor copy and value validation helpers
@@ -868,6 +928,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_workspace_shell.js # Project workspace modal shell, messages, request, and refresh broadcast helpers
 │   │       │   │   └── project_workspace_state.js # Project workspace browser state holder
 │   │       │   ├── run-comparison/
+│   │       │   │   ├── history_compare_bridge.js # Run comparison ESM bridge for lazy compare overlays
 │   │       │   │   ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
 │   │       │   │   ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers
 │   │       │   │   ├── history_compare_launcher.js # Run Comparison candidate picker and manual run-search flow
@@ -879,15 +940,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── runner_persistence.js # Client-side saved-run persistence for local runner commands
 │   │       │   │   └── runner_workspace.js # Workspace-terminal command parsing and path helpers
 │   │       │   ├── schedules/
-│   │       │   │   └── schedules_modal.js # Schedules modal state, cadence preview, schedule actions, and run handoffs
+│   │       │   │   └── schedules_modal.js # Lazy-loaded Schedules modal state, cadence preview, schedule actions, and run handoffs
 │   │       │   ├── shortcuts/
 │   │       │   │   ├── global_shortcuts.js # Global tab/action/chrome shortcut matching and dispatch
 │   │       │   │   └── shortcuts_key_handler.js # Global ? keyboard shortcut for the shortcuts overlay
 │   │       │   ├── status-monitor/
-│   │       │   │   ├── status_monitor_core.js # Pure Status Monitor formatting, date, hashing, and telemetry helpers
-│   │       │   │   ├── status_monitor_data.js # Status Monitor endpoint loading and dashboard data aggregation
-│   │       │   │   └── status_monitor_resources.js # Status Monitor CPU/memory resource sampling and sparkline helpers
+│   │       │   │   ├── status_monitor_core.js # Lazy-loaded Status Monitor formatting, date, hashing, and telemetry helpers
+│   │       │   │   ├── status_monitor_data.js # Lazy-loaded Status Monitor endpoint loading and dashboard data aggregation
+│   │       │   │   └── status_monitor_resources.js # Lazy-loaded Status Monitor CPU/memory resource sampling and sparkline helpers
 │   │       │   ├── tabs/
+│   │       │   │   ├── share_redaction_bridge.js # Share-redaction ESM bridge for tab export flows
 │   │       │   │   ├── tab_close_lifecycle.js # Tab close, detach, kill-confirmation, and deferred-removal helpers
 │   │       │   │   ├── tab_drag_reorder.js # Tab pointer/touch drag reordering behavior
 │   │       │   │   ├── tab_exports.js # Tab transcript copy, export, and permalink actions
@@ -896,6 +958,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── terminal/
 │   │       │   │   ├── composer_controller.js # Terminal composer paste, focus, autocomplete input, and keyboard handling
 │   │       │   │   ├── composer_editing.js # Terminal composer caret, selection, and word-boundary helpers
+│   │       │   │   ├── composer_prompt_bridge.js # Composer prompt ESM bridge for terminal prompt rendering
 │   │       │   │   ├── local_commands.js # Terminal-native theme/config command handlers and shared local-command helpers
 │   │       │   │   └── mobile_composer_keyboard.js # Mobile composer keyboard, viewport-height, and submit listeners
 │   │       │   ├── theme/
@@ -903,9 +966,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── tour/
 │   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
 │   │       │   ├── watchers/
-│   │       │   │   └── watchers_modal.js # Watchers modal state, diff summary, cadence preview, fire audit, and run handoffs
+│   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
-│   │       │   │   └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
+│   │       │   │   ├── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
+│   │       │   │   └── workflows_bridge.js # Workflows ESM bridge for lazy workflow panels
 │   │       │   └── workspace/
 │   │       │       ├── workspace_autocomplete_cache.js # Files autocomplete cache refresh and path hint helpers
 │   │       │       ├── workspace_drag_drop.js # Files browser drag/drop move behavior
@@ -913,17 +977,25 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── history.js      # Command history chips, drawer rows, filters, and compare entry points
 │   │       ├── mobile_chrome.js # Mobile shell chrome — peek/menu routing, viewport mode, pull-to-refresh suppression
 │   │       ├── output.js       # ANSI rendering and line management
+│   │       ├── output_bridge.js # Output ESM bridge for terminal output helpers
+│   │       ├── output_mode_bridge.js # Output-mode ESM bridge for display toggles
+│   │       ├── permalink.entry.js # Module entry for the permalink page bundle
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
-│   │       ├── pty.js          # Browser-side interactive PTY controller backed by xterm.js
+│   │       ├── pty.js          # Lazy-loaded interactive PTY controller backed by xterm.js
 │   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
+│   │       ├── runner_bridge.js # Runner ESM bridge for command execution helpers
+│   │       ├── runtime_bridge.js # Runtime ESM bridge for shared browser compatibility APIs
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
 │   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
-│   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller (loads last)
-│   │       ├── status_monitor.js  # Status Monitor modal/sheet controller
+│   │       ├── shell_bootstrap.entry.js # Module entry for shell bootstrap controllers
+│   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller
+│   │       ├── status_monitor.js  # Lazy-loaded Status Monitor modal/sheet controller
 │   │       ├── tabs.js         # Tab lifecycle management
-│   │       ├── tour_modal.js   # Desktop visual onboarding tour carousel
+│   │       ├── tabs_bridge.js # Tabs ESM bridge for tab lifecycle helpers
+│   │       ├── tour_modal.js   # Lazy-loaded desktop visual onboarding tour carousel
 │   │       ├── ui/
 │   │       │   ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
+│   │       │   ├── overlay_actions_bridge.js # Overlay action ESM bridge for shared overlay controls
 │   │       │   ├── ui_action_sheet.js # Shared mobile action-sheet primitive for contextual row/detail actions
 │   │       │   ├── ui_confirm.js # showConfirm primitive — shared confirmation-dialog surface
 │   │       │   ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel lifecycle
@@ -934,26 +1006,27 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── ui_outside_click.js # Ambient outside-click dismissal helper
 │   │       │   ├── ui_pressable.js # Unified pointer/click/keyboard activation contract
 │   │       │   └── ui_tab_strip_edges.js # Shared horizontal tab-strip overflow edge indicators
-│   │       ├── vendor/         # Committed browser builds — generated by scripts/build_vendor.mjs
-│   │       │                   #   from npm packages in package.json; regenerate with npm run vendor:sync
+│   │       ├── vendor/         # Committed browser vendor builds — generated by scripts/build_vendor.mjs
 │   │       │   ├── ansi_up.js          # ANSI-to-HTML (ansi_up v6, ESM-only — wrapped as IIFE browser global)
 │   │       │   ├── jspdf.umd.min.js    # PDF generation (jsPDF UMD build, copied as-is from npm)
 │   │       │   ├── xterm-addon-fit.js  # xterm fit addon for interactive PTY sizing
 │   │       │   ├── xterm.css           # xterm stylesheet for interactive PTY tabs
 │   │       │   └── xterm.js            # xterm browser terminal for interactive PTY tabs
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
+│   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
 │   │       └── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
 │   └── templates/
+│       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
+│       ├── diag_audit.html     # Operator audit-log viewer and export links (IP-gated)
 │       ├── index.html          # Frontend HTML shell rendered by Flask
 │       ├── permalink.html      # Live permalink page template
 │       ├── permalink_base.html # Shared shell for permalink pages
 │       ├── permalink_error.html # Missing/expired permalink template
 │       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
 │       └── theme_vars_style.html # Injected CSS variable block for the active theme
+├── assets.config.json         # Frontend asset bundle membership/order for scripts/build_assets.mjs
 ├── assets/                     # README media assets (demo videos)
-├── data/                       # Writable volume — SQLite database, artifacts, body-store files, and secret key file
-│   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml          # Local Compose stack with Redis, optional Postgres, optional local AI providers, and the shell app
 ├── docs/
 │   ├── ai-privacy.md          # Optional AI assist privacy posture and operator checks
@@ -971,13 +1044,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── grafana/
 │   │   └── darklab-overview.json # Starter Grafana dashboard for the Prometheus /metrics endpoint
 │   └── run_local.sh             # Script to run without Docker using Python directly
+├── frontend-globals.allowlist.json # Intentional browser global allowlist for frontend module inventory checks
 ├── package-lock.json           # npm dependency lockfile (auto-generated by npm install)
 ├── package.json                # JS dev dependencies and test scripts
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
-│                               #   tests that import app.py get correct static analysis in VS Code
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
 ├── scripts/
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
+│   ├── build_assets.mjs       # Generates committed frontend bundles in app/static/build/ (run via npm run assets:sync)
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
@@ -988,6 +1062,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
+│   ├── inventory_frontend_modules.mjs # Reports/checks frontend globals, publish paths, and cross-file reads
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
 │   ├── migrate_sqlite_to_postgres.py # Offline SQLite-to-Postgres cutover helper with row-count and file-reference validation
 │   ├── obs_recording.mjs       # Minimal OBS WebSocket helper used by the demo recording wrappers
@@ -1000,122 +1075,132 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── run_postgres_tests.sh   # Opt-in Postgres pytest lane with disposable container, host DSN, and Compose-network modes
 │   ├── run_pytest.sh           # Local pytest wrapper — pins repo config/rootdir and keeps collection scoped
 │   └── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
-└── tests/
-    ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
-    ├── js/
-    │   ├── e2e/                # Playwright end-to-end tests (require running Flask server)
-    │   │   ├── autocomplete.spec.js # autocomplete dropdown coverage — context-aware suggestions, pipe-stage hints, accept paths
-    │   │   ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
-    │   │   ├── commands.spec.js # command execution, denial, and status rendering
-    │   │   ├── demo.mobile.spec.js # Mobile demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
-    │   │   ├── demo.spec.js    # Desktop demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
-    │   │   ├── failure-paths.spec.js  # /runs denial/rate limit, share/history failure toasts
-    │   │   ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
-    │   │   ├── helpers.js      # runCommand/openHistory helpers
-    │   │   ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup
-    │   │   ├── interaction-contract.spec.js # end-to-end verification of the UI Interaction Helper contract against real chrome surfaces
-    │   │   ├── kill.spec.js    # kill confirmation and running-tab stop behavior
-    │   │   ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
-    │   │   ├── output.spec.js  # copy/clear/save/export behavior
-    │   │   ├── rate-limit.spec.js # per-session /runs rate limiting
-    │   │   ├── runner-stall.spec.js   # SSE stall recovery
-    │   │   ├── search.spec.js  # search/highlight/navigation behavior
-    │   │   ├── session-token.spec.js # session-token lifecycle, migration, and cross-session persistence
-    │   │   ├── share.spec.js   # snapshot permalinks and clipboard behavior
-    │   │   ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
-    │   │   ├── tabs.spec.js    # tab lifecycle, rename, reorder, and new-tab behavior
-    │   │   ├── team-mode.spec.js # team creation, invite redemption, active scope switching, and shared team history
-    │   │   ├── theme-audit.spec.js # walks all built-in themes to catch colour leaks and unstyled surfaces
-    │   │   ├── timestamps.spec.js # timestamp and line-number toggle behavior
-    │   │   ├── ui-capture.desktop.capture.js # Desktop UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
-    │   │   ├── ui-capture.mobile.capture.js  # Mobile UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
-    │   │   ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
-    │   │   ├── ui_capture_shared.js # Shared scene registry for the UI screenshot capture pipeline (desktop + mobile)
-    │   │   ├── visual_guardrails.js # Shared demo/capture startup assertions for viewport, health, token, and seeded-history parity
-    │   │   ├── visual_history_fixture.js # Shared paginated /history fixture payload used by desktop and mobile demo recordings
-    │   │   ├── welcome-context.spec.js # welcome persistence across tabs and mobile context coverage
-    │   │   ├── welcome-interactions.spec.js # welcome command/badge interaction coverage
-    │   │   ├── welcome.helpers.js # shared welcome-route fixtures and setup for split welcome specs
-    │   │   └── welcome.spec.js # welcome animation and settle-path coverage
-    │   ├── fixtures/           # Shared unit-test fixture data
-    │   │   └── button_primitive_allowlist.json # Exception selectors for button_primitives_allowlist.test.js
-    │   └── unit/               # Vitest unit tests for browser-module logic
-    │       ├── app.test.js         # bootstrap wiring, session-preference hydration, mobile shell/run-button regressions, prompt/composer boundaries, and modal controls
-    │       ├── atlas.test.js       # Session Entity Atlas overlay, detail rendering, project-filter, export, and active-project link coverage
-    │       ├── atlas_mobile.test.js # Mobile Session Entity Atlas list/detail, filters, action-sheet, select-mode, and deep-link coverage
-    │       ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
-    │       ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
-    │       ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
-    │       ├── button_primitives_runtime.test.js # runtime contract — mounts JS-rendered history/mobile pagination controls and verifies they still use shared button primitives
-    │       ├── command_registry.test.js # Command Registry modal knowledge-section and pipe-helper rendering coverage
-    │       ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
-    │       ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
-    │       ├── finding_triage_editor.test.js # Finding remediation and verification editor load/save coverage
-    │       ├── grep_output_suggestions.test.js # output-token autocomplete suggestions for safe grep pipe contexts
-    │       ├── helpers/
-    │       │   ├── app_harness.js # Shared jsdom harness for app/controller tests, including Options/mobile shell globals
-    │       │   ├── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-    │       │   ├── session_harness.js # Shared session.js localStorage/fetch harness
-    │       │   └── workspace_harness.js # Shared Files/workspace modal harness and response helpers
-    │       ├── history.test.js     # starring, clipboard, delete/clear failures, mobile chip behavior, draft restore
-    │       ├── history_compare_split.test.js # split-pane run comparison renderer, lazy hunk expansion, and copy-summary coverage
-    │       ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
-    │       ├── notification_channels.test.js # Options Notifications tab refresh, editor validation, and channel action coverage
-    │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
-    │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
-    │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
-    │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage
-    │       ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery
-    │       ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
-    │       ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
-    │       ├── shell_chrome.test.js  # Desktop HUD status/Redis pill behavior
-    │       ├── state.test.js       # composer state store accessors and reset behavior
-    │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
-    │       ├── tabbar_chrome_collapse.test.js # tab-bar chrome auto-collapse behavior and persisted pinning coverage
-    │       ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
-    │       ├── team_scope.test.js  # active personal/team scope menu/selector storage, refresh, and reload edge cases
-    │       ├── teams_panel.test.js # Options Teams role/capability UI and failed mutation coverage
-    │       ├── tour_modal.test.js  # desktop visual onboarding tour renderer, navigation, sample-chip, and dismissal coverage
-    │       ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
-    │       ├── ui_disclosure.test.js # bindDisclosure helper coverage — aria-expanded sync, panel class lifecycle, onToggle emission rules, imperative handle API
-    │       ├── ui_dismissible.test.js # bindDismissible helper coverage — backdrop-click semantics, close buttons, handle API, closeTopmostDismissible dispatcher priority
-    │       ├── ui_focus_helpers.test.js # focusElement + blurActiveElement helper coverage — preventScroll fallback, no-op guards, activeElement blur path
-    │       ├── ui_focus_trap.test.js # bindFocusTrap helper coverage — Tab/Shift+Tab boundary wrapping, middle-of-list passthrough, idempotency, disposal, hidden-focusable skip
-    │       ├── ui_outside_click.test.js # bindOutsideClickClose helper coverage — guards, outside-click dismissal, trigger exemption, exempt selectors, scope override
-    │       ├── ui_pressable.test.js # bindPressable helper coverage — activation paths, press-style clearing, focus-theft prevention, idempotency
-    │       ├── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
-    │       ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
-    │       └── workspace.test.js    # Files panel rendering and route-call helpers
-    ├── py/                     # Python / pytest tests
-    │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
-    │   ├── fixtures/
-    │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
-    │   │   ├── container_smoke_test-interactive-expectations.json # Interactive PTY smoke fixtures
-    │   │   ├── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
-    │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
-    │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
-    │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
-    │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
-    │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
-    │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
-    │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
-    │   ├── test_notifications_channels.py # Slack, Discord, Telegram, and Pushover notification channel coverage
-    │   ├── test_notifications_email.py # SMTP email notification channel coverage
-    │   ├── test_notifications_hooks.py # Notification hook fan-out, skip-rule, and redaction coverage
-    │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
-    │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
-    │   ├── test_output_signals_against_line_signal.py # Output signal scope coverage for the typed line-event signal enum
-    │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
-    │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
-    │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
-    │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
-    │   ├── test_run_output_model.py # Typed run-output line-event schema, legacy compatibility, and entity normalization coverage
-    │   ├── test_run_output_model_parity.py # Python/browser enum parity coverage for the run-output line-event schema
-    │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
-    │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
-    │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
-    │   └── test_watchers_classifiers.py # Watcher findings, ports, hosts, TLS, textual fallback, and classifier registry coverage
-    └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
+├── tests/
+│   ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
+│   ├── js/
+│   │   ├── e2e/                # Playwright end-to-end tests (require running Flask server)
+│   │   │   ├── autocomplete.spec.js # autocomplete dropdown coverage — context-aware suggestions, pipe-stage hints, accept paths
+│   │   │   ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
+│   │   │   ├── commands.spec.js # command execution, denial, and status rendering
+│   │   │   ├── demo.mobile.spec.js # Mobile demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
+│   │   │   ├── demo.spec.js    # Desktop demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
+│   │   │   ├── failure-paths.spec.js  # /runs denial/rate limit, share/history failure toasts
+│   │   │   ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
+│   │   │   ├── helpers.js      # runCommand/openHistory helpers
+│   │   │   ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup
+│   │   │   ├── interaction-contract.spec.js # end-to-end verification of the UI Interaction Helper contract against real chrome surfaces
+│   │   │   ├── kill.spec.js    # kill confirmation and running-tab stop behavior
+│   │   │   ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
+│   │   │   ├── output.spec.js  # copy/clear/save/export behavior
+│   │   │   ├── rate-limit.spec.js # per-session /runs rate limiting
+│   │   │   ├── runner-stall.spec.js   # SSE stall recovery
+│   │   │   ├── search.spec.js  # search/highlight/navigation behavior
+│   │   │   ├── session-token.spec.js # session-token lifecycle, migration, and cross-session persistence
+│   │   │   ├── share.spec.js   # snapshot permalinks and clipboard behavior
+│   │   │   ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
+│   │   │   ├── source-lazy-smoke.spec.js # Source-mode lazy shell surface smoke coverage
+│   │   │   ├── tabs.spec.js    # tab lifecycle, rename, reorder, and new-tab behavior
+│   │   │   ├── team-mode.spec.js # team creation, invite redemption, active scope switching, and shared team history
+│   │   │   ├── theme-audit.spec.js # walks all built-in themes to catch colour leaks and unstyled surfaces
+│   │   │   ├── timestamps.spec.js # timestamp and line-number toggle behavior
+│   │   │   ├── ui-capture.desktop.capture.js # Desktop UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
+│   │   │   ├── ui-capture.mobile.capture.js  # Mobile UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
+│   │   │   ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
+│   │   │   ├── ui_capture_shared.js # Shared scene registry for the UI screenshot capture pipeline (desktop + mobile)
+│   │   │   ├── visual_guardrails.js # Shared demo/capture startup assertions for viewport, health, token, and seeded-history parity
+│   │   │   ├── visual_history_fixture.js # Shared paginated /history fixture payload used by desktop and mobile demo recordings
+│   │   │   ├── welcome-context.spec.js # welcome persistence across tabs and mobile context coverage
+│   │   │   ├── welcome-interactions.spec.js # welcome command/badge interaction coverage
+│   │   │   ├── welcome.helpers.js # shared welcome-route fixtures and setup for split welcome specs
+│   │   │   └── welcome.spec.js # welcome animation and settle-path coverage
+│   │   ├── fixtures/           # Shared unit-test fixture data
+│   │   │   └── button_primitive_allowlist.json # Exception selectors for button_primitives_allowlist.test.js
+│   │   └── unit/               # Vitest unit tests for browser-module logic
+│   │       ├── app.test.js         # bootstrap wiring, session-preference hydration, mobile shell/run-button regressions, prompt/composer boundaries, and modal controls
+│   │       ├── atlas.test.js       # Session Entity Atlas overlay, detail rendering, project-filter, export, and active-project link coverage
+│   │       ├── atlas_mobile.test.js # Mobile Session Entity Atlas list/detail, filters, action-sheet, select-mode, and deep-link coverage
+│   │       ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
+│   │       ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
+│   │       ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
+│   │       ├── button_primitives_runtime.test.js # runtime contract — mounts JS-rendered history/mobile pagination controls and verifies they still use shared button primitives
+│   │       ├── command_registry.test.js # Command Registry modal knowledge-section and pipe-helper rendering coverage
+│   │       ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
+│   │       ├── core_esm_exports.test.js # Vitest coverage for core ESM export contracts
+│   │       ├── diag_audit.test.js  # diagnostics audit viewer filter, row, details, and empty-state coverage
+│   │       ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
+│   │       ├── finding_triage_editor.test.js # Finding remediation and verification editor load/save coverage
+│   │       ├── frontend_inventory.test.js # Vitest coverage for frontend global inventory contracts
+│   │       ├── grep_output_suggestions.test.js # output-token autocomplete suggestions for safe grep pipe contexts
+│   │       ├── helpers/
+│   │       │   ├── app_harness.js # Shared jsdom harness for app/controller tests, including Options/mobile shell globals
+│   │       │   ├── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
+│   │       │   ├── session_harness.js # Shared session.js localStorage/fetch harness
+│   │       │   └── workspace_harness.js # Shared Files/workspace modal harness and response helpers
+│   │       ├── history.test.js     # starring, clipboard, delete/clear failures, mobile chip behavior, draft restore
+│   │       ├── history_compare_split.test.js # split-pane run comparison renderer, lazy hunk expansion, and copy-summary coverage
+│   │       ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
+│   │       ├── notification_channels.test.js # Options Notifications tab refresh, editor validation, and channel action coverage
+│   │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
+│   │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
+│   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
+│   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
+│   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
+│   │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
+│   │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
+│   │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage
+│   │       ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery
+│   │       ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
+│   │       ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
+│   │       ├── shell_chrome.test.js  # Desktop HUD status/Redis pill behavior
+│   │       ├── shell_entry_module.test.js # Native shell ES module startup smoke test
+│   │       ├── state.test.js       # composer state store accessors and reset behavior
+│   │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
+│   │       ├── tabbar_chrome_collapse.test.js # tab-bar chrome auto-collapse behavior and persisted pinning coverage
+│   │       ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
+│   │       ├── team_scope.test.js  # active personal/team scope menu/selector storage, refresh, and reload edge cases
+│   │       ├── teams_panel.test.js # Options Teams role/capability UI and failed mutation coverage
+│   │       ├── tour_modal.test.js  # desktop visual onboarding tour renderer, navigation, sample-chip, and dismissal coverage
+│   │       ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
+│   │       ├── ui_disclosure.test.js # bindDisclosure helper coverage — aria-expanded sync, panel class lifecycle, onToggle emission rules, imperative handle API
+│   │       ├── ui_dismissible.test.js # bindDismissible helper coverage — backdrop-click semantics, close buttons, handle API, closeTopmostDismissible dispatcher priority
+│   │       ├── ui_focus_helpers.test.js # focusElement + blurActiveElement helper coverage — preventScroll fallback, no-op guards, activeElement blur path
+│   │       ├── ui_focus_trap.test.js # bindFocusTrap helper coverage — Tab/Shift+Tab boundary wrapping, middle-of-list passthrough, idempotency, disposal, hidden-focusable skip
+│   │       ├── ui_outside_click.test.js # bindOutsideClickClose helper coverage — guards, outside-click dismissal, trigger exemption, exempt selectors, scope override
+│   │       ├── ui_pressable.test.js # bindPressable helper coverage — activation paths, press-style clearing, focus-theft prevention, idempotency
+│   │       ├── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
+│   │       ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
+│   │       └── workspace.test.js    # Files panel rendering and route-call helpers
+│   ├── py/                     # Python / pytest tests
+│   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
+│   │   ├── fixtures/
+│   │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
+│   │   │   ├── container_smoke_test-interactive-expectations.json # Interactive PTY smoke fixtures
+│   │   │   ├── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
+│   │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
+│   │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
+│   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
+│   │   ├── test_check_versions.py # Dependency version-check helper coverage
+│   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
+│   │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
+│   │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
+│   │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
+│   │   ├── test_notifications_channels.py # Slack, Discord, Telegram, and Pushover notification channel coverage
+│   │   ├── test_notifications_email.py # SMTP email notification channel coverage
+│   │   ├── test_notifications_hooks.py # Notification hook fan-out, skip-rule, and redaction coverage
+│   │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
+│   │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
+│   │   ├── test_output_signals_against_line_signal.py # Output signal scope coverage for the typed line-event signal enum
+│   │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
+│   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
+│   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
+│   │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
+│   │   ├── test_run_output_model.py # Typed run-output line-event schema, legacy compatibility, and entity normalization coverage
+│   │   ├── test_run_output_model_parity.py # Python/browser enum parity coverage for the run-output line-event schema
+│   │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
+│   │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
+│   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
+│   │   └── test_watchers_classifiers.py # Watcher findings, ports, hosts, TLS, textual fallback, and classifier registry coverage
+│   └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
 └── tools/
     └── darklab_cli/
         ├── pyproject.toml      # Installable in-repo darklab CLI package metadata

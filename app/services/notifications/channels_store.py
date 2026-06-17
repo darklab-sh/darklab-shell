@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import json
 import uuid
@@ -9,6 +10,8 @@ from typing import Any
 
 from core import database
 from core.database_backend import dialect_for_backend
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.notifications import dispatcher
 from services.notifications.base import channel_class_for_kind
 from services.notifications.channels import register_builtin_channels
@@ -290,6 +293,46 @@ def _serialize_channel(channel: NotificationChannel) -> dict[str, Any]:
     return payload
 
 
+def _audit_details(
+    channel: NotificationChannel,
+    *,
+    action: str,
+    source: str,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "action": action,
+        "source": source,
+        "channel_id": channel.id,
+        "kind": channel.kind,
+        "label": channel.label,
+        "muted": bool(channel.muted),
+        "triggers": [trigger for trigger in channel.triggers if trigger != TRIGGER_TEST],
+    }
+    details.update({key: value for key, value in dict(extra or {}).items() if value not in (None, "")})
+    return details
+
+
+def _record_config_change(
+    channel: NotificationChannel,
+    *,
+    action: str,
+    audit_fields: Mapping[str, Any] | None,
+    source: str,
+    conn,
+    details: Mapping[str, Any] | None = None,
+) -> None:
+    if not audit_fields:
+        return
+    record_event(
+        AuditEventType.NOTIFICATION_CONFIG_CHANGE,
+        target_id=channel.id,
+        details=_audit_details(channel, action=action, source=source, extra=details),
+        conn=conn,
+        **dict(audit_fields),
+    )
+
+
 def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
     payload = {
         "id": event.id,
@@ -419,7 +462,14 @@ def list_notification_events(
     }
 
 
-def create_notification_channel(session_token: str, data: dict[str, Any], *, team_id: str = "") -> dict[str, Any]:
+def create_notification_channel(
+    session_token: str,
+    data: dict[str, Any],
+    *,
+    team_id: str = "",
+    audit_fields: Mapping[str, Any] | None = None,
+    audit_source: str = "",
+) -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     kind = _normalize_kind(data.get("kind"))
     channel_id = _channel_id()
@@ -466,6 +516,13 @@ def create_notification_channel(session_token: str, data: dict[str, Any], *, tea
                 channel.updated,
             ),
         )
+        _record_config_change(
+            channel,
+            action="create",
+            audit_fields=audit_fields,
+            source=audit_source,
+            conn=conn,
+        )
         conn.commit()
     emit_channel_secret_audits(channel.secret_owner_token, audit_records)
     return _serialize_channel(channel)
@@ -477,6 +534,8 @@ def update_notification_channel(
     data: dict[str, Any],
     *,
     team_id: str = "",
+    audit_fields: Mapping[str, Any] | None = None,
+    audit_source: str = "",
 ) -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
@@ -517,12 +576,37 @@ def update_notification_channel(
                 channel.id,
             ),
         )
+        changed_fields = [
+            field for field in ("label", "config", "triggers", "muted", "secret_refs")
+            if (
+                (field == "label" and channel.label != existing.label)
+                or (field == "config" and channel.config != existing.config)
+                or (field == "triggers" and list(channel.triggers) != list(existing.triggers))
+                or (field == "muted" and channel.muted != existing.muted)
+                or (field == "secret_refs" and channel.secrets != existing.secrets)
+            )
+        ]
+        _record_config_change(
+            channel,
+            action="update",
+            audit_fields=audit_fields,
+            source=audit_source,
+            conn=conn,
+            details={"changed_fields": changed_fields},
+        )
         conn.commit()
     emit_channel_secret_audits(channel.secret_owner_token, audit_records)
     return _serialize_channel(channel)
 
 
-def delete_notification_channel(session_token: str, channel_id: str, *, team_id: str = "") -> bool:
+def delete_notification_channel(
+    session_token: str,
+    channel_id: str,
+    *,
+    team_id: str = "",
+    audit_fields: Mapping[str, Any] | None = None,
+    audit_source: str = "",
+) -> bool:
     session_token = require_durable_session_token(session_token)
     removed = False
     with database.db_connect() as conn:
@@ -533,6 +617,14 @@ def delete_notification_channel(session_token: str, channel_id: str, *, team_id:
             (*owner_params, channel_id),
         )
         removed = int(getattr(cur, "rowcount", 0) or 0) > 0
+        if removed:
+            _record_config_change(
+                channel,
+                action="delete",
+                audit_fields=audit_fields,
+                source=audit_source,
+                conn=conn,
+            )
         conn.commit()
     if removed:
         for secret_name in channel.secrets.values():
@@ -558,10 +650,17 @@ def migrate_notification_channels_session(conn, from_session_id: str, to_session
     }
 
 
-def send_test_notification(session_token: str, channel_id: str, *, team_id: str = "") -> dict[str, Any]:
+def send_test_notification(
+    session_token: str,
+    channel_id: str,
+    *,
+    team_id: str = "",
+    audit_fields: Mapping[str, Any] | None = None,
+    audit_source: str = "",
+) -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
-        _get_channel(conn, session_token, channel_id, team_id)
+        channel = _get_channel(conn, session_token, channel_id, team_id)
         event_ids = dispatcher.enqueue(
             TRIGGER_TEST,
             build_test_payload(channel_id),
@@ -573,5 +672,13 @@ def send_test_notification(session_token: str, channel_id: str, *, team_id: str 
             team_id=team_id,
         )
         events = _test_event_statuses(conn, event_ids)
+        _record_config_change(
+            channel,
+            action="test",
+            audit_fields=audit_fields,
+            source=audit_source,
+            conn=conn,
+            details={"count": len(event_ids), "result": "queued"},
+        )
         conn.commit()
     return {"queued": len(event_ids), "event_ids": event_ids, "events": events}

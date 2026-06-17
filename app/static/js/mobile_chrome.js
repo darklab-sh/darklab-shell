@@ -5,6 +5,56 @@
 // app.js, controller.js, shell_chrome.js so every helper it delegates to is
 // already defined.
 
+import {
+  getActiveTab as importedGetActiveTab,
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  onUiEvent as importedOnUiEvent,
+} from './core/state.js';
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  shareUrl as importedShareUrl,
+  showToast as importedShowToast,
+} from './core/utils.js';
+import { dispatchMobileMenuAction as importedDispatchMobileMenuAction } from './features/mobile/mobile_menu_actions.js';
+import { activeTeamScopeCan as importedActiveTeamScopeCan } from './features/team_scope.js';
+import {
+  _getStarred as importedGetStarred,
+  _toggleStar as importedToggleStar,
+} from './features/history/history_actions.js';
+import { openHistoryWithFilters as importedOpenHistoryWithFilters, resetHistoryMobileFilters as importedResetHistoryMobileFilters } from './history.js';
+import { confirmHistAction as importedConfirmHistAction } from './features/history/history_mutations.js';
+import {
+  _historyAddRunToActiveProject as importedHistoryAddRunToActiveProject,
+  _historyAddRunToProject as importedHistoryAddRunToProject,
+} from './features/history/history_project_actions.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from './features/history/history_restore.js';
+import {
+  _historyEditEntityMetadata as importedHistoryEditEntityMetadata,
+  _historyRelativeTime as importedHistoryRelativeTime,
+} from './features/history/history_rows.js';
+import { apiFetch as importedApiFetch, logClientError as importedLogClientError } from './session.js';
+import { openStatusMonitor as importedOpenStatusMonitor } from './runtime_bridge.js';
+import { openHistoryRunDetails as importedOpenHistoryRunDetails } from './features/history/history_run_modal_state_bridge.js';
+import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from './features/run-comparison/history_compare_bridge.js';
+import { performMobileEditAction as importedPerformMobileEditAction } from './app.js';
+import { confirmKill as importedConfirmKill } from './runner.js';
+import {
+  getActiveProjectContext as importedGetActiveProjectContext,
+  refreshActiveProjectContext as importedRefreshActiveProjectContext,
+} from './features/projects/project_context_bridge.js';
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
+import { loadMobileRunningIndicator as importedLoadMobileRunningIndicator } from './core/lazy_assets.js';
+import { bindMobileSheet as importedBindMobileSheet } from './ui/mobile_sheet.js';
+import { bindDisclosure as importedBindDisclosure } from './ui/ui_disclosure.js';
+import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  setComposerValue as importedSetComposerValue,
+} from './ui/ui_helpers.js';
+
 (function initMobileChrome(global) {
   if (typeof document === 'undefined') return;
 
@@ -12,6 +62,60 @@
   // when the page is rendered without the mobile shell.
   const mobileShell = document.getElementById('mobile-shell');
   if (!mobileShell) return;
+
+  const activeTeamScopeCan = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan) || null;
+  const apiFetch = (typeof importedApiFetch !== 'undefined' && importedApiFetch) || null;
+  const bindDisclosure = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure) || null;
+  const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
+  const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
+  const bindPressable = (typeof importedBindPressable !== 'undefined' && importedBindPressable) || null;
+  const blurVisibleComposerInputIfMobile = (
+    typeof importedBlurVisibleComposerInputIfMobile !== 'undefined'
+    && importedBlurVisibleComposerInputIfMobile
+  ) || null;
+  const confirmHistAction = (typeof importedConfirmHistAction !== 'undefined' && importedConfirmHistAction) || null;
+  const confirmKill = (typeof importedConfirmKill !== 'undefined' && importedConfirmKill) || null;
+  const copyTextToClipboard = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard) || null;
+  const dispatchMobileMenuAction = (
+    typeof importedDispatchMobileMenuAction !== 'undefined'
+    && importedDispatchMobileMenuAction
+  ) || null;
+  const getActiveTab = (typeof importedGetActiveTab !== 'undefined' && importedGetActiveTab) || null;
+  const getActiveTabId = (typeof importedGetActiveTabId !== 'undefined' && importedGetActiveTabId) || null;
+  const getAppState = (typeof importedGetAppState !== 'undefined' && importedGetAppState) || null;
+  const getStarred = (typeof importedGetStarred !== 'undefined' && importedGetStarred) || null;
+  const historyAddRunToActiveProject = (
+    typeof importedHistoryAddRunToActiveProject !== 'undefined'
+    && importedHistoryAddRunToActiveProject
+  ) || null;
+  const historyAddRunToProject = (
+    typeof importedHistoryAddRunToProject !== 'undefined'
+    && importedHistoryAddRunToProject
+  ) || null;
+  const historyEditEntityMetadata = (
+    typeof importedHistoryEditEntityMetadata !== 'undefined'
+    && importedHistoryEditEntityMetadata
+  ) || null;
+  const historyRelativeTime = (typeof importedHistoryRelativeTime !== 'undefined' && importedHistoryRelativeTime) || null;
+  const onUiEvent = (typeof importedOnUiEvent !== 'undefined' && importedOnUiEvent) || null;
+  const openHistoryCompareLauncher = (typeof importedOpenHistoryCompareLauncher !== 'undefined' && importedOpenHistoryCompareLauncher) || null;
+  const openHistoryRunDetails = (typeof importedOpenHistoryRunDetails !== 'undefined' && importedOpenHistoryRunDetails) || null;
+  const openHistoryWithFilters = (typeof importedOpenHistoryWithFilters !== 'undefined' && importedOpenHistoryWithFilters) || null;
+  const performMobileEditAction = (typeof importedPerformMobileEditAction !== 'undefined' && importedPerformMobileEditAction) || null;
+  const resetHistoryMobileFilters = (typeof importedResetHistoryMobileFilters !== 'undefined' && importedResetHistoryMobileFilters) || null;
+  const restoreHistoryRunIntoTab = (
+    typeof importedRestoreHistoryRunIntoTab !== 'undefined'
+    && importedRestoreHistoryRunIntoTab
+  ) || null;
+  const setComposerValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue) || null;
+  const shareUrl = (typeof importedShareUrl !== 'undefined' && importedShareUrl) || null;
+  const showToast = (typeof importedShowToast !== 'undefined' && importedShowToast) || null;
+  const toggleStar = (typeof importedToggleStar !== 'undefined' && importedToggleStar) || null;
+
+  function logMobileChromeError(context, err) {
+    if (typeof importedLogClientError === 'function') importedLogClientError(context, err);
+  }
 
   // ── Elements ────────────────────────────────────────────────────
   const mobileShellChrome     = document.getElementById('mobile-shell-chrome');
@@ -91,7 +195,7 @@
 
   if (mobileKillBtn) {
     mobileKillBtn.addEventListener('click', () => {
-      const tabId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
+      const tabId = typeof getActiveTabId === 'function' ? getActiveTabId() : null;
       if (tabId && typeof confirmKill === 'function') confirmKill(tabId);
     });
   }
@@ -108,10 +212,37 @@
     } catch (_) { return false; }
   })();
   const tabsBarEl = runningIndicatorDisabled ? null : document.getElementById('tabs-bar');
-  global.DarklabMobileRunningIndicator?.create({
-    tabsBarEl,
-    terminalBarEl: tabsBarEl ? tabsBarEl.closest('.terminal-bar') : null,
-  });
+  let mobileRunningIndicatorPromise = null;
+  function mobileRunningIndicatorActive() {
+    return !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  }
+  function ensureMobileRunningIndicator() {
+    if (
+      !tabsBarEl
+      || (typeof tabsBarEl.isConnected === 'boolean' && !tabsBarEl.isConnected)
+      || !mobileRunningIndicatorActive()
+      || typeof importedLoadMobileRunningIndicator !== 'function'
+    ) return null;
+    if (mobileRunningIndicatorPromise) return mobileRunningIndicatorPromise;
+    mobileRunningIndicatorPromise = importedLoadMobileRunningIndicator()
+      .then((indicator) => {
+        indicator?.create?.({
+          tabsBarEl,
+          terminalBarEl: tabsBarEl.closest('.terminal-bar'),
+        });
+      })
+      .catch((err) => {
+        mobileRunningIndicatorPromise = null;
+        logMobileChromeError('failed to load mobile running indicator', err);
+      });
+    return mobileRunningIndicatorPromise;
+  }
+  ensureMobileRunningIndicator();
+  if (tabsBarEl && typeof document.addEventListener === 'function') {
+    document.addEventListener('app:mobile-terminal-mode-changed', (event) => {
+      if (event?.detail?.active) ensureMobileRunningIndicator();
+    });
+  }
 
   // ── 2C: Menu sheet ───────────────────────────────────────────────
   function setActionHint(el, text) {
@@ -168,16 +299,16 @@
       setSavedCount(menuSchedulesCount, items.length);
       return;
     }
-    if (typeof global.apiFetch !== 'function') return;
+    if (typeof apiFetch !== 'function') return;
     const requestSeq = ++schedulesCountRequestSeq;
-    global.apiFetch('/schedules', { cache: 'no-store' })
+    apiFetch('/schedules', { cache: 'no-store' })
       .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
       .then(data => {
         if (requestSeq !== schedulesCountRequestSeq) return;
         setSavedCount(menuSchedulesCount, Array.isArray(data?.schedules) ? data.schedules.length : 0);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load schedules count for mobile menu', err);
+        logMobileChromeError('failed to load schedules count for mobile menu', err);
       });
   }
   let watchersCountRequestSeq = 0;
@@ -187,16 +318,16 @@
       setSavedCount(menuWatchersCount, items.length);
       return;
     }
-    if (typeof global.apiFetch !== 'function') return;
+    if (typeof apiFetch !== 'function') return;
     const requestSeq = ++watchersCountRequestSeq;
-    global.apiFetch('/watchers', { cache: 'no-store' })
+    apiFetch('/watchers', { cache: 'no-store' })
       .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
       .then(data => {
         if (requestSeq !== watchersCountRequestSeq) return;
         setSavedCount(menuWatchersCount, Array.isArray(data?.watchers) ? data.watchers.length : 0);
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load watchers count for mobile menu', err);
+        logMobileChromeError('failed to load watchers count for mobile menu', err);
       });
   }
   let historyCountRequestSeq = 0;
@@ -214,19 +345,23 @@
     const runs = readCmdHistory();
     setMenuHistoryCount(runs.length);
     const requestSeq = ++historyCountRequestSeq;
-    _recentsRefresh({ render: false })
-      .then(() => {
+    if (typeof apiFetch !== 'function') return;
+    apiFetch('/history', { cache: 'no-store' })
+      .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
+      .then(data => {
         if (requestSeq !== historyCountRequestSeq) return;
-        const total = _recentsTotalCountFromCache();
-        if (total !== null) setMenuHistoryCount(total);
+        const total = Number(data?.total_count ?? data?.items?.length ?? data?.runs?.length ?? 0);
+        setMenuHistoryCount(Number.isFinite(total) ? total : 0);
       })
-      .catch(() => {});
+      .catch((err) => {
+        logMobileChromeError('failed to load history count for mobile menu', err);
+      });
   }
   let atlasHintRequestSeq = 0;
   function refreshAtlasHint() {
-    if (!menuAtlasHint || typeof global.apiFetch !== 'function') return;
+    if (!menuAtlasHint || typeof apiFetch !== 'function') return;
     const requestSeq = ++atlasHintRequestSeq;
-    global.apiFetch('/atlas?orphan_filter=hide&suppression_filter=hide', { cache: 'no-store' })
+    apiFetch('/atlas?orphan_filter=hide&suppression_filter=hide', { cache: 'no-store' })
       .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
       .then(data => {
         if (requestSeq !== atlasHintRequestSeq) return;
@@ -237,14 +372,14 @@
           : pluralCount(findings, 'finding');
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load Atlas count for mobile menu', err);
+        logMobileChromeError('failed to load Atlas count for mobile menu', err);
       });
   }
   let filesHintRequestSeq = 0;
   function refreshFilesHint() {
-    if (!menuFilesHint || typeof global.apiFetch !== 'function') return;
+    if (!menuFilesHint || typeof apiFetch !== 'function') return;
     const requestSeq = ++filesHintRequestSeq;
-    global.apiFetch('/workspace/files', { cache: 'no-store' })
+    apiFetch('/workspace/files', { cache: 'no-store' })
       .then(resp => resp && resp.ok === false ? Promise.reject(new Error(`HTTP ${resp.status}`)) : resp.json())
       .then(data => {
         if (requestSeq !== filesHintRequestSeq) return;
@@ -253,7 +388,7 @@
         menuFilesHint.textContent = pluralCount(files, 'file');
       })
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load Files count for mobile menu', err);
+        logMobileChromeError('failed to load Files count for mobile menu', err);
       });
   }
   function _projectHintName(project) {
@@ -262,22 +397,20 @@
   }
   function refreshProjectHint(project) {
     if (!menuProjectHint) return;
-    const current = project || (
-      typeof global.getActiveProjectContext === 'function'
-        ? global.getActiveProjectContext()
-        : null
-    );
+    const current = project || (typeof importedGetActiveProjectContext === 'function'
+      ? importedGetActiveProjectContext()
+      : null);
     const name = _projectHintName(current);
     menuProjectHint.textContent = name;
     menuProjectHint.title = name ? `Active project: ${name}` : '';
   }
   function refreshProjectHintFromServer() {
     refreshProjectHint();
-    if (typeof global.refreshActiveProjectContext !== 'function') return;
-    global.refreshActiveProjectContext()
+    if (typeof importedRefreshActiveProjectContext !== 'function') return;
+    importedRefreshActiveProjectContext()
       .then(project => refreshProjectHint(project))
       .catch((err) => {
-        if (typeof logClientError === 'function') logClientError('failed to load active project for mobile menu', err);
+        logMobileChromeError('failed to load active project for mobile menu', err);
       });
   }
   function refreshThemeHint() {
@@ -318,20 +451,21 @@
     return !!(menuSheet && menuSheet.classList && !menuSheet.classList.contains('u-hidden'));
   }
 
-  // Take over the shared mobile-menu helpers so every caller (hamburger click,
-  // outside-click dismissal, overlay coordination) opens the new sheet instead.
-  global.showMobileMenu = openMenuSheet;
-  global.hideMobileMenu = closeMenuSheet;
-  global.isMobileMenuOpen = isMenuSheetOpen;
+  // Take over shared mobile-menu events so callers that imported the generic
+  // helpers before this module loaded still open the sheet-aware menu.
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:mobile-menu-show', openMenuSheet);
+    onUiEvent('app:mobile-menu-hide', closeMenuSheet);
+  }
 
   function openMobileHistorySurface() {
-    if (typeof global.resetHistoryMobileFilters === 'function') {
-      global.resetHistoryMobileFilters();
+    if (typeof resetHistoryMobileFilters === 'function') {
+      resetHistoryMobileFilters();
     }
-    if (typeof global.openHistoryWithFilters === 'function') {
-      global.openHistoryWithFilters();
-    } else if (typeof global.dispatchMobileMenuAction === 'function') {
-      global.dispatchMobileMenuAction('history', null);
+    if (typeof openHistoryWithFilters === 'function') {
+      openHistoryWithFilters();
+    } else if (typeof dispatchMobileMenuAction === 'function') {
+      dispatchMobileMenuAction('history', null);
     } else {
       showRecentsSheet();
     }
@@ -352,8 +486,8 @@
   // Scrim click + Escape are owned by bindDismissible
   // (ui_dismissible.js) so every sheet/panel/modal surface uses the same
   // registry-driven close cascade instead of hand-rolled wiring.
-  if (typeof global.bindDismissible === 'function') {
-    global.bindDismissible(menuSheet, {
+  if (typeof bindDismissible === 'function') {
+    bindDismissible(menuSheet, {
       level: 'sheet',
       isOpen: isMenuSheetOpen,
       onClose: closeMenuSheet,
@@ -363,7 +497,7 @@
 
   // ── 2D: Recent peek ─────────────────────────────────────────────
   function readCmdHistory() {
-    const h = global.recentPreviewHistory;
+    const h = typeof getAppState === 'function' ? getAppState().recentPreviewHistory : null;
     return Array.isArray(h) ? h : [];
   }
   function _prefersReducedMotion() {
@@ -397,7 +531,7 @@
   }
   function renderRecentPeek() {
     if (!recentPeek) return;
-    const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
+    const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
     const activeRunning = !!(activeTab && activeTab.st === 'running');
     _syncStatusMonitorPeekTimer(activeRunning);
     const holdStatusMonitor = !activeRunning && _statusMonitorPeekHoldUntil && Date.now() < _statusMonitorPeekHoldUntil;
@@ -454,8 +588,8 @@
   const _recentsFilterState = { type: 'all', root: '', exit: 'all', date: 'all', starred: false };
   const _recentsPaging = {
     page: 1,
-    pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
-      ? Math.max(1, Number(APP_CONFIG.history_panel_limit) || 50)
+    pageSize: (importedGetAppConfig?.() && importedGetAppConfig().history_panel_limit)
+      ? Math.max(1, Number(importedGetAppConfig().history_panel_limit) || 50)
       : 50,
     totalCount: 0,
     pageCount: 0,
@@ -481,7 +615,7 @@
   }
   function _recentsStarred() {
     try {
-      if (typeof global._getStarred === 'function') return global._getStarred();
+      if (typeof getStarred === 'function') return getStarred();
     } catch (_) { /* non-critical */ }
     return new Set();
   }
@@ -642,19 +776,19 @@
   }
   function _recentsCopyCommand(run) {
     const command = run?.command || '';
-    if (typeof global.copyTextToClipboard !== 'function') return;
-    global.copyTextToClipboard(command)
-      .then(() => global.showToast && global.showToast('Command copied'))
-      .catch(() => global.showToast && global.showToast('Failed to copy command', 'error'));
+    if (typeof copyTextToClipboard !== 'function') return;
+    copyTextToClipboard(command)
+      .then(() => showToast && showToast('Command copied'))
+      .catch(() => showToast && showToast('Failed to copy command', 'error'));
   }
   function _recentsCanManageHistory() {
-    return typeof global.activeTeamScopeCan === 'function'
-      ? global.activeTeamScopeCan('manage_history')
+    return typeof activeTeamScopeCan === 'function'
+      ? activeTeamScopeCan('manage_history')
       : true;
   }
   function _recentsCanMutateProjects() {
-    return typeof global.activeTeamScopeCan === 'function'
-      ? global.activeTeamScopeCan('mutate_projects')
+    return typeof activeTeamScopeCan === 'function'
+      ? activeTeamScopeCan('mutate_projects')
       : true;
   }
   function _recentsRunActionMenu(run) {
@@ -687,46 +821,46 @@
     addItem('permalink', () => {
       if (!run.id) return;
       const url = `${location.origin}/history/${run.id}`;
-      if (typeof global.shareUrl === 'function') {
-        global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
+      if (typeof shareUrl === 'function') {
+        shareUrl(url).catch(() => showToast && showToast('Share failed', 'error'));
       }
     });
     addItem('compare', () => {
-      if (typeof global.openHistoryCompareLauncher === 'function') {
-        global.openHistoryCompareLauncher(run);
+      if (typeof openHistoryCompareLauncher === 'function') {
+        openHistoryCompareLauncher(run);
         closeRecentsSheet();
       }
     });
     if (_recentsCanManageHistory()) {
       addItem('edit', () => {
-        if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
+        if (typeof historyEditEntityMetadata === 'function') historyEditEntityMetadata('run', run);
       });
     }
     if (_recentsCanMutateProjects()) {
       addItem('add to active project', () => {
-        if (typeof global._historyAddRunToActiveProject === 'function') {
-          global._historyAddRunToActiveProject(run)
-            .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
+        if (typeof historyAddRunToActiveProject === 'function') {
+          historyAddRunToActiveProject(run)
+            .catch(() => showToast && showToast('Failed to add run to active project', 'error'));
         }
       });
       addItem('add to project', () => {
-        if (typeof global._historyAddRunToProject === 'function') {
-          global._historyAddRunToProject(run)
-            .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
+        if (typeof historyAddRunToProject === 'function') {
+          historyAddRunToProject(run)
+            .catch(() => showToast && showToast('Failed to add run to project', 'error'));
         }
       });
     }
     addItem('copy run id', () => {
-      if (typeof global.copyTextToClipboard === 'function') {
-        global.copyTextToClipboard(run.id)
-          .then(() => global.showToast && global.showToast('Run ID copied'))
-          .catch(() => global.showToast && global.showToast('Failed to copy run ID', 'error'));
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(run.id)
+          .then(() => showToast && showToast('Run ID copied'))
+          .catch(() => showToast && showToast('Failed to copy run ID', 'error'));
       }
     });
     if (_recentsCanManageHistory()) {
       addItem('delete', () => {
-        if (run.id && typeof global.confirmHistAction === 'function') {
-          global.confirmHistAction('delete', run.id, run.command, 'run');
+        if (run.id && typeof confirmHistAction === 'function') {
+          confirmHistAction('delete', run.id, run.command, 'run');
         }
       });
     }
@@ -833,8 +967,8 @@
           clearPressStyle: true,
           onActivate: (e) => {
             e.stopPropagation();
-            if (typeof global._toggleStar === 'function') {
-              try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
+            if (typeof toggleStar === 'function') {
+              try { toggleStar(cmd); } catch (_) { /* non-critical */ }
             }
             _recentsRenderList();
             if (_recentsFilterState.starred) _recentsRefresh();
@@ -856,7 +990,7 @@
       const timeEl = document.createElement('span');
       timeEl.className = 'sheet-item-time';
       const parsed = _recentsParseDate(isRun ? run.started : snapshot.created);
-      const relFn = typeof _historyRelativeTime === 'function' ? _historyRelativeTime : null;
+      const relFn = typeof historyRelativeTime === 'function' ? historyRelativeTime : null;
       timeEl.textContent = parsed && relFn ? relFn(parsed) : '';
       if (parsed) timeEl.title = parsed.toLocaleString();
       meta.appendChild(timeEl);
@@ -873,14 +1007,14 @@
       if (isRun) {
         actions.appendChild(_recentsMakeAction('copy command', () => _recentsCopyCommand(run)));
         actions.appendChild(_recentsMakeAction('restore', () => {
-          if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
+          if (typeof restoreHistoryRunIntoTab !== 'function') return;
           const cmdEl2 = item.querySelector('.sheet-item-cmd');
           if (cmdEl2) cmdEl2.textContent = 'loading…';
-          global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
+          restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
             .then(() => closeRecentsSheet())
             .catch(() => {
               if (cmdEl2) cmdEl2.textContent = cmd;
-              if (typeof global.showToast === 'function') global.showToast('Failed to load run');
+              if (typeof showToast === 'function') showToast('Failed to load run');
             });
         }));
         actions.appendChild(_recentsRunActionMenu(run));
@@ -890,9 +1024,9 @@
           closeRecentsSheet();
         }));
         actions.appendChild(_recentsMakeAction('copy link', () => {
-          if (typeof global.shareUrl === 'function') {
-            global.shareUrl(_recentsSnapshotUrl(snapshot))
-              .catch(() => global.showToast && global.showToast('Share failed', 'error'));
+          if (typeof shareUrl === 'function') {
+            shareUrl(_recentsSnapshotUrl(snapshot))
+              .catch(() => showToast && showToast('Share failed', 'error'));
           }
         }));
       }
@@ -900,8 +1034,8 @@
         if (_recentsCanManageHistory()) {
           actions.appendChild(_recentsMakeAction('delete', () => {
             if (!entryData.id) return;
-            if (typeof global.confirmHistAction === 'function') {
-              global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
+            if (typeof confirmHistAction === 'function') {
+              confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
             }
           }));
         }
@@ -919,12 +1053,12 @@
           closeRecentsSheet();
           return;
         }
-        if (typeof global.openHistoryRunDetails === 'function') {
-          global.openHistoryRunDetails(run);
+        if (typeof openHistoryRunDetails === 'function') {
+          openHistoryRunDetails(run);
           closeRecentsSheet();
           return;
         }
-        if (typeof global.setComposerValue === 'function') global.setComposerValue(cmd, cmd.length, cmd.length);
+        if (typeof setComposerValue === 'function') setComposerValue(cmd, cmd.length, cmd.length);
         closeRecentsSheet();
       });
 
@@ -946,10 +1080,10 @@
     _recentsRenderPagination(0);
   }
   function _recentsRefresh({ render = true } = {}) {
-    if (typeof global.apiFetch !== 'function') return Promise.resolve([]);
+    if (typeof apiFetch !== 'function') return Promise.resolve([]);
     const requestUrl = _recentsBuildHistoryRequestUrl();
     const requestSeq = ++_recentsRequestSeq;
-    const request = global.apiFetch(requestUrl)
+    const request = apiFetch(requestUrl)
       .then(r => r.json())
       .then(data => {
         if (requestSeq !== _recentsRequestSeq) return _recentsItems;
@@ -988,8 +1122,8 @@
     if (!recentsSheet) return;
     _recentsSearchQuery = '';
     if (recentsSheetSearch) recentsSheetSearch.value = '';
-    if (typeof global.blurVisibleComposerInputIfMobile === 'function') {
-      try { global.blurVisibleComposerInputIfMobile(); } catch (_) { /* non-critical */ }
+    if (typeof blurVisibleComposerInputIfMobile === 'function') {
+      try { blurVisibleComposerInputIfMobile(); } catch (_) { /* non-critical */ }
     }
     // Reset filter UI each open so users don't inherit stale state.
     _recentsFilterState.type = 'all';
@@ -1019,8 +1153,8 @@
   // Scrim click + Escape are owned by bindDismissible so
   // the sheet participates in the unified modal > sheet > panel Escape
   // cascade (see ui_dismissible.js).
-  if (typeof global.bindDismissible === 'function') {
-    global.bindDismissible(recentsSheet, {
+  if (typeof bindDismissible === 'function') {
+    bindDismissible(recentsSheet, {
       level: 'sheet',
       isOpen: isRecentsSheetOpen,
       onClose: closeRecentsSheet,
@@ -1033,8 +1167,8 @@
       clearPressStyle: true,
       onActivate: () => {
         if (!_recentsCanManageHistory()) return;
-        if (typeof global.confirmHistAction === 'function') {
-          global.confirmHistAction('clear');
+        if (typeof confirmHistAction === 'function') {
+          confirmHistAction('clear');
         }
       },
     });
@@ -1066,8 +1200,8 @@
   // Drag/tap/keyboard close behavior is provided by the shared bindMobileSheet
   // helper (see app/static/js/ui/mobile_sheet.js) so the recents sheet matches
   // every other mobile bottom sheet.
-  if (typeof global.bindMobileSheet === 'function') {
-    global.bindMobileSheet(recentsSheet, { onClose: closeRecentsSheet });
+  if (typeof bindMobileSheet === 'function') {
+    bindMobileSheet(recentsSheet, { onClose: closeRecentsSheet });
   }
 
   const recentsFiltersToggle   = document.getElementById('mobile-recents-filters-toggle');
@@ -1300,7 +1434,7 @@
   function openPeekSurface(event) {
     if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
     if (recentPeek && recentPeek.dataset.peekMode === 'status-monitor') {
-      if (typeof global.openStatusMonitor === 'function') void global.openStatusMonitor({ source: 'mobile-peek' });
+      if (typeof importedOpenStatusMonitor === 'function') void importedOpenStatusMonitor({ source: 'mobile-peek' });
       return;
     }
     openMobileHistorySurface();
@@ -1340,8 +1474,8 @@
       }
     });
     onUiEvent('app:tab-status-changed', (e) => {
-      const activeId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
-      const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
+      const activeId = typeof getActiveTabId === 'function' ? getActiveTabId() : null;
+      const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
       const detail = e && e.detail ? e.detail : {};
       const suppressStatusMonitorHold = !!(activeTab && activeTab.suppressStatusMonitorPeekHold);
       if (detail.id === activeId && detail.status && detail.status !== 'running' && suppressStatusMonitorHold) {
@@ -1401,8 +1535,8 @@
   kbHelper?.querySelectorAll('button[data-kb-action]').forEach(btn => {
     const action = btn.dataset.kbAction;
     const fire = () => {
-      if (typeof global.performMobileEditAction === 'function') {
-        try { global.performMobileEditAction(action); } catch (_) { /* non-critical */ }
+      if (typeof performMobileEditAction === 'function') {
+        try { performMobileEditAction(action); } catch (_) { /* non-critical */ }
       }
     };
     btn.addEventListener('pointerdown', (e) => { e.preventDefault(); fire(); });

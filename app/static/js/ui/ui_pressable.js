@@ -30,7 +30,10 @@
 //   chrome button does not pull focus off the composer (matches the
 //   pointerdown + preventDefault pattern used today around the mobile
 //   keyboard helper buttons)
-(function (global) {
+import { isConfirmOpen as importedIsConfirmOpen } from './ui_confirm.js';
+import { refocusComposerAfterAction as importedRefocusComposerAfterAction } from './ui_helpers.js';
+
+const bindPressable = (function (global) {
   'use strict';
 
   function _isNativeButton(el) {
@@ -60,9 +63,9 @@
     // back to the composer here would defeat both and leave Tab with no
     // trap target. ui_confirm.js refocuses the composer itself once the
     // modal resolves, so skipping here does not leak focus state.
-    const modalOwnsFocus = typeof global.isConfirmOpen === 'function' && global.isConfirmOpen();
-    if (!modalOwnsFocus && options.refocusComposer !== false && typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({
+    const modalOwnsFocus = typeof importedIsConfirmOpen === 'function' && importedIsConfirmOpen();
+    if (!modalOwnsFocus && options.refocusComposer !== false && typeof importedRefocusComposerAfterAction === 'function') {
+      importedRefocusComposerAfterAction({
         preventScroll: options.preventScroll !== false,
         defer: !!options.defer,
       });
@@ -121,5 +124,7 @@
     };
   }
 
-  global.bindPressable = bindPressable;
+  return bindPressable;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export { bindPressable };

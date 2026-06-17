@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from email.message import Message
 from http.client import HTTPMessage
 from io import BytesIO
@@ -284,6 +285,41 @@ def test_webhook_channel_retries_timeout(monkeypatch):
     assert result.ok is False
     assert result.retryable is True
     assert "timed out" in result.error
+
+
+def test_webhook_channel_log_host_strips_url_userinfo(monkeypatch, caplog):
+    monkeypatch.setattr(
+        "services.notifications.channels.webhook.get_channel_secret",
+        lambda *_: "https://user:secret-token@example.invalid:8443/hook",
+    )
+    monkeypatch.setattr(
+        "services.notifications.channels._http._open_http_request",
+        lambda *_args, **_kwargs: _raise(socket.timeout("timed out")),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="shell"):
+        result = WebhookChannel(_channel()).send({"trigger": "run_complete"})
+
+    assert result.ok is False
+    assert result.retryable is True
+    assert "secret-token" not in result.error
+    assert "user:secret-token@" not in result.error
+    records = [record for record in caplog.records if record.name == "shell"]
+    http_records = [
+        record for record in records
+        if record.getMessage() in {"NOTIFICATION_HTTP_REQUEST", "NOTIFICATION_HTTP_NETWORK_ERROR"}
+    ]
+    assert [record.getMessage() for record in http_records] == [
+        "NOTIFICATION_HTTP_REQUEST",
+        "NOTIFICATION_HTTP_NETWORK_ERROR",
+    ]
+    assert {record.host for record in http_records} == {"example.invalid:8443"}
+    serialized_extras = json.dumps([
+        {"host": record.host, "error": getattr(record, "error", "")}
+        for record in http_records
+    ])
+    assert "secret-token" not in serialized_extras
+    assert "user:secret-token@" not in serialized_extras
 
 
 def test_run_complete_payload_exposes_command_root_without_full_command(monkeypatch):

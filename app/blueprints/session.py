@@ -16,6 +16,9 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
+from services.audit.context import request_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.notifications.channels_store import migrate_notification_channels_session
 from services.projects.migration import migrate_project_workspace_session
 from services.secrets.storage import migrate_session_secrets
@@ -23,6 +26,7 @@ from services.session.variables import list_session_variables
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
 from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
+from services.teams.storage import token_hash
 from services.workflows.user_workflows import (
     UserWorkflowError,
     create_user_workflow,
@@ -90,6 +94,39 @@ _IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 def _session_kind(session_id):
     return "token" if str(session_id or "").startswith("tok_") else "anonymous"
+
+
+def _session_hash(session_id):
+    value = str(session_id or "").strip()
+    return token_hash(value) if value else ""
+
+
+def _session_label(session_id):
+    value = str(session_id or "").strip()
+    if not value:
+        return ""
+    if value.startswith("tok_"):
+        return get_log_session_id(value)
+    return value[:8] + "********"
+
+
+def _session_identity_details(session_id, *, prefix="session"):
+    value = str(session_id or "").strip()
+    label_key = "session_label" if prefix == "session" else f"{prefix}_session_label"
+    hash_key = "session_hash" if prefix == "session" else f"{prefix}_session_hash"
+    return {
+        label_key: _session_label(value),
+        hash_key: _session_hash(value),
+    }
+
+
+def _session_audit_fields(actor_session_id):
+    session_id = str(actor_session_id or "").strip()
+    return {
+        "session_id": session_id,
+        "actor_session_id": session_id,
+        **request_audit_fields(request),
+    }
 
 
 def _active_scope_or_response(session_id):
@@ -504,6 +541,16 @@ def session_token_generate():
             "INSERT INTO session_tokens (token, created) VALUES (?, ?) ON CONFLICT(token) DO NOTHING",
             (session_token, created),
         )
+        record_event(
+            AuditEventType.SESSION_TOKEN_GENERATE,
+            target_id=_session_label(session_token),
+            details={
+                "source": "browser",
+                **_session_identity_details(session_token, prefix="session"),
+            },
+            conn=conn,
+            **_session_audit_fields(get_session_id()),
+        )
         conn.commit()
     log.info("SESSION_TOKEN_GENERATED", extra={
         "ip": get_client_ip(),
@@ -573,7 +620,19 @@ def session_token_revoke():
         result = conn.execute(
             "DELETE FROM session_tokens WHERE token = ?", (token,)
         )
-        conn.commit()
+        if result.rowcount:
+            record_event(
+                AuditEventType.SESSION_TOKEN_REVOKE,
+                target_id=_session_label(token),
+                details={
+                    "source": "browser",
+                    "revoked_current": token == current_session_id,
+                    **_session_identity_details(token, prefix="session"),
+                },
+                conn=conn,
+                **_session_audit_fields(current_session_id),
+            )
+            conn.commit()
     if result.rowcount == 0:
         log.warning("SESSION_TOKEN_REVOKE_DENIED", extra={
             "ip": get_client_ip(),
@@ -795,17 +854,44 @@ def session_migrate():
             "DELETE FROM user_workflows WHERE session_id = ?",
             (from_session_id,),
         )
+        migrated_runs = runs_result.rowcount
+        migrated_snapshots = snaps_result.rowcount
+        # Use the INSERT rowcount, not the DELETE rowcount; duplicate rows are ignored.
+        migrated_stars = stars_insert.rowcount
+        migrated_preferences = prefs_insert.rowcount
+        migrated_variables = vars_insert.rowcount
+        migrated_workflows = workflows_result.rowcount
+        migration_counts = {
+            "migrated_runs": migrated_runs,
+            "migrated_snapshots": migrated_snapshots,
+            "migrated_stars": migrated_stars,
+            "migrated_preferences": migrated_preferences,
+            "migrated_variables": migrated_variables,
+            "migrated_workflows": migrated_workflows,
+            **project_migration,
+            **notification_migration,
+            "migrated_recent_values": migrated_recent_values,
+            "migrated_secrets": migrated_secrets,
+            "migrated_workspace_files": workspace_migration.migrated_files,
+            "skipped_workspace_files": workspace_migration.skipped_files,
+            "migrated_workspace_directories": workspace_migration.migrated_directories,
+            "skipped_workspace_directories": workspace_migration.skipped_directories,
+        }
+        record_event(
+            AuditEventType.SESSION_MIGRATE,
+            target_id=_session_label(to_session_id),
+            details={
+                "source": "browser",
+                "from_state": _session_kind(from_session_id),
+                "to_state": _session_kind(to_session_id),
+                **_session_identity_details(from_session_id, prefix="source"),
+                **_session_identity_details(to_session_id, prefix="destination"),
+                "migration_counts": migration_counts,
+            },
+            conn=conn,
+            **_session_audit_fields(current_session_id),
+        )
         conn.commit()
-
-    migrated_runs = runs_result.rowcount
-    migrated_snapshots = snaps_result.rowcount
-        # Use the INSERT rowcount, not the DELETE rowcount — duplicate rows are ignored.
-    # counts rows actually written; DELETE counts all source rows including any
-    # that were skipped because the destination already had the same command.
-    migrated_stars = stars_insert.rowcount
-    migrated_preferences = prefs_insert.rowcount
-    migrated_variables = vars_insert.rowcount
-    migrated_workflows = workflows_result.rowcount
 
     log.info("SESSION_MIGRATED", extra={
         "ip": get_client_ip(),

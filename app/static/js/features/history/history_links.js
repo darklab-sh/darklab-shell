@@ -1,4 +1,12 @@
 // History permalink and snapshot link helpers.
+import { shareUrl as importedShareUrl } from '../../core/utils.js';
+
+const HISTORY_LINKS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyShareUrl() {
+  return (typeof importedShareUrl !== 'undefined' && importedShareUrl)
+    || (typeof HISTORY_LINKS_GLOBAL?.shareUrl === 'function' ? HISTORY_LINKS_GLOBAL.shareUrl : null);
+}
 
 function _snapshotUrl(snapshot) {
   return `${location.origin}/share/${snapshot.id}`;
@@ -17,9 +25,22 @@ function openSnapshotLink(snapshot) {
 }
 
 function copySnapshotLink(snapshot) {
-  return shareUrl(_snapshotUrl(snapshot));
+  const share = _historyShareUrl();
+  return typeof share === 'function' ? share(_snapshotUrl(snapshot)) : Promise.resolve(false);
 }
 
 function copyHistoryRunPermalink(run) {
-  return shareUrl(_historyRunPermalinkUrl(run));
+  const share = _historyShareUrl();
+  return typeof share === 'function' ? share(_historyRunPermalinkUrl(run)) : Promise.resolve(false);
 }
+
+if (typeof window !== 'undefined') {
+}
+
+export {
+  _historyRunPermalinkUrl,
+  _snapshotUrl,
+  copyHistoryRunPermalink,
+  copySnapshotLink,
+  openSnapshotLink,
+};

@@ -12,6 +12,9 @@ from extensions import limiter
 from config import CFG
 from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.projects import preferences as project_preferences
 from services.atlas.intel_bridge import refresh_entity_intel
 from services.atlas.import_workflow import AtlasImportError, apply_atlas_import, preview_atlas_import
@@ -245,6 +248,32 @@ def _log_atlas_import_apply_succeeded(result, *, session_id, scope, member, payl
         **_atlas_import_option_log_fields(options),
         **_atlas_import_count_log_fields(counts),
     })
+
+
+def _audit_atlas_import_apply(result, *, session_id, scope, payload, options):
+    result = result if isinstance(result, dict) else {}
+    payload = payload if isinstance(payload, dict) else {}
+    counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+    project_id = str(payload.get("project_id") or "")
+    source_tool = str(result.get("source_tool") or "")
+    record_event(
+        AuditEventType.IMPORT_APPLY,
+        target_id=str(result.get("batch_id") or ""),
+        project_id=project_id,
+        details={
+            "source": "atlas",
+            "draft_id": str(payload.get("draft_id") or ""),
+            "batch_id": str(result.get("batch_id") or ""),
+            "project_id": project_id,
+            "format_id": str(result.get("format_id") or ""),
+            "source_tool": source_tool,
+            "source_tool_key": _atlas_import_source_tool_key(source_tool),
+            "already_applied": bool(result.get("already_applied")),
+            "options": _atlas_import_option_flags(options),
+            "counts": _atlas_import_count_log_fields(counts),
+        },
+        **route_audit_fields(session_id, request, scope),
+    )
 
 
 def _log_atlas_import_apply_rejected(exc, *, session_id, scope, member, payload, options):
@@ -627,6 +656,13 @@ def atlas_import_apply():
         payload=payload,
         options=apply_options,
     )
+    _audit_atlas_import_apply(
+        result,
+        session_id=session_id,
+        scope=scope,
+        payload=payload,
+        options=apply_options,
+    )
     return jsonify(result)
 
 
@@ -883,6 +919,18 @@ def atlas_entity_suppression_update(entity_id):
             "WHERE id = ?",
             (suppressed, reason, _suppression_timestamp(suppressed), entity_id),
         )
+        record_event(
+            AuditEventType.ENTITY_SUPPRESS,
+            target_id=entity_id,
+            details={
+                "entity_id": entity_id,
+                "suppressed": suppressed,
+                "reason": reason,
+                "source": "atlas",
+            },
+            conn=conn,
+            **route_audit_fields(session_id, request, owner_scope),
+        )
         conn.commit()
     log.info("ATLAS_ENTITY_SUPPRESSION_UPDATED", extra={
         "ip": get_client_ip(),
@@ -924,6 +972,19 @@ def atlas_entities_bulk_suppression_update():
                     for item_id in sorted(found_ids)
                 ],
             )
+            record_event(
+                AuditEventType.ENTITY_SUPPRESS,
+                target_id="",
+                details={
+                    "entity_ids": sorted(found_ids),
+                    "updated_count": len(found_ids),
+                    "suppressed": suppressed,
+                    "reason": reason,
+                    "source": "atlas_bulk",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request, owner_scope),
+            )
             conn.commit()
     results = [
         {"entity_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
@@ -964,6 +1025,19 @@ def atlas_entities_bulk_delete():
         ).fetchall()
         found_ids = {str(row["id"] or "") for row in rows}
         deleted = delete_atlas_entities(conn, session_id, entity_ids)
+        if deleted.get("entities"):
+            record_event(
+                AuditEventType.ENTITY_DELETE,
+                target_id="",
+                details={
+                    "entity_ids": sorted(found_ids),
+                    "deleted_count": int(deleted.get("entities") or 0),
+                    "finding_count": int(deleted.get("findings") or 0),
+                    "source": "atlas_bulk",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request),
+            )
         conn.commit()
     results = [
         {"entity_id": entity_id, "status": "deleted" if entity_id in found_ids else "not_found"}
@@ -1021,6 +1095,22 @@ def atlas_entity_delete(entity_id):
             )
         deleted = delete_atlas_entities(conn, session_id, [entity_id])
         cleanup = delete_atlas_cleanup_preview(conn, session_id, sibling_cleanup or {})
+        deleted_count = int(deleted.get("entities") or 0) + int(cleanup.get("entities") or 0)
+        finding_count = int(deleted.get("findings") or 0) + int(cleanup.get("findings") or 0)
+        if deleted_count:
+            record_event(
+                AuditEventType.ENTITY_DELETE,
+                target_id=entity_id,
+                details={
+                    "entity_id": entity_id,
+                    "deleted_count": deleted_count,
+                    "finding_count": finding_count,
+                    "run_id": source_run_id,
+                    "source": "atlas",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request),
+            )
         conn.commit()
     log.info("ATLAS_ENTITY_DELETED", extra={
         "ip": get_client_ip(),
@@ -1052,6 +1142,18 @@ def atlas_findings_bulk_delete():
         ).fetchall()
         found_ids = {str(row["id"] or "") for row in rows}
         deleted_findings = delete_atlas_findings(conn, session_id, finding_ids)
+        if deleted_findings:
+            record_event(
+                AuditEventType.FINDING_DELETE,
+                target_id="",
+                details={
+                    "finding_ids": sorted(found_ids),
+                    "deleted_count": deleted_findings,
+                    "source": "atlas_bulk",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request),
+            )
         conn.commit()
     results = [
         {"finding_id": finding_id, "status": "deleted" if finding_id in found_ids else "not_found"}
@@ -1089,6 +1191,17 @@ def atlas_finding_suppression_update(finding_id):
             "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
             "WHERE id = ?",
             (suppressed, reason, _suppression_timestamp(suppressed), finding_id),
+        )
+        record_event(
+            AuditEventType.FINDING_SUPPRESS,
+            target_id=finding_id,
+            details={
+                "finding_id": finding_id,
+                "suppressed": suppressed,
+                "reason": reason,
+            },
+            conn=conn,
+            **route_audit_fields(session_id, request, owner_scope),
         )
         conn.commit()
     log.info("ATLAS_FINDING_SUPPRESSION_UPDATED", extra={
@@ -1130,6 +1243,18 @@ def atlas_findings_bulk_suppression_update():
                     (suppressed, reason, _suppression_timestamp(suppressed), item_id)
                     for item_id in sorted(found_ids)
                 ],
+            )
+            record_event(
+                AuditEventType.FINDING_SUPPRESS,
+                target_id="",
+                details={
+                    "finding_ids": sorted(found_ids),
+                    "updated_count": len(found_ids),
+                    "suppressed": suppressed,
+                    "reason": reason,
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request, owner_scope),
             )
             conn.commit()
     results = [
@@ -1185,6 +1310,20 @@ def atlas_finding_delete(finding_id):
             )
         deleted_findings = delete_atlas_findings(conn, session_id, [finding_id])
         cleanup = delete_atlas_cleanup_preview(conn, session_id, sibling_cleanup or {})
+        if deleted_findings:
+            record_event(
+                AuditEventType.FINDING_DELETE,
+                target_id=finding_id,
+                details={
+                    "finding_id": finding_id,
+                    "deleted_count": deleted_findings + int(cleanup.get("findings") or 0),
+                    "finding_count": deleted_findings + int(cleanup.get("findings") or 0),
+                    "source": "atlas",
+                    "run_id": source_run_id,
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request),
+            )
         conn.commit()
     log.info("ATLAS_FINDING_DELETED", extra={
         "ip": get_client_ip(),

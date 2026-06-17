@@ -33,6 +33,11 @@ from . import (
     v0026_project_auto_promote_rules,
     v0027_atlas_import_sources,
     v0028_finding_triage_details,
+    v0029_project_reports,
+    v0030_audit_events,
+    v0031_run_output_summary_status,
+    v0032_watcher_monitoring_phase0,
+    v0033_watcher_monitoring_policy,
 )
 from .runner import Migration
 
@@ -65,4 +70,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0026_project_auto_promote_rules.MIGRATION,
     v0027_atlas_import_sources.MIGRATION,
     v0028_finding_triage_details.MIGRATION,
+    v0029_project_reports.MIGRATION,
+    v0030_audit_events.MIGRATION,
+    v0031_run_output_summary_status.MIGRATION,
+    v0032_watcher_monitoring_phase0.MIGRATION,
+    v0033_watcher_monitoring_policy.MIGRATION,
 )

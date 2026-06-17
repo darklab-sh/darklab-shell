@@ -77,6 +77,15 @@ def _unsafe_address(ip_text: str) -> ipaddress._BaseAddress | None:
     return address if not address.is_global else None
 
 
+def _safe_log_host(parsed_url) -> str:
+    host = str(parsed_url.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return ""
+    if parsed_url.port:
+        return f"{host}:{parsed_url.port}"
+    return host
+
+
 def validate_http_url(url: str, label: str) -> str | None:
     parsed = urlparse(str(url or "").strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -168,7 +177,7 @@ def _post(
     )
     log.debug(
         "NOTIFICATION_HTTP_REQUEST",
-        extra={"label": label, "host": parsed_url.netloc, "timeout": timeout, "test_send": test_send},
+        extra={"label": label, "host": _safe_log_host(parsed_url), "timeout": timeout, "test_send": test_send},
     )
     try:
         with _open_http_request(request, timeout=timeout) as response:
@@ -179,7 +188,7 @@ def _post(
     except (TimeoutError, socket.timeout, URLError) as exc:
         log.warning(
             "NOTIFICATION_HTTP_NETWORK_ERROR",
-            extra={"label": label, "host": parsed_url.netloc, "error": network_error_message(exc, label=label)},
+            extra={"label": label, "host": _safe_log_host(parsed_url), "error": network_error_message(exc, label=label)},
         )
         return ChannelResult.retry(network_error_message(exc, label=label))
     log.debug("NOTIFICATION_HTTP_RESPONSE", extra={"label": label, "status": status, "test_send": test_send})

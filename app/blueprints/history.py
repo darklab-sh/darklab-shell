@@ -39,10 +39,13 @@ from services.history.run_metadata import (
     normalize_history_filter_text as _normalize_history_filter_text,
     run_atlas_counts_by_run as _run_atlas_counts_by_run,
     run_file_artifacts_by_run as _run_file_artifacts_by_run,
-    run_metadata_counts_by_run as _run_metadata_counts_by_run,
+    run_finding_counts_by_run as _run_finding_counts_by_run,
 )
 from services.history.search import run_search_clause, sqlite_fts_query
 from core.process import active_runs_for_session
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType, AuditTargetType
+from services.audit.recorder import record_event
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
 from services.teams.request_scope import RequestScopeError, current_request_scope, requested_team_id, scope_error_payload
@@ -1120,7 +1123,7 @@ def get_history():
         paged_snapshots = [item for item in paged_items if item.get("type") == "snapshot"]
         artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
         project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
-        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        finding_counts_by_run = _run_finding_counts_by_run(conn, [item["id"] for item in paged_runs])
         atlas_counts = _run_atlas_counts_by_run(
             conn,
             session_id,
@@ -1139,11 +1142,10 @@ def get_history():
             item["project_link_count"] = len(item["project_links"])
             item["labels"] = labels_by_run.get(str(item["id"]), [])
             item["note"] = (notes_by_run.get(str(item["id"]), []) or [None])[0]
-            item.update(metadata_counts_by_run.get(str(item["id"]), {
-                "finding_count": 0,
-                "label_count": 0,
-                "note_count": 0,
-            }))
+            run_id = str(item["id"])
+            item["finding_count"] = finding_counts_by_run.get(run_id, 0)
+            item["label_count"] = len(item["labels"])
+            item["note_count"] = len(notes_by_run.get(run_id, []))
             item.update(atlas_counts.get(str(item["id"]), {
                 "atlas_entity_count": 0,
                 "atlas_finding_count": 0,
@@ -1757,7 +1759,7 @@ def get_run(run_id):
         )
         if run_team_id:
             include_private_metadata = team_scope_allowed
-        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id]) if include_private_metadata else {}
+        finding_counts_by_run = _run_finding_counts_by_run(conn, [run_id]) if include_private_metadata else {}
         atlas_counts = (
             _run_atlas_counts_by_run(conn, session_id, [run_id], team_id=run_team_id)
             if include_private_metadata else {}
@@ -1779,11 +1781,9 @@ def get_run(run_id):
     run["findings"] = findings_by_run.get(str(run_id), [])
     run["labels"] = labels_by_run.get(str(run_id), [])
     run["note"] = (notes_by_run.get(str(run_id), []) or [None])[0]
-    run.update(metadata_counts_by_run.get(str(run_id), {
-        "finding_count": 0,
-        "label_count": 0,
-        "note_count": 0,
-    }))
+    run["finding_count"] = finding_counts_by_run.get(str(run_id), 0)
+    run["label_count"] = len(run["labels"])
+    run["note_count"] = len(notes_by_run.get(str(run_id), []))
     run.update(atlas_counts.get(str(run_id), {
         "atlas_entity_count": 0,
         "atlas_finding_count": 0,
@@ -1875,6 +1875,18 @@ def delete_run(run_id):
             if cleanup_preview:
                 atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
         cur = conn.execute(delete_run_sql, (run_id, *scope_params))
+        if cur.rowcount:
+            record_event(
+                AuditEventType.HISTORY_DELETE,
+                target_id=run_id,
+                details={
+                    "run_id": run_id,
+                    "deleted_count": int(cur.rowcount or 0),
+                    "source": "history",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request, owner_scope),
+            )
         conn.commit()
     if cur.rowcount:
         log.info("HISTORY_DELETED", extra={
@@ -2283,6 +2295,17 @@ def bulk_delete_history():
                 f"DELETE FROM runs WHERE {delete_scope_sql} AND id IN ({delete_placeholders})",  # nosec
                 [*delete_scope_params, *deletable_ids],
             )
+            record_event(
+                AuditEventType.HISTORY_DELETE,
+                target_id="",
+                details={
+                    "run_ids": deletable_ids,
+                    "deleted_count": len(deletable_ids),
+                    "source": "history_bulk",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request, owner_scope),
+            )
         conn.commit()
     log.info("HISTORY_BULK_DELETED", extra={
         "ip": get_client_ip(),
@@ -2317,6 +2340,18 @@ def clear_history():
         ]
         delete_run_artifacts(conn, run_ids)
         cur = conn.execute("DELETE FROM runs WHERE " + scope_sql, scope_params)  # nosec
+        if cur.rowcount:
+            record_event(
+                AuditEventType.HISTORY_DELETE,
+                target_id="",
+                details={
+                    "run_count": int(cur.rowcount or 0),
+                    "deleted_count": int(cur.rowcount or 0),
+                    "source": "history_clear",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request, owner_scope),
+            )
         conn.commit()
     log.info("HISTORY_CLEARED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": cur.rowcount,
@@ -2378,6 +2413,32 @@ def save_share():
             "INSERT INTO snapshots (id, session_id, team_id, label, created, content) VALUES (?, ?, ?, ?, ?, ?)",
             (share_id, session_id, owner_scope.team_id, label, created, stored_content)
         )
+        record_event(
+            AuditEventType.SNAPSHOT_CREATE,
+            target_id=share_id,
+            details={
+                "snapshot_id": share_id,
+                "safe_label": label,
+                "redaction_mode": "configured" if apply_redaction else "none",
+                "source": "share",
+                "run_id": str(data.get("run_id") or ""),
+            },
+            conn=conn,
+            **route_audit_fields(session_id, request, owner_scope),
+        )
+        if CFG.get("share_redaction_enabled") and apply_redaction:
+            record_event(
+                AuditEventType.REDACTION_USE,
+                target_type=AuditTargetType.SNAPSHOT,
+                target_id=share_id,
+                details={
+                    "snapshot_id": share_id,
+                    "redaction_mode": "configured",
+                    "source": "share",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request, owner_scope),
+            )
         conn.commit()
     log.info("SHARE_CREATED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
@@ -2420,6 +2481,17 @@ def bulk_delete_shares():
             conn.execute(
                 f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
                 [session_id, *deletable_ids],
+            )
+            record_event(
+                AuditEventType.SNAPSHOT_DELETE,
+                target_id="",
+                details={
+                    "snapshot_ids": deletable_ids,
+                    "deleted_count": len(deletable_ids),
+                    "source": "share_bulk",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request),
             )
         conn.commit()
     log.info("SHARES_BULK_DELETED", extra={
@@ -2487,6 +2559,18 @@ def delete_share(share_id):
             "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),
         )
+        if cur.rowcount:
+            record_event(
+                AuditEventType.SNAPSHOT_DELETE,
+                target_id=share_id,
+                details={
+                    "snapshot_id": share_id,
+                    "deleted_count": int(cur.rowcount or 0),
+                    "source": "share",
+                },
+                conn=conn,
+                **route_audit_fields(session_id, request),
+            )
         conn.commit()
     log.info("SHARE_DELETED", extra={
         "ip": get_client_ip(),

@@ -1,6 +1,372 @@
 // ── Desktop UI controller ──
 // Bootstraps the page, wires listeners, and coordinates the feature helpers.
 
+import {
+  getCmdSelection,
+  replaceCmdRange,
+} from './features/terminal/composer_editing.js';
+import { setControllerActionHandlers as importedSetControllerActionHandlers } from './controller_action_bridge.js';
+import {
+  emitUiEvent,
+  getActiveTabId as importedGetActiveTabId,
+  getActiveTab,
+  getAppState as importedGetAppState,
+  getAutocompleteState as importedGetAutocompleteState,
+  getTabs as importedGetTabs,
+  getWelcomeState as importedGetWelcomeState,
+  setAutocompleteState as importedSetAutocompleteState,
+  setWelcomeState as importedSetWelcomeState,
+} from './core/state.js';
+import {
+  cmdInput,
+  commandCatalogCloseBtn,
+  commandCatalogOverlay,
+  commandRegistryCloseBtn,
+  faqCloseBtn,
+  faqOverlay,
+  headerTitle,
+  histClearAllBtn,
+  historyCloseBtn,
+  historyPanel,
+  lnBtn,
+  mobileCmdInput,
+  mobileMenu,
+  mobileRunBtn,
+  mobileShellTranscript,
+  newTabBtn,
+  optionsCloseBtn,
+  optionsCommandOutcomeSummariesToggle,
+  optionsCompareContextSelect,
+  optionsCompareViewModeSelect,
+  optionsHudClockSelect,
+  optionsLnToggle,
+  optionsNotifyToggle,
+  optionsProjectAutoLinkExternalRunsToggle,
+  optionsProjectAutoLinkRunEntitiesToggle,
+  optionsPromptUsernameInput,
+  optionsShareRedactionSelect,
+  optionsTabs,
+  optionsTsSelect,
+  optionsWelcomeSelect,
+  searchCaseBtn,
+  searchCloseBtn,
+  searchInput,
+  searchNextBtn,
+  searchPrevBtn,
+  searchRegexBtn,
+  searchScopeButtons,
+  searchSummaryBtn,
+  searchToggleBtn,
+  shortcutsOverlay,
+  themeCloseBtn,
+  tsBtn,
+  workflowsCloseBtn,
+  workflowsOverlay,
+  workspaceCancelEditBtn,
+  workspaceCloseBtn,
+  workspaceCloseViewerBtn,
+  workspaceEditorOverlay,
+  workspaceViewerOverlay,
+} from './core/dom.js';
+import {
+  blurVisibleComposerInputIfMobile,
+  focusElement,
+  getComposerInputs,
+  getComposerValue,
+  hideFaqOverlay,
+  hideHistoryPanel,
+  hideMobileMenu,
+  hideSearchBar,
+  hideShortcutsOverlay,
+  hideWorkflowsOverlay,
+  isAcDropdownOpen,
+  isActiveTabRunning,
+  isFaqOverlayOpen,
+  isHistoryPanelOpen,
+  isMobileMenuOpen,
+  isOptionsOverlayOpen,
+  isSearchBarOpen,
+  isShortcutsOverlayOpen,
+  isThemeOverlayOpen,
+  isWorkflowsOverlayOpen,
+  isWorkspaceOverlayOpen,
+  markInteractionSurfaceReady,
+  refocusComposerAfterAction,
+  setComposerValue,
+  setMobileKeyboardOpenState,
+  showFaqOverlay,
+  showMobileMenu,
+  showSearchBar,
+  showShortcutsOverlay,
+  showWorkflowsOverlay,
+  togglePanelOverlay,
+} from './ui/ui_helpers.js';
+import {
+  bindDismissible,
+  closeTopmostDismissible,
+} from './ui/ui_dismissible.js';
+import { bindFocusTrap } from './ui/ui_focus_trap.js';
+import { bindMobileSheet } from './ui/mobile_sheet.js';
+import { closeMajorOverlays as _closeMajorOverlays } from './ui/overlay_actions_bridge.js';
+import {
+  _tsModes,
+  closeOptions,
+  closeThemeSelector,
+  createShortcutTab,
+  hidePromptUsernameSavedIndicator,
+  isEditableTarget,
+} from './app.js';
+import {
+  _defaultThemeEntry,
+  _findThemeEntry,
+  _savedThemeName,
+  applyThemeSelection,
+  renderThemeSelectionOptions,
+  syncThemeSelectionControls,
+} from './features/theme/theme.js';
+import {
+  activateOptionsTab,
+  applyCommandOutcomeSummariesPreference,
+  applyCompareContextPreference,
+  applyCompareViewModePreference,
+  applyHudClockPreference,
+  applyLineNumberPreference,
+  applyProjectAutoLinkExternalRunsPreference,
+  applyProjectAutoLinkRunEntitiesPreference,
+  applyPromptUsernamePreference,
+  applyRunNotifyPreference,
+  applyShareRedactionDefaultPreference,
+  applyTimestampPreference,
+  applyWelcomeIntroPreference,
+  getHudClockPreference,
+  getPreference,
+  getPromptUsernamePreference,
+  getShareRedactionDefaultPreference,
+  getWelcomeIntroPreference,
+  loadSessionPreferences,
+  syncOptionsControls,
+  syncPromptUsernameValidation,
+} from './features/preferences/preferences.js';
+import {
+  _seedLocalStorageStarsToServer,
+  cancelPendingTerminalConfirm,
+  confirmKill,
+  hasPendingTerminalConfirm,
+  interruptPromptLine,
+  restoreActiveRunsAfterReload,
+  runCommand,
+  submitComposerCommand,
+} from './runner.js';
+import {
+  applyFaqHashTarget,
+  clearFaqHash,
+  renderAllowedCommandsFaq,
+  renderFaqItems,
+  renderFaqLimits,
+  setAllowedCommandsFaqData,
+} from './features/command-registry/faq_helpers.js';
+import {
+  closeCommandRegistry,
+  isCommandRegistryOverlayOpen,
+  renderCommandRegistry,
+  setCommandRegistryData as importedSetCommandRegistryData,
+} from './features/command-registry/command_registry_bridge.js';
+import {
+  apiFetch,
+  logClientError,
+} from './session.js';
+import {
+  getLineNumberMode,
+  getTimestampMode,
+} from './output.js';
+import {
+  acAccept,
+  acHide,
+  acIsHintOnly,
+  acNextSelectableIndex,
+  acSelectableIndexes,
+  acSelectableItems,
+  acShow,
+} from './autocomplete.js';
+import {
+  bindMobileComposerKeyboardListeners,
+  bindMobileComposerSubmitAndInputListeners,
+} from './features/terminal/mobile_composer_keyboard.js';
+import {
+  clearSearch,
+  navigateSearch,
+  prepareSearchBarForOpen,
+  prepareSearchBarForScope,
+  runSearch,
+  scheduleRunSearch,
+  setSearchScope,
+  summarizeCurrentOutputSignals,
+} from './search.js';
+import {
+  createDefaultTabLabel,
+  createTab,
+  setupTabScrollControls,
+  updateNewTabBtn,
+} from './tabs.js';
+import {
+  handleActionShortcut,
+  handleChromeShortcut,
+  handleTabShortcut,
+} from './features/shortcuts/global_shortcuts.js';
+import {
+  hydrateCmdHistory,
+  navigateCmdHistory,
+} from './features/history/history_recall.js';
+import {
+  refreshHistoryPanel,
+  resetHistoryMobileFilters,
+  resetHistorySelectionOnClose,
+} from './history.js';
+import { loadStarredFromServer } from './features/history/history_actions.js';
+import { confirmHistAction } from './features/history/history_mutations.js';
+import { enterHistSearch } from './features/history/history_search.js';
+import {
+  closeAtlas as importedCloseAtlas,
+  isAtlasOverlayOpen as importedIsAtlasOverlayOpen,
+} from './features/atlas/atlas_bridge.js';
+import { isHistoryRunOverlayOpen as importedIsHistoryRunOverlayOpen } from './features/history/history_run_modal_state_bridge.js';
+import {
+  requestWelcomeSettle,
+  runWelcome,
+  welcomeOwnsTab,
+} from './welcome.js';
+import { restoreTabSessionState } from './features/tabs/tab_session_state.js';
+import { isConfirmOpen } from './ui/ui_confirm.js';
+import {
+  _uiOverlayRefs,
+  isMobileKeyboardOpen,
+  syncMobileViewportState,
+  useMobileTerminalViewportMode,
+} from './features/mobile/mobile_shell_layout.js';
+import { dispatchMobileMenuAction } from './features/mobile/mobile_menu_actions.js';
+import {
+  closeWorkspace,
+  hideWorkspaceEditor,
+  hideWorkspaceViewer,
+} from './workspace.js';
+import {
+  closeWorkflowEditor as importedCloseWorkflowEditor,
+  ensureWorkflowCatalogLoaded as importedEnsureWorkflowCatalogLoaded,
+  openWorkflowEditor as importedOpenWorkflowEditor,
+  renderWorkflowItems as importedRenderWorkflowItems,
+} from './features/workflows/workflows_bridge.js';
+import {
+  closeProviderStatusModal as importedCloseProviderStatusModal,
+  hasSecretsHandler as importedHasSecretsHandler,
+  isProviderStatusModalOpen as importedIsProviderStatusModalOpen,
+} from './features/preferences/secrets_bridge.js';
+import {
+  closeProjectWorkspace as importedCloseProjectWorkspace,
+  isProjectWorkspaceOpen as importedIsProjectWorkspaceOpen,
+} from './features/projects/project_context_bridge.js';
+
+const closeAtlas = (...args) => _controllerFn('closeAtlas', importedCloseAtlas)?.(...args);
+const closeCommandCatalogModal = (...args) => _controllerFn('closeCommandCatalogModal')?.(...args);
+const closeProviderStatusModal = (...args) => {
+  const fn = (
+    typeof importedHasSecretsHandler === 'function'
+    && importedHasSecretsHandler('closeProviderStatusModal')
+    && typeof importedCloseProviderStatusModal === 'function'
+  ) ? importedCloseProviderStatusModal : _controllerFn('closeProviderStatusModal');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+const closeProjectWorkspace = (...args) => _controllerFn('closeProjectWorkspace', importedCloseProjectWorkspace)?.(...args);
+const closeSchedulesModal = (...args) => _controllerFn('closeSchedulesModal')?.(...args);
+const closeWatchersModal = (...args) => _controllerFn('closeWatchersModal')?.(...args);
+const closeWorkflowEditor = (...args) => _controllerFn('closeWorkflowEditor', importedCloseWorkflowEditor)?.(...args);
+const ensureWorkflowCatalogLoaded = (...args) => _controllerFn('ensureWorkflowCatalogLoaded', importedEnsureWorkflowCatalogLoaded)?.(...args);
+const isAtlasOverlayOpen = (...args) => !!_controllerFn('isAtlasOverlayOpen', importedIsAtlasOverlayOpen)?.(...args);
+const isCommandCatalogOverlayOpen = (...args) => !!_controllerFn('isCommandCatalogOverlayOpen')?.(...args);
+const isHistoryCompareOverlayOpen = (...args) => !!_controllerFn('isHistoryCompareOverlayOpen')?.(...args);
+const isHistoryRunOverlayOpen = (...args) => !!_controllerFn('isHistoryRunOverlayOpen', importedIsHistoryRunOverlayOpen)?.(...args);
+const isProviderStatusModalOpen = (...args) => {
+  const fn = (
+    typeof importedHasSecretsHandler === 'function'
+    && importedHasSecretsHandler('isProviderStatusModalOpen')
+    && typeof importedIsProviderStatusModalOpen === 'function'
+  ) ? importedIsProviderStatusModalOpen : _controllerFn('isProviderStatusModalOpen');
+  return !!fn?.(...args);
+};
+const isProjectWorkspaceOpen = (...args) => !!_controllerFn('isProjectWorkspaceOpen', importedIsProjectWorkspaceOpen)?.(...args);
+const isSchedulesOverlayOpen = (...args) => !!_controllerFn('isSchedulesOverlayOpen')?.(...args);
+const isWatchersOverlayOpen = (...args) => !!_controllerFn('isWatchersOverlayOpen')?.(...args);
+const loadWorkflows = (...args) => _controllerFn('loadWorkflows')?.(...args);
+const openWorkflowEditor = (...args) => _controllerFn('openWorkflowEditor', importedOpenWorkflowEditor)?.(...args);
+const renderWorkflowItems = (...args) => _controllerFn('renderWorkflowItems', importedRenderWorkflowItems)?.(...args);
+
+const CONTROLLER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _controllerFn(name, imported = null) {
+  if (typeof imported === 'function') return imported;
+  const fn = CONTROLLER_GLOBAL && CONTROLLER_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _controllerActiveTabId() {
+  const importedValue = typeof importedGetActiveTabId === 'function' ? importedGetActiveTabId() : null;
+  if (importedValue) return importedValue;
+  const readActive = CONTROLLER_GLOBAL && CONTROLLER_GLOBAL.getActiveTabId;
+  if (typeof readActive === 'function') {
+    const value = readActive();
+    if (value) return value;
+  }
+  return CONTROLLER_GLOBAL?.activeTabId || CONTROLLER_GLOBAL?.APP_STATE?.activeTabId || null;
+}
+
+function _controllerTabs() {
+  const tabs = _controllerFn('getTabs', importedGetTabs)?.();
+  return Array.isArray(tabs) ? tabs : [];
+}
+
+function _controllerState() {
+  return _controllerFn('getAppState', importedGetAppState)?.() || {};
+}
+
+function _controllerWelcomeState() {
+  return _controllerFn('getWelcomeState', importedGetWelcomeState)?.() || {};
+}
+
+function _controllerSearchCaseSensitive() {
+  return !!_controllerState().searchCaseSensitive;
+}
+
+function _controllerSetSearchCaseSensitive(value) {
+  _controllerState().searchCaseSensitive = !!value;
+}
+
+function _controllerSearchRegexMode() {
+  return !!_controllerState().searchRegexMode;
+}
+
+function _controllerSetSearchRegexMode(value) {
+  _controllerState().searchRegexMode = !!value;
+}
+
+function _controllerSetWelcomeState(next) {
+  return _controllerFn('setWelcomeState', importedSetWelcomeState)?.(next);
+}
+
+function _controllerAutocompleteState() {
+  return _controllerFn('getAutocompleteState', importedGetAutocompleteState)?.() || {};
+}
+
+function _controllerSetAutocompleteState(next) {
+  return _controllerFn('setAutocompleteState', importedSetAutocompleteState)?.(next);
+}
+
+let _controllerCommandRegistryData = null;
+
+function _controllerSetCommandRegistryData(data) {
+  _controllerCommandRegistryData = data || null;
+  if (typeof importedSetCommandRegistryData === 'function') importedSetCommandRegistryData(data);
+  return _controllerCommandRegistryData;
+}
+
 renderThemeSelectionOptions();
 const initialThemeName = _savedThemeName();
 const initialTheme = initialThemeName ? _findThemeEntry(initialThemeName) : null;
@@ -8,35 +374,132 @@ const resolvedInitialTheme = initialTheme || _defaultThemeEntry();
 if (resolvedInitialTheme) applyThemeSelection(resolvedInitialTheme.name, false);
 else syncThemeSelectionControls();
 
+function _welcomeApi(name) {
+  return (typeof window !== 'undefined' && window[name])
+    || (typeof globalThis !== 'undefined' && globalThis[name])
+    || (name === 'runWelcome' && typeof runWelcome !== 'undefined' ? runWelcome : null)
+    || (name === 'welcomeOwnsTab' && typeof welcomeOwnsTab !== 'undefined' ? welcomeOwnsTab : null)
+    || (name === 'requestWelcomeSettle' && typeof requestWelcomeSettle !== 'undefined' ? requestWelcomeSettle : null);
+}
+
+function _welcomeActiveNow() {
+  return !!_controllerWelcomeState().active;
+}
+
+function _welcomeDoneNow() {
+  return !!_controllerWelcomeState().done;
+}
+
+function _setWelcomeBootPending(value) {
+  _controllerSetWelcomeState({ bootPending: !!value });
+}
+
+function _setWelcomePromptAfterSettle(value) {
+  _controllerSetWelcomeState({ promptAfterSettle: !!value });
+}
+
+function _welcomeOwns(tabId) {
+  const owns = _welcomeApi('welcomeOwnsTab');
+  return typeof owns === 'function' && owns(tabId);
+}
+
+function _requestWelcomeSettle(tabId) {
+  const settle = _welcomeApi('requestWelcomeSettle');
+  return typeof settle === 'function' ? settle(tabId) : false;
+}
+
+function _readControllerAutocompleteState() {
+  const apiState = _controllerAutocompleteState();
+  return {
+    filtered: Array.isArray(apiState.filtered) ? apiState.filtered : [],
+    index: apiState.index ?? -1,
+  };
+}
+
+function _writeControllerAutocompleteState(next = {}) {
+  _controllerSetAutocompleteState(next);
+  return _readControllerAutocompleteState();
+}
+
+function _runWelcomeIntro() {
+  const run = _welcomeApi('runWelcome');
+  if (typeof run === 'function') run();
+}
+
 tsBtn.addEventListener('click', () => {
-  applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
+  const current = typeof getTimestampMode === 'function' ? getTimestampMode() : 'off';
+  applyTimestampPreference(_tsModes[(_tsModes.indexOf(current) + 1) % _tsModes.length]);
   refocusComposerAfterAction({ defer: true });
 });
 
 lnBtn.addEventListener('click', () => {
-  applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
+  const current = typeof getLineNumberMode === 'function' ? getLineNumberMode() : 'off';
+  applyLineNumberPreference(current === 'on' ? 'off' : 'on');
   refocusComposerAfterAction({ defer: true });
 });
 
-function openWorkflows() {
+function openWorkflows(options = {}) {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  const scopedItems = Array.isArray(options.items) ? options.items : null;
+  if (workflowsOverlay) {
+    if (scopedItems) workflowsOverlay.dataset.workflowScoped = '1';
+    else delete workflowsOverlay.dataset.workflowScoped;
+  }
   showWorkflowsOverlay();
-  if (typeof ensureWorkflowCatalogLoaded === 'function') {
-    ensureWorkflowCatalogLoaded().catch(err => {
+  if (scopedItems) {
+    if (typeof renderWorkflowItems === 'function') {
+      renderWorkflowItems(scopedItems, { emitCatalogEvent: options.emitCatalogEvent !== false });
+    }
+    if (typeof markInteractionSurfaceReady === 'function') {
+      markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
+    }
+    return Promise.resolve(scopedItems);
+  }
+  const workflowsReady = typeof loadWorkflows === 'function'
+    ? loadWorkflows()
+    : Promise.resolve();
+  return workflowsReady.then(() => {
+    if (typeof ensureWorkflowCatalogLoaded !== 'function') return null;
+    return ensureWorkflowCatalogLoaded().catch(err => {
       logClientError('failed to load /workflows while opening modal', err);
+      return null;
     });
-  }
-  if (typeof markInteractionSurfaceReady === 'function') {
-    markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
-  }
+  }).catch(err => {
+    logClientError('failed to load workflows controller', err);
+  }).finally(() => {
+    if (typeof markInteractionSurfaceReady === 'function') {
+      markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
+    }
+  });
 }
 
 function closeWorkflows() {
+  if (workflowsOverlay) delete workflowsOverlay.dataset.workflowScoped;
   hideWorkflowsOverlay();
   if (typeof emitUiEvent === 'function') emitUiEvent('app:workflows-closed', {});
   refocusComposerAfterAction({ defer: true });
 }
+
+function openWorkflowEditorFromButton() {
+  if (typeof openWorkflowEditor === 'function') {
+    openWorkflowEditor();
+  } else if (typeof loadWorkflows === 'function') {
+    loadWorkflows()
+      .then(() => {
+        if (typeof openWorkflowEditor === 'function') openWorkflowEditor();
+      })
+      .catch(err => {
+        logClientError('failed to load workflow editor', err);
+      });
+  }
+}
+
+document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(btn => {
+  if (btn.dataset.workflowEditorOpenBound === '1') return;
+  btn.dataset.workflowEditorOpenBound = '1';
+  btn.addEventListener('click', openWorkflowEditorFromButton);
+});
 
 function openFaq() {
   _closeMajorOverlays();
@@ -86,7 +549,6 @@ function toggleHistoryPanelSurface(force = null) {
   return isOpen;
 }
 
-window.toggleHistoryPanelSurface = toggleHistoryPanelSurface;
 
 function renderShortcuts(data) {
   const listEl = document.getElementById('shortcuts-list');
@@ -165,6 +627,10 @@ function setupDismissibleOverlays() {
   const projectWorkspaceCloseBtn = projectWorkspaceOverlay?.querySelector('.project-workspace-close');
   const providerStatusOverlay = document.getElementById('provider-status-overlay');
   const providerStatusCloseBtn = providerStatusOverlay?.querySelector('.provider-status-close');
+  const schedulesOverlay = document.getElementById('schedules-overlay');
+  const schedulesCloseBtns = schedulesOverlay?.querySelectorAll('.schedules-close, .sheet-grab');
+  const watchersOverlay = document.getElementById('watchers-overlay');
+  const watchersCloseBtns = watchersOverlay?.querySelectorAll('.watchers-close, .sheet-grab');
 
   bindDismissible(_uiOverlayRefs.workflowsOverlay, {
     level: 'panel',
@@ -174,7 +640,10 @@ function setupDismissibleOverlays() {
   });
   bindDismissible(_uiOverlayRefs.workspaceOverlay, {
     level: 'panel',
-    isOpen: () => typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen(),
+    isOpen: () => !!(
+      _uiOverlayRefs.workspaceOverlay
+      && _uiOverlayRefs.workspaceOverlay.classList.contains('open')
+    ),
     onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); },
     closeButtons: typeof workspaceCloseBtn !== 'undefined' ? workspaceCloseBtn : null,
   });
@@ -217,7 +686,7 @@ function setupDismissibleOverlays() {
     closeButtons: typeof commandRegistryCloseBtn !== 'undefined' ? commandRegistryCloseBtn : null,
   });
   bindDismissible(projectWorkspaceOverlay, {
-    level: 'panel',
+    level: 'modal',
     isOpen: () => typeof isProjectWorkspaceOpen === 'function' && isProjectWorkspaceOpen(),
     onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); },
     closeButtons: projectWorkspaceCloseBtn,
@@ -233,6 +702,18 @@ function setupDismissibleOverlays() {
     isOpen: () => typeof isProviderStatusModalOpen === 'function' && isProviderStatusModalOpen(),
     onClose: () => { if (typeof closeProviderStatusModal === 'function') closeProviderStatusModal(); },
     closeButtons: providerStatusCloseBtn,
+  });
+  bindDismissible(schedulesOverlay, {
+    level: 'modal',
+    isOpen: () => typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen(),
+    onClose: () => { if (typeof closeSchedulesModal === 'function') closeSchedulesModal(); },
+    closeButtons: schedulesCloseBtns,
+  });
+  bindDismissible(watchersOverlay, {
+    level: 'modal',
+    isOpen: () => typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen(),
+    onClose: () => { if (typeof closeWatchersModal === 'function') closeWatchersModal(); },
+    closeButtons: watchersCloseBtns,
   });
   bindDismissible(_uiOverlayRefs.themeOverlay, {
     level: 'panel',
@@ -328,8 +809,15 @@ function setupMobileComposer() {
 
 // ── Load config from server ──
 apiFetch('/config').then(r => r.json()).then(cfg => {
-  APP_CONFIG = cfg;
-  if (typeof window !== 'undefined') window.APP_CONFIG = APP_CONFIG;
+  if (
+    typeof window !== 'undefined'
+    && window.DarklabConfig
+    && typeof window.DarklabConfig.setAppConfig === 'function'
+  ) {
+    window.DarklabConfig.setAppConfig(cfg);
+  } else if (typeof window !== 'undefined') {
+    window.APP_CONFIG = cfg;
+  }
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const railWordmarkTitle = document.getElementById('rail-wordmark-title');
@@ -345,7 +833,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   });
   syncThemeSelectionControls();
   updateNewTabBtn();
-  renderFaqLimits(cfg);
+  if (typeof renderFaqLimits === 'function') renderFaqLimits(cfg);
   if (cfg.diag_enabled) {
     const railDiagBtn = document.getElementById('rail-diag-btn');
     if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
@@ -456,24 +944,24 @@ optionsPromptUsernameInput?.addEventListener('change', e => {
 });
 
 apiFetch('/allowed-commands').then(r => r.json()).then(data => {
-  allowedCommandsFaqData = data;
-  renderAllowedCommandsFaq(data);
+  if (typeof setAllowedCommandsFaqData === 'function') setAllowedCommandsFaqData(data);
+  if (typeof renderAllowedCommandsFaq === 'function') renderAllowedCommandsFaq(data);
 }).catch(err => {
   logClientError('failed to load /allowed-commands', err);
 });
 
 apiFetch('/commands/catalog').then(r => r.json()).then(data => {
-  commandRegistryData = data;
+  _controllerSetCommandRegistryData(data);
   if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
-    renderCommandRegistry();
+    if (typeof renderCommandRegistry === 'function') renderCommandRegistry();
   }
 }).catch(err => {
   logClientError('failed to load /commands/catalog', err);
-  commandRegistryData = { restricted: false, commands: [], groups: [] };
+  _controllerSetCommandRegistryData({ restricted: false, commands: [], groups: [] });
 });
 
 apiFetch('/faq').then(r => r.json()).then(data => {
-  renderFaqItems(data.items || []);
+  if (typeof renderFaqItems === 'function') renderFaqItems(data.items || []);
 }).catch(err => {
   logClientError('failed to load /faq', err);
 });
@@ -484,12 +972,10 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
   logClientError('failed to load /shortcuts', err);
 });
 
-const workflowsLoad = typeof reloadWorkflowCatalog === 'function'
-  ? reloadWorkflowCatalog()
-  : apiFetch('/workflows').then(r => r.json()).then(data => {
-      const items = data.items || [];
-      renderWorkflowItems(items);
-    });
+const workflowsLoad = apiFetch('/workflows').then(r => r.json()).then(data => {
+  const items = data.items || [];
+  if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
+});
 workflowsLoad.catch(err => {
   logClientError('failed to load /workflows', err);
 });
@@ -538,12 +1024,12 @@ Promise.all([
     && restoreTabSessionState();
   const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
     && restoreActiveRunsAfterReload(activeData.runs || []);
-  if (!restoredTabs && !restoredActiveRuns && (!Array.isArray(tabs) || tabs.length === 0)) {
+  if (!restoredTabs && !restoredActiveRuns && (!_controllerTabs().length)) {
     createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
-    runWelcome();
+    _runWelcomeIntro();
     return;
   }
-  _welcomeBootPending = false;
+  _setWelcomeBootPending(false);
 });
 
 setTimeout(() => {
@@ -568,7 +1054,7 @@ function openSearchFromSignal(scope = null) {
     normalizedScope
     && typeof isSearchBarOpen === 'function'
     && isSearchBarOpen()
-    && searchScope === normalizedScope
+    && _controllerState().searchScope === normalizedScope
   ) {
     navigateSearch(1);
     refocusComposerAfterAction({ defer: true });
@@ -580,9 +1066,12 @@ function openSearchFromSignal(scope = null) {
     prepareSearchBarForOpen();
   }
   showSearchBar();
-  if (searchScope === 'text') focusElement(searchInput);
+  if (_controllerState().searchScope === 'text') focusElement(searchInput);
   else refocusComposerAfterAction({ defer: true });
   runSearch();
+}
+
+if (typeof window !== 'undefined') {
 }
 
 // ── Search ──
@@ -613,7 +1102,7 @@ if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButton
   searchScopeButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
       setSearchScope(btn.dataset.searchScope || 'text');
-      if (searchScope === 'text') focusElement(searchInput);
+      if (_controllerState().searchScope === 'text') focusElement(searchInput);
       else refocusComposerAfterAction({ defer: true });
     });
   });
@@ -635,14 +1124,16 @@ searchInput.addEventListener('keydown', e => {
 });
 
 searchCaseBtn.addEventListener('click', () => {
-  searchCaseSensitive = !searchCaseSensitive;
-  searchCaseBtn.setAttribute('aria-pressed', searchCaseSensitive ? 'true' : 'false');
+  const next = !_controllerSearchCaseSensitive();
+  _controllerSetSearchCaseSensitive(next);
+  searchCaseBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
   runSearch();
 });
 
 searchRegexBtn.addEventListener('click', () => {
-  searchRegexMode = !searchRegexMode;
-  searchRegexBtn.setAttribute('aria-pressed', searchRegexMode ? 'true' : 'false');
+  const next = !_controllerSearchRegexMode();
+  _controllerSetSearchRegexMode(next);
+  searchRegexBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
   runSearch();
 });
 
@@ -721,25 +1212,28 @@ document.addEventListener('keydown', e => {
     if (handleChromeShortcut(e)) return;
     return;
   }
-  if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+  if (_welcomeActiveNow() && !_welcomeDoneNow() && _welcomeOwns(_controllerActiveTabId())) {
+    const editableWelcomeTarget = isEditableTarget(e.target);
+    const composerWelcomeTarget = e.target === cmdInput || (typeof mobileCmdInput !== 'undefined' && e.target === mobileCmdInput);
+    if (editableWelcomeTarget && !composerWelcomeTarget) return;
     const isCtrlC = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C');
     const isSpace = e.key === ' ' || e.code === 'Space';
     const isPrintable = !e.metaKey && !e.ctrlKey && !e.altKey && !isEditableTarget(e.target) && e.key.length === 1;
     if (isCtrlC) {
-      _welcomePromptAfterSettle = true;
-      requestWelcomeSettle(activeTabId);
+      _setWelcomePromptAfterSettle(true);
+      _requestWelcomeSettle(_controllerActiveTabId());
       refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (e.key === 'Escape' || e.key === 'Enter' || isSpace) {
-      requestWelcomeSettle(activeTabId);
+      _requestWelcomeSettle(_controllerActiveTabId());
       refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (isPrintable) {
-      requestWelcomeSettle(activeTabId);
+      _requestWelcomeSettle(_controllerActiveTabId());
       refocusComposerAfterAction({ defer: true });
       setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
       e.preventDefault();
@@ -753,20 +1247,20 @@ document.addEventListener('keydown', e => {
     if (e.target === cmdInput) return;
     const editable = isEditableTarget(e.target);
     if (editable) return;
-    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
-      _welcomePromptAfterSettle = true;
-      requestWelcomeSettle(activeTabId);
+    if (_welcomeActiveNow() && !_welcomeDoneNow() && _welcomeOwns(_controllerActiveTabId())) {
+      _setWelcomePromptAfterSettle(true);
+      _requestWelcomeSettle(_controllerActiveTabId());
       refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
-      confirmKill(activeTabId);
+      confirmKill(_controllerActiveTabId());
     } else if (hasActiveTerminalConfirm()) {
-      cancelPendingTerminalConfirm(activeTabId);
+      cancelPendingTerminalConfirm(_controllerActiveTabId());
     } else {
-      interruptPromptLine(activeTabId);
+      interruptPromptLine(_controllerActiveTabId());
     }
     e.preventDefault();
     return;
@@ -786,27 +1280,27 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (
-    _welcomeActive && welcomeOwnsTab(activeTabId)
+    _welcomeActiveNow() && !_welcomeDoneNow() && _welcomeOwns(_controllerActiveTabId())
     && cmdInput
     && !e.metaKey && !e.ctrlKey && !e.altKey
     && !isEditableTarget(e.target)
     && e.key.length === 1
   ) {
-    requestWelcomeSettle(activeTabId);
+    _requestWelcomeSettle(_controllerActiveTabId());
     refocusComposerAfterAction({ defer: true });
     setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
     e.preventDefault();
     return;
   }
-  if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
+  if (e.key === 'Enter' && _welcomeActiveNow() && !_welcomeDoneNow() && _welcomeOwns(_controllerActiveTabId())) {
     if ((typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) return;
-    requestWelcomeSettle(activeTabId);
+    _requestWelcomeSettle(_controllerActiveTabId());
     refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
-  if (e.key === 'Escape' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
-    requestWelcomeSettle(activeTabId);
+  if (e.key === 'Escape' && _welcomeActiveNow() && !_welcomeDoneNow() && _welcomeOwns(_controllerActiveTabId())) {
+    _requestWelcomeSettle(_controllerActiveTabId());
     refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
@@ -901,9 +1395,11 @@ function _replayPromptShortcutAfterSelection(e) {
       if (typeof acHide === 'function') acHide();
       return true;
     }
-    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acFiltered).length) {
-      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
-      if (typeof acShow === 'function') acShow(acFiltered);
+    const acState = _readControllerAutocompleteState();
+    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acState.filtered).length) {
+      const nextIndex = acAutocompleteNextSelectableIndex(acState.filtered, acState.index, 1);
+      _writeControllerAutocompleteState({ index: nextIndex });
+      if (typeof acShow === 'function') acShow(acState.filtered);
     } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(-1)) {
       if (typeof acHide === 'function') acHide();
     }
@@ -914,17 +1410,20 @@ function _replayPromptShortcutAfterSelection(e) {
       if (typeof acHide === 'function') acHide();
       return true;
     }
-    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acFiltered).length) {
-      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
-      if (typeof acShow === 'function') acShow(acFiltered);
+    const acState = _readControllerAutocompleteState();
+    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acState.filtered).length) {
+      const nextIndex = acAutocompleteNextSelectableIndex(acState.filtered, acState.index, -1);
+      _writeControllerAutocompleteState({ index: nextIndex });
+      if (typeof acShow === 'function') acShow(acState.filtered);
     } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(1)) {
       if (typeof acHide === 'function') acHide();
     }
     return true;
   }
   if (e.key === 'Enter') {
-    if (acIndex >= 0 && acFiltered[acIndex] && !acAutocompleteIsHintOnly(acFiltered[acIndex])) {
-      if (typeof acAccept === 'function') acAccept(acFiltered[acIndex]);
+    const acState = _readControllerAutocompleteState();
+    if (acState.index >= 0 && acState.filtered[acState.index] && !acAutocompleteIsHintOnly(acState.filtered[acState.index])) {
+      if (typeof acAccept === 'function') acAccept(acState.filtered[acState.index]);
     } else {
       if (typeof acHide === 'function') acHide();
       if (typeof submitComposerCommand === 'function') {
@@ -937,3 +1436,31 @@ function _replayPromptShortcutAfterSelection(e) {
   }
   return true;
 }
+
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+  });
+  if (typeof importedSetControllerActionHandlers === 'function') {
+    importedSetControllerActionHandlers({
+      closeFaq,
+      closeWorkflows,
+      openFaq,
+      openWorkflows,
+      toggleHistoryPanelSurface,
+    });
+  }
+}
+
+export {
+  acAutocompleteIsHintOnly,
+  acAutocompleteNextSelectableIndex,
+  acAutocompleteSelectableItems,
+  closeShortcuts,
+  hasActiveTerminalConfirm,
+  isAnyPanelOverlayOpen,
+  openFaq,
+  openShortcuts,
+  openWorkflows,
+  setupMobileComposer,
+  toggleHistoryPanelSurface,
+};

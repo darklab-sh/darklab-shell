@@ -1,5 +1,326 @@
 // ── Run comparison result renderer ─────────────────────────────────────
 // Transcript hunk rendering, object diff sections, restore actions, and compare fetch flow.
+import { getTabs as importedGetTabs } from '../../core/state.js';
+import { APP_CONFIG as importedAppConfig } from '../../core/config.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from '../../runtime_bridge.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from '../history/history_restore.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
+import {
+  activateTab as importedActivateTab,
+  createTab as importedCreateTab,
+} from '../../tabs.js';
+import {
+  anchorTone as importedCompareAnchorTone,
+  buildAnchorMap as importedCompareBuildAnchorMap,
+  coerceContext as importedCompareCoerceContext,
+  coerceViewMode as importedCompareCoerceViewMode,
+  compareFormatDelta as importedCompareFormatDelta,
+  contextLimit as importedCompareContextLimit,
+  cssEscape as importedCompareCssEscape,
+  lineLimit as importedCompareLineLimit,
+  number as importedCompareNumber,
+  omittedTotal as importedCompareOmittedTotal,
+  resolveViewMode as importedCompareResolveViewMode,
+  storedContext as importedCompareStoredContext,
+  storedViewMode as importedCompareStoredViewMode,
+  totalChangedLines as importedCompareTotalChangedLines,
+} from './history_compare_core.js';
+import {
+  _historyCompareScrollToLine as importedHistoryCompareScrollToLine,
+  _renderHistoryCompareMinimap as importedRenderHistoryCompareMinimap,
+  _renderHistoryCompareNav as importedRenderHistoryCompareNav,
+} from './history_compare_navigation.js';
+import {
+  _historyCompareRunCard as importedHistoryCompareRunCard,
+  _renderHistoryCompareLauncher as importedRenderHistoryCompareLauncher,
+} from './history_compare_launcher.js';
+import {
+  _renderHistoryCompareActionsMenu as importedRenderHistoryCompareActionsMenu,
+  _renderHistoryCompareDisplayControls as importedRenderHistoryCompareDisplayControls,
+} from './history_compare_controls.js';
+import {
+  _ensureHistoryCompareOverlay as importedEnsureHistoryCompareOverlay,
+  _openHistoryCompareOverlay as importedOpenHistoryCompareOverlay,
+} from './history_compare_overlay.js';
+import { setHistoryCompareHandlers as importedSetHistoryCompareHandlers } from './history_compare_bridge.js';
+
+const HISTORY_COMPARE_RENDERER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+let _historyCompareRendererRowHeightFrame = null;
+let _historyCompareRendererRowResizeObserver = null;
+let _historyCompareRendererRowPairSequence = 0;
+let _historyCompareRendererUnitSequence = 0;
+let _historyCompareApiFetchFallbackLogged = false;
+
+function _historyCompareRendererGlobalFunction(name) {
+  const fn = HISTORY_COMPARE_RENDERER_GLOBAL && HISTORY_COMPARE_RENDERER_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _historyCompareRendererCoreFunction(name) {
+  const core = HISTORY_COMPARE_RENDERER_GLOBAL.DarklabHistoryCompareCore
+    || null;
+  return core && typeof core[name] === 'function' ? core[name] : null;
+}
+
+function _historyCompareRendererApiFetch(url, options, details = {}) {
+  const api = (
+    typeof importedRuntimeApiFetch === 'function'
+    && typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+  )
+    ? importedRuntimeApiFetch
+    : _historyCompareRendererGlobalFunction('apiFetch');
+  if (typeof api === 'function') return api(url, options);
+  if (!_historyCompareApiFetchFallbackLogged) {
+    _historyCompareApiFetchFallbackLogged = true;
+    _historyCompareRendererLogClientError('history compare apiFetch fallback', null, {
+      event: 'HISTORY_COMPARE_API_FETCH_FALLBACK',
+      level: 'warning',
+      left_id: String(details.leftId || ''),
+      right_id: String(details.rightId || ''),
+      url_path: _historyCompareRendererUrlPath(url),
+    });
+  }
+  return fetch(url, options);
+}
+
+function _historyCompareRendererUrlPath(url) {
+  try {
+    const parsed = new URL(String(url || ''), 'http://localhost/');
+    return `${parsed.pathname}${parsed.search}`;
+  } catch (_) {
+    return String(url || '').split('#', 1)[0].slice(0, 300);
+  }
+}
+
+function _historyCompareRendererLogClientError(context, err, details = {}) {
+  const logger = (
+    typeof importedRuntimeLogClientError === 'function'
+    && typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+  )
+    ? importedRuntimeLogClientError
+    : _historyCompareRendererGlobalFunction('logClientError');
+  if (typeof logger === 'function') logger(context, err, details);
+}
+
+function _historyCompareRendererLineLimit(limits) {
+  const lineLimit = (typeof importedCompareLineLimit !== 'undefined' && importedCompareLineLimit)
+    || _historyCompareRendererCoreFunction('lineLimit');
+  if (typeof lineLimit === 'function') return lineLimit(limits);
+  const limit = Number(limits?.line_display_truncate || 0);
+  return Number.isFinite(limit) && limit > 0 ? limit : 4000;
+}
+
+function _historyCompareRendererAnchorTone(items) {
+  const tone = (typeof importedCompareAnchorTone !== 'undefined' && importedCompareAnchorTone)
+    || _historyCompareRendererCoreFunction('anchorTone');
+  return typeof tone === 'function' ? tone(items) : 'info';
+}
+
+function _historyCompareRendererCssEscape(value) {
+  const escape = (typeof importedCompareCssEscape !== 'undefined' && importedCompareCssEscape)
+    || _historyCompareRendererCoreFunction('cssEscape');
+  return typeof escape === 'function' ? escape(value) : String(value);
+}
+
+function _historyCompareRendererNumber(value, fallback = null) {
+  const number = (typeof importedCompareNumber !== 'undefined' && importedCompareNumber)
+    || _historyCompareRendererCoreFunction('number');
+  if (typeof number === 'function') return number(value, fallback);
+  if (value === null || typeof value === 'undefined' || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function _historyCompareRendererUseMobile() {
+  const useMobile = (
+    typeof importedUseMobileTerminalViewportMode !== 'undefined'
+    && importedUseMobileTerminalViewportMode
+  )
+    || _historyCompareRendererGlobalFunction('useMobileTerminalViewportMode');
+  return typeof useMobile === 'function' ? useMobile() : false;
+}
+
+function _historyCompareRendererShowToast(message, tone = 'success') {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || _historyCompareRendererGlobalFunction('showToast');
+  if (typeof toast === 'function') toast(message, tone);
+}
+
+function _historyCompareRendererBindPressable(el) {
+  const bind = (typeof importedBindPressable !== 'undefined' && importedBindPressable)
+    || _historyCompareRendererGlobalFunction('bindPressable');
+  if (typeof bind === 'function') bind(el);
+}
+
+function _historyCompareRendererBuildAnchorMap(data) {
+  const build = (typeof importedCompareBuildAnchorMap !== 'undefined' && importedCompareBuildAnchorMap)
+    || _historyCompareRendererCoreFunction('buildAnchorMap');
+  const built = typeof build === 'function' ? build(data) : null;
+  if (built && built.a instanceof Map && built.b instanceof Map && (built.a.size || built.b.size)) return built;
+  const map = { a: new Map(), b: new Map() };
+  const findingObjects = data?.objects?.findings || {};
+  const addAnchor = (side, item) => {
+    const index = _historyCompareRendererNumber(item?.compare_line_index);
+    if (index === null) return;
+    const existing = map[side].get(index) || [];
+    existing.push(item);
+    map[side].set(index, existing);
+  };
+  (Array.isArray(findingObjects.added) ? findingObjects.added : []).forEach(item => addAnchor('b', item));
+  (Array.isArray(findingObjects.removed) ? findingObjects.removed : []).forEach(item => addAnchor('a', item));
+  return map;
+}
+
+function _historyCompareRendererOmittedTotal(truncated) {
+  const omitted = (typeof importedCompareOmittedTotal !== 'undefined' && importedCompareOmittedTotal)
+    || _historyCompareRendererCoreFunction('omittedTotal');
+  return typeof omitted === 'function' ? omitted(truncated) : 0;
+}
+
+function _historyCompareRendererStoredViewMode() {
+  const stored = (typeof importedCompareStoredViewMode !== 'undefined' && importedCompareStoredViewMode)
+    || _historyCompareRendererCoreFunction('storedViewMode');
+  return typeof stored === 'function' ? stored() : 'auto';
+}
+
+function _historyCompareRendererStoredContext() {
+  const stored = (typeof importedCompareStoredContext !== 'undefined' && importedCompareStoredContext)
+    || _historyCompareRendererCoreFunction('storedContext');
+  return typeof stored === 'function' ? stored() : '3';
+}
+
+function _historyCompareRendererCoerceViewMode(value) {
+  const coerce = (typeof importedCompareCoerceViewMode !== 'undefined' && importedCompareCoerceViewMode)
+    || _historyCompareRendererCoreFunction('coerceViewMode');
+  return typeof coerce === 'function' ? coerce(value) : value;
+}
+
+function _historyCompareRendererCoerceContext(value) {
+  const coerce = (typeof importedCompareCoerceContext !== 'undefined' && importedCompareCoerceContext)
+    || _historyCompareRendererCoreFunction('coerceContext');
+  return typeof coerce === 'function' ? coerce(value) : value;
+}
+
+function _historyCompareRendererResolveViewMode(value) {
+  const resolve = (typeof importedCompareResolveViewMode !== 'undefined' && importedCompareResolveViewMode)
+    || _historyCompareRendererCoreFunction('resolveViewMode');
+  return typeof resolve === 'function' ? resolve(value) : value;
+}
+
+function _historyCompareRendererTotalChangedLines(totals) {
+  const total = (typeof importedCompareTotalChangedLines !== 'undefined' && importedCompareTotalChangedLines)
+    || _historyCompareRendererCoreFunction('totalChangedLines');
+  return typeof total === 'function' ? total(totals) : 0;
+}
+
+function _historyCompareRendererContextLimit(contextMode) {
+  const limit = (typeof importedCompareContextLimit !== 'undefined' && importedCompareContextLimit)
+    || _historyCompareRendererCoreFunction('contextLimit');
+  if (typeof limit === 'function') return limit(contextMode);
+  if (contextMode === 'all') return null;
+  const parsed = Number(contextMode);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 3;
+}
+
+function _historyCompareRendererFormatDelta(value, suffix = '') {
+  const format = (typeof importedCompareFormatDelta !== 'undefined' && importedCompareFormatDelta)
+    || _historyCompareRendererCoreFunction('compareFormatDelta');
+  return typeof format === 'function' ? format(value, suffix) : String(value);
+}
+
+function _historyCompareRendererScrollToLine(side, index, options) {
+  const scroll = (typeof importedHistoryCompareScrollToLine !== 'undefined' && importedHistoryCompareScrollToLine)
+    || _historyCompareRendererGlobalFunction('_historyCompareScrollToLine');
+  return typeof scroll === 'function' ? scroll(side, index, options) : false;
+}
+
+function _historyCompareRendererNav(data) {
+  const render = (typeof importedRenderHistoryCompareNav !== 'undefined' && importedRenderHistoryCompareNav)
+    || _historyCompareRendererGlobalFunction('_renderHistoryCompareNav');
+  return typeof render === 'function' ? render(data) : document.createDocumentFragment();
+}
+
+function _historyCompareRendererMinimap(buckets) {
+  const render = (typeof importedRenderHistoryCompareMinimap !== 'undefined' && importedRenderHistoryCompareMinimap)
+    || _historyCompareRendererGlobalFunction('_renderHistoryCompareMinimap');
+  return typeof render === 'function' ? render(buckets) : document.createDocumentFragment();
+}
+
+function _historyCompareRendererDisplayControls(data, viewMode) {
+  const render = (
+    typeof importedRenderHistoryCompareDisplayControls !== 'undefined'
+    && importedRenderHistoryCompareDisplayControls
+  )
+    || _historyCompareRendererGlobalFunction('_renderHistoryCompareDisplayControls');
+  return typeof render === 'function' ? render(data, viewMode) : document.createDocumentFragment();
+}
+
+function _historyCompareRendererActionsMenu(data, deltas) {
+  const render = (typeof importedRenderHistoryCompareActionsMenu !== 'undefined' && importedRenderHistoryCompareActionsMenu)
+    || _historyCompareRendererGlobalFunction('_renderHistoryCompareActionsMenu');
+  return typeof render === 'function' ? render(data, deltas) : document.createDocumentFragment();
+}
+
+function _historyCompareRendererRunCard(run, label) {
+  const render = (typeof importedHistoryCompareRunCard !== 'undefined' && importedHistoryCompareRunCard)
+    || _historyCompareRendererGlobalFunction('_historyCompareRunCard');
+  return typeof render === 'function' ? render(run, label) : document.createDocumentFragment();
+}
+
+function _historyCompareRendererMaybeLauncher() {
+  const render = (typeof importedRenderHistoryCompareLauncher !== 'undefined' && importedRenderHistoryCompareLauncher)
+    || _historyCompareRendererGlobalFunction('_renderHistoryCompareLauncher');
+  if (typeof render === 'function') render();
+}
+
+function _historyCompareRendererTabs() {
+  const getTabsFn = _historyCompareRendererGlobalFunction('getTabs');
+  if (typeof getTabsFn === 'function') return getTabsFn();
+  if (typeof importedGetTabs === 'function') return importedGetTabs();
+  const stateTabs = HISTORY_COMPARE_RENDERER_GLOBAL.tabs;
+  if (Array.isArray(stateTabs)) return stateTabs;
+  return [];
+}
+
+function _historyCompareRendererCreateTab(label) {
+  const create = _historyCompareRendererGlobalFunction('createTab')
+    || (typeof importedCreateTab !== 'undefined' && importedCreateTab);
+  return typeof create === 'function' ? create(label) : null;
+}
+
+function _historyCompareRendererActivateTab(tabId, options) {
+  const activate = _historyCompareRendererGlobalFunction('activateTab')
+    || (typeof importedActivateTab !== 'undefined' && importedActivateTab);
+  if (typeof activate === 'function') activate(tabId, options);
+}
+
+function _historyCompareRendererRestoreRun(run, options) {
+  const restore = _historyCompareRendererGlobalFunction('restoreHistoryRunIntoTab')
+    || (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab);
+  return typeof restore === 'function'
+    ? restore(run, options)
+    : Promise.reject(new Error('history restore unavailable'));
+}
+
+function _historyCompareRendererEnsureOverlay() {
+  const ensure = (typeof importedEnsureHistoryCompareOverlay !== 'undefined' && importedEnsureHistoryCompareOverlay)
+    || _historyCompareRendererGlobalFunction('_ensureHistoryCompareOverlay');
+  return typeof ensure === 'function' ? ensure() : null;
+}
+
+function _historyCompareRendererOpenOverlay() {
+  const open = (typeof importedOpenHistoryCompareOverlay !== 'undefined' && importedOpenHistoryCompareOverlay)
+    || _historyCompareRendererGlobalFunction('_openHistoryCompareOverlay');
+  if (typeof open === 'function') open();
+}
 
 function _compareMetricCell(label, value, tone = '') {
   const cell = document.createElement('div');
@@ -32,7 +353,7 @@ function _appendHistoryCompareSegments(parent, segments, fallbackText) {
 function _renderHistoryCompareLineText(line, segments = null, limits = {}) {
   const code = document.createElement('code');
   const rawText = String((line && line.text) || '');
-  const limit = _historyCompareLineLimit(limits);
+  const limit = _historyCompareRendererLineLimit(limits);
   const truncated = rawText.length > limit;
   const visibleText = truncated ? rawText.slice(0, limit) : rawText;
   const safeSegments = Array.isArray(segments) ? segments : [];
@@ -88,12 +409,12 @@ function _renderHistoryComparePaneRow(line, {
   if (safeAnchors.length && Number.isFinite(compareLineIndex)) {
     const marker = document.createElement('button');
     marker.type = 'button';
-    marker.className = `btn btn-ghost history-compare-finding-marker is-${_historyCompareAnchorTone(safeAnchors)}`;
+    marker.className = `btn btn-ghost history-compare-finding-marker is-${_historyCompareRendererAnchorTone(safeAnchors)}`;
     marker.setAttribute('aria-label', 'Jump to linked finding');
     marker.addEventListener('click', event => {
       event.stopPropagation();
       const findingRow = document.querySelector(
-        `.history-compare-object-row[data-object-kind="finding"][data-compare-side="${side}"][data-compare-line-index="${_historyCompareCssEscape(compareLineIndex)}"]`,
+        `.history-compare-object-row[data-object-kind="finding"][data-compare-side="${side}"][data-compare-line-index="${_historyCompareRendererCssEscape(compareLineIndex)}"]`,
       );
       if (typeof findingRow?.scrollIntoView === 'function') {
         findingRow.scrollIntoView({ block: 'center', inline: 'nearest' });
@@ -110,6 +431,45 @@ function _renderHistoryComparePaneRow(line, {
   row.appendChild(anchorSlot);
   row.appendChild(_renderHistoryCompareLineText(line, segments, limits));
   return row;
+}
+
+function _historyCompareAttachFindingMarker(row, side, compareLineIndex, anchors) {
+  if (!row || row.querySelector('.history-compare-finding-marker')) return;
+  const safeAnchors = Array.isArray(anchors) ? anchors : [];
+  if (!safeAnchors.length) return;
+  const marker = document.createElement('button');
+  marker.type = 'button';
+  marker.className = `btn btn-ghost history-compare-finding-marker is-${_historyCompareRendererAnchorTone(safeAnchors)}`;
+  marker.setAttribute('aria-label', 'Jump to linked finding');
+  marker.addEventListener('click', event => {
+    event.stopPropagation();
+    const findingRow = document.querySelector(
+      `.history-compare-object-row[data-object-kind="finding"][data-compare-side="${side}"][data-compare-line-index="${_historyCompareRendererCssEscape(compareLineIndex)}"]`,
+    );
+    if (typeof findingRow?.scrollIntoView === 'function') {
+      findingRow.scrollIntoView({ block: 'center', inline: 'nearest' });
+    }
+    if (findingRow) {
+      findingRow.classList.remove('history-compare-line-pulse');
+      void findingRow.offsetWidth;
+      findingRow.classList.add('history-compare-line-pulse');
+      setTimeout(() => findingRow.classList.remove('history-compare-line-pulse'), 900);
+    }
+  });
+  const slot = row.querySelector('.history-compare-line-anchor-slot');
+  if (slot) slot.appendChild(marker);
+}
+
+function _syncHistoryCompareFindingMarkers(data) {
+  const anchorMap = _historyCompareRendererBuildAnchorMap(data);
+  ['a', 'b'].forEach((side) => {
+    anchorMap[side].forEach((anchors, compareLineIndex) => {
+      const row = document.querySelector(
+        `.history-compare-pane[data-side="${side}"] .history-compare-row[data-compare-line-index="${_historyCompareRendererCssEscape(compareLineIndex)}"]`,
+      );
+      _historyCompareAttachFindingMarker(row, side, compareLineIndex, anchors);
+    });
+  });
 }
 
 function _renderHistoryCompareSpacer(label = '') {
@@ -131,7 +491,7 @@ function _historyCompareRowHeight(row) {
 }
 
 function _historyCompareUsesStackedMobilePanes(wrap) {
-  const mobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const mobile = _historyCompareRendererUseMobile();
   const stacked = wrap?.classList?.contains('is-unified') || wrap?.classList?.contains('is-changes-only');
   return Boolean(mobile && stacked);
 }
@@ -169,37 +529,40 @@ function _syncHistoryCompareRowPairHeights(wrap) {
 
 function _scheduleHistoryCompareRowPairHeightSync(wrap) {
   if (!wrap) return;
-  if (_historyCompareRowHeightFrame !== null) {
+  if (_historyCompareRendererRowHeightFrame !== null) {
     const cancel = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
-    cancel(_historyCompareRowHeightFrame);
+    cancel(_historyCompareRendererRowHeightFrame);
   }
   const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : callback => setTimeout(callback, 0);
-  _historyCompareRowHeightFrame = raf(() => {
-    _historyCompareRowHeightFrame = null;
+  _historyCompareRendererRowHeightFrame = raf(() => {
+    _historyCompareRendererRowHeightFrame = null;
     _syncHistoryCompareRowPairHeights(wrap);
   });
 }
 
-function _bindHistoryCompareRowPairHeightSync(wrap) {
-  if (_historyCompareRowResizeObserver) {
-    _historyCompareRowResizeObserver.disconnect();
-    _historyCompareRowResizeObserver = null;
+function _observeHistoryCompareRowPairHeights(wrap) {
+  if (_historyCompareRendererRowResizeObserver) {
+    _historyCompareRendererRowResizeObserver.disconnect();
   }
   if (typeof ResizeObserver === 'function' && wrap) {
-    _historyCompareRowResizeObserver = new ResizeObserver(() => _scheduleHistoryCompareRowPairHeightSync(wrap));
-    _historyCompareRowResizeObserver.observe(wrap);
+    _historyCompareRendererRowResizeObserver = new ResizeObserver(() => {
+      _scheduleHistoryCompareRowPairHeightSync(wrap);
+    });
+    _historyCompareRendererRowResizeObserver.observe(wrap);
+  } else {
+    _historyCompareRendererRowResizeObserver = null;
   }
   _scheduleHistoryCompareRowPairHeightSync(wrap);
 }
 
 function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow, unitTone = '') {
-  const pair = String(_historyCompareRowPairSequence);
-  _historyCompareRowPairSequence += 1;
+  const pair = String(_historyCompareRendererRowPairSequence);
+  _historyCompareRendererRowPairSequence += 1;
   leftRow.dataset.comparePair = pair;
   rightRow.dataset.comparePair = pair;
   if (unitTone) {
-    const unit = String(_historyCompareUnitSequence);
-    _historyCompareUnitSequence += 1;
+    const unit = String(_historyCompareRendererUnitSequence);
+    _historyCompareRendererUnitSequence += 1;
     leftRow.dataset.compareUnitIndex = unit;
     rightRow.dataset.compareUnitIndex = unit;
     leftRow.dataset.compareUnitTone = unitTone;
@@ -210,7 +573,7 @@ function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow, un
 }
 
 function _advanceHistoryCompareUnits(count) {
-  _historyCompareUnitSequence += Math.max(0, Number(count || 0));
+  _historyCompareRendererUnitSequence += Math.max(0, Number(count || 0));
 }
 
 function _historyCompareReplaceRenderEvents(hunk) {
@@ -292,7 +655,7 @@ function _fetchHistoryCompareFoldSide(data, hunk, side) {
   const range = _historyCompareFoldRange(hunk, side);
   if (range.start >= range.end) return Promise.resolve([]);
   const collected = [];
-  const loadPage = start => apiFetch(_historyCompareLineUrl(data, side, start, range.end))
+  const loadPage = start => _historyCompareRendererApiFetch(_historyCompareLineUrl(data, side, start, range.end))
     .then(resp => resp.json())
     .then(payload => {
       if (payload.error) throw new Error(payload.error);
@@ -388,8 +751,8 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
   if (Array.isArray(hunk.left?.lines) || Array.isArray(hunk.right?.lines)) {
     const leftLines = hunk.left?.lines || [];
     const rightLines = hunk.right?.lines || [];
-    const leftStart = _historyCompareNumber(hunk.left?.start, 0);
-    const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+    const leftStart = _historyCompareRendererNumber(hunk.left?.start, 0);
+    const rightStart = _historyCompareRendererNumber(hunk.right?.start, 0);
     const total = Math.max(leftLines.length, rightLines.length);
     if (changesOnly) {
       _advanceHistoryCompareUnits(total);
@@ -429,8 +792,8 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
     }
     return;
   }
-  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
-  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+  const leftStart = _historyCompareRendererNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareRendererNumber(hunk.right?.start, 0);
   const rawLeadingLeft = context.leading?.left || [];
   const rawLeadingRight = context.leading?.right || [];
   const rawTrailingLeft = context.trailing?.left || [];
@@ -494,7 +857,7 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
         .catch(() => {
           hunk._loading = false;
           setFoldButtons(false, label);
-          showToast('Failed to load unchanged lines', 'error');
+          _historyCompareRendererShowToast('Failed to load unchanged lines', 'error');
         });
     };
     makeFoldButtonPair(label, expand);
@@ -503,8 +866,8 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
   appendLines(
     trailingLeft,
     trailingRight,
-    _historyCompareNumber(hunk.left?.end, leftStart) - trailingLeft.length,
-    _historyCompareNumber(hunk.right?.end, rightStart) - trailingRight.length,
+    _historyCompareRendererNumber(hunk.left?.end, leftStart) - trailingLeft.length,
+    _historyCompareRendererNumber(hunk.right?.end, rightStart) - trailingRight.length,
   );
 }
 
@@ -512,8 +875,8 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data, ancho
   const limits = data.limits || {};
   const leftLines = hunk.left?.lines || [];
   const rightLines = hunk.right?.lines || [];
-  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
-  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+  const leftStart = _historyCompareRendererNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareRendererNumber(hunk.right?.start, 0);
   _historyCompareReplaceRenderEvents(hunk).forEach(event => {
     if (event.type === 'pair') {
       const pair = event.pair || {};
@@ -589,8 +952,8 @@ function _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data, anch
   const limits = data.limits || {};
   const op = hunk.op;
   const lines = op === 'insert' ? (hunk.right?.lines || []) : (hunk.left?.lines || []);
-  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
-  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+  const leftStart = _historyCompareRendererNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareRendererNumber(hunk.right?.start, 0);
   lines.forEach((line, index) => {
     const leftCompareIndex = leftStart + index;
     const rightCompareIndex = rightStart + index;
@@ -638,7 +1001,7 @@ function _renderHistoryCompareSplitPane(data, options = {}) {
   const wrap = document.createElement('div');
   wrap.className = `history-compare-split is-${viewMode.replace(/_/g, '-')}`;
   wrap.dataset.compareViewMode = viewMode;
-  const anchorMap = _historyCompareBuildAnchorMap(data);
+  const anchorMap = _historyCompareRendererBuildAnchorMap(data);
   const leftPane = document.createElement('div');
   leftPane.className = 'history-compare-pane nice-scroll';
   leftPane.dataset.side = 'a';
@@ -648,8 +1011,8 @@ function _renderHistoryCompareSplitPane(data, options = {}) {
   const renderPanes = () => {
     leftPane.replaceChildren();
     rightPane.replaceChildren();
-    _historyCompareRowPairSequence = 0;
-    _historyCompareUnitSequence = 0;
+    _historyCompareRendererRowPairSequence = 0;
+    _historyCompareRendererUnitSequence = 0;
     const leftTitle = document.createElement('div');
     leftTitle.className = 'history-compare-pane-title';
     leftTitle.textContent = 'Run A';
@@ -679,7 +1042,7 @@ function _renderHistoryCompareSplitPane(data, options = {}) {
     _scheduleHistoryCompareRowPairHeightSync(wrap);
   };
   renderPanes();
-  if (!(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())) {
+  if (!_historyCompareRendererUseMobile()) {
     let syncing = false;
     const sync = (source, target) => {
       if (syncing || !source || !target) return;
@@ -697,8 +1060,8 @@ function _renderHistoryCompareSplitPane(data, options = {}) {
   }
   wrap.appendChild(leftPane);
   wrap.appendChild(rightPane);
-  wrap.appendChild(_renderHistoryCompareMinimap(data.density_buckets || []));
-  _bindHistoryCompareRowPairHeightSync(wrap);
+  wrap.appendChild(_historyCompareRendererMinimap(data.density_buckets || []));
+  _observeHistoryCompareRowPairHeights(wrap);
   return wrap;
 }
 
@@ -714,7 +1077,7 @@ function _historyCompareCountsSubtitle(totals = {}) {
 }
 
 function _renderHistoryCompareOmittedNote(truncated = {}) {
-  const omitted = _historyCompareOmittedTotal(truncated);
+  const omitted = _historyCompareRendererOmittedTotal(truncated);
   if (!omitted) return null;
   const note = document.createElement('div');
   note.className = 'history-compare-counts-note';
@@ -789,15 +1152,15 @@ function _renderHistoryCompareObjectSection(title, items, kind, sign) {
   const list = document.createElement('div');
   list.className = 'history-compare-line-list';
   safeItems.forEach(item => {
-    const compareLineIndex = _historyCompareNumber(item?.compare_line_index);
+    const compareLineIndex = _historyCompareRendererNumber(item?.compare_line_index);
     const compareSide = sign === '+' ? 'b' : 'a';
     const row = compareLineIndex === null ? document.createElement('div') : document.createElement('button');
     if (row.tagName === 'BUTTON') {
       row.type = 'button';
       row.addEventListener('click', () => {
-        _historyCompareScrollToLine(compareSide, compareLineIndex, { emit: true });
+        _historyCompareRendererScrollToLine(compareSide, compareLineIndex, { emit: true });
       });
-      if (typeof bindPressable === 'function') bindPressable(row);
+      _historyCompareRendererBindPressable(row);
     }
     row.className = `history-compare-line history-compare-object-row${compareLineIndex === null ? '' : ' control-row'}`;
     row.dataset.objectKind = kind;
@@ -838,7 +1201,7 @@ function _historyCompareDerivedSide(side) {
 
 function _historyCompareDerivedPointer(item) {
   if (!item || typeof item !== 'object') return null;
-  const compareLineIndex = _historyCompareNumber(item.compare_line_index);
+  const compareLineIndex = _historyCompareRendererNumber(item.compare_line_index);
   const compareSide = _historyCompareDerivedSide(item.compare_side);
   if (compareLineIndex === null || !compareSide) return null;
   return { compareLineIndex, compareSide };
@@ -906,7 +1269,7 @@ function _historyCompareDerivedChangedMeta(item, kind) {
 }
 
 function _historyCompareDerivedCount(group, key, listKey) {
-  const explicit = _historyCompareNumber(group?.[key]);
+  const explicit = _historyCompareRendererNumber(group?.[key]);
   if (explicit !== null) return explicit;
   const values = group && Array.isArray(group[listKey]) ? group[listKey] : [];
   return values.length;
@@ -951,9 +1314,9 @@ function _historyCompareAppendDerivedRow(list, item, kind, sign, pointer, option
   if (row.tagName === 'BUTTON') {
     row.type = 'button';
     row.addEventListener('click', () => {
-      _historyCompareScrollToLine(pointer.compareSide, pointer.compareLineIndex, { emit: true });
+      _historyCompareRendererScrollToLine(pointer.compareSide, pointer.compareLineIndex, { emit: true });
     });
-    if (typeof bindPressable === 'function') bindPressable(row);
+    _historyCompareRendererBindPressable(row);
   }
   row.className = 'history-compare-line history-compare-object-row history-compare-derived-row'
     + (pointer ? ' control-row is-anchorable' : '');
@@ -1066,53 +1429,57 @@ function _renderHistoryCompareDerivedChanges(derivedChanges = {}) {
 }
 
 function _historyCompareHasTabCapacity(count) {
-  const maxTabs = Number((typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.max_tabs) || 0);
-  if (!maxTabs || maxTabs <= 0 || typeof tabs === 'undefined' || !Array.isArray(tabs)) return true;
-  return tabs.length + Number(count || 0) <= maxTabs;
+  const appConfig = typeof importedAppConfig !== 'undefined' ? importedAppConfig : null;
+  const runtimeConfig = appConfig || HISTORY_COMPARE_RENDERER_GLOBAL.APP_CONFIG || {};
+  const maxTabs = Number(runtimeConfig.max_tabs || 0);
+  const currentTabs = _historyCompareRendererTabs();
+  if (!maxTabs || maxTabs <= 0 || !Array.isArray(currentTabs)) return true;
+  return currentTabs.length + Number(count || 0) <= maxTabs;
 }
 
 function _restoreBothHistoryCompareRuns(left, right) {
   if (!left || !right) return Promise.reject(new Error('missing comparison runs'));
   if (!_historyCompareHasTabCapacity(2)) {
-    showToast('Not enough tab capacity to restore both runs', 'error');
+    _historyCompareRendererShowToast('Not enough tab capacity to restore both runs', 'error');
     return Promise.reject(new Error('not enough tab capacity'));
   }
-  const leftTabId = createTab(`A: ${left.command || 'run'}`);
+  const leftTabId = _historyCompareRendererCreateTab(`A: ${left.command || 'run'}`);
   if (!leftTabId) return Promise.reject(new Error('failed to create Run A tab'));
-  const rightTabId = createTab(`B: ${right.command || 'run'}`);
+  const rightTabId = _historyCompareRendererCreateTab(`B: ${right.command || 'run'}`);
   if (!rightTabId) return Promise.reject(new Error('failed to create Run B tab'));
   return Promise.all([
-    restoreHistoryRunIntoTab(left, { targetTabId: leftTabId, hidePanelOnSuccess: false }),
-    restoreHistoryRunIntoTab(right, { targetTabId: rightTabId, hidePanelOnSuccess: false }),
+    _historyCompareRendererRestoreRun(left, { targetTabId: leftTabId, hidePanelOnSuccess: false }),
+    _historyCompareRendererRestoreRun(right, { targetTabId: rightTabId, hidePanelOnSuccess: false }),
   ]).then(() => {
-    if (typeof activateTab === 'function') activateTab(rightTabId, { focusComposer: false });
+    _historyCompareRendererActivateTab(rightTabId, { focusComposer: false });
     return [leftTabId, rightTabId];
   });
 }
 
 function _renderHistoryComparison(data) {
-  const overlay = _ensureHistoryCompareOverlay();
+  const overlay = _historyCompareRendererEnsureOverlay();
+  if (!overlay) return;
   const body = overlay.querySelector('#history-compare-body');
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
   body.replaceChildren();
-  if (!data._compareViewModeDefault) data._compareViewModeDefault = _historyCompareStoredViewMode();
-  if (!data._compareContextDefault) data._compareContextDefault = _historyCompareStoredContext();
-  const rawViewMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || data._compareViewModeDefault);
-  const viewMode = _historyCompareResolveViewMode(rawViewMode);
-  const contextMode = _historyCompareCoerceContext(data._compareContext || data._compareContextDefault);
+  if (!data._compareViewModeDefault) data._compareViewModeDefault = _historyCompareRendererStoredViewMode();
+  if (!data._compareContextDefault) data._compareContextDefault = _historyCompareRendererStoredContext();
+  const rawViewMode = _historyCompareRendererCoerceViewMode(data._compareViewModeRaw || data._compareViewModeDefault);
+  const viewMode = _historyCompareRendererResolveViewMode(rawViewMode);
+  const contextMode = _historyCompareRendererCoerceContext(data._compareContext || data._compareContextDefault);
   data._compareViewModeRaw = rawViewMode;
   data._compareContext = contextMode;
   const totals = data.totals || {};
-  const changedOutputCount = _historyCompareTotalChangedLines(totals);
+  const changedOutputCount = _historyCompareRendererTotalChangedLines(totals);
   subtitle.textContent = viewMode === 'findings_only'
     ? 'Changed findings and artifacts'
     : (changedOutputCount ? _historyCompareCountsSubtitle(totals) : 'Changed findings and artifacts');
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
-  runs.appendChild(_historyCompareRunCard(data.left, 'Run A'));
-  runs.appendChild(_historyCompareRunCard(data.right, 'Run B'));
+  runs.appendChild(_historyCompareRendererRunCard(data.left, 'Run A'));
+  runs.appendChild(_historyCompareRendererRunCard(data.right, 'Run B'));
   body.appendChild(runs);
 
   const deltas = data.deltas || {};
@@ -1126,13 +1493,13 @@ function _renderHistoryComparison(data) {
     ));
   }
   if (deltas.duration_seconds) {
-    metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta(deltas.duration_seconds.delta || 0, 's')));
+    metrics.appendChild(_compareMetricCell('Duration', _historyCompareRendererFormatDelta(deltas.duration_seconds.delta || 0, 's')));
   }
   if (deltas.output_lines) {
-    metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta(deltas.output_lines.delta || 0)));
+    metrics.appendChild(_compareMetricCell('Lines', _historyCompareRendererFormatDelta(deltas.output_lines.delta || 0)));
   }
   if (deltas.findings) {
-    metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta(deltas.findings.delta || 0)));
+    metrics.appendChild(_compareMetricCell('Findings', _historyCompareRendererFormatDelta(deltas.findings.delta || 0)));
   }
   if (data.left && data.right && (
     Number.isFinite(Number(data.left.persisted_finding_count))
@@ -1140,7 +1507,7 @@ function _renderHistoryComparison(data) {
   )) {
     metrics.appendChild(_compareMetricCell(
       'Stored findings',
-      _compareFormatDelta(Number(data.right.persisted_finding_count || 0) - Number(data.left.persisted_finding_count || 0)),
+      _historyCompareRendererFormatDelta(Number(data.right.persisted_finding_count || 0) - Number(data.left.persisted_finding_count || 0)),
     ));
   }
   if (data.left && data.right && (
@@ -1149,7 +1516,7 @@ function _renderHistoryComparison(data) {
   )) {
     metrics.appendChild(_compareMetricCell(
       'Artifacts',
-      _compareFormatDelta(Number(data.right.artifact_count || 0) - Number(data.left.artifact_count || 0)),
+      _historyCompareRendererFormatDelta(Number(data.right.artifact_count || 0) - Number(data.left.artifact_count || 0)),
     ));
   }
   body.appendChild(metrics);
@@ -1188,14 +1555,14 @@ function _renderHistoryComparison(data) {
 
   const toolbar = document.createElement('div');
   toolbar.className = 'history-compare-toolbar';
-  toolbar.appendChild(_renderHistoryCompareDisplayControls(data, viewMode));
-  toolbar.appendChild(_renderHistoryCompareActionsMenu(data, deltas));
-  toolbar.appendChild(_renderHistoryCompareNav(data));
+  toolbar.appendChild(_historyCompareRendererDisplayControls(data, viewMode));
+  toolbar.appendChild(_historyCompareRendererActionsMenu(data, deltas));
+  toolbar.appendChild(_historyCompareRendererNav(data));
   body.appendChild(toolbar);
   if (viewMode !== 'findings_only') {
     body.appendChild(_renderHistoryCompareSplitPane(data, {
       viewMode,
-      contextLimit: _historyCompareContextLimit(contextMode),
+      contextLimit: _historyCompareRendererContextLimit(contextMode),
     }));
   }
 
@@ -1216,6 +1583,7 @@ function _renderHistoryComparison(data) {
   if (removedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Removed entities', removedEntities, 'entity', '-'));
   if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
   if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
+  _syncHistoryCompareFindingMarkers(data);
   if (
     !changedOutputCount
     && !hasDerivedChanges
@@ -1232,7 +1600,7 @@ function _renderHistoryComparison(data) {
 
 function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
   if (!leftId || !rightId) return;
-  _openHistoryCompareOverlay();
+  _historyCompareRendererOpenOverlay();
   const body = document.querySelector('#history-compare-body');
   if (body) {
     body.replaceChildren();
@@ -1242,11 +1610,12 @@ function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
     body.appendChild(loading);
   }
   const url = options.url || `/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`;
-  apiFetch(url)
+  _historyCompareRendererApiFetch(url, undefined, { leftId, rightId })
     .then(resp => resp.json().catch(() => ({})).then(data => {
       if (!resp.ok || data.error) {
         const err = new Error(data.error || `Compare request failed (${resp.status || 'unknown'})`);
         err.compareRequestError = true;
+        err.httpStatus = resp.status || null;
         throw err;
       }
       return data;
@@ -1258,8 +1627,33 @@ function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
       if (typeof console !== 'undefined' && typeof console.error === 'function') {
         console.error('[history compare] failed', err);
       }
-      if (_historyCompareState && _historyCompareState.source) _renderHistoryCompareLauncher();
+      _historyCompareRendererLogClientError('history compare fetch failed', err, {
+        event: 'HISTORY_COMPARE_FETCH_FAILED',
+        level: 'error',
+        left_id: String(leftId || ''),
+        right_id: String(rightId || ''),
+        url_path: _historyCompareRendererUrlPath(url),
+        status: Number(err && err.httpStatus || 0) || null,
+        compare_request_error: err?.compareRequestError === true,
+      });
+      const compareState = HISTORY_COMPARE_RENDERER_GLOBAL._historyCompareState;
+      if (compareState && compareState.source) _historyCompareRendererMaybeLauncher();
       const detail = err && err.compareRequestError && err.message ? `: ${err.message}` : '';
-      showToast(`Failed to compare runs${detail}`, 'error');
+      _historyCompareRendererShowToast(`Failed to compare runs${detail}`, 'error');
     });
 }
+
+HISTORY_COMPARE_RENDERER_GLOBAL._compareMetricCell = _compareMetricCell;
+HISTORY_COMPARE_RENDERER_GLOBAL._restoreBothHistoryCompareRuns = _restoreBothHistoryCompareRuns;
+HISTORY_COMPARE_RENDERER_GLOBAL._renderHistoryComparison = _renderHistoryComparison;
+HISTORY_COMPARE_RENDERER_GLOBAL.fetchAndRenderHistoryComparison = fetchAndRenderHistoryComparison;
+if (typeof importedSetHistoryCompareHandlers === 'function') {
+  importedSetHistoryCompareHandlers({ fetchAndRenderHistoryComparison });
+}
+
+export {
+  _compareMetricCell,
+  _renderHistoryComparison,
+  _restoreBothHistoryCompareRuns,
+  fetchAndRenderHistoryComparison,
+};

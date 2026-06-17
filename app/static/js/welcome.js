@@ -5,10 +5,143 @@
 // lines, typed commands, inline comment hints, and a closing hint row.
 // Calling cancelWelcome() (e.g. when the user runs a command) stops the
 // animation immediately; runner.js also calls clearTab to wipe partial output.
+import { getActiveTabId as importedGetActiveTabId, getWelcomeState as importedGetWelcomeState, setWelcomeState as importedSetWelcomeState } from './core/state.js';
+import { getWelcomeIntroPreference as importedGetWelcomeIntroPreference, getTourSeenVersionPreference as importedGetTourSeenVersionPreference } from './features/preferences/preferences.js';
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from './runtime_bridge.js';
+import { cmdInput as importedCmdInput, shellPromptWrap as importedShellPromptWrap } from './core/dom.js';
+import { renderMotd as importedRenderMotd } from './core/utils.js';
+import { appendPromptNewline as importedAppendPromptNewline } from './runner.js';
+import { getOutput as importedGetOutput, mountShellPrompt as importedMountShellPrompt, unmountShellPrompt as importedUnmountShellPrompt } from './tabs.js';
+import { buildPromptLabel as importedBuildPromptLabel } from './output.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
+import {
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+} from './ui/ui_helpers.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import { setWelcomeHandlers as importedSetWelcomeHandlers } from './welcome_bridge.js';
+
+const WELCOME_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _welcomeGlobalFunction(name) {
+  const fn = WELCOME_GLOBAL && WELCOME_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _welcomeGlobalValue(name) {
+  return WELCOME_GLOBAL ? WELCOME_GLOBAL[name] : undefined;
+}
+
+function _welcomeAppConfig() {
+  if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
+  return _welcomeGlobalValue('APP_CONFIG') || {};
+}
+
+function _welcomeActiveTabId() {
+  if (typeof importedGetActiveTabId === 'function') return importedGetActiveTabId();
+  const readActiveTabId = _welcomeGlobalFunction('getActiveTabId');
+  return readActiveTabId ? readActiveTabId() : (_welcomeGlobalValue('APP_STATE')?.activeTabId || null);
+}
+
+function _welcomeGetOutput(tabId) {
+  if (typeof importedGetOutput === 'function') return importedGetOutput(tabId);
+  const getOutput = _welcomeGlobalFunction('getOutput');
+  return getOutput ? getOutput(tabId) : null;
+}
+
+function _welcomeMountShellPrompt(tabId, force = false) {
+  const mountShellPrompt = (typeof importedMountShellPrompt === 'function' && importedMountShellPrompt)
+    || _welcomeGlobalFunction('mountShellPrompt');
+  if (!mountShellPrompt) return;
+  if (force) {
+    mountShellPrompt(tabId, true);
+    return;
+  }
+  mountShellPrompt(tabId);
+}
+
+function _welcomeUnmountShellPrompt(tabId) {
+  const unmountShellPrompt = (typeof importedUnmountShellPrompt === 'function' && importedUnmountShellPrompt)
+    || _welcomeGlobalFunction('unmountShellPrompt');
+  if (unmountShellPrompt) unmountShellPrompt(tabId);
+}
+
+function _welcomeRefocusComposer(...args) {
+  const refocus = (typeof importedRefocusComposerAfterAction === 'function' && importedRefocusComposerAfterAction)
+    || _welcomeGlobalFunction('refocusComposerAfterAction');
+  if (refocus) refocus(...args);
+}
+
+function _welcomeAppendPromptNewline(tabId) {
+  const append = (typeof importedAppendPromptNewline === 'function' && importedAppendPromptNewline)
+    || _welcomeGlobalFunction('appendPromptNewline');
+  if (append) append(tabId);
+}
+
+function _welcomeSetComposerValue(value) {
+  const setComposerValue = (typeof importedSetComposerValue === 'function' && importedSetComposerValue)
+    || _welcomeGlobalFunction('setComposerValue');
+  if (setComposerValue) setComposerValue(value);
+}
+
+function _welcomeBindPressable(el, opts) {
+  const bind = (typeof importedBindPressable === 'function' && importedBindPressable)
+    || _welcomeGlobalFunction('bindPressable');
+  return bind ? bind(el, opts) : null;
+}
+
+function _welcomeApiFetch(...args) {
+  const apiFetch = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || _welcomeGlobalFunction('apiFetch');
+  if (!apiFetch) throw new Error('apiFetch is unavailable');
+  return apiFetch(...args);
+}
+
+function _welcomeLogClientError(context, err, details = null) {
+  const logClientError = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedRuntimeLogClientError === 'function'
+      ? importedRuntimeLogClientError
+      : null
+  ) || _welcomeGlobalFunction('logClientError');
+  if (logClientError) logClientError(context, err, details);
+}
+
+function _welcomeCmdInput() {
+  return (typeof importedCmdInput !== 'undefined' && importedCmdInput) || _welcomeGlobalValue('cmdInput') || null;
+}
+
+function _welcomeShellPromptWrap() {
+  return (typeof importedShellPromptWrap !== 'undefined' && importedShellPromptWrap) || _welcomeGlobalValue('shellPromptWrap') || null;
+}
+
+let _welcomeActive = false;
+let _welcomeDone = false;
+let _welcomeTabId = null;
+let _welcomeBanner = null;
+let _welcomeLiveLine = null;
+let _welcomeHintNode = null;
+let _welcomeStatusNodes = [];
+let _welcomePlan = null;
+let _welcomeNextBlockIndex = 0;
+let _welcomeSettleRequested = false;
+let _welcomePromptAfterSettle = false;
+let _welcomeBootPending = true;
 
 const _welcomeWaiters = new Set();
-const _welcomePrompt = typeof buildPromptLabel === 'function'
-  ? buildPromptLabel()
+const _welcomePrompt = typeof importedBuildPromptLabel === 'function'
+  ? importedBuildPromptLabel()
   : 'anon@darklab.sh:~ $';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['initializing /', 'initializing -', 'initializing \\', 'initializing |'];
@@ -16,15 +149,16 @@ const _welcomeStatusPendingText = 'initializing...';
 const _welcomeStatusReadyText = 'initialized';
 
 function _getWelcomeIntroMode() {
-  if (typeof getWelcomeIntroPreference === 'function') {
-    return getWelcomeIntroPreference();
-  }
+  const readPreference = (typeof importedGetWelcomeIntroPreference === 'function' && importedGetWelcomeIntroPreference)
+    || _welcomeGlobalFunction('getWelcomeIntroPreference');
+  if (readPreference) return readPreference();
   return 'animated';
 }
 
 function _getEffectiveWelcomeStatusLabels() {
-  const statusLabels = Array.isArray(APP_CONFIG.welcome_status_labels)
-    ? APP_CONFIG.welcome_status_labels
+  const config = _welcomeAppConfig();
+  const statusLabels = Array.isArray(config.welcome_status_labels)
+    ? config.welcome_status_labels
         .map(label => String(label || '').trim().toUpperCase())
         .filter(Boolean)
         .slice(0, 6)
@@ -35,9 +169,9 @@ function _getEffectiveWelcomeStatusLabels() {
 }
 
 function _shouldUseMobileWelcomeSequence() {
-  if (typeof useMobileTerminalViewportMode === 'function') {
-    return useMobileTerminalViewportMode();
-  }
+  const useMobile = (typeof importedUseMobileTerminalViewportMode === 'function' && importedUseMobileTerminalViewportMode)
+    || _welcomeGlobalFunction('useMobileTerminalViewportMode');
+  if (useMobile) return useMobile();
   if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
     return window.matchMedia('(max-width: 600px)').matches;
   }
@@ -45,22 +179,24 @@ function _shouldUseMobileWelcomeSequence() {
 }
 
 function _visibleWelcomeTourChapters() {
-  return Array.isArray(APP_CONFIG?.tour_chapters) ? APP_CONFIG.tour_chapters : [];
+  const config = _welcomeAppConfig();
+  return Array.isArray(config?.tour_chapters) ? config.tour_chapters : [];
 }
 
 function _welcomeTourSeenVersion() {
-  if (typeof getTourSeenVersionPreference === 'function') {
-    return Number(getTourSeenVersionPreference() || 0) || 0;
-  }
+  const readPreference = (typeof importedGetTourSeenVersionPreference === 'function' && importedGetTourSeenVersionPreference)
+    || _welcomeGlobalFunction('getTourSeenVersionPreference');
+  if (readPreference) return Number(readPreference() || 0) || 0;
   return 0;
 }
 
 function _welcomeTourVersion() {
-  return Number(APP_CONFIG?.tour_version || 0) || 0;
+  return Number(_welcomeAppConfig()?.tour_version || 0) || 0;
 }
 
 function _welcomeTourCtaState() {
-  if (!(APP_CONFIG && APP_CONFIG.tour_enabled === true)) return null;
+  const config = _welcomeAppConfig();
+  if (!(config && config.tour_enabled === true)) return null;
   if (!_visibleWelcomeTourChapters().length) return null;
   const version = _welcomeTourVersion();
   const seenVersion = _welcomeTourSeenVersion();
@@ -69,8 +205,53 @@ function _welcomeTourCtaState() {
   };
 }
 
+function _writeWelcomeState(next = {}) {
+  const setWelcomeState = (typeof importedSetWelcomeState === 'function' && importedSetWelcomeState)
+    || _welcomeGlobalFunction('setWelcomeState');
+  if (setWelcomeState) setWelcomeState(next);
+  if (Object.prototype.hasOwnProperty.call(next, 'active')) _welcomeActive = !!next.active;
+  if (Object.prototype.hasOwnProperty.call(next, 'done')) _welcomeDone = !!next.done;
+  if (Object.prototype.hasOwnProperty.call(next, 'tabId')) _welcomeTabId = next.tabId == null ? null : String(next.tabId);
+  if (Object.prototype.hasOwnProperty.call(next, 'settleRequested')) _welcomeSettleRequested = !!next.settleRequested;
+  if (Object.prototype.hasOwnProperty.call(next, 'promptAfterSettle')) _welcomePromptAfterSettle = !!next.promptAfterSettle;
+  if (Object.prototype.hasOwnProperty.call(next, 'bootPending')) _welcomeBootPending = !!next.bootPending;
+  const getWelcomeState = (typeof importedGetWelcomeState === 'function' && importedGetWelcomeState)
+    || _welcomeGlobalFunction('getWelcomeState');
+  return getWelcomeState ? getWelcomeState() : {
+    active: _welcomeActive,
+    done: _welcomeDone,
+    tabId: _welcomeTabId,
+    settleRequested: _welcomeSettleRequested,
+    promptAfterSettle: _welcomePromptAfterSettle,
+    bootPending: _welcomeBootPending,
+  };
+}
+
+function _readWelcomeState() {
+  const getWelcomeState = (typeof importedGetWelcomeState === 'function' && importedGetWelcomeState)
+    || _welcomeGlobalFunction('getWelcomeState');
+  const apiState = getWelcomeState ? getWelcomeState() : null;
+  return {
+    active: _welcomeActive || !!(apiState && apiState.active),
+    done: _welcomeDone || !!(apiState && apiState.done),
+    tabId: _welcomeTabId || (apiState && apiState.tabId) || null,
+    settleRequested: _welcomeSettleRequested || !!(apiState && apiState.settleRequested),
+    promptAfterSettle: _welcomePromptAfterSettle || !!(apiState && apiState.promptAfterSettle),
+    bootPending: _welcomeBootPending || !!(apiState && apiState.bootPending),
+  };
+}
+
+function _welcomeIsActive() {
+  return !!_readWelcomeState().active;
+}
+
+function _welcomeIsSettling() {
+  return !!_readWelcomeState().settleRequested;
+}
+
 function welcomeOwnsTab(tabId) {
-  return !!tabId && _welcomeTabId === tabId && (_welcomeActive || _welcomeDone);
+  const state = _readWelcomeState();
+  return !!tabId && state.tabId === tabId && (state.active || state.done);
 }
 
 function _sleep(ms) {
@@ -110,8 +291,7 @@ function _clearWelcomeBanner() {
 function _resetWelcomePlan() {
   _welcomePlan = null;
   _welcomeNextBlockIndex = 0;
-  _welcomeSettleRequested = false;
-  _welcomePromptAfterSettle = false;
+  _writeWelcomeState({ settleRequested: false, promptAfterSettle: false });
 }
 
 function _setWelcomeBannerSettled(settled) {
@@ -132,7 +312,7 @@ async function _spinWelcomeStatus(node, stepMs = 140) {
   if (!node) return;
   let frame = 0;
   node.dataset.state = 'loading';
-  while (_welcomeActive && node.isConnected && node.dataset.state === 'loading') {
+  while (_welcomeIsActive() && node.isConnected && node.dataset.state === 'loading') {
     node.textContent = _welcomeStatusFrames[frame % _welcomeStatusFrames.length];
     frame++;
     await _sleep(stepMs);
@@ -171,18 +351,18 @@ function _appendWelcomeStatusRow(label, value = _welcomeStatusPendingText) {
 }
 
 async function _runWelcomeStatusSequence(labels, intervalMs, staggerMs = null) {
-  if (!_welcomeActive || !_welcomeBanner || !labels.length) return;
+  if (!_welcomeIsActive() || !_welcomeBanner || !labels.length) return;
   const settlePromises = [];
   const STAGGER_MS = staggerMs == null
     ? Math.max(140, Math.floor(intervalMs * 0.32))
     : staggerMs;
 
   for (let i = 0; i < labels.length; i++) {
-    if (!_welcomeActive) return;
+    if (!_welcomeIsActive()) return;
     _appendWelcomeStatusRow(labels[i], _welcomeStatusPendingText);
     settlePromises.push((async (index) => {
       await _sleep(intervalMs);
-      if (_welcomeActive) _setWelcomeStatus(index, 'loaded');
+      if (_welcomeIsActive()) _setWelcomeStatus(index, 'loaded');
     })(i));
     if (i + 1 < labels.length) {
       await _sleep(STAGGER_MS);
@@ -198,11 +378,11 @@ async function _runWelcomeAnimation(tabId, {
   hints = [],
   includeBlocks = true,
 } = {}) {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return false;
 
   _renderWelcomeAsciiStream(tabId, asciiArt);
-  if (!_welcomeActive) return false;
+  if (!_welcomeIsActive()) return false;
 
   const effectiveStatusLabels = _getEffectiveWelcomeStatusLabels();
   const introBlocks = includeBlocks ? blocks : [];
@@ -212,31 +392,31 @@ async function _runWelcomeAnimation(tabId, {
     blocks: introBlocks,
     hints,
   };
-  if (_welcomeSettleRequested) {
+  if (_welcomeIsSettling()) {
     settleWelcome(tabId);
     return true;
   }
 
-  const INTER_BLOCK_MS = APP_CONFIG.welcome_inter_block_ms ?? 1500;
-  const POST_STATUS_PAUSE_MS = Math.max(0, Number(APP_CONFIG.welcome_post_status_pause_ms ?? 220) || 0);
+  const INTER_BLOCK_MS = _welcomeAppConfig().welcome_inter_block_ms ?? 1500;
+  const POST_STATUS_PAUSE_MS = Math.max(0, Number(_welcomeAppConfig().welcome_post_status_pause_ms ?? 220) || 0);
   const STATUS_MS = Math.max(820, Math.floor(INTER_BLOCK_MS * 0.78));
   const STATUS_STAGGER_MS = Math.max(140, Math.floor(INTER_BLOCK_MS * 0.28));
-  const CHAR_MS = APP_CONFIG.welcome_char_ms ?? 10;
-  const JITTER = APP_CONFIG.welcome_jitter_ms ?? 10;
-  const POST_CMD_MS = APP_CONFIG.welcome_post_cmd_ms ?? 700;
-  const FIRST_PROMPT_IDLE_MS = Math.max(0, Number(APP_CONFIG.welcome_first_prompt_idle_ms ?? 2100) || 0);
-  const HINT_INTERVAL_MS = Math.max(0, Number(APP_CONFIG.welcome_hint_interval_ms ?? 4200) || 0);
+  const CHAR_MS = _welcomeAppConfig().welcome_char_ms ?? 10;
+  const JITTER = _welcomeAppConfig().welcome_jitter_ms ?? 10;
+  const POST_CMD_MS = _welcomeAppConfig().welcome_post_cmd_ms ?? 700;
+  const FIRST_PROMPT_IDLE_MS = Math.max(0, Number(_welcomeAppConfig().welcome_first_prompt_idle_ms ?? 2100) || 0);
+  const HINT_INTERVAL_MS = Math.max(0, Number(_welcomeAppConfig().welcome_hint_interval_ms ?? 4200) || 0);
 
   await _runWelcomeStatusSequence(effectiveStatusLabels, STATUS_MS, STATUS_STAGGER_MS);
-  if (!_welcomeActive) return false;
-  if (_welcomeSettleRequested) {
+  if (!_welcomeIsActive()) return false;
+  if (_welcomeIsSettling()) {
     settleWelcome(tabId);
     return true;
   }
   _setWelcomeBannerSettled(true);
   await _sleep(Math.max(POST_STATUS_PAUSE_MS, Math.floor(INTER_BLOCK_MS * 0.24)));
-  if (!_welcomeActive) return false;
-  if (_welcomeSettleRequested) {
+  if (!_welcomeIsActive()) return false;
+  if (_welcomeIsSettling()) {
     settleWelcome(tabId);
     return true;
   }
@@ -245,13 +425,13 @@ async function _runWelcomeAnimation(tabId, {
     _appendWelcomeSectionHeader(tabId, 'Recommended commands', 'recommended-commands');
   }
   for (const [blockIndex, block] of introBlocks.entries()) {
-    if (!_welcomeActive) break;
-    if (_welcomeSettleRequested) {
+    if (!_welcomeIsActive()) break;
+    if (_welcomeIsSettling()) {
       settleWelcome(tabId);
       return true;
     }
 
-    const currentOut = getOutput(tabId);
+    const currentOut = _welcomeGetOutput(tabId);
     if (!currentOut) break;
     _welcomeNextBlockIndex = blockIndex;
 
@@ -265,7 +445,7 @@ async function _runWelcomeAnimation(tabId, {
     _welcomeNextBlockIndex = blockIndex + 1;
 
     if (blockIndex === 0) {
-      const commands = getOutput(tabId)?.querySelectorAll('.welcome-command');
+      const commands = _welcomeGetOutput(tabId)?.querySelectorAll('.welcome-command');
       const featuredLine = commands && commands[commands.length - 1];
       if (featuredLine) {
         _ensureFeaturedWelcomeBadge(featuredLine, block.cmd);
@@ -273,17 +453,16 @@ async function _runWelcomeAnimation(tabId, {
     }
   }
 
-  if (_welcomeActive) {
+  if (_welcomeIsActive()) {
     _appendWelcomeTourCta(tabId);
-    _welcomeDone = true;
+    _writeWelcomeState({ done: true });
     if (hints.length) {
       _appendWelcomeSectionHeader(tabId, 'Helpful hints', 'helpful-hints');
       void _runWelcomeHintFeed(tabId, hints, HINT_INTERVAL_MS);
     } else {
       _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
-      _welcomeActive = false;
-      _welcomeBootPending = false;
-      if (tabId === activeTabId) mountShellPrompt(tabId);
+      _writeWelcomeState({ active: false, bootPending: false });
+      if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
     }
   }
 
@@ -292,29 +471,36 @@ async function _runWelcomeAnimation(tabId, {
 
 function cancelWelcome(tabId = null) {
   if (tabId && _welcomeTabId && _welcomeTabId !== tabId) return false;
-  _welcomeActive = false;
-  _welcomeDone   = false;
-  _welcomeTabId = null;
-  _welcomeBootPending = false;
+  _writeWelcomeState({
+    active: false,
+    done: false,
+    tabId: null,
+    bootPending: false,
+  });
   _flushWelcomeWaiters();
   _clearWelcomeLiveLine();
   _clearWelcomeBanner();
   _resetWelcomePlan();
-  if (tabId === activeTabId) {
-    mountShellPrompt(tabId, true);
-    refocusComposerAfterAction({ defer: true });
+  if (tabId === _welcomeActiveTabId()) {
+    _welcomeMountShellPrompt(tabId, true);
+    _welcomeRefocusComposer({ defer: true });
     setTimeout(() => {
-      if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+      const shellPromptWrap = _welcomeShellPromptWrap();
+      if (shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
     }, 0);
   }
-  refocusComposerAfterAction();
-  if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+  _welcomeRefocusComposer();
+  {
+    const shellPromptWrap = _welcomeShellPromptWrap();
+    if (shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+  }
   return true;
 }
 
-function requestWelcomeSettle(tabId = activeTabId) {
-  if (!tabId || !_welcomeActive || _welcomeTabId !== tabId) return false;
-  _welcomeSettleRequested = true;
+function requestWelcomeSettle(tabId = _welcomeActiveTabId()) {
+  const state = _readWelcomeState();
+  if (!tabId || !state.active || state.tabId !== tabId) return false;
+  _writeWelcomeState({ settleRequested: true });
   _flushWelcomeWaiters();
   if (_welcomePlan) {
     return settleWelcome(tabId);
@@ -323,12 +509,12 @@ function requestWelcomeSettle(tabId = activeTabId) {
 }
 
 async function _typeWelcomeCommand(tabId, cmd, { charMs, jitterMs, postMs, startDelayMs = 0, commentText = null, interactive = true } = {}) {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return false;
 
-  const CHAR_MS = charMs ?? (APP_CONFIG.welcome_char_ms ?? 10);
-  const JITTER = jitterMs ?? (APP_CONFIG.welcome_jitter_ms ?? 10);
-  const POST_CMD_MS = postMs ?? (APP_CONFIG.welcome_post_cmd_ms ?? 700);
+  const CHAR_MS = charMs ?? (_welcomeAppConfig().welcome_char_ms ?? 10);
+  const JITTER = jitterMs ?? (_welcomeAppConfig().welcome_jitter_ms ?? 10);
+  const POST_CMD_MS = postMs ?? (_welcomeAppConfig().welcome_post_cmd_ms ?? 700);
 
   const typingSpan = document.createElement('span');
   typingSpan.className = 'line wlc-live welcome-command';
@@ -348,17 +534,17 @@ async function _typeWelcomeCommand(tabId, cmd, { charMs, jitterMs, postMs, start
   } else {
     await _sleep(Math.min(80, CHAR_MS * 2));
   }
-  if (!_welcomeActive) { typingSpan.remove(); _welcomeLiveLine = null; return false; }
+  if (!_welcomeIsActive()) { typingSpan.remove(); _welcomeLiveLine = null; return false; }
 
   for (let i = 0; i < cmd.length; i++) {
-    if (!_welcomeActive) { typingSpan.remove(); _welcomeLiveLine = null; return false; }
+    if (!_welcomeIsActive()) { typingSpan.remove(); _welcomeLiveLine = null; return false; }
     wlcText.textContent = cmd.slice(0, i + 1);
     out.scrollTop = out.scrollHeight;
     await _sleep(CHAR_MS + Math.random() * JITTER);
   }
 
   await _sleep(POST_CMD_MS);
-  if (!_welcomeActive) { typingSpan.remove(); _welcomeLiveLine = null; return false; }
+  if (!_welcomeIsActive()) { typingSpan.remove(); _welcomeLiveLine = null; return false; }
   _finalizeWelcomeCommandLine(tabId, typingSpan, cmd, commentText, { interactive });
   return true;
 }
@@ -366,10 +552,10 @@ async function _typeWelcomeCommand(tabId, cmd, { charMs, jitterMs, postMs, start
 function _renderWelcomeAsciiStream(tabId, asciiArt) {
   // The banner animates as streamed output so it feels like terminal output
   // rather than a separately mounted hero component.
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return;
 
-  const artLines = (asciiArt || (APP_CONFIG.app_name || 'darklab_shell'))
+  const artLines = (asciiArt || (_welcomeAppConfig().app_name || 'darklab_shell'))
     .split('\n')
     .map(line => line.replace(/\s+$/g, ''))
     .filter(line => line.length > 0);
@@ -382,7 +568,7 @@ function _renderWelcomeAsciiStream(tabId, asciiArt) {
   artBlock.setAttribute('aria-label', 'ASCII art banner');
   artBlock.textContent = artLines.join('\n');
 
-  const motdText = String(APP_CONFIG?.motd || '').trim();
+  const motdText = String(_welcomeAppConfig()?.motd || '').trim();
   let operatorNotice = null;
   if (motdText) {
     operatorNotice = document.createElement('div');
@@ -395,7 +581,9 @@ function _renderWelcomeAsciiStream(tabId, asciiArt) {
 
     const operatorBody = document.createElement('div');
     operatorBody.className = 'welcome-operator-body';
-    if (typeof renderMotd === 'function') {
+    const renderMotd = (typeof importedRenderMotd === 'function' && importedRenderMotd)
+      || _welcomeGlobalFunction('renderMotd');
+    if (renderMotd) {
       operatorBody.innerHTML = renderMotd(motdText);
     } else {
       operatorBody.textContent = motdText;
@@ -420,7 +608,7 @@ function _renderWelcomeAsciiStream(tabId, asciiArt) {
 }
 
 function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = true } = {}) {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return;
   const line = document.createElement('span');
   line.className = 'line welcome-command' + (interactive ? '' : ' welcome-command-static');
@@ -444,12 +632,13 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
   }
   function loadCommand() {
     if (!interactive) return;
-    if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-    refocusComposerAfterAction();
-    setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
+    if (_welcomeIsActive() && welcomeOwnsTab(tabId)) settleWelcome(tabId);
+    _welcomeRefocusComposer();
+    _welcomeSetComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
     // Defer so the document click handler has already run before autocomplete updates.
     setTimeout(() => {
-      if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
+      const cmdInput = _welcomeCmdInput();
+      if (cmdInput && typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
     }, 0);
   }
   if (interactive) {
@@ -457,7 +646,7 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
     // composer value). bindPressable gives us click + keyboard activation
     // with press-highlight cleanup for role="button" spans without
     // double-refocusing the composer.
-    bindPressable(cmdText, {
+    _welcomeBindPressable(cmdText, {
       refocusComposer: false,
       clearPressStyle: true,
       onActivate: loadCommand,
@@ -469,23 +658,25 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
 }
 
 function _loadWelcomeTourCommand(tabId) {
-  if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-  refocusComposerAfterAction();
-  setComposerValue('tour', 4, 4, { dispatch: false });
+  if (_welcomeIsActive() && welcomeOwnsTab(tabId)) settleWelcome(tabId);
+  _welcomeRefocusComposer();
+  _welcomeSetComposerValue('tour', 4, 4, { dispatch: false });
   setTimeout(() => {
-    if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
+    const cmdInput = _welcomeCmdInput();
+    if (cmdInput && typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
   }, 0);
 }
 
 function _openWelcomeVisualTour(tabId) {
-  if (typeof openTourModal !== 'function') return false;
-  if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
+  const openTourModal = _welcomeGlobalFunction('openTourModal');
+  if (!openTourModal) return false;
+  if (_welcomeIsActive() && welcomeOwnsTab(tabId)) settleWelcome(tabId);
   return openTourModal({ source: 'welcome' });
 }
 
 function _appendWelcomeTourCta(tabId) {
   const state = _welcomeTourCtaState();
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!state || !out) return null;
   const existing = out.querySelector('[data-welcome-section="tour-cta"]');
   if (existing) return existing;
@@ -507,16 +698,19 @@ function _appendWelcomeTourCta(tabId) {
   chip.setAttribute('role', 'button');
   chip.title = 'Click to load into prompt';
   chip.setAttribute('aria-label', 'Load command: tour');
-  bindPressable(chip, {
+  _welcomeBindPressable(chip, {
     refocusComposer: false,
     clearPressStyle: true,
     onActivate: () => _loadWelcomeTourCommand(tabId),
   });
 
   line.append(label, chip);
+  const openTourModal = _welcomeGlobalFunction('openTourModal');
+  const useMobile = (typeof importedUseMobileTerminalViewportMode === 'function' && importedUseMobileTerminalViewportMode)
+    || _welcomeGlobalFunction('useMobileTerminalViewportMode');
   if (
-    !(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
-    && typeof openTourModal === 'function'
+    !(useMobile && useMobile())
+    && openTourModal
   ) {
     const joiner = document.createElement('span');
     joiner.className = 'welcome-tour-cta-label';
@@ -527,7 +721,7 @@ function _appendWelcomeTourCta(tabId) {
     visual.tabIndex = 0;
     visual.setAttribute('role', 'button');
     visual.setAttribute('aria-label', 'Open the visual tour');
-    bindPressable(visual, {
+    _welcomeBindPressable(visual, {
       refocusComposer: false,
       clearPressStyle: true,
       onActivate: () => _openWelcomeVisualTour(tabId),
@@ -540,7 +734,7 @@ function _appendWelcomeTourCta(tabId) {
 }
 
 function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { interactive = true } = {}) {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out || !line || !line.isConnected) return null;
 
   line.classList.remove('wlc-live', 'wlc-settling');
@@ -564,14 +758,15 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
     cmdText.replaceWith(cmdText.cloneNode(true));
     const boundCmdText = line.querySelector('.welcome-command-text');
     function loadCommand() {
-      if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-      refocusComposerAfterAction();
-      setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
+      if (_welcomeIsActive() && welcomeOwnsTab(tabId)) settleWelcome(tabId);
+      _welcomeRefocusComposer();
+      _welcomeSetComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
       setTimeout(() => {
-        if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
+        const cmdInput = _welcomeCmdInput();
+        if (cmdInput && typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
       }, 0);
     }
-    bindPressable(boundCmdText, {
+    _welcomeBindPressable(boundCmdText, {
       refocusComposer: false,
       clearPressStyle: true,
       onActivate: loadCommand,
@@ -599,7 +794,7 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
 }
 
 function _appendWelcomeOutput(tabId, text, cls = 'welcome-output') {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return;
   const line = document.createElement('span');
   line.className = `line ${cls}`;
@@ -614,7 +809,7 @@ function _appendWelcomeOutput(tabId, text, cls = 'welcome-output') {
 }
 
 function _appendWelcomeSectionHeader(tabId, text, sectionId = '', cls = 'welcome-section-header') {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return null;
   if (sectionId) {
     const existing = out.querySelector(`[data-welcome-section="${sectionId}"]`);
@@ -701,15 +896,16 @@ function _sampleWelcomeBlocks(blocks, count = 5) {
 }
 
 function _shouldRotateWelcomeHints(tabId) {
-  return _welcomeActive
-    && !_welcomeSettleRequested
+  const state = _readWelcomeState();
+  return state.active
+    && !state.settleRequested
     && welcomeOwnsTab(tabId)
-    && activeTabId === tabId
-    && (!cmdInput || !cmdInput.value.trim());
+    && _welcomeActiveTabId() === tabId
+    && (!_welcomeCmdInput() || !_welcomeCmdInput().value.trim());
 }
 
 async function _showWelcomeHint(tabId, text, initial = false) {
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return null;
 
   if (!_welcomeHintNode) {
@@ -727,7 +923,7 @@ async function _showWelcomeHint(tabId, text, initial = false) {
     _welcomeHintNode.classList.remove('welcome-hint-visible');
     await _sleep(220);
   }
-  if (!_welcomeActive) return null;
+  if (!_welcomeIsActive()) return null;
 
   _welcomeHintNode.textContent = `# ${String(text).trim()}`;
   requestAnimationFrame(() => {
@@ -738,9 +934,10 @@ async function _showWelcomeHint(tabId, text, initial = false) {
 }
 
 async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
-  if (!_welcomeActive || !_welcomeDone || !Array.isArray(hints) || !hints.length) return;
+  const state = _readWelcomeState();
+  if (!state.active || !state.done || !Array.isArray(hints) || !hints.length) return;
 
-  if (_welcomeSettleRequested) {
+  if (state.settleRequested) {
     settleWelcome(tabId);
     return;
   }
@@ -750,29 +947,30 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
   if (!current) return;
   used.add(current);
   await _showWelcomeHint(tabId, current, true);
-  if (tabId === activeTabId) {
-    mountShellPrompt(tabId, true);
-    refocusComposerAfterAction();
-    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+  if (tabId === _welcomeActiveTabId()) {
+    _welcomeMountShellPrompt(tabId, true);
+    _welcomeRefocusComposer();
+    const shellPromptWrap = _welcomeShellPromptWrap();
+    if (shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   }
 
   if (!(Number(intervalMs) > 0)) {
-    _welcomeActive = false;
-    if (tabId === activeTabId) mountShellPrompt(tabId);
+    _writeWelcomeState({ active: false });
+    if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
     return;
   }
 
-  const rotationsRemainingStart = _welcomeHintRotationBudget(APP_CONFIG.welcome_hint_rotations);
+  const rotationsRemainingStart = _welcomeHintRotationBudget(_welcomeAppConfig().welcome_hint_rotations);
   if (rotationsRemainingStart === 0) {
-    _welcomeActive = false;
-    if (tabId === activeTabId) mountShellPrompt(tabId);
+    _writeWelcomeState({ active: false });
+    if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
     return;
   }
   let rotationsRemaining = rotationsRemainingStart;
 
   while (_shouldRotateWelcomeHints(tabId)) {
     await _sleep(intervalMs);
-    if (_welcomeSettleRequested) {
+    if (_welcomeIsSettling()) {
       settleWelcome(tabId);
       return;
     }
@@ -789,8 +987,8 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
     await _showWelcomeHint(tabId, current, false);
   }
 
-  _welcomeActive = false;
-  if (tabId === activeTabId) mountShellPrompt(tabId);
+  _writeWelcomeState({ active: false });
+  if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
 }
 
 function _currentWelcomeHintText() {
@@ -799,14 +997,15 @@ function _currentWelcomeHintText() {
 }
 
 async function _resumeWelcomeHintFeed(tabId, hints, intervalMs) {
-  if (!_welcomeActive || !_welcomeDone || !Array.isArray(hints) || !hints.length) return;
+  const state = _readWelcomeState();
+  if (!state.active || !state.done || !Array.isArray(hints) || !hints.length) return;
   if (!(Number(intervalMs) > 0)) {
-    _welcomeActive = false;
+    _writeWelcomeState({ active: false });
     return;
   }
-  let rotationsRemaining = _welcomeHintRotationBudget(APP_CONFIG.welcome_hint_rotations);
+  let rotationsRemaining = _welcomeHintRotationBudget(_welcomeAppConfig().welcome_hint_rotations);
   if (rotationsRemaining === 0) {
-    _welcomeActive = false;
+    _writeWelcomeState({ active: false });
     return;
   }
 
@@ -829,8 +1028,8 @@ async function _resumeWelcomeHintFeed(tabId, hints, intervalMs) {
     await _showWelcomeHint(tabId, next, false);
   }
 
-  _welcomeActive = false;
-  if (tabId === activeTabId) mountShellPrompt(tabId);
+  _writeWelcomeState({ active: false });
+  if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
 }
 
 function _ensureFeaturedWelcomeBadge(line, cmd) {
@@ -843,7 +1042,7 @@ function _ensureFeaturedWelcomeBadge(line, cmd) {
   badge.setAttribute('role', 'button');
   badge.title = 'Click to load into prompt';
   badge.setAttribute('aria-label', `Load command: ${cmd}`);
-  bindPressable(badge, {
+  _welcomeBindPressable(badge, {
     refocusComposer: false,
     clearPressStyle: true,
     onActivate: () => {
@@ -862,20 +1061,20 @@ function _ensureWelcomeFinalHint(tabId, hints) {
     const line = document.createElement('span');
     line.className = 'line welcome-hint welcome-hint-feed welcome-hint-visible';
     line.textContent = `# ${String(finalHint).trim()}`;
-    getOutput(tabId)?.appendChild(line);
+    _welcomeGetOutput(tabId)?.appendChild(line);
     _welcomeHintNode = line;
-    if (tabId === activeTabId) mountShellPrompt(tabId, true);
+    if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId, true);
     return;
   }
   _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
-  if (tabId === activeTabId) mountShellPrompt(tabId, true);
+  if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId, true);
 }
 
-function settleWelcome(tabId = activeTabId) {
+function settleWelcome(tabId = _welcomeActiveTabId()) {
   // Settling collapses all pending typing/rotation work into the final state so
   // the user can start typing immediately without waiting for animation timers.
   if (!welcomeOwnsTab(tabId)) return false;
-  const out = getOutput(tabId);
+  const out = _welcomeGetOutput(tabId);
   if (!out) return false;
 
   _flushWelcomeWaiters();
@@ -908,17 +1107,16 @@ function settleWelcome(tabId = activeTabId) {
   _welcomeNextBlockIndex = blocks.length;
   _appendWelcomeTourCta(tabId);
 
-  _welcomeDone = true;
+  _writeWelcomeState({ done: true });
   if (_welcomePlan && Array.isArray(_welcomePlan.hints) && _welcomePlan.hints.length) {
     _appendWelcomeSectionHeader(tabId, 'Helpful hints', 'helpful-hints');
   }
   _ensureWelcomeFinalHint(tabId, _welcomePlan && _welcomePlan.hints);
-  _welcomeActive = false;
-  _welcomeBootPending = false;
-  if (tabId === activeTabId) mountShellPrompt(tabId);
-  if (_welcomePromptAfterSettle) {
-    _welcomePromptAfterSettle = false;
-    appendPromptNewline(tabId);
+  _writeWelcomeState({ active: false, bootPending: false });
+  if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
+  if (_readWelcomeState().promptAfterSettle) {
+    _writeWelcomeState({ promptAfterSettle: false });
+    _welcomeAppendPromptNewline(tabId);
   }
   out.scrollTop = out.scrollHeight;
   return true;
@@ -931,8 +1129,8 @@ function _renderSettledWelcome(tabId, {
   includeBlocks = true,
   rotateHints = false,
 } = {}) {
-  const out = getOutput(tabId);
-  if (!out || !_welcomeActive) return false;
+  const out = _welcomeGetOutput(tabId);
+  if (!out || !_welcomeIsActive()) return false;
   const introBlocks = includeBlocks ? blocks : [];
   _welcomePlan = {
     asciiArt,
@@ -942,40 +1140,43 @@ function _renderSettledWelcome(tabId, {
   };
   const settled = settleWelcome(tabId);
   if (settled && rotateHints && Array.isArray(hints) && hints.length) {
-    _welcomeActive = true;
-    _welcomeBootPending = false;
-    const intervalMs = Math.max(0, Number(APP_CONFIG.welcome_hint_interval_ms ?? 4200) || 0);
+    _writeWelcomeState({ active: true, bootPending: false });
+    const intervalMs = Math.max(0, Number(_welcomeAppConfig().welcome_hint_interval_ms ?? 4200) || 0);
     void _resumeWelcomeHintFeed(tabId, hints, intervalMs);
   }
   return settled;
 }
 
 async function runWelcome() {
-  const tabId = activeTabId;
+  const tabId = _welcomeActiveTabId();
   const introMode = _getWelcomeIntroMode();
   if (introMode === 'remove') {
-    _welcomeBootPending = false;
-    _welcomeActive = false;
-    _welcomeDone = false;
-    _welcomeTabId = null;
-    if (tabId === activeTabId) mountShellPrompt(tabId);
+    _writeWelcomeState({
+      bootPending: false,
+      active: false,
+      done: false,
+      tabId: null,
+    });
+    if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
     return;
   }
-  _welcomeBootPending = true;
-  _welcomeActive = true;
-  _welcomeDone = false;
-  _welcomeTabId = activeTabId;
-  _welcomeSettleRequested = false;
-  unmountShellPrompt();
+  _writeWelcomeState({
+    bootPending: true,
+    active: true,
+    done: false,
+    tabId: _welcomeActiveTabId(),
+    settleRequested: false,
+  });
+  _welcomeUnmountShellPrompt();
 
   if (_shouldUseMobileWelcomeSequence()) {
     const [asciiArt, hintData] = await Promise.all([
-      apiFetch('/welcome/ascii-mobile').then(r => r.text()).catch(err => {
-        logClientError('failed to load /welcome/ascii-mobile', err);
+      _welcomeApiFetch('/welcome/ascii-mobile').then(r => r.text()).catch(err => {
+        _welcomeLogClientError('failed to load /welcome/ascii-mobile', err);
         return '';
       }),
-      apiFetch('/welcome/hints-mobile').then(r => r.json()).catch(err => {
-        logClientError('failed to load /welcome/hints-mobile', err);
+      _welcomeApiFetch('/welcome/hints-mobile').then(r => r.json()).catch(err => {
+        _welcomeLogClientError('failed to load /welcome/hints-mobile', err);
         return null;
       }),
     ]);
@@ -996,36 +1197,40 @@ async function runWelcome() {
       hints,
       includeBlocks: false,
     });
-    if (!_welcomeActive && !_welcomeDone) {
-      _welcomeTabId = null;
-      _welcomeBootPending = false;
-      if (tabId === activeTabId) mountShellPrompt(tabId);
+    {
+      const state = _readWelcomeState();
+      if (!state.active && !state.done) {
+      _writeWelcomeState({ tabId: null, bootPending: false });
+      if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
+      }
     }
     return;
   }
 
   const [data, asciiArt, hintData] = await Promise.all([
-    apiFetch('/welcome').then(r => r.json()).catch(err => {
-      logClientError('failed to load /welcome', err);
+    _welcomeApiFetch('/welcome').then(r => r.json()).catch(err => {
+      _welcomeLogClientError('failed to load /welcome', err);
       return null;
     }),
-    apiFetch('/welcome/ascii').then(r => r.text()).catch(err => {
-      logClientError('failed to load /welcome/ascii', err);
+    _welcomeApiFetch('/welcome/ascii').then(r => r.text()).catch(err => {
+      _welcomeLogClientError('failed to load /welcome/ascii', err);
       return '';
     }),
-    apiFetch('/welcome/hints').then(r => r.json()).catch(err => {
-      logClientError('failed to load /welcome/hints', err);
+    _welcomeApiFetch('/welcome/hints').then(r => r.json()).catch(err => {
+      _welcomeLogClientError('failed to load /welcome/hints', err);
       return null;
     }),
   ]);
-  if (!data || !data.length || !_welcomeActive) {
-    _welcomeActive = false;
-    _welcomeTabId = null;
-    _welcomeBootPending = false;
-    if (tabId === activeTabId) mountShellPrompt(tabId);
+  if (!data || !data.length || !_welcomeIsActive()) {
+    _writeWelcomeState({
+      active: false,
+      tabId: null,
+      bootPending: false,
+    });
+    if (tabId === _welcomeActiveTabId()) _welcomeMountShellPrompt(tabId);
     return;
   }
-  const SAMPLE_COUNT   = Math.max(0, Number(APP_CONFIG.welcome_sample_count ?? 5) || 0);
+  const SAMPLE_COUNT   = Math.max(0, Number(_welcomeAppConfig().welcome_sample_count ?? 5) || 0);
   const sampledBlocks = SAMPLE_COUNT > 0 ? _sampleWelcomeBlocks(data, SAMPLE_COUNT) : [];
   const hints = (hintData && Array.isArray(hintData.items)) ? hintData.items : [];
   if (introMode === 'disable_animation') {
@@ -1045,3 +1250,17 @@ async function runWelcome() {
     includeBlocks: true,
   });
 }
+
+if (typeof window !== 'undefined') {
+  if (typeof importedSetWelcomeHandlers === 'function') {
+    importedSetWelcomeHandlers({ cancelWelcome, welcomeOwnsTab });
+  }
+}
+
+export {
+  cancelWelcome,
+  requestWelcomeSettle,
+  runWelcome,
+  settleWelcome,
+  welcomeOwnsTab,
+};

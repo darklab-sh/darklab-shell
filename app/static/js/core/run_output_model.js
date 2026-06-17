@@ -324,6 +324,48 @@ var DarklabRunOutputModel = (function (global) {
     toWireLineEvent,
   });
 
-  global.DarklabRunOutputModel = api;
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+const {
+  LINE_EVENT_SCHEMA_VERSION,
+  LINE_KIND_VALUES,
+  LINE_NOISE_KIND_VALUES,
+  LINE_ROLE_VALUES,
+  LINE_SIGNAL_VALUES,
+  LineKind,
+  LineNoiseKind,
+  LineRole,
+  LineSignal,
+  eventSearchText,
+  fromWireLineEvent,
+  isNoiseLineEvent,
+  legacyClsToKind,
+  legacyClsToRole,
+  noiseKindForEvent,
+  noiseKindForRole,
+  toLegacyWireLineEvent,
+  toWireLineEvent,
+} = DarklabRunOutputModel;
+
+export {
+  DarklabRunOutputModel,
+  LINE_EVENT_SCHEMA_VERSION,
+  LINE_KIND_VALUES,
+  LINE_NOISE_KIND_VALUES,
+  LINE_ROLE_VALUES,
+  LINE_SIGNAL_VALUES,
+  LineKind,
+  LineNoiseKind,
+  LineRole,
+  LineSignal,
+  eventSearchText,
+  fromWireLineEvent,
+  isNoiseLineEvent,
+  legacyClsToKind,
+  legacyClsToRole,
+  noiseKindForEvent,
+  noiseKindForRole,
+  toLegacyWireLineEvent,
+  toWireLineEvent,
+};

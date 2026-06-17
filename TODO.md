@@ -12,7 +12,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
-  - [Audit log surface](#audit-log-surface)
   - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
   - [Run comparison enhancements](#run-comparison-enhancements)
@@ -20,6 +19,8 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
+  - [Attack-surface delta digest notifications](#attack-surface-delta-digest-notifications)
+  - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Architecture](#architecture)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
@@ -32,8 +33,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 No open TODOs are currently tracked.
 
----
-
 ## Known Issues
 
 No known issues are currently tracked.
@@ -42,7 +41,9 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Project Monitoring summary route has no consumer yet.**
+  - `GET /projects/<id>/monitoring/summary` and `get_project_monitoring_summary` ship a digest-ready payload, but no browser, CLI, or notification worker consumes it yet.
+  - Keep it documented as forward API surface if the attack-surface digest work is still planned; otherwise remove or hide it until a digest producer lands.
 
 ---
 
@@ -56,10 +57,11 @@ These are possible future improvements, split by whether they look worth carryin
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
-- **Richer target references in package exports.**
-  - Useful when selected findings rely on derived relationships that are not directly visible in the finding text.
-- **Richer provenance metadata and round-trip import hints.**
-  - Helps labels, notes, targets, findings, and packages survive export/import workflows with less manual repair.
+- **Package re-import preview/apply.**
+  - Worth scoping once package handoff archives are used regularly. It should reuse the Atlas import preview/apply pattern and the package manifest import hints before it writes project data.
+- **Project Monitoring CLI surface.**
+  - Possible future `darklab monitoring <project_id>` and `darklab monitoring ack <project_id> <fire_id> --state STATE [--note NOTE]` commands could expose the Project Monitoring dashboard, rollups, and fire triage flow without opening the browser.
+  - Keep this lower priority than watcher creation, Project assignment, policy controls, and baseline acceptance, which are already available through `darklab watch`.
 - **Revisit PTY transport after real usage.**
   - The current Redis-brokered SSE plus POST endpoints keep deployment simple, but WebSockets may be worth it if latency, throughput, or bidirectional control becomes a real limitation.
 - **Split `pty.js` and `pty_service.py` if PTY work grows again.**
@@ -77,16 +79,14 @@ No research items are currently tracked.
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
-### Audit log surface
-- Add a queryable audit table for consequential actions such as delete, share, redaction toggle, secret create/replace, project link, suppression, and evidence package build.
-- Add an audit viewer on `/diag` or inside Options so operators can inspect what happened without reconstructing it from structured logs after the fact.
-- Many engagement contracts require this kind of operator-visible trail, so this would make compliance and post-engagement review easier.
+- **External tool integration candidates:** add the strongest reviewed tool gaps when they fit the sandboxed registry, findings, Atlas, and provenance model. High-value candidates are ProjectDiscovery's `tlsx` for TLS/certificate metadata and `cdncheck` for CDN/WAF classification, plus `trufflehog` or `gitleaks` for exposed-secret findings from repos and files. Medium candidates are resolver-backed brute-force DNS tools such as `puredns` or `shuffledns`, Shodan InternetDB as a free/no-key IP context provider, optional FOFA/ZoomEye providers for users with keys, and a `nuclei` template management or pinning surface so scan provenance can explain which template set produced a result. A lower-risk app-native `jq`-style JSON/JSONL selector could also extend safe post-filtering without exposing real shell pipes.
 
 ### Workflows v2 — playbooks with parameters
 - Evolve workflows from saved command lists into reusable runbooks.
 - Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.
 - Add conditional next-step behavior based on exit code.
 - Let each step capture selected output into named variables that later steps can consume.
+- Build on the existing session-variable and workflow foundations so operators can turn repeat scans into parameterized profiles without rewriting commands by hand.
 
 ### Run replay / scrubbable event stream
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.
@@ -128,10 +128,10 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### PWA install and service-worker push
 - Make the mobile shell installable and deliver completion pings via web-push so phone users get notified when the tab is closed or the device is asleep. Today mobile notifications are intentionally hidden because foreground-only notifications are not useful on phones.
+- Reuse the run-complete notification hook so push delivery becomes another channel rather than a separate completion system.
 - **Entry-level scope:**
   - Add a manifest, app icons, and a small service worker so users can "Add to Home Screen" and launch into a standalone mobile shell.
   - VAPID-signed web-push subscription tied to the active session token; subscribe and unsubscribe from the Options sheet.
-  - Reuse the run-complete event hook from the outbound-notifications surface so push is just another channel.
 - **Architecture:**
   - New `app/static/manifest.webmanifest`, icon assets under `app/static/icons/`, and `app/static/sw.js` registered from `app.js` only when the runtime supports it.
   - New `WebPushChannel` in the notifications service; VAPID keys stored as operator config; per-session-token subscription endpoint at `/session/push/subscribe`.
@@ -139,20 +139,26 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Gotchas: iOS Safari requires the user to install the PWA before push works; document this in CONFIGURATION.md.
 
 ### Engagement report builder
-- Turn a project workspace into a styled markdown/PDF engagement report — methodology, scope, targets, findings table, remediation notes, screenshots. Evidence packages today are raw bundles; this is the narrative deliverable a customer reads.
-- **Entry-level scope:**
-  - One-click "Generate report" from a project, with an editable cover page (engagement name, dates, operator, contact).
-  - Sections auto-populated from project data: targets, findings grouped by severity, included runs (with permalinks), artifacts.
-  - Output formats: markdown source plus rendered HTML and PDF, reusing the existing export pipeline.
-  - Operator-editable section templates in a new `app/conf/report_templates.yaml`.
-- **Architecture:**
-  - New `app/services/reports/` service composing project-workspace data with existing finding/run/artifact serializers; templating via Jinja autoescape.
-  - Adds `GET/POST /projects/<id>/report` to `app/blueprints/projects.py`.
-  - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
-  - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
+- The Project Report tab now covers the base narrative-report flow. Future polish can make reports feel more portable and customer-ready:
+  - Add report-created run links or permalinks where needed, carrying the report's redaction mode and showing the `permalink_retention_days` caveat in preview/export metadata.
+  - Feed richer package/export provenance into the report once that plan lands, especially source run/import context and target relationships.
+  - Tune artifact embedding/listing once provenance and report-created run links are available; screenshot galleries and richer binary handling can stay later work.
+  - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
+  - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
+
+### Attack-surface delta digest notifications
+- Send scheduled project summaries such as "since last week: 3 new subdomains, 2 new open ports, 1 certificate expiring soon" through the existing notification channels.
+- Build the digest from watcher diffs, run-comparison classifiers, Atlas entity counts, and provider-enriched target context instead of inventing a separate reporting path.
+- Let operators tune cadence and scope per project so noisy scan projects can stay quiet while recurring monitoring projects stay visible.
+
+### Project-scoped target intelligence overview
+- Add a project overview surface that rolls up hosts, ports, services, cert expirations, top findings by severity, and provider-enriched context for each target.
+- Treat the overview as an engagement console: enough context to understand the current attack surface before drilling into individual runs, targets, Atlas rows, or findings.
+- Reuse existing project summaries, Atlas materialization, target relationships, findings, and intel provider snapshots so the overview stays consistent with the rest of the workspace.
 
 ### Native ticketing integrations
 - From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.
+- Keep the action close to existing triage and review-state controls so tickets feel like an extension of finding review, not a separate export step.
 - **Entry-level scope:**
   - Generic webhook + templated payload connector plus first-class adapters for the most common trackers.
   - Secret-backed auth stored in the existing encrypted secrets surface.
@@ -166,6 +172,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ### Operator-extensible signal and parser rules
 - Allow operators to extend the built-in findings classifier, entity extractor, and structured metadata logic via a hot-reloadable `conf/signals.yaml` (or small sandboxed snippets) without code changes.
 - Custom rules feed the same findings strip, Atlas materialization, search scopes, run comparison diffs, project triage, and export surfaces as core signals.
+- Target custom scanner output and internal tooling first; the biggest value is letting self-hosted teams teach darklab_shell their local signal language without carrying a fork.
 - **Entry-level scope:**
   - Declarative regex + capture group + mapping rules for common cases (e.g., custom internal scanner output).
   - Optional tiny expression or Lua/JS sandbox for complex parsing.

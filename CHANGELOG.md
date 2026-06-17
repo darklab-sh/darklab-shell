@@ -6,6 +6,236 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.2] — 2026-06-16
+
+### Added
+
+- **`darklab history` can filter by run type** — the bundled CLI now accepts `--type all|runs|runs_external|runs_builtin`, plus shorter `external` and `builtin` aliases, and maps the run subtype choices to the API's `run_kind` filter.
+  - **Why:** the CLI history command now lines up with the run-type choices operators already see in the browser History drawer.
+  - **Tests:** the main CLI regression covers `history --type runs_external` and verifies the request sends `run_kind=external`.
+
+- **Watcher policy controls are available from the bundled CLI** — `darklab watch create` now accepts repeatable `--ignore-line-pattern`, `--alert-after-repeated-changes N`, and repeatable `--alert-signal-class findings|entities|ports`, while `darklab watch set-policy` updates those fields on an existing watcher.
+  - **Why:** CLI-created watchers can now use the same notification-noise controls as the Watchers modal instead of falling back to the two legacy diff options.
+  - **Tests:** the API CLI watcher regression now covers policy create payloads, `watch info` policy output, and `watch set-policy`.
+
+- **Frontend asset bundle pipeline** — The shell now serves committed, content-hashed CSS and JavaScript bundles by default, with source mode still available for local edit-and-refresh work.
+  - **Why:** first load fetches fewer files, repeat loads can reuse immutable assets, and broken bundle manifests or lazy-load failures now have clear diagnostics.
+  - **What:** app, permalink, diagnostics, lazy controller, font, favicon, and standalone vendor/static assets resolve through the bundle manifest; the old classic shell bundle split is retired; major on-demand surfaces such as PDF export, Atlas, Projects, Watchers, Workflows, PTY, Schedules, Status Monitor, run comparison, and Options panels load when opened instead of during first paint.
+  - **Validation:** `npm run assets:sync` regenerates the committed build, `npm run assets:check` verifies bundle output from the repo root and `scripts/`, the browser-global inventory gate documents the remaining compatibility boundaries, and the pinned `esbuild` dependency is on the patched binary-integrity release.
+  - **Tests:** route, Vitest, and Playwright coverage now exercises source and bundle asset rendering, immutable caching, missing-manifest failures, generated asset drift, lazy-loader APIs, missing-export logging, source-mode browser flows, bundle-mode shared chunks, client logging, asset-mode selection, frontend inventory gates, and ESM failure context.
+
+- **Watcher monitoring foundation** — Watchers can now carry explicit same-scope Project membership, infer that membership from a single same-scope baseline run link, and clear the membership when a Project is deleted.
+  - Watcher fires now persist their event kind, state reason, and acknowledgement fields so Project monitoring timelines can render changed, recovered, failed, no-change, baseline-created, and baseline-accepted events without guessing from mutable watcher state.
+  - **Tests:** added backend coverage for same-scope watcher Project inference, cross-scope rejection, deleted-Project cleanup, persisted fire classification, baseline acceptance marking, and watcher migration registration.
+
+- **Project Monitoring tab** — Project workspaces now include a Monitoring tab for project-linked watcher checks.
+  - The backend `/projects/<id>/monitoring` payload scopes monitors through the same personal/team ownership helpers as the Project workspace, groups them into active, changed, failed, quiet, and paused dashboard states, and keeps watcher fires visible even when old baseline or current runs have been deleted.
+  - Watcher fires now expose a bounded rollup with classifier, severity, added/removed/changed counts, truncation, run ids, and top signals. The rollup is derived from the canonical shared diff classifier summaries, so the dashboard and notification digests share one backend-owned severity contract.
+  - The desktop and mobile Project workspace render status cards, grouped monitor cards, severity, top signals, and a chronological fire timeline. Available runs open in Run Details, and Compare is enabled only when both the current and baseline runs still exist.
+  - Monitoring rows can now pause or resume the watcher, queue a run, confirm and accept a baseline from the latest run, and update changed or failed timeline fires with an optional note. Accepting a baseline stays separate from marking a change expected, card-level latest fires stay read-only so the same note is not editable in two places, and acknowledgement updates record safe audit metadata without copying note text into audit details.
+  - Monitoring filters now cover status, severity, classifier/tool, derived group, cadence, acknowledgement state, changed window, and linked Project target. The payload also exposes derived monitor groups and watcher policy flags so operators can see whether removals, metadata-only changes, repeated changes, ignored line patterns, and selected signal classes are currently noisy or quiet. Ignored line patterns now quiet matching textual fallback churn, while repeated-change and signal-class filters suppress notifications without hiding detected dashboard state. Signal-class filters use notification groups: findings for structured findings, entities for host/DNS/textual entity changes, and ports for open-port plus certificate/TLS changes.
+  - Project monitoring responses now include a digest-ready summary with changed, recovered, and failed monitor counts, highest severity, bounded top changes, and links back to the Monitoring payload. A lightweight `/projects/<id>/monitoring/summary` route exposes the same shape for digest-style summaries without making the dashboard wait for notification delivery work.
+  - Monitoring routes, watcher service changes, watcher finalization, SQLite backfills, and client-side monitoring failures now emit structured, bounded logs with masked session fields, so operators can tell whether a dashboard loaded, a fire was triaged, a run reference disappeared, or a notification policy suppressed an alert without reading audit rows or raw browser errors.
+  - Monitoring caution states now use the defined amber semantic token for changed, important, acknowledged, and needs-action pills, and monitoring status, severity, acknowledgement, fire-kind, rollup, and policy labels compose the shared badge primitive instead of carrying their own pill styling. Monitoring filters, fallback buttons, and the timeline now stay on the shared form, button, and scrollbar primitives.
+  - **Tests:** added backend payload coverage for project monitoring counts, severity rollups, missing baseline and current run references, derived groups, filter metadata, notification policy gates, team route capabilities, unbounded current-triage state, unbounded summary severity/top changes, digest-ready summaries, audited fire acknowledgement updates, SQLite and Postgres migration backfills, safe logging for monitoring route/service/finalization paths, accept-baseline rejection of missing/unrelated/unfinished/cross-scope run ids, target-filter scoping for suppressed and foreign Atlas entities, and incremental Postgres enum constraints for watcher fires, plus Vitest coverage for Monitoring tab rendering, disabled missing-run comparisons, severity/top-signal display, filters, grouped cards, required card run metadata, changed-window filtering for never-run monitors, quiet-status timeline mapping, policy chips, Run Details, Compare, pause/resume/run-now actions, retry/reset flows, acknowledgement actions, client-side monitoring failure logging, badge primitive/tone composition, actionable-only timeline triage controls, primitive-safe fallback buttons, Accept baseline confirmation, a real-browser Projects Monitoring tab flow, and a CSS guard that keeps undefined yellow token references out of source styles.
+
+- **Engagement report builder** — Projects now have a full Report tab for turning selected project evidence into a readable engagement report.
+  - Operators can edit engagement metadata, executive summary, methodology, cover notes, and date ranges with `YYYY-MM-DD to YYYY-MM-DD` validation.
+  - The editor can toggle and reorder shipped sections, choose included runs/targets/findings/artifacts, save drafts explicitly with optimistic concurrency, preview rendered HTML, export a markdown/HTML archive, and use browser Print/PDF from the preview.
+  - Report drafts are owner-scoped, template-aware, and backed by `services.reports`; the single shipped template stays implicit, while operator-configured template choices appear when more than one template is available.
+  - Rendered reports include generated-by metadata, selected evidence summaries, redaction mode, readable finding target references when export settings allow them, and source/run relationship context when the project has it.
+  - Report preview and archive export now render from one shared composed context per request/build, and report archive provenance records selection filters, bounded exclusions, and resolved build-time counts for large-project selections.
+  - View-only team members can preview and export the default readable report, while save, raw-output, and private-note controls stay locked.
+  - Selection behavior uses paged runs, targets, findings, and artifacts controls with server totals, keeps explicit None/All choices dynamic across metadata edits, stores filter-backed All selections without materializing thousands of ids, supports bounded exclusions, shows compact selected/excluded ID summaries, resolves manual selections beyond the visible page, clears stale previews after edits, warns before reload discards unsaved work, and escapes Markdown table cells.
+  - **Test coverage:** Vitest covers draft rendering, explicit Save, conflicts, stale preview invalidation, reload confirmation, include-all behavior, filter-backed All reload persistence, paged selector loading, template visibility, view-only gating, archive downloads, Print/PDF wiring, and report provenance display. Backend, route, and Playwright coverage exercises archive export, size-limit failures, date-range validation, redaction, selection bounds, Markdown escaping, large run/target/finding/artifact selector resolution, the live save/preview/print/archive flow, and large-selector paging with filter-backed All, off-page exclusions, draft reload, preview, export, and scroll preservation.
+
+- **Richer package/export provenance** — Evidence package and report archives now carry compact, redaction-aware provenance that explains what was selected and how it was produced.
+  - Package and report manifests use v2 archive metadata for build settings, selected entity ids/counts, redaction/private-note choices, and safe source summaries.
+  - Package manifests add bounded project-link provenance for selected runs and targets, plus import hints for package metadata, labels, notes, source links, target relationships, and finding review state.
+  - Import-hint warnings call out redaction, excluded private notes, and unavailable artifacts when those choices limit what a reviewer can recreate later.
+  - Package rows, package previews, manifest previews, and the Report tab show concise provenance summaries or compact source chips, with clean fallbacks for older manifests and project views that do not record source fields.
+  - Package and report finding output includes readable target references, source run, relationship source, stored confidence, and redaction-aware token fallback matching. Redacted output keeps relationship metadata but omits target-reference values.
+  - **Test coverage:** backend and route coverage verifies source-detail whitelisting, safe project-link provenance mapping, import-hint warnings, target-reference matching, and target-reference redaction. Package Vitest and Playwright coverage verifies the visible provenance summaries and manifest JSON.
+
+- **Audit log surface** — Operators can now review consequential app actions from an IP-gated `/diag/audit` viewer instead of reconstructing them from server logs.
+  - The shared `audit_events` table, recorder, query helpers, retention pruning, and event registry store bounded rows with hashed session identity, optional team/member actor context, request metadata, job/correlation ids, and safe details.
+  - Event types carry fail-closed or best-effort recording policy. Sensitive actions can roll back when an audit row cannot be safely written, while routine activity can fall back to sanitized structured logs.
+  - History deletion, snapshots/redaction use, workspace file write/move/delete actions, project links, package/report builds, download tickets, Atlas entity suppression/deletion, Atlas import apply, finding review/suppression/deletion, secret lifecycle changes, session-token generation/revocation/migration, team-management actions, automation definition changes, and notification-channel config changes now record audit rows.
+  - Safety rules keep raw tokens, one-time invite/recovery codes, file contents, imported row bodies, raw automation command text, webhook URLs, bot tokens, SMTP passwords, and replacement secret values out of audit details.
+  - `/diag/audit` filters by event, actor, team, project, target, correlation, and date; shows target-aware event hints and safe JSON details; links back to available app surfaces; and exports capped CSV/JSON downloads with truncation markers.
+  - Audit retention runs at startup and periodically, and `audit_log_enabled=false` makes the recorder a no-op while logging that tradeoff once.
+  - Projects now include an Activity tab that shows scoped, user-safe audit rows for personal project owners and team-scoped project viewers without exposing the operator-wide diagnostics table.
+  - Project Activity supports compact filters for event type, actor, target type, target id, and date range; offset pagination; mobile stacked rows; retention-aware empty states; and collapsed safe-details drawers.
+  - Options → Teams now includes an owner/admin Activity subtab for safe team-governance and shared-configuration rows, with filters, offset pagination, retention-aware empty states, and collapsed safe details.
+  - Project metadata edit sheets now show a compact Recent activity panel for the current item and can jump into the filtered Project Activity tab.
+  - The selected team overview now shows owners/admins a compact Recent activity panel for team-governance rows, with a jump into the full Team Activity subtab.
+  - Job-backed package and report archives now include a minimal audit handoff in their provenance with event type, job id, and correlation id. Package README files show the audit correlation so a reviewer can tie the bundle back to the build event without exposing session-derived details.
+  - **Test coverage:** focused backend coverage verifies the centralized event registry policy, same-transaction rollback behavior, sanitized best-effort fallback logs, owner-scoped audit pagination, scoped personal/team/project visibility boundaries, periodic retention gating, Project and Team Activity route access, package/report audit handoff fields, and the operator diagnostics viewer/export paths. Browser coverage verifies audit viewer filters, Project and Team Activity filters, object-level Recent activity panels, row rendering, native details drawers, disabled/empty states, mobile rows, and a live project-link action appearing in `/diag/audit`.
+
+### Fixed
+
+- **Frontend inventory allowlist covers the preference bridge** — the intentional browser-published preference apply helpers are now recorded in `frontend-globals.allowlist.json`, keeping the asset inventory gate aligned with the source and capture flows.
+  - **Validation:** `npm run assets:inventory:check` passes.
+
+- **Diagnostics stays readable on phones** — `/diag` now uses a single-column touch layout with stacked key/value rows, so health cards, storage rows, and classifier tools no longer squeeze into unreadable columns on mobile Safari-sized screens.
+  - **Validation:** focused mobile diagnostics Playwright coverage and CSS lint pass.
+
+- **UI screenshot capture covers the v2.2 Project workspace tabs** — the desktop and mobile screenshot packs now include dedicated Projects Monitoring, Activity, and Report scenes.
+  - **Why:** the capture pack already covered the Projects shell, but the new v2.2 workspace surfaces needed first-class visual-review frames before release.
+  - **What:** the capture helper can now choose `--asset-bundle-mode source|bundle`, and the shared capture setup waits on current app readiness signals instead of removed test-only globals.
+  - **Tests:** the added scenes remain steps inside the existing `desktop screenshot capture pack` and `mobile screenshot capture pack`, which are gated by `RUN_CAPTURE=1` and don't change the normal test totals. The committed asset bundles were regenerated after the browser theme compatibility helper was re-exposed.
+
+- **Official docs use current-state wording consistently** — README, FEATURES, ARCHITECTURE, CONFIGURATION, CONTRIBUTING, DECISIONS, DOC_STANDARDS, THEME, API/supporting docs, and the test guide now avoid roadmap-style wording in current behavior descriptions, while literal contract names such as `/api/v1`, `/v1/models`, migration filenames, log fields, and test identifiers stay intact.
+  - Official docs also avoid naming temporary release-prep artifacts that are removed before the release is cut.
+  - **Tests:** documentation drift coverage and markdown lint pass.
+
+- **CLI watcher read output now shows event context** — `darklab watch info` and `darklab watch fires` now include watcher fire kind, state reason, and acknowledgement state, `run --link-project` help describes the create-time Project lookup accurately, and `watch resume` sends the explicit resume action used by the web client.
+  - **Why:** the CLI should show the same watcher context the API already returns, and command help should describe when Project linking happens.
+  - **Tests:** extended the API CLI watcher regression for fire event/ack output and the resume payload.
+
+- **CLI live-server smoke coverage** — The bundled `darklab` CLI now has a focused live Flask server smoke test in addition to the broader fake-client parser and request-shaping coverage.
+  - **Why:** release validation now catches real HTTP auth, URL construction, API routing, JSON/text response parsing, and formatted API errors before the CLI ships.
+  - **Tests:** added `test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history`, covering `whoami`, `history --type external`, saved output reads, and a missing-run error against a local live server.
+
+- **Notification HTTP logs strip webhook URL credentials** — DEBUG/WARN notification HTTP logs now record only the parsed host and optional port instead of `netloc`, so vault-backed webhook URLs with `user:password@host` userinfo cannot leak credentials through send-attempt or network-error log extras.
+  - **Why:** notification URLs are stored as secrets, and logging embedded URL userinfo would expose secret material during normal DEBUG troubleshooting or WARN retry paths.
+  - **Tests:** added `test_webhook_channel_log_host_strips_url_userinfo`, covering credentialed webhook URLs, DEBUG/WARN log extras, and retry error text.
+
+- **Project Monitoring monitor cards stay readable with several watchers** — monitor card groups now render at most two cards per row on desktop, and cards in the same row keep a consistent height even when one watcher has no checks yet.
+  - **Why:** three monitor cards in one row made status badges and policy chips feel cramped, while uneven card heights made mixed result and no-result rows feel visually unfinished.
+  - **Tests:** focused Project Monitoring Vitest and Playwright coverage pass, and the regenerated asset bundles are in sync.
+
+- **Project Monitoring can create and assign monitors directly** — the Monitoring tab now has a **New monitor** action, the Watchers modal includes a Project selector, and `darklab watch` can set project membership when creating or updating a watcher.
+  - **Why:** project-linked watcher checks should be easy to create from the project surface that displays them, and CLI-created watchers should be able to appear on the same dashboard without relying on baseline inference.
+  - **Tests:** added focused Vitest coverage for the Monitoring CTA and watcher Project selector, plus CLI coverage for `watch create --project` and `watch set-project`.
+
+- **JavaScript lint coverage drift** — `npm run lint:js` now lints the full `app/static/js/` source tree instead of relying on a shell-expanded shallow glob, and the pre-commit hook delegates to that same script so local and hook lint results match.
+  - Generated bundles under `app/static/build/` and vendored browser builds stay out of ESLint and remain covered by `npm run assets:check` and `npm run vendor:check`.
+  - The frontend global inventory budget now records `output.js`'s explicit `AnsiUp` vendor-global read, keeping that browser boundary visible after the lint cleanup.
+  - **Validation:** `npm run lint:js`, `npm run lint:shell`, and focused Vitest coverage for Output, permalink, PTY, tabs, Atlas, and frontend inventory modules pass with the expanded lint scope.
+
+- **Release checklist covers OpenAPI snapshots** — the release branch merge checklist now calls out regenerating `docs/api-v1-openapi.json` after an app version change so the checked-in contract keeps matching `/api/v1/openapi.json`.
+  - **Validation:** `python -m pytest -q tests/py/test_docs.py` passes.
+
+- **History compare split-view flake** — The Playwright split-pane scroll sync check now scopes its forced overflow to the active compare overlay, waits for both panes to be scrollable, drains pending animation frames, and then asserts the mirrored scroll position. This avoids a CI-only race where the right pane could still read as `0` after the test's synthetic scroll.
+  - **Validation:** `npm run lint:js` and the focused History split-view Playwright case pass.
+
+- **Project Monitoring badge density** — Monitoring tab status, severity, acknowledgement, policy, and rollup badges now size to their label instead of stretching inside card and timeline grids, so quiet/no-change rows no longer render full-width “No signal” pills.
+  - **Validation:** focused Project Monitoring Vitest and Playwright coverage pass.
+
+- **Markdown lint dependency audit** — npm now overrides `markdownlint-cli2`'s pinned Markdown parser dependencies to fixed `js-yaml` and `markdown-it` releases, clearing the moderate npm audit findings without downgrading the markdown lint runner.
+  - **Validation:** `npm audit --audit-level=moderate`, `npm run audit:js`, and `npm run lint:md` pass with the updated lockfile.
+
+- **Shodan scan autocomplete** — `shodan scan` now suggests Shodan's real scan subcommands (`internet`, `list`, `protocols`, `status`, and `submit`) instead of treating the next token as an IP/host.
+  - `shodan scan submit` now owns the public IP/CIDR placeholder, and the built-in examples use `shodan scan submit 8.8.8.8` instead of the invalid `shodan scan 8.8.8.8` form.
+  - **Tests:** expanded autocomplete matcher coverage for nested `shodan scan submit` hints and backend registry coverage for the YAML-derived Shodan scan context.
+
+- **Workflows source-mode lazy smoke** — Sidebar workflow rows now hand off to the controller-owned Workflows opener instead of opening and rendering the Workflows overlay themselves first.
+  - This keeps the Workflows overlay on one open/close path after the ESM migration, so the explicit close button cannot leave a scoped workflow sheet open and block the next rail action.
+  - **Tests:** verified the source-mode lazy smoke that opens Projects, Options, Command Registry, Workflows, Atlas, Status Monitor, History run details/compare, and PDF export through normal controls.
+
+- **Modal shortcuts after the ESM migration** — The Projects and Files modals now close through the shared Escape/backdrop dismissible path again, Shift+Option+F opens Files through an explicit Workspace import, and Option+Tab cycles tabs inside Options, Atlas, and Projects before falling back to terminal tab cycling.
+  - **Tests:** expanded the existing desktop shortcut browser coverage for Projects and Files Escape/backdrop dismissal and Options/Atlas tab cycling, added direct export coverage for the restored modal tab-cycle boundaries, and verified the focused source-mode shortcut slice plus focused shortcut unit coverage.
+
+- **Mobile Projects taps after the ESM migration** — Mobile Projects list/detail controls now stop delegated click handling before async project hooks yield, so archived project expansion and artifact group collapse no longer toggle twice and end up unchanged.
+  - **Tests:** verified focused shell chrome coverage for the mobile project list and mobile project tab content/action rows.
+
+- **Session-scoped lazy fetches after the ESM migration** — Run Compare, History restore, and session-variable autocomplete now use the runtime fetch bridge before any legacy global or raw-fetch fallback, so session-token and team-scope headers stay attached in the normal ESM runtime.
+  - **Tests:** expanded the ESM export contract to load session variables, restore a History run, and fetch a run comparison with `window.apiFetch` absent while the runtime fetch handler is active.
+
+- **Snapshot sharing keeps the active session token** — Creating a share snapshot now posts through the session-aware runtime fetch boundary after the ESM migration, so `/share` receives the active `X-Session-ID` header instead of returning `session_required`. Rejected share responses now show the normal failure toast instead of copying a `...undefined` URL.
+  - **Tests:** extended permalink tab unit coverage for rejected `/share` responses and the existing share browser flow for active session-token snapshot creation.
+
+- **Atlas auto-promote rule prefill keeps the selected entity kind** — Creating a Project auto-promote rule from an Atlas entity tab now uses the visibly selected Atlas tab, so domain/IP/hash/CVE/URL views prefill the matching rule target instead of falling back to `any`.
+  - **Tests:** updated Atlas unit coverage to use the public tab controller path and verified the focused Project-workspace Playwright flow in bundle and source asset modes.
+
+- **Teams create forms survive background refreshes** — The Options → Teams create/join/recovery forms now keep typed values when a team-list refresh or busy-state render happens while the form is open, preventing the create flow from silently losing required fields.
+  - **Tests:** added Teams panel unit coverage for in-progress create form refreshes and reran the team-mode browser flow in source mode plus a five-repeat bundle-mode stress run.
+
+- **urlscan-cli version checks follow upstream releases** — `scripts/check_versions.sh` now reads urlscan-cli's calendar-versioned GitHub Releases instead of treating the older Go module-proxy `v0.0.6` tag as the newest usable CLI release.
+  - **Tests:** added focused pytest coverage for the urlscan-cli release lookup while keeping normal Go module pins on the Go proxy path.
+
+- **Request debug-log query redaction** — DEBUG `REQUEST` logs now record sorted query parameter names instead of raw query strings, so troubleshooting still shows which filters were present without leaking token, ticket, key, or other pasted query values.
+
+- **Package/report build audit race** — Asynchronous evidence package and report export jobs now record their final `complete` audit row before publishing the externally visible `complete` job status, so polling clients and route tests cannot observe a finished archive before its audit trail is durable.
+  - Audit recording remains best-effort and logs its own failure without blocking archive delivery.
+
+- **SQLite WAL growth control** — SQLite connections now set `wal_autocheckpoint=1000`, and Flask workers periodically run a guarded `PRAGMA wal_checkpoint(TRUNCATE)` before requests so long-lived containers do not let `history.db-wal` grow unchecked.
+  - `/diag` and Prometheus already expose WAL size; the checkpoint hook now gives that signal an automatic cleanup path.
+  - **Tests:** added backend coverage for the SQLite connection PRAGMAs and route coverage for the periodic checkpoint hook.
+
+- **Team active-run lookup scale** — Redis-backed team active-run lists now use a `teamprocs:<team_id>` index instead of scanning every `procmeta:*` row for each team-scoped stream, event, or kill visibility check.
+  - Team-owned run registration, owner heartbeats, owner claims, active-run removal, and stale metadata cleanup now keep the team index aligned with the existing session index. Redis diagnostics and metrics also count the `teamprocs` namespace.
+  - **Tests:** added backend coverage proving team listings use the team index without a metadata scan and that removing a team run clears the index.
+
+- **Stream owner-liveness refresh load** — brokered command and interactive PTY streams now refresh active-run ownership immediately, then at most once every five seconds per stream connection, instead of rewriting owner metadata for every streamed frame.
+  - **Tests:** added route coverage for throttled owner refreshes on normal brokered streams and interactive PTY streams.
+
+- **Run-output summary backfill retries** — startup now records durable status for run-output summary backfill attempts, so legacy runs with empty structured output or unreadable artifacts/previews are handled once instead of being retried and re-logged on every restart.
+  - **Tests:** added SQLite database-init coverage for empty-summary and failed-backfill markers.
+
+- **Run-output artifact sharding** — new full-output transcript artifacts now write under hash-sharded `run-output/ab/abcd/<run_id>.txt.gz` paths instead of adding every file directly under `run-output/`.
+  - Existing flat artifact paths still load and delete normally through their stored `run_output_artifacts.rel_path`, so no bulk migration is required.
+  - **Tests:** added backend coverage for the two-level shard path contract and sharded artifact deletion.
+
+- **History metadata query load** — browser History pages and run permalink JSON now reuse the label and note rows they already fetch when reporting label/note counts, instead of issuing separate count queries for the same metadata.
+  - Finding counts still use a batched run-id query, and the larger offloaded-output search indexing work remains tracked with the rest of the history search scaling follow-up.
+  - **Tests:** existing route coverage for History search metadata counts and permalink JSON metadata counts passes unchanged.
+
+- **Static asset browser caching** — `/static/...` and `/vendor/...` responses now send `Cache-Control: public, max-age=31536000, immutable`, so repeat page loads can reuse unchanged CSS, JavaScript, fonts, and vendored browser libraries instead of revalidating every file.
+  - The main HTML route stays outside the immutable policy so browser reloads still pick up new app markup and asset references.
+  - **Tests:** extended existing route coverage to assert immutable caching on static/vendor assets and to keep the index route uncached by that policy.
+
+- **CSS startup waterfall** — shell, permalink, and diagnostics templates now render modular CSS through the asset manifest instead of loading `styles.css` and discovering the rest through serial `@import` rules.
+  - `styles.css` remains as a compatibility entrypoint, but app-rendered pages no longer use it for boot CSS. JavaScript bundling now uses the shared frontend asset bundle pipeline.
+  - **Tests:** extended existing index and permalink route coverage to assert direct hashed CSS links.
+
+- **Scanner kill PID reuse guard** — scanner-mode `/kill` and API cancel requests now verify the active run's stored PID start time before sending the sudo-backed process-group signal, so a recycled PID cannot make the app terminate an unrelated scanner process group.
+  - Stale or unverifiable scanner metadata is treated like an already-gone process group and still releases the caller's running state without issuing the sudo kill.
+  - **Tests:** added backend, route, and API coverage for matching PID start times, reused PID rejection, legacy metadata without start time, and scanner kill/cancel stale-PID handling.
+
+- **Periodic retention cleanup** — the scheduler worker now runs a guarded daily retention pass for expired runs, snapshots, run-output artifacts, and audit rows, so long-lived containers keep applying retention without waiting for a restart.
+  - Startup pruning remains in place for boot-time cleanup, and the scheduler uses the same database and audit retention helpers so deletion, artifact cleanup, and logging stay consistent.
+  - **Tests:** added scheduler-worker coverage for daily retention pruning and the once-per-interval guard.
+
+- **Redis required for multi-worker startup** — deployments with `WEB_CONCURRENCY>1` now fail fast when Redis is unavailable instead of silently falling back to per-worker PID and active-run maps.
+  - Single-worker local development can still run without Redis, and Redis-backed or fake-Redis test/capture modes continue to support multi-worker settings.
+  - **Tests:** added backend coverage for rejected multi-worker/no-Redis startup, allowed single-worker fallback, and allowed multi-worker Redis configuration.
+
+- **Client-side run redaction** — `/run/client` now applies the normal output metadata and share/export redaction path before browser-owned built-in output becomes run history, search text, or Atlas entity data.
+  - The route still only accepts the fixed browser-owned built-in allow-list, but client-submitted line text no longer bypasses the redaction baseline before persistence.
+  - **Tests:** added route coverage proving client-side run output is redacted before search indexing while non-redacted entities can still be materialized.
+
+- **Run ownership and completion internals stay aligned across personal and team scopes** — command prep, completed-run finalization, and brokered project-completion notices now share narrower helpers while preserving the same savepoints, non-fatal failure handling, logs, metrics, and returned project-link details.
+  - **Tests:** existing scheduler launch, API run-start, owner-context predicate, SQLite finalize, auto-promote, Postgres graph, optional-failure, and pyright coverage passes unchanged; the broker-worker route test now pins project notice text and metadata.
+
+- **Synthetic post-filter buffer cap** — server-side `sort` and `uniq` pipe helpers now bound their buffered input with `max_output_lines` and emit a `[post-filter]` notice when later lines are skipped before sorting or deduping.
+  - `max_output_lines=0` keeps the existing unlimited behavior for operators who explicitly disable the output-line cap.
+  - **Tests:** added backend coverage for capped `sort` and `uniq -c` buffers plus the truncation notice.
+
+- **Stale Python bytecode cleanup** — cleared ignored `app/**/__pycache__` files left over from earlier module layouts and confirmed `.gitignore` already excludes `__pycache__/`, `*.pyc`, and `*.pyo`.
+  - **Tests:** documentation drift coverage passes unchanged; no suite-total change.
+
+- **HTTP scanner throttling** — dynamic app routes now have a baseline per-IP throttle before route matching, so broad scanners hitting random paths are rejected before they can tie up the web worker pool and delay normal command start/kill requests.
+  - Static assets stay exempt, existing command/API/write-specific limits remain tighter where they already apply, and the default burst now leaves room for the app's first-load request fan-out without weakening the sustained per-minute scanner cap.
+  - **Tests:** added route coverage for repeated unknown-path probes, the default first-load burst allowance, and static-asset exemptions.
+
+- **Tabbar chrome toggle reset** — the search/display controls toggle now hides itself once closed tabs leave enough room for the full tabbar chrome again, instead of lingering as a no-op collapse glyph.
+  - **Tests:** added Vitest coverage for the pinned-open toggle visibility decision.
+
+- **Report builder selection, export, and logging hardening** — the Report tab now keeps large evidence selections, previews, exports, and failure paths consistent across the editor, preview, and archive jobs.
+  - **Selectors:** paged run/target/finding/artifact selectors ignore stale responses after filter changes, draft search values apply before blur, finding/artifact search uses the same query path as Preview and Export, manual selections show loaded labels with off-page fallbacks, selection counts announce changes to assistive technology, and boolean/text filter detection is explicit.
+  - **Preview/export:** report composition skips unused first-page selector queries, finding counts use the same orphan-finding scope as Preview and Export, target-reference labels survive narrowed target selections, and export jobs return stable safe failure codes/messages instead of raw exception text.
+  - **Logs:** preview, export, and selector failures emit sanitized structured context with counts, paging, selection modes, exclusions, matched totals, and filter activity while keeping raw draft/search text out of logs, job status, and audit details.
+
+- **Built-in command ANSI rendering** — structured built-in rows now preserve the intended ANSI styling path through `ansi_up`, so `jobs`, `runs`, `status`, `stats`, `last`, `retention`, and system-style summaries no longer show stray `[4m`/`[0m` control fragments in the terminal.
+
+- **Audit log table fit** — team-scoped audit rows now truncate long scope and target identifiers inside the table, keep the Details column visible at normal desktop widths, and expand details rows with a self-contained JSON envelope aligned back into the table.
+
+- **Findings Board column loading** — project-scoped Findings Board refreshes now load each review column with its own page cap, so a project with hundreds of New findings no longer hides reviewed, false-positive, or follow-up items from the board.
+
+---
+
 ## [2.1] — 2026-06-03
 
 ### Added
@@ -435,7 +665,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Added `tests/py/test_postgres_backend.py` for SQLite/Postgres smoke operations, configured app startup, Postgres-backed History/stats routes, terminal `stats`, run persistence, artifact metadata, snapshot shares, session metadata, token lifecycle, session migration, secret migration conflicts, Projects, Atlas, Atlas intel refresh, diagnostics, metrics, run-kind imports, duplicate finding-occurrence migration, and trigger-disable coverage.
     - Added a real Postgres migration fixture for artifacts, body-store pointers, encrypted-secret metadata, JSON columns, row counts, file references, and search parity.
 - **Disposable Postgres test container** — `scripts/run_postgres_tests.sh` now starts a temporary Docker Postgres container when no `DARKLAB_TEST_POSTGRES_DSN` is set, exports the generated localhost DSN for the test process, waits for readiness, and removes the container whether the run passes or fails. Existing host-DSN and Compose-network modes remain available through `--host` and `--compose`.
-- **Postgres operator readiness docs** — the main README, configuration reference, architecture notes, migration guide, release drafts, and TODOs now describe Postgres as supported production-scaling behavior instead of planning work.
+- **Postgres operator readiness docs** — the main README, configuration reference, architecture notes, migration guide, and TODOs now describe Postgres as supported production-scaling behavior instead of planning work.
   - **Docs:** documented the Compose `.env` path, environment-over-config precedence, override-file caveats, offline migration flow, backup/rollback expectations, and the Compose-network Postgres test command.
 - **Postgres documentation review cleanup** — refreshed feature, architecture, storage-scaling, and migration-helper docs so SQLite-only search/storage details are clearly scoped, Postgres is described as supported behavior, and advanced migration flags explain when they are safe to use.
 - **Recent target autocomplete now supports domains, IPs, URLs, and ports** — autocomplete recents are no longer domain-only.
@@ -1143,7 +1373,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - `test_redis_orphan_count_flags_dangling_procmeta` confirms procmeta entries whose session set no longer references them are counted as orphans.
     - `test_redis_namespace_count_marks_capped_when_scan_hits_limit` confirms bounded SCAN flags namespaces as `capped` once they hit `_DIAG_REDIS_SCAN_KEY_CAP`.
     - `test_db_section_reports_query_latency` confirms the database card returns a non-negative `query_ms`.
-    - Updated test totals across `tests/README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`, and the in-repo release drafts.
+    - Updated test totals across `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`.
 - **Status Monitor Command Constellation polish** — the constellation now reads cleaner, the Y axis uses its space, and historical insights load without a polling timer.
   - **Why:**
     - The constellation Y axis was anchored to actual `max(elapsed_seconds)`, so a single multi-hour scan flattened every other star into the bottom third of the canvas.
@@ -1164,7 +1394,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Replaced the polling-cadence Vitest with a no-poll assertion plus a `>0 → 0` drain refresh test and a `0 → >0` no-refresh test.
     - Added Vitest coverage for the off-scale clamp + upward-tick element, the same-root + ≤2h + same-day connector predicate, and the dropped `24` axis label.
     - Extended the constellation render Vitest assertion to lock the new five Y-axis labels and the updated major/minor horizontal guide counts to the dynamic ceiling.
-    - Updated test totals across `tests/README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`, and the in-repo release drafts.
+    - Updated test totals across `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`.
 - **Status Monitor replaces the run-only monitor with a useful idle dashboard** — session health and active-run control now live in one first-class desktop/mobile surface.
   - **Why:** brokered attach/kill makes the monitor useful as a session command center, while an empty active-run modal was a poor idle-state experience.
   - **What:** renamed the surface to Status Monitor, added desktop rail and mobile menu access, converted desktop from a HUD-attached drawer into a centered modal, kept mobile as a bottom sheet, and added system, workspace resource, and session-stat cards above the active-runs section. The dashboard uses `/status`, `/workspace/files`, `/history/stats`, and `/history/insights` for DB/Redis state, workspace quota/file counts, run totals, success/failure/incomplete counts, average elapsed time, starred commands, snapshots, CPU-driven heartbeat status, activity heat, command territory, recent-run constellation with app-native popovers, and event ticker visuals.

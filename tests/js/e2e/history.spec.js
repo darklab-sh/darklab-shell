@@ -226,13 +226,65 @@ async function selectVisibleHistoryRuns(page, commands) {
   }
 }
 
-async function forceComparePaneOverflow(page) {
-  await page.locator('.history-compare-pane').evaluateAll((panes) => {
-    panes.forEach((pane) => {
+async function forceComparePaneOverflow(overlay) {
+  const panes = overlay.locator('.history-compare-pane')
+  await panes.evaluateAll((paneElements) => {
+    paneElements.forEach((pane) => {
+      pane.style.height = '90px'
       pane.style.maxHeight = '90px'
       pane.style.overflowY = 'auto'
     })
   })
+  await expect.poll(() => panes.evaluateAll((paneElements) => (
+    paneElements.every((pane) => pane.scrollHeight > pane.clientHeight)
+  ))).toBe(true)
+}
+
+async function expectSplitPaneScrollSync(overlay) {
+  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split) => {
+    const left = split.querySelector('.history-compare-pane[data-side="a"]')
+    const right = split.querySelector('.history-compare-pane[data-side="b"]')
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    if (!left || !right) {
+      return {
+        actual: 0,
+        expected: 0,
+        leftScrollable: false,
+        mobileMode: false,
+        rightScrollable: false,
+      }
+    }
+    const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+      ? window.useMobileTerminalViewportMode()
+      : false
+    const leftMax = Math.max(0, left.scrollHeight - left.clientHeight)
+    const rightMax = Math.max(0, right.scrollHeight - right.clientHeight)
+    const targetScrollTop = Math.min(48, Math.max(1, Math.min(leftMax, rightMax)))
+
+    left.scrollTop = 0
+    right.scrollTop = 0
+    left.dispatchEvent(new Event('scroll', { bubbles: true }))
+    right.dispatchEvent(new Event('scroll', { bubbles: true }))
+    await nextFrame()
+    await nextFrame()
+
+    left.scrollTop = targetScrollTop
+    left.dispatchEvent(new Event('scroll', { bubbles: true }))
+    await nextFrame()
+    await nextFrame()
+
+    return {
+      actual: right.scrollTop,
+      expected: left.scrollTop,
+      leftScrollable: leftMax > 0,
+      mobileMode,
+      rightScrollable: rightMax > 0,
+    }
+  })
+  expect(scrollState.mobileMode, 'split compare scroll sync is only active in desktop mode').toBe(false)
+  expect(scrollState.leftScrollable, 'left compare pane should be scrollable before testing sync').toBe(true)
+  expect(scrollState.rightScrollable, 'right compare pane should be scrollable before testing sync').toBe(true)
+  expect(scrollState.actual).toBe(scrollState.expected)
 }
 
 async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}) {
@@ -245,24 +297,21 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.leftChangedText)
   await expect(overlay.locator('.history-compare-pane[data-side="b"]')).toContainText(fixture.rightChangedText)
 
-  await forceComparePaneOverflow(page)
-  const leftPane = overlay.locator('.history-compare-pane[data-side="a"]')
-  const rightPane = overlay.locator('.history-compare-pane[data-side="b"]')
-  await leftPane.evaluate((node) => {
-    node.scrollTop = 48
-    node.dispatchEvent(new Event('scroll'))
-  })
-  await expect.poll(() => rightPane.evaluate((node) => node.scrollTop)).toBe(48)
+  await forceComparePaneOverflow(overlay)
+  await expectSplitPaneScrollSync(overlay)
 
   const foldButton = overlay.getByRole('button', { name: /Show 2 unchanged line/ }).first()
   await expect(foldButton).toBeVisible()
-  const lazyResponse = page.waitForResponse((response) => {
+  const lineResponses = Promise.all(['a', 'b'].map(side => page.waitForResponse((response) => {
     const url = new URL(response.url())
     return url.pathname === '/history/compare/lines'
+      && url.searchParams.get('side') === side
       && (!projectId || url.searchParams.get('project_id') === projectId)
-  })
+  })))
   await foldButton.click()
-  expect((await lazyResponse).ok()).toBe(true)
+  for (const response of await lineResponses) {
+    expect(response.ok()).toBe(true)
+  }
   await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.commonFoldedText)
 
   const expander = overlay.locator('.history-compare-line-expander').first()

@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -31,6 +32,11 @@ log = logging.getLogger("shell")
 
 def ensure_run_output_dir():
     os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+
+
+def artifact_rel_path_for_run(run_id: str) -> str:
+    digest = hashlib.sha256(str(run_id).encode("utf-8")).hexdigest()
+    return os.path.join(digest[:2], digest[:4], f"{run_id}.txt.gz")
 
 
 @dataclass(frozen=True)
@@ -75,7 +81,7 @@ class RunOutputCapture:
         self._artifact_file = None
 
         if self.persist_full_output:
-            self.artifact_rel_path = f"{run_id}.txt.gz"
+            self.artifact_rel_path = artifact_rel_path_for_run(run_id)
 
     @staticmethod
     def _entry_storage_bytes(entry: dict[str, object]) -> int:
@@ -145,7 +151,7 @@ class RunOutputCapture:
         if not self.persist_full_output or self._artifact_file:
             return bool(self._artifact_file)
         if not self.artifact_rel_path:
-            self.artifact_rel_path = f"{self.run_id}.txt.gz"
+            self.artifact_rel_path = artifact_rel_path_for_run(self.run_id)
         header = self._artifact_header()
         header_bytes = self._jsonl_bytes(header)
         if self.full_output_max_bytes and header_bytes >= self.full_output_max_bytes:
@@ -160,6 +166,7 @@ class RunOutputCapture:
             return False
         ensure_run_output_dir()
         artifact_path = get_artifact_path(self.artifact_rel_path)
+        os.makedirs(os.path.dirname(artifact_path), exist_ok=True)
         self._artifact_file = gzip.open(artifact_path, "wt", encoding="utf-8")
         self._artifact_file.write(json.dumps(header, separators=(",", ":")) + "\n")
         self.full_output_bytes += header_bytes
@@ -256,10 +263,24 @@ def get_artifact_path(rel_path: str) -> str:
 def delete_artifact_file(rel_path: str | None):
     if not rel_path:
         return
+    artifact_path = get_artifact_path(rel_path)
     try:
-        os.remove(get_artifact_path(rel_path))
+        os.remove(artifact_path)
     except FileNotFoundError:
         pass
+    else:
+        _remove_empty_artifact_parent_dirs(os.path.dirname(artifact_path))
+
+
+def _remove_empty_artifact_parent_dirs(path: str) -> None:
+    run_output_root = os.path.abspath(RUN_OUTPUT_DIR)
+    current = os.path.abspath(path)
+    while current != run_output_root and current.startswith(run_output_root + os.sep):
+        try:
+            os.rmdir(current)
+        except OSError:
+            return
+        current = os.path.dirname(current)
 
 
 def load_full_output_lines(rel_path: str) -> list[str]:

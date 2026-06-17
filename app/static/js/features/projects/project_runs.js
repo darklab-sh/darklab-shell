@@ -1,3 +1,8 @@
+import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
+import { fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison } from '../run-comparison/history_compare_bridge.js';
+
+let exportedDarklabProjectRuns = null;
+
 (function projectRunsModule(global) {
   'use strict';
 
@@ -189,8 +194,8 @@
       const fallback = runOptions.find(option => !compareOptionLabels(option).includes(label));
       if (!fallback) return;
       leftSelect.value = String(fallback.value || '');
-      if (typeof global.syncAppSelect === 'function') {
-        global.syncAppSelect(leftSelect);
+      if (typeof importedSyncAppSelect === 'function') {
+        importedSyncAppSelect(leftSelect);
       }
     }
 
@@ -215,8 +220,8 @@
       if (mode === 'baseline') {
         avoidCompareLabelSelfTarget(container, String(targetSelect.value || ''));
       }
-      if (typeof global.syncAppSelect === 'function') {
-        global.syncAppSelect(targetSelect);
+      if (typeof importedSyncAppSelect === 'function') {
+        importedSyncAppSelect(targetSelect);
       }
       container.querySelectorAll('[data-project-compare-mode-value]').forEach((btn) => {
         const active = String(btn.dataset.projectCompareModeValue || '') === mode;
@@ -247,11 +252,15 @@
       if (normalizedMode === 'run' && !normalizedTarget) throw new Error('Choose two project runs to compare.');
       if (normalizedMode === 'run' && normalizedLeftId === normalizedTarget) throw new Error('Choose two different project runs to compare.');
       if (normalizedMode === 'baseline' && !normalizedTarget) throw new Error('Choose a baseline label to compare.');
-      const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
-        ? global.fetchAndRenderHistoryComparison
-        : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
-          ? window.fetchAndRenderHistoryComparison
-          : null);
+      const compareFn = (...args) => {
+        const bridged = typeof importedFetchAndRenderHistoryComparison === 'function'
+          ? importedFetchAndRenderHistoryComparison(...args)
+          : undefined;
+        if (bridged !== undefined) return bridged;
+        return typeof global.fetchAndRenderHistoryComparison === 'function'
+          ? global.fetchAndRenderHistoryComparison(...args)
+          : undefined;
+      };
       if (!compareFn) throw new Error('Run comparison is not available.');
       const params = new URLSearchParams({
         left: normalizedLeftId,
@@ -455,7 +464,11 @@
     };
   }
 
-  global.DarklabProjectRuns = {
+  const DarklabProjectRuns = {
     createProjectRunsController,
   };
+  exportedDarklabProjectRuns = DarklabProjectRuns;
 })(globalThis);
+
+export {
+  exportedDarklabProjectRuns as DarklabProjectRuns,};

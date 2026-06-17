@@ -3,11 +3,12 @@
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stripEsmExports } from './helpers/extract.js'
 
-const NOTIFICATION_CHANNELS_SRC = readFileSync(
+const NOTIFICATION_CHANNELS_SRC = stripEsmExports(readFileSync(
   resolve(process.cwd(), 'app/static/js/features/preferences/notification_channels.js'),
   'utf8',
-)
+))
 
 function jsonResponse(body, status = 200) {
   return {

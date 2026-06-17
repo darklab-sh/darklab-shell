@@ -292,6 +292,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0026",
         "0027",
         "0028",
+        "0029",
+        "0030",
+        "0031",
+        "0032",
+        "0033",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -336,6 +341,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'row_number',
                 'source_detail_json'
             ))
+            OR (table_name = 'run_output_summary_status' AND column_name IN (
+                'attempts',
+                'status'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -350,6 +359,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "atlas_import_batches",
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
+        "run_output_summary_status",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -374,6 +384,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("atlas_entity_import_links", "created_entity", "boolean"),
         ("atlas_finding_import_occurrences", "row_number", "bigint"),
         ("atlas_finding_import_occurrences", "source_detail_json", "jsonb"),
+        ("run_output_summary_status", "attempts", "integer"),
+        ("run_output_summary_status", "status", "text"),
     }
     runs_index_rows = conn.execute(
         """
@@ -440,6 +452,121 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_atlas_finding_import_occurrences_batch",
         "idx_atlas_finding_import_occurrences_finding_seen",
     }.issubset({row["indexname"] for row in import_index_rows})
+
+
+@pytest.mark.postgres
+def test_postgres_watcher_monitoring_migration_backfills_legacy_rows(postgres_schema):
+    from core.migrations import v0032_watcher_monitoring_phase0
+    from core.migrations.runner import apply_migration, ensure_migration_table
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+
+    conn = postgres_schema.conn
+    ensure_migration_table(conn)
+    conn.execute(
+        """
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE project_links (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE watchers (
+            id TEXT PRIMARY KEY,
+            session_token TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
+            baseline_run_id TEXT NOT NULL,
+            updated TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE watcher_fires (
+            id TEXT PRIMARY KEY,
+            state_at_fire TEXT NOT NULL DEFAULT '',
+            diff_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb
+        )
+        """
+    )
+    for project_id, session_id, team_id in (
+        ("prj_same", "tok_pg_watchers", ""),
+        ("prj_ambiguous_a", "tok_pg_watchers", ""),
+        ("prj_ambiguous_b", "tok_pg_watchers", ""),
+        ("prj_cross", "tok_pg_watchers", ""),
+        ("prj_team", "tok_pg_watchers", "team_pg_watchers"),
+    ):
+        conn.execute(
+            "INSERT INTO projects (id, session_id, team_id) VALUES (%s, %s, %s)",
+            (project_id, session_id, team_id),
+        )
+    for link_id, project_id, run_id in (
+        ("plink_same", "prj_same", "run_same"),
+        ("plink_ambiguous_a", "prj_ambiguous_a", "run_ambiguous"),
+        ("plink_ambiguous_b", "prj_ambiguous_b", "run_ambiguous"),
+        ("plink_cross", "prj_cross", "run_cross"),
+        ("plink_team", "prj_team", "run_team"),
+    ):
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id) VALUES (%s, %s, 'run', %s)",
+            (link_id, project_id, run_id),
+        )
+    for watcher_id, baseline_run_id, team_id in (
+        ("w_same", "run_same", ""),
+        ("w_ambiguous", "run_ambiguous", ""),
+        ("w_unlinked", "run_unlinked", ""),
+        ("w_cross", "run_cross", "team_pg_watchers"),
+        ("w_team", "run_team", "team_pg_watchers"),
+    ):
+        conn.execute(
+            "INSERT INTO watchers (id, session_token, team_id, baseline_run_id, updated) "
+            "VALUES (%s, 'tok_pg_watchers', %s, %s, '2026-05-20T10:00:00+00:00')",
+            (watcher_id, team_id, baseline_run_id),
+        )
+    for fire_id, state_at_fire, summary in (
+        ("fire_changed", "changed", {"classifier": "ports"}),
+        ("fire_failed", "error", {"classifier": "textual"}),
+        ("fire_no_change", "ok", {"classifier": "textual"}),
+        ("fire_paused", "paused", {"classifier": "textual"}),
+        ("fire_baseline", "ok", {"classifier": "baseline", "baseline_created": True}),
+    ):
+        conn.execute(
+            "INSERT INTO watcher_fires (id, state_at_fire, diff_summary_json) VALUES (%s, %s, %s)",
+            (fire_id, state_at_fire, Jsonb(summary)),
+        )
+
+    apply_migration(conn, v0032_watcher_monitoring_phase0.MIGRATION)
+    conn.commit()
+
+    watcher_rows = conn.execute("SELECT id, project_id FROM watchers ORDER BY id").fetchall()
+    fire_rows = conn.execute("SELECT id, fire_kind, state_reason FROM watcher_fires ORDER BY id").fetchall()
+
+    assert {row["id"]: row["project_id"] for row in watcher_rows} == {
+        "w_ambiguous": "",
+        "w_cross": "",
+        "w_same": "prj_same",
+        "w_team": "prj_team",
+        "w_unlinked": "",
+    }
+    assert {row["id"]: (row["fire_kind"], row["state_reason"]) for row in fire_rows} == {
+        "fire_baseline": ("baseline_created", "baseline_created"),
+        "fire_changed": ("changed", "diff_detected"),
+        "fire_failed": ("failed", "run_failed"),
+        "fire_no_change": ("no_change", "no_change"),
+        "fire_paused": ("paused", "paused"),
+    }
 
 
 @pytest.mark.postgres

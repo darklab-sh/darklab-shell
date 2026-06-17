@@ -1,19 +1,5 @@
 import { describe, it, beforeEach, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import { resolve, dirname } from 'path'
-import { fileURLToPath } from 'url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = resolve(__dirname, '../../..')
-const UI_FOCUS_TRAP_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'),
-  'utf8',
-)
-
-function loadFocusTrap() {
-  new Function(UI_FOCUS_TRAP_SRC)()
-  return window
-}
+import { bindFocusTrap } from '../../../app/static/js/ui/ui_focus_trap.js'
 
 function makeCard({ buttons = 0, include = [] } = {}) {
   const card = document.createElement('div')
@@ -46,17 +32,14 @@ function arrowEvent(key) {
 }
 
 describe('bindFocusTrap', () => {
-  let g
-
   beforeEach(() => {
-    g = loadFocusTrap()
     document.body.replaceChildren()
   })
 
   it('wraps Tab from the last focusable back to the first', () => {
     const card = makeCard({ buttons: 3 })
     const [first, , last] = card.querySelectorAll('button')
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     last.focus()
     expect(document.activeElement).toBe(last)
     const ev = tabEvent()
@@ -68,7 +51,7 @@ describe('bindFocusTrap', () => {
   it('wraps Shift+Tab from the first focusable back to the last', () => {
     const card = makeCard({ buttons: 3 })
     const [first, , last] = card.querySelectorAll('button')
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     first.focus()
     expect(document.activeElement).toBe(first)
     const ev = tabEvent({ shift: true })
@@ -80,7 +63,7 @@ describe('bindFocusTrap', () => {
   it('does not preventDefault when Tab moves between middle focusables', () => {
     const card = makeCard({ buttons: 3 })
     const [, middle] = card.querySelectorAll('button')
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     middle.focus()
     const ev = tabEvent()
     card.dispatchEvent(ev)
@@ -91,7 +74,7 @@ describe('bindFocusTrap', () => {
     const card = document.createElement('div')
     card.innerHTML = '<p>text only</p>'
     document.body.appendChild(card)
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     const ev = tabEvent()
     card.dispatchEvent(ev)
     expect(ev.defaultPrevented).toBe(false)
@@ -99,8 +82,8 @@ describe('bindFocusTrap', () => {
 
   it('returns null on a re-bind to the same container (idempotent)', () => {
     const card = makeCard({ buttons: 2 })
-    const first = g.bindFocusTrap(card)
-    const second = g.bindFocusTrap(card)
+    const first = bindFocusTrap(card)
+    const second = bindFocusTrap(card)
     expect(first).not.toBeNull()
     expect(second).toBeNull()
   })
@@ -108,7 +91,7 @@ describe('bindFocusTrap', () => {
   it('dispose removes the keydown handler and clears the bound flag', () => {
     const card = makeCard({ buttons: 2 })
     const [firstBtn, lastBtn] = card.querySelectorAll('button')
-    const handle = g.bindFocusTrap(card)
+    const handle = bindFocusTrap(card)
     expect(card.dataset.focusTrapBound).toBe('1')
     handle.dispose()
     expect(card.dataset.focusTrapBound).toBeUndefined()
@@ -126,7 +109,7 @@ describe('bindFocusTrap', () => {
     hiddenBtn.hidden = true
     const card = makeCard({ buttons: 2, include: [hiddenBtn] })
     const [first, last] = card.querySelectorAll('button:not([hidden])')
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     last.focus()
     const ev = tabEvent()
     card.dispatchEvent(ev)
@@ -146,7 +129,7 @@ describe('bindFocusTrap', () => {
     trailingHidden.style.display = 'none'
     card.appendChild(trailingHidden)
     const [first, last] = card.querySelectorAll('button:not([style*="display: none"])')
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     last.focus()
     const ev = tabEvent()
     card.dispatchEvent(ev)
@@ -164,7 +147,7 @@ describe('bindFocusTrap', () => {
     card.appendChild(hiddenMenu)
     const [first, last] = Array.from(card.querySelectorAll('button'))
       .filter(button => button !== hiddenOption)
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     last.focus()
     const ev = tabEvent()
     card.dispatchEvent(ev)
@@ -175,7 +158,7 @@ describe('bindFocusTrap', () => {
   it('does not intercept arrow keys unless explicitly enabled', () => {
     const card = makeCard({ buttons: 2 })
     const [first] = card.querySelectorAll('button')
-    g.bindFocusTrap(card)
+    bindFocusTrap(card)
     first.focus()
     const ev = arrowEvent('ArrowRight')
     card.dispatchEvent(ev)
@@ -186,7 +169,7 @@ describe('bindFocusTrap', () => {
   it('cycles forward with ArrowRight and ArrowDown when arrow keys are enabled', () => {
     const card = makeCard({ buttons: 3 })
     const [first, middle, last] = card.querySelectorAll('button')
-    g.bindFocusTrap(card, { arrowKeys: true })
+    bindFocusTrap(card, { arrowKeys: true })
     first.focus()
 
     const right = arrowEvent('ArrowRight')
@@ -203,7 +186,7 @@ describe('bindFocusTrap', () => {
   it('cycles backward with ArrowLeft and ArrowUp when arrow keys are enabled', () => {
     const card = makeCard({ buttons: 3 })
     const [first, middle, last] = card.querySelectorAll('button')
-    g.bindFocusTrap(card, { arrowKeys: true })
+    bindFocusTrap(card, { arrowKeys: true })
     middle.focus()
 
     const left = arrowEvent('ArrowLeft')
@@ -220,7 +203,7 @@ describe('bindFocusTrap', () => {
   it('wraps arrow-key navigation when arrow keys are enabled', () => {
     const card = makeCard({ buttons: 2 })
     const [first, last] = card.querySelectorAll('button')
-    g.bindFocusTrap(card, { arrowKeys: true })
+    bindFocusTrap(card, { arrowKeys: true })
     last.focus()
 
     const forward = arrowEvent('ArrowRight')

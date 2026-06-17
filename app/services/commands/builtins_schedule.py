@@ -9,6 +9,8 @@ from typing import Any
 
 from core import database
 from core.helpers import get_log_session_id
+from services.audit.automation import record_schedule_event, run_now_details
+from services.audit.models import AuditEventType
 from services.commands.builtins_format import ansi_dim, ansi_green, format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
@@ -163,14 +165,24 @@ def _parse_create(parts: list[str]) -> dict[str, Any]:
 def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, object]]:
     payload = _parse_create(parts)
     command = validate_schedule_command(payload["command"], session_id)
-    schedule = create_schedule(
-        session_id,
-        command_text=command,
-        cron_expr=payload.get("cron_expr"),
-        cadence_preset=payload.get("cadence_preset"),
-        timezone_name=payload.get("timezone_name"),
-        label=str(payload.get("label") or ""),
-    )
+    with database.db_connect() as conn:
+        schedule = create_schedule(
+            session_id,
+            command_text=command,
+            cron_expr=payload.get("cron_expr"),
+            cadence_preset=payload.get("cadence_preset"),
+            timezone_name=payload.get("timezone_name"),
+            label=str(payload.get("label") or ""),
+            conn=conn,
+        )
+        record_schedule_event(
+            AuditEventType.SCHEDULE_CREATE,
+            schedule,
+            audit_fields={"session_id": session_id, "actor_session_id": session_id},
+            source="terminal_builtin",
+            conn=conn,
+        )
+        conn.commit()
     log.info("BUILTIN_SCHEDULE_CREATED", extra={
         "session": get_log_session_id(session_id),
         "source": "builtin",
@@ -192,6 +204,20 @@ def _run_schedule_now(schedule: Schedule) -> list[dict[str, object]]:
     with database.db_connect() as conn:
         status = fire_schedule(conn, schedule, fired_at=fired_at)
         refreshed = get_schedule(schedule.id, conn=conn)
+        active = refreshed or schedule
+        record_schedule_event(
+            AuditEventType.SCHEDULE_RUN_NOW,
+            active,
+            audit_fields={"session_id": schedule.session_token, "actor_session_id": schedule.session_token},
+            source="terminal_builtin",
+            details=run_now_details(
+                status,
+                fired_at=fired_at,
+                run_id=active.last_run_id,
+                last_error=active.last_error,
+            ),
+            conn=conn,
+        )
         conn.commit()
     lines = [output_line(f"schedule: fired {schedule.id}", "builtin-success")]
     lines.append(output_line(format_native_record("status", status, 10), "builtin-kv"))
@@ -233,7 +259,17 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
             return _info_lines(schedule)
         if subcommand == "pause":
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule pause <id>"), session_id)
-            updated = pause_schedule(schedule.id)
+            with database.db_connect() as conn:
+                updated = pause_schedule(schedule.id, conn=conn)
+                record_schedule_event(
+                    AuditEventType.SCHEDULE_UPDATE,
+                    updated or schedule,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"changed_fields": ["enabled", "paused_reason"]},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_SCHEDULE_PAUSED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -243,7 +279,17 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
             return [output_line(f"schedule: paused {(updated or schedule).id}", "builtin-success")]
         if subcommand == "resume":
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule resume <id>"), session_id)
-            updated = resume_schedule(schedule.id)
+            with database.db_connect() as conn:
+                updated = resume_schedule(schedule.id, conn=conn)
+                record_schedule_event(
+                    AuditEventType.SCHEDULE_UPDATE,
+                    updated or schedule,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"changed_fields": ["enabled", "paused_reason"]},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_SCHEDULE_RESUMED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -254,7 +300,17 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
             return [output_line(f"schedule: resumed {(updated or schedule).id}", "builtin-success")]
         if subcommand in {"delete", "rm", "remove"}:
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule delete <id>"), session_id)
-            removed = delete_schedule(schedule.id)
+            with database.db_connect() as conn:
+                removed = delete_schedule(schedule.id, conn=conn)
+                record_schedule_event(
+                    AuditEventType.SCHEDULE_DELETE,
+                    schedule,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"deleted_count": 1 if removed else 0},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_SCHEDULE_DELETED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",

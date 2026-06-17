@@ -129,9 +129,9 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fire a scheduled command immediately and return the updated schedule row. |
 | `GET` | `/api/v1/schedules/<schedule_id>/fires` | Read paged fire audit rows for a scheduled command. |
 | `GET` | `/api/v1/watchers` | Change-detection watcher page for the token's active personal/team scope. |
-| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, and optional command override. |
+| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, optional command override, optional Project membership, and watcher noise policy. |
 | `GET` | `/api/v1/watchers/<watcher_id>` | One change-detection watcher. |
-| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update a watcher's command, cadence, timezone, label, options, or pause/resume state. |
+| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update a watcher's command, cadence, timezone, label, Project membership, options, policy, or pause/resume state. |
 | `DELETE` | `/api/v1/watchers/<watcher_id>` | Delete a watcher and its owned schedule. |
 | `POST` | `/api/v1/watchers/<watcher_id>/run-now` | Fire a watcher immediately and return the updated watcher row. |
 | `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promote the latest fire, or the supplied `run_id`, to the new watcher baseline. |
@@ -339,15 +339,19 @@ Schedule list and fire-audit routes use the normal `limit`, `offset`, and `has_m
 
 ## Watchers
 
-Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. Direct API callers can add `X-Team-ID` or `team_id` to work inside a team scope they belong to; otherwise watchers use personal scope. A watcher can start from a completed baseline run in the same scope, or it can capture its first successful fire as the baseline. Each watcher owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares later completed fires against the current baseline.
+Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. Direct API callers can add `X-Team-ID` or `team_id` to work inside a team scope they belong to; otherwise watchers use personal scope. A watcher can start from a completed baseline run in the same scope, or it can capture its first successful fire as the baseline. Each watcher owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares later completed fires against the current baseline. API responses include the watcher's `project_id`, `options`, `policy`, current state counters, and owned schedule preview fields; fire responses include `fire_kind`, `state_reason`, `ack_state`, `ack_note`, `ack_by`, and `ack_at`.
 
 ```bash
 darklab watch create --first-run --every hourly -- nmap -sV darklab.sh
-darklab watch create run_123 --every hourly
+darklab watch create run_123 --every hourly --project prj_123
 darklab watch create run_123 --cron "*/15 * * * *" --label "HTTP drift"
+darklab watch create run_123 --every hourly --ignore-line-pattern "^Host is up"
 darklab watch create run_123 --every daily -- curl -I https://darklab.sh
 darklab watch list
 darklab watch info wtr_123
+darklab watch set-project wtr_123 prj_123
+darklab watch set-project wtr_123 --clear
+darklab watch set-policy wtr_123 --alert-after-repeated-changes 3
 darklab watch pause wtr_123
 darklab watch resume wtr_123
 darklab watch run wtr_123
@@ -356,7 +360,9 @@ darklab watch accept wtr_123 --run-id run_456
 darklab watch delete wtr_123
 ```
 
-If `watch create` starts from an existing baseline and does not include a command after `--`, the API inherits the command from the baseline run. `--first-run` requires a command because there is no completed run to inherit from yet. `--suppress-removals` ignores removal-only diffs, and `--notify-metadata-changes` treats metadata-only changes as alert-worthy. Watcher list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab watch list` and `darklab watch fires` default to 50 rows and cap at 100.
+If `watch create` starts from an existing baseline and does not include a command after `--`, the API inherits the command from the baseline run. `--first-run` requires a command because there is no completed run to inherit from yet. `--project` links the watcher to Project Monitoring, and `watch set-project` can add, change, or clear that link later. `--suppress-removals` ignores removal-only diffs, and `--notify-metadata-changes` treats metadata-only changes as diff-worthy. `watch create` and `watch set-policy` also expose watcher notification policy with repeatable `--ignore-line-pattern`, `--alert-after-repeated-changes N`, and repeatable `--alert-signal-class findings|entities|ports`. JSON create/update calls accept the same `project_id` and `policy` fields. `project_id` must belong to the same personal/team scope; when it is omitted, the watcher can infer a Project from a baseline run that has exactly one same-scope Project link. `policy.ignore_line_patterns` accepts up to 20 strings of 120 characters or less, `policy.alert_after_repeated_changes` accepts an integer from 1 to 10, and `policy.alert_signal_classes` accepts `findings`, `entities`, and `ports`.
+
+Policy controls gate notification fan-out, not dashboard visibility. A repeated-change threshold above 1 or a signal-class filter can suppress `watcher_changed` delivery while the watcher still records the changed fire and Project Monitoring still shows the current dashboard state. Watcher list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab watch list` and `darklab watch fires` default to 50 rows and cap at 100.
 
 Watcher notifications use `watcher_changed`, `watcher_error`, and `watcher_recovered`. See [docs/watchers.md](watchers.md) for the diff model, baseline lifecycle, and scheduler interaction.
 
@@ -462,11 +468,11 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | Command | Purpose |
 | --- | --- |
 | `darklab whoami [--format text\|json]` | Check token auth. |
-| `darklab run "<cmd>" [--project PROJECT_ID\|--link-project NAME] [--wait] [--wait-timeout N] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, `--no-follow --format json` prints the start payload, and `--wait` waits for the final run status without streaming. `--wait-timeout` defaults to the server's 30 second wait and caps at 3600 seconds. `--link-project` resolves a project name locally before starting. Follow modes exit with code `2` if the stream closes before a terminal event. |
+| `darklab run "<cmd>" [--project PROJECT_ID\|--link-project NAME] [--wait] [--wait-timeout N] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, `--no-follow --format json` prints the start payload, and `--wait` waits for the final run status without streaming. `--wait-timeout` defaults to the server's 30 second wait and caps at 3600 seconds. `--link-project` resolves a project name locally before starting and sends the Project id with the run start request. Follow modes exit with code `2` if the stream closes before a terminal event. |
 | `darklab active [--format text\|json\|ndjson]` | List active runs for the current token. |
 | `darklab tail <run_id> [--format text\|ndjson] [--after EVENT_ID]` | Follow an existing run stream. Exits with code `2` if the stream closes before a terminal event. |
 | `darklab cancel <run_id> [--format text\|json]` | Cancel an active run in the same token session. |
-| `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. `--limit` defaults to 50 and caps at 100. CLI output includes each run's finished timestamp and prints the newest item last. |
+| `darklab history [--project PROJECT_ID] [--type all\|runs\|runs_external\|runs_builtin] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged run history. `--type runs_external`/`external` shows external commands and `--type runs_builtin`/`builtin` shows built-ins. `--limit` defaults to 50 and caps at 100. CLI output includes each run's finished timestamp and prints the newest item last. |
 | `darklab grep <pattern> [--context N] [--project PROJECT_ID] [--since ISO] [--until ISO] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Search saved run output across runs and print line-context matches. `--limit` defaults to 50 and caps at 100; `--context` defaults to 2 and caps at 10. Structured selectors can be repeated. |
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
 | `darklab output <run_id> [--range N-M] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range and filtered by structured line metadata. Structured selectors can be repeated. |
@@ -501,10 +507,12 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab schedule pause\|resume\|delete\|run <schedule_id> [--format text\|json]` | Pause, resume, delete, or immediately fire one scheduled command. |
 | `darklab schedule fires <schedule_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List fire audit rows for a scheduled command. `--limit` defaults to 50 and caps at 100. |
 | `darklab watch list [--limit N] [--offset N] [--format text\|json\|ndjson]` | List change-detection watchers. `--limit` defaults to 50 and caps at 100. |
-| `darklab watch create (--first-run \| <baseline_run_id>) (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] [--suppress-removals] [--notify-metadata-changes] [-- COMMAND]` | Create a watcher from its first successful run or from a completed baseline run. Existing-run watchers can omit `-- COMMAND` to inherit the baseline command. |
+| `darklab watch create (--first-run \| <baseline_run_id>) (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--project PROJECT_ID] [--timezone TZ] [--suppress-removals] [--notify-metadata-changes] [--ignore-line-pattern PATTERN] [--alert-after-repeated-changes N] [--alert-signal-class findings\|entities\|ports] [-- COMMAND]` | Create a watcher from its first successful run or from a completed baseline run. Existing-run watchers can omit `-- COMMAND` to inherit the baseline command. |
 | `darklab watch info\|pause\|resume\|delete\|run <watcher_id> [--format text\|json]` | Inspect, pause, resume, delete, or immediately fire one watcher. |
+| `darklab watch set-project <watcher_id> <project_id> [--format text\|json]` / `darklab watch set-project <watcher_id> --clear` | Add, change, or clear the Project Monitoring link for one watcher. |
+| `darklab watch set-policy <watcher_id> [--ignore-line-pattern PATTERN] [--clear-ignore-line-patterns] [--alert-after-repeated-changes N] [--alert-signal-class findings\|entities\|ports] [--clear-alert-signal-classes]` | Update notification policy for one watcher. Passed pattern and signal-class lists replace the current lists; omitted policy fields stay unchanged. |
 | `darklab watch accept <watcher_id> [--run-id RUN_ID]` | Promote the latest watcher fire, or the supplied run, to the new baseline. |
-| `darklab watch fires <watcher_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List watcher fire audit rows. `--limit` defaults to 50 and caps at 100. |
+| `darklab watch fires <watcher_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List watcher fire audit rows, including fire kind, state reason, acknowledgement state, diff kind, and run id. `--limit` defaults to 50 and caps at 100. |
 | `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Channel mutation commands accept `--format text\|json`; `notify list` and `notify events` also accept `ndjson`, and event `--limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab completion bash\|zsh\|fish` | Print static shell completion for subcommands, nested subcommands, option names, and fixed choices. This command reads only the local CLI parser and does not require `DARKLAB_API_URL` or `DARKLAB_TOKEN`. |
 | `darklab completion install [--shell auto\|bash\|zsh\|fish]` | Install static shell completion into the current user's shell-completion directory. `auto` reads `$SHELL`; pass a shell explicitly when detection is not enough. |
@@ -568,7 +576,7 @@ timeout = 30
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts

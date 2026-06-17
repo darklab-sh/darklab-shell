@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import signal  # noqa: F401 — re-exported for test compatibility
 import time
+import hashlib
+import json
 
 from flask import Flask, jsonify, request
 
@@ -100,7 +102,10 @@ from blueprints.teams import teams_bp  # noqa: E402
 from blueprints.watchers import watchers_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
-from core.process import cleanup_stale_active_run_metadata  # noqa: E402
+from core.http_rate_limit import check_dynamic_route_rate_limit  # noqa: E402
+from core.database import DB_BACKEND, db_connect  # noqa: E402
+from core.database_backend import DatabaseBackend  # noqa: E402
+from core.process import cleanup_stale_active_run_metadata, redis_client  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
 from services import metrics as app_metrics  # noqa: E402
 from services.api_v1.serialization import json_error  # noqa: E402
@@ -110,10 +115,21 @@ app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
 limiter.init_app(app)
 
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
+_SQLITE_WAL_CHECKPOINT_INTERVAL_SECONDS = 300
 _last_workspace_cleanup_monotonic = 0.0
+_last_sqlite_wal_checkpoint_monotonic = 0.0
+_sqlite_wal_checkpoint_monotonic = time.monotonic
 _REQUEST_COMPLETED_LOG_SKIP_PREFIXES = ("/static/", "/vendor/")
 _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
 _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
+_IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
+_ASSET_VERSION_CACHE: dict[str, str] = {}
+_STATIC_ASSET_URL_CACHE: dict[str, str] = {}
+_ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "manifest.json"
+_VALID_ASSET_BUNDLE_MODES = frozenset({"source", "bundle"})
+_WARNED_INVALID_ASSET_BUNDLE_MODES: set[str] = set()
+_LOGGED_ASSET_BUNDLE_MODES: set[str] = set()
 
 
 def _should_log_request_completed() -> bool:
@@ -132,6 +148,191 @@ def _request_completed_log_level(status_code: int) -> int | None:
     return logging.INFO
 
 
+def _apply_immutable_asset_cache_headers(response):
+    if request.method not in {"GET", "HEAD"} or response.status_code not in {200, 304}:
+        return response
+    path = request.path or ""
+    if path.startswith(_IMMUTABLE_ASSET_PREFIXES):
+        response.headers["Cache-Control"] = _IMMUTABLE_ASSET_CACHE_CONTROL
+    return response
+
+
+def _versioned_asset_url(path: str) -> str:
+    asset_path = str(path or "")
+    if not asset_path.startswith(("/static/", "/vendor/")):
+        return asset_path
+    if asset_path not in _ASSET_VERSION_CACHE:
+        _ASSET_VERSION_CACHE[asset_path] = _asset_version(asset_path)
+    version = _ASSET_VERSION_CACHE[asset_path]
+    separator = "&" if "?" in asset_path else "?"
+    return f"{asset_path}{separator}v={version}" if version else asset_path
+
+
+def _static_asset_url(path: str) -> str:
+    asset_path = str(path or "")
+    if not asset_path.startswith(("/static/", "/vendor/")):
+        return asset_path
+    if _asset_bundle_mode() != "bundle":
+        return _versioned_asset_url(asset_path)
+    if asset_path not in _STATIC_ASSET_URL_CACHE:
+        _STATIC_ASSET_URL_CACHE[asset_path] = _hashed_static_asset_url(asset_path)
+    return _STATIC_ASSET_URL_CACHE[asset_path]
+
+
+def _hashed_static_asset_url(path: str) -> str:
+    try:
+        static_assets = _load_asset_manifest().get("static_assets")
+    except RuntimeError:
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static", exc_info=True)
+        raise
+    if not isinstance(static_assets, dict):
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static")
+        raise _asset_manifest_error("Asset manifest is incomplete: missing static_assets")
+    entry = static_assets.get(path)
+    if not isinstance(entry, dict):
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static")
+        raise _asset_manifest_error(f"Asset manifest is incomplete: missing static asset {path}")
+    built_path = str(entry.get("path") or "").strip()
+    if not built_path:
+        _log_asset_manifest_resolution_failed(logical_name=path, bundle_type="static")
+        raise _asset_manifest_error(f"Asset manifest is incomplete: static asset {path} has no built path")
+    return built_path
+
+
+def _asset_version(path: str) -> str:
+    local_path: Path | None = None
+    if path.startswith("/static/"):
+        local_path = Path(app.static_folder or "") / path.removeprefix("/static/")
+    elif path.startswith("/vendor/"):
+        vendor_path = path.removeprefix("/vendor/")
+        if vendor_path.startswith("fonts/"):
+            local_path = Path(app.static_folder or "") / vendor_path
+        else:
+            local_path = Path(app.static_folder or "") / "js/vendor" / vendor_path
+    if local_path is None:
+        return APP_VERSION
+    try:
+        return hashlib.sha256(local_path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        log.warning("ASSET_VERSION_FALLBACK", exc_info=True, extra={
+            "asset_path": path,
+            "local_path": str(local_path),
+            "fallback_version": APP_VERSION,
+        })
+        return APP_VERSION
+
+
+def _asset_bundle_mode() -> str:
+    mode = str(CFG.get("asset_bundle_mode") or "bundle").strip().lower()
+    if mode in _VALID_ASSET_BUNDLE_MODES:
+        if mode not in _LOGGED_ASSET_BUNDLE_MODES:
+            _LOGGED_ASSET_BUNDLE_MODES.add(mode)
+            log.info("ASSET_BUNDLE_MODE_SELECTED", extra={"asset_bundle_mode": mode})
+        return mode
+    if mode not in _WARNED_INVALID_ASSET_BUNDLE_MODES:
+        _WARNED_INVALID_ASSET_BUNDLE_MODES.add(mode)
+        log.warning("ASSET_BUNDLE_MODE_INVALID", extra={
+            "configured_mode": mode,
+            "fallback_mode": "bundle",
+        })
+    return "bundle"
+
+
+def _asset_manifest_error(message: str) -> RuntimeError:
+    return RuntimeError(f"{message}. Run assets:sync.")
+
+
+def _log_asset_manifest_resolution_failed(
+    *,
+    logical_name: str,
+    bundle_type: str = "",
+    mode: str = "",
+    exc_info=False,
+) -> None:
+    log.error("ASSET_MANIFEST_RESOLUTION_FAILED", exc_info=exc_info, extra={
+        "bundle": logical_name,
+        "bundle_type": bundle_type,
+        "asset_bundle_mode": mode or _asset_bundle_mode(),
+        "manifest_path": str(_ASSET_MANIFEST_PATH),
+    })
+
+
+def _load_asset_manifest() -> dict:
+    try:
+        with _ASSET_MANIFEST_PATH.open("r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except OSError as exc:
+        raise _asset_manifest_error(f"Asset manifest is missing at {_ASSET_MANIFEST_PATH}") from exc
+    except json.JSONDecodeError as exc:
+        raise _asset_manifest_error(f"Asset manifest is invalid JSON at {_ASSET_MANIFEST_PATH}") from exc
+    if not isinstance(manifest, dict):
+        raise _asset_manifest_error("Asset manifest must be a JSON object")
+    bundles = manifest.get("bundles")
+    if not isinstance(bundles, dict):
+        raise _asset_manifest_error("Asset manifest is incomplete: missing bundles")
+    return manifest
+
+
+def _asset_bundle_entry(logical_name: str) -> dict:
+    bundle_name = str(logical_name or "").strip()
+    if not bundle_name:
+        _log_asset_manifest_resolution_failed(logical_name=bundle_name)
+        raise _asset_manifest_error("Asset bundle name is required")
+    try:
+        bundles = _load_asset_manifest()["bundles"]
+    except RuntimeError:
+        _log_asset_manifest_resolution_failed(logical_name=bundle_name, exc_info=True)
+        raise
+    entry = bundles.get(bundle_name)
+    if not isinstance(entry, dict):
+        _log_asset_manifest_resolution_failed(logical_name=bundle_name)
+        raise _asset_manifest_error(f"Asset manifest is incomplete: missing bundle {bundle_name}")
+    return entry
+
+
+def _asset_bundle(logical_name: str) -> list[str]:
+    entry = _asset_bundle_entry(logical_name)
+    bundle_type = str(entry.get("type") or "").strip()
+    mode = _asset_bundle_mode()
+    if bundle_type not in {"css", "js", "esm"}:
+        _log_asset_manifest_resolution_failed(
+            logical_name=logical_name,
+            bundle_type=bundle_type,
+            mode=mode,
+        )
+        raise _asset_manifest_error(f"Unsupported asset bundle type for {logical_name}: {bundle_type}")
+    if mode == "bundle":
+        built_path = str(entry.get("path") or "").strip()
+        if not built_path:
+            _log_asset_manifest_resolution_failed(
+                logical_name=logical_name,
+                bundle_type=bundle_type,
+                mode=mode,
+            )
+            raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no built path")
+        return [built_path]
+
+    sources = entry.get("entries") if bundle_type == "esm" else entry.get("sources")
+    if not isinstance(sources, list) or not sources:
+        _log_asset_manifest_resolution_failed(
+            logical_name=logical_name,
+            bundle_type=bundle_type,
+            mode=mode,
+        )
+        raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no sources")
+    return [_versioned_asset_url(str(source)) for source in sources]
+
+
+def _asset_bundle_script_type(logical_name: str) -> str:
+    entry = _asset_bundle_entry(logical_name)
+    return "module" if str(entry.get("type") or "").strip() == "esm" else ""
+
+
+app.jinja_env.globals["static_asset"] = _static_asset_url
+app.jinja_env.globals["asset_bundle"] = _asset_bundle
+app.jinja_env.globals["asset_bundle_script_type"] = _asset_bundle_script_type
+
+
 def _cleanup_active_run_metadata_on_startup():
     try:
         result = cleanup_stale_active_run_metadata()
@@ -139,11 +340,13 @@ def _cleanup_active_run_metadata_on_startup():
         log.exception("ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR")
         return
     removed = int(result.get("metadata_removed", 0) or 0)
-    members = int(result.get("session_members_removed", 0) or 0)
-    if removed or members:
+    session_members = int(result.get("session_members_removed", 0) or 0)
+    team_members = int(result.get("team_members_removed", 0) or 0)
+    if removed or session_members or team_members:
         log.info("ACTIVE_RUN_METADATA_STARTUP_CLEANUP", extra={
             "metadata_removed": removed,
-            "session_members_removed": members,
+            "session_members_removed": session_members,
+            "team_members_removed": team_members,
         })
 
 
@@ -173,6 +376,28 @@ def _rate_limit_handler(e):
     return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
 
 
+@app.before_request
+def _enforce_dynamic_route_rate_limit():
+    result = check_dynamic_route_rate_limit(
+        client_ip=get_client_ip(),
+        path=request.path,
+        cfg=CFG,
+        redis_client=redis_client,
+    )
+    if result.allowed:
+        return None
+    log.warning("RATE_LIMIT", extra={
+        "ip": get_client_ip(),
+        "path": request.path,
+        "limit": result.limit,
+        "scope": "http",
+    })
+    app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope="http")
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("rate_limited", "Rate limit exceeded. Please slow down.")), 429
+    return jsonify({"error": "rate_limited", "retry_after": result.retry_after}), 429
+
+
 @app.errorhandler(500)
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
@@ -195,6 +420,7 @@ def _server_error_handler(e):
 @app.before_request
 def _run_periodic_workspace_cleanup():
     _maybe_cleanup_workspaces()
+    _maybe_checkpoint_sqlite_wal()
 
 
 def _maybe_cleanup_workspaces():
@@ -213,6 +439,33 @@ def _maybe_cleanup_workspaces():
         log.exception("WORKSPACE_CLEANUP_ERROR")
 
 
+def _maybe_checkpoint_sqlite_wal():
+    global _last_sqlite_wal_checkpoint_monotonic
+    if DB_BACKEND != DatabaseBackend.SQLITE:
+        return
+    now = _sqlite_wal_checkpoint_monotonic()
+    if now - _last_sqlite_wal_checkpoint_monotonic < _SQLITE_WAL_CHECKPOINT_INTERVAL_SECONDS:
+        return
+    _last_sqlite_wal_checkpoint_monotonic = now
+    try:
+        with db_connect() as conn:
+            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    except Exception:
+        log.warning("SQLITE_WAL_CHECKPOINT_FAILED", exc_info=True)
+        return
+    if not row:
+        return
+    busy = int(row[0] or 0)
+    log_frames = int(row[1] or 0)
+    checkpointed_frames = int(row[2] or 0)
+    if busy or log_frames or checkpointed_frames:
+        log.info("SQLITE_WAL_CHECKPOINT", extra={
+            "busy": busy,
+            "log_frames": log_frames,
+            "checkpointed_frames": checkpointed_frames,
+        })
+
+
 @app.before_request
 def _log_request():
     request.environ["darklab_metrics_start"] = str(time.perf_counter())
@@ -220,12 +473,13 @@ def _log_request():
         ip = get_client_ip()
         extra: dict = {"ip": ip, "method": request.method, "path": request.path}
         if request.query_string:
-            extra["qs"] = request.query_string.decode(errors="replace")
+            extra["query_keys"] = sorted(request.args.keys())
         log.debug("REQUEST", extra=extra)
 
 
 @app.after_request
 def _log_response(response):
+    response = _apply_immutable_asset_cache_headers(response)
     started = request.environ.get("darklab_metrics_start")
     try:
         elapsed = time.perf_counter() - float(started) if started else 0.0

@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 from config import CFG
 from core.helpers import get_session_id
 from extensions import limiter
+from services.audit.context import route_audit_fields
 from services.secrets.audit import emit_secret_event
 from services.secrets.storage import (
     InvalidSecretName,
@@ -164,6 +165,7 @@ def session_secrets_upsert():
             data.get("consumer_envs"),
             audit_session_id=session_id,
             team_id=scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, scope),
         )
     except (InvalidSecretName, SecretConsumerEnvConflict, InvalidSecretValue, MasterKeyError, SecretDecryptError) as exc:
         return _secret_error(exc)
@@ -194,7 +196,13 @@ def session_secrets_delete(name):
     if capability_response:
         return capability_response
     try:
-        removed = delete_secret(secret_scope_id, name)
+        removed = delete_secret(
+            secret_scope_id,
+            name,
+            audit_session_id=session_id,
+            team_id=scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, scope),
+        )
     except (InvalidSecretName, SecretConsumerEnvConflict, InvalidSecretValue, MasterKeyError, SecretDecryptError) as exc:
         return _secret_error(exc)
     if removed:
@@ -215,7 +223,12 @@ def session_secrets_rotate():
     if capability_response:
         return capability_response
     try:
-        count = rewrap_session_secrets(secret_scope_id, audit_session_id=session_id, team_id=scope.team_id)
+        count = rewrap_session_secrets(
+            secret_scope_id,
+            audit_session_id=session_id,
+            team_id=scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, scope),
+        )
     except (InvalidSecretName, SecretConsumerEnvConflict, InvalidSecretValue, MasterKeyError, SecretDecryptError) as exc:
         return _secret_error(exc)
     _emit_scoped_secret_event("SECRET_ROTATED", session_id, scope, count=count)

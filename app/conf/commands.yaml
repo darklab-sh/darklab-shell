@@ -3558,6 +3558,10 @@ commands:
         - shodan scan 0.0.0.0
         - shodan scan localhost
         - shodan scan ::1
+        - shodan scan submit 127.0.0.1
+        - shodan scan submit 0.0.0.0
+        - shodan scan submit localhost
+        - shodan scan submit ::1
     requires_secrets:
       - env: SHODAN_API_KEY
     workspace_flags:
@@ -3590,7 +3594,7 @@ commands:
         - value: shodan download shodan-apache apache
           description: Save Shodan search results into a session file
           feature_required: workspace
-        - value: shodan scan 8.8.8.8
+        - value: shodan scan submit 8.8.8.8
           description: Ask Shodan to scan a public IP
         - value: shodan myip
           description: Show the scanner container's public IP according to Shodan
@@ -3689,15 +3693,42 @@ commands:
               hint_only: true
               description: Shodan search query
         scan:
-          description: Ask Shodan to scan a public IP or netblock
+          description: Manage Shodan on-demand scans
           examples:
-            - value: shodan scan 8.8.8.8
-              description: Request a Shodan scan
-          arguments:
-            - placeholder: <ip-or-cidr>
-              hint_only: true
-              value_type: target
-              description: Public IP address or CIDR to scan
+            - value: shodan scan submit 8.8.8.8
+              description: Submit a public IP for scanning
+            - value: shodan scan list
+              description: Show recently launched scans
+            - value: shodan scan protocols
+              description: List supported scan protocols
+          subcommands:
+            internet:
+              description: Scan the Internet for a specific port and protocol
+              arguments:
+                - placeholder: <port>
+                  hint_only: true
+                  value_type: port_set
+                  description: Port to scan
+                - placeholder: <protocol>
+                  hint_only: true
+                  description: Shodan scan protocol
+            list:
+              description: Show recently launched scans
+            protocols:
+              description: List scan protocols supported by Shodan
+            status:
+              description: Check the status of an on-demand scan
+              arguments:
+                - placeholder: <scan-id>
+                  hint_only: true
+                  description: Shodan scan id
+            submit:
+              description: Scan a public IP or netblock using Shodan
+              arguments:
+                - placeholder: <ip-or-cidr>
+                  hint_only: true
+                  value_type: target
+                  description: Public IP address or CIDR to scan
         myip:
           description: Show the scanner container's public IP
           examples:

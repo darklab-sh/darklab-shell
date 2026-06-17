@@ -1,8 +1,23 @@
 // Shared finding remediation and verification editor.
 // Loaded before shell_chrome.js; Projects and Atlas open it with a saved callback.
+import { apiFetch as importedApiFetch } from '../../session.js';
+import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import {
+  enhanceAppSelects as importedEnhanceAppSelects,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncAppSelect as importedSyncAppSelect,
+} from '../../ui/ui_helpers.js';
+
+let DarklabFindingTriageEditor = null;
 
 (function findingTriageEditorModule(global) {
   'use strict';
+  const bindDismissible = typeof importedBindDismissible === 'function' ? importedBindDismissible : null;
+  const bindMobileSheet = typeof importedBindMobileSheet === 'function' ? importedBindMobileSheet : null;
+  const enhanceAppSelects = typeof importedEnhanceAppSelects === 'function' ? importedEnhanceAppSelects : null;
+  const refocusComposerAfterAction = typeof importedRefocusComposerAfterAction === 'function' ? importedRefocusComposerAfterAction : null;
+  const syncAppSelect = typeof importedSyncAppSelect === 'function' ? importedSyncAppSelect : null;
 
   const VERIFICATION_STATES = [
     { value: 'not_started', label: 'Not started' },
@@ -24,9 +39,8 @@
   }
 
   function api() {
-    if (typeof global.apiFetch === 'function') return global.apiFetch.bind(global);
-    if (typeof apiFetch === 'function') return apiFetch;
-    return global.fetch.bind(global);
+    return (typeof importedApiFetch === 'function' && importedApiFetch)
+      || (typeof global.fetch === 'function' ? global.fetch.bind(global) : null);
   }
 
   function text(value, fallback = '') {
@@ -74,7 +88,7 @@
 
   function syncStatusSelect() {
     const statusSelect = el('finding-triage-status');
-    if (statusSelect && typeof global.syncAppSelect === 'function') global.syncAppSelect(statusSelect);
+    if (statusSelect && typeof syncAppSelect === 'function') syncAppSelect(statusSelect);
   }
 
   function setDisabled(disabled) {
@@ -110,8 +124,8 @@
     overlay.setAttribute('aria-hidden', 'true');
     state.finding = null;
     state.options = {};
-    if (typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({ defer: true });
+    if (typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ defer: true });
     }
   }
 
@@ -196,21 +210,21 @@
     el('finding-triage-close')?.addEventListener('click', close);
     el('finding-triage-cancel')?.addEventListener('click', close);
     const overlay = el('finding-triage-overlay');
-    if (overlay && typeof global.bindDismissible === 'function') {
-      global.bindDismissible(overlay, {
+    if (overlay && typeof bindDismissible === 'function') {
+      bindDismissible(overlay, {
         level: 'modal',
         isOpen,
         onClose: close,
         closeButtons: null,
       });
     }
-    if (overlay && typeof global.bindMobileSheet === 'function') {
-      global.bindMobileSheet(el('finding-triage-modal'), { onClose: close });
+    if (overlay && typeof bindMobileSheet === 'function') {
+      bindMobileSheet(el('finding-triage-modal'), { onClose: close });
     }
   }
 
   function bindOpenChrome(overlay) {
-    if (typeof global.enhanceAppSelects === 'function') global.enhanceAppSelects(overlay);
+    if (typeof enhanceAppSelects === 'function') enhanceAppSelects(overlay);
   }
 
   async function open(finding, options = {}) {
@@ -243,7 +257,7 @@
     }
   }
 
-  global.DarklabFindingTriageEditor = {
+  DarklabFindingTriageEditor = {
     compactTriage,
     close,
     isOpen,
@@ -253,3 +267,22 @@
     verificationStates: VERIFICATION_STATES.slice(),
   };
 })(typeof window !== 'undefined' ? window : globalThis);
+
+const compactTriage = DarklabFindingTriageEditor.compactTriage;
+const closeFindingTriageEditor = DarklabFindingTriageEditor.close;
+const isFindingTriageEditorOpen = DarklabFindingTriageEditor.isOpen;
+const openFindingTriageEditor = DarklabFindingTriageEditor.open;
+const verificationStatusLabel = DarklabFindingTriageEditor.verificationStatusLabel;
+const verificationStatusTone = DarklabFindingTriageEditor.verificationStatusTone;
+const verificationStates = DarklabFindingTriageEditor.verificationStates;
+
+export {
+  DarklabFindingTriageEditor,
+  closeFindingTriageEditor,
+  compactTriage,
+  isFindingTriageEditorOpen,
+  openFindingTriageEditor,
+  verificationStatusLabel,
+  verificationStatusTone,
+  verificationStates,
+};

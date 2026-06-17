@@ -1,6 +1,8 @@
 // Project Findings board view controller.
 // Loaded before shell_chrome.js; shell chrome supplies shared findings actions.
 
+let exportedDarklabProjectFindingsBoard = null;
+
 (function projectFindingsBoardModule(global) {
   'use strict';
 
@@ -172,7 +174,11 @@
     };
   }
 
-  global.DarklabProjectFindingsBoard = {
+  const DarklabProjectFindingsBoard = {
     createProjectFindingsBoardController,
   };
+  exportedDarklabProjectFindingsBoard = DarklabProjectFindingsBoard;
 })(globalThis);
+
+export {
+  exportedDarklabProjectFindingsBoard as DarklabProjectFindingsBoard,};

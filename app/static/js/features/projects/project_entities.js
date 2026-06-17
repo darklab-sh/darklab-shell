@@ -1,17 +1,32 @@
 // Project Entities tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
+import { DarklabAtlasEntityRow as importedAtlasEntityRow } from '../atlas/atlas_entity_row.js';
+import { DarklabAtlasTabs as importedAtlasTabs } from '../atlas/atlas_tabs.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
+
+let exportedDarklabProjectEntities = null;
 
 (function initProjectEntities(global) {
   if (typeof document === 'undefined') return;
-  const entityRowApi = global.DarklabAtlasEntityRow || {};
+  const entityRowApi = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow)
+    || {};
 
   function _entityItems(summary) {
     return summary && Array.isArray(summary.entities) ? summary.entities : [];
   }
 
   function _entityTabs() {
-    const atlasTabs = global.DarklabAtlasTabs && Array.isArray(global.DarklabAtlasTabs.tabs)
-      ? global.DarklabAtlasTabs.tabs
+    const atlasTabsApi = (typeof importedAtlasTabs !== 'undefined' && importedAtlasTabs)
+      || null;
+    const atlasTabs = atlasTabsApi && Array.isArray(atlasTabsApi.tabs)
+      ? atlasTabsApi.tabs
       : [
           { id: 'ip', label: 'Hosts/IPs', type: 'ip' },
           { id: 'domain', label: 'Domains', type: 'domain' },
@@ -23,8 +38,10 @@
   }
 
   function _entityTypeLabel(type) {
-    if (global.DarklabAtlasTabs && typeof global.DarklabAtlasTabs.labelForType === 'function') {
-      return global.DarklabAtlasTabs.labelForType(type);
+    const atlasTabsApi = (typeof importedAtlasTabs !== 'undefined' && importedAtlasTabs)
+      || null;
+    if (atlasTabsApi && typeof atlasTabsApi.labelForType === 'function') {
+      return atlasTabsApi.labelForType(type);
     }
     const fallback = _entityTabs().find(tab => tab.type === String(type || ''));
     return fallback ? fallback.label : String(type || 'Entity');
@@ -49,6 +66,77 @@
       ? ` · refreshed ${formatDate(entity.intel_last_refreshed)}`
       : '';
     return `intel: ${providerText}${refreshed}`;
+  }
+
+  function _appendDataset(el, dataset = {}) {
+    Object.entries(dataset || {}).forEach(([key, value]) => {
+      el.dataset[key] = value;
+    });
+  }
+
+  function _fallbackProjectEntityRow({
+    entity,
+    projectId = '',
+    title = '',
+    meta = '',
+    detail = '',
+    chips = [],
+    accessory = null,
+    action = null,
+    selected = false,
+    checkbox = null,
+    chipClass = () => 'badge badge-tone-muted',
+    bindPressable = null,
+  }) {
+    const row = document.createElement('article');
+    row.className = 'project-explorer-item panel-row project-entity-row';
+    row.classList.toggle('is-selected', !!selected);
+    if (checkbox) row.appendChild(checkbox);
+
+    let contentHost = row;
+    if (action) {
+      contentHost = document.createElement('button');
+      contentHost.type = 'button';
+      contentHost.className = 'control-row project-explorer-item-click-target';
+      contentHost.dataset.projectAction = action.action;
+      _appendDataset(contentHost, action.dataset || {});
+      if (projectId && !contentHost.dataset.projectId) contentHost.dataset.projectId = projectId;
+      if (typeof bindPressable === 'function') bindPressable(contentHost);
+    }
+
+    const main = document.createElement('div');
+    main.className = 'project-explorer-item-main';
+    const heading = document.createElement('div');
+    heading.className = 'project-explorer-item-title';
+    heading.textContent = title || String(entity && (entity.canonical_value || entity.value || entity.id) || '');
+    main.appendChild(heading);
+    if (meta) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'project-explorer-item-meta';
+      metaEl.textContent = meta;
+      main.appendChild(metaEl);
+    }
+    if (detail) {
+      const detailEl = document.createElement('div');
+      detailEl.className = 'project-explorer-item-detail';
+      detailEl.textContent = detail;
+      main.appendChild(detailEl);
+    }
+    if (Array.isArray(chips) && chips.length) {
+      const chipWrap = document.createElement('div');
+      chipWrap.className = 'project-explorer-item-chips';
+      chips.forEach((chip) => {
+        const chipEl = document.createElement('span');
+        chipEl.className = chipClass(chip.kind);
+        chipEl.textContent = String(chip.label || '');
+        chipWrap.appendChild(chipEl);
+      });
+      main.appendChild(chipWrap);
+    }
+    contentHost.appendChild(main);
+    if (contentHost !== row) row.appendChild(contentHost);
+    if (accessory) row.appendChild(accessory);
+    return row;
   }
 
   function _entityCounts(summary) {
@@ -94,14 +182,16 @@
     }
 
     function activeTeamScopeCan(capability) {
-      return typeof global.activeTeamScopeCan === 'function'
-        ? global.activeTeamScopeCan(capability)
-        : true;
+      const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+        || null;
+      return typeof can === 'function' ? can(capability) : true;
     }
 
     function teamScopeDeniedMessage(action) {
-      return typeof global.teamScopeDeniedMessage === 'function'
-        ? global.teamScopeDeniedMessage(action)
+      const denied = (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+        || null;
+      return typeof denied === 'function'
+        ? denied(action)
         : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
@@ -795,7 +885,7 @@
     async function confirmApplyRule(rule, preview) {
       const confirmFn = typeof ctx.showConfirm === 'function'
         ? ctx.showConfirm
-        : (typeof global.showConfirm === 'function' ? global.showConfirm : null);
+        : ((typeof importedShowConfirm !== 'undefined' && importedShowConfirm) || null);
       if (!confirmFn) return true;
       const choice = await confirmFn({
         body: {
@@ -813,7 +903,7 @@
     async function confirmDeleteRule(rule) {
       const confirmFn = typeof ctx.showConfirm === 'function'
         ? ctx.showConfirm
-        : (typeof global.showConfirm === 'function' ? global.showConfirm : null);
+        : ((typeof importedShowConfirm !== 'undefined' && importedShowConfirm) || null);
       if (!confirmFn) return true;
       const choice = await confirmFn({
         body: {
@@ -1168,7 +1258,8 @@
         renderRuleCheckbox('Only first seen after rule creation', 'first_seen_after_rule_created', editor.first_seen_after_rule_created, disabled),
       );
       filterPanel.append(filterGrid, filterChecks);
-      const bindDisclosureFn = typeof global.bindDisclosure === 'function' ? global.bindDisclosure : null;
+      const bindDisclosureFn = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure)
+        || null;
       if (bindDisclosureFn) {
         bindDisclosureFn(filterTrigger, {
           panel: filterPanel,
@@ -1345,7 +1436,9 @@
     }
 
     function openInAtlas(projectId, summary, entity) {
-      const openAtlas = ctx.openAtlas || global.openAtlas;
+      const openAtlas = ctx.openAtlas
+        || (typeof importedOpenAtlas !== 'undefined' && importedOpenAtlas)
+        || null;
       if (typeof openAtlas !== 'function' || !entity) return;
       const project = summary && summary.project && typeof summary.project === 'object' ? summary.project : null;
       const tab = tabs().find(item => item.type === String(entity.type || ''));
@@ -1388,7 +1481,7 @@
       } catch (err) {
         state.rows = [];
         ctx.setProjectWorkspaceMessage(err && err.message ? err.message : 'Could not load Atlas entities.', { error: true });
-        if (typeof global.logClientError === 'function') global.logClientError('failed to load project entity picker', err);
+        if (typeof importedLogClientError === 'function') importedLogClientError('failed to load project entity picker', err);
       } finally {
         state.loading = false;
         renderPicker();
@@ -1563,7 +1656,10 @@
           checkbox.dataset.projectId = projectId;
           checkbox.setAttribute('aria-label', `Select ${value || entityId}`);
         }
-        const row = entityRowApi.renderProjectEntityRow({
+        const renderProjectEntityRow = typeof entityRowApi.renderProjectEntityRow === 'function'
+          ? entityRowApi.renderProjectEntityRow
+          : _fallbackProjectEntityRow;
+        const row = renderProjectEntityRow({
           entity,
           projectId,
           title: value || entityId,
@@ -1930,7 +2026,11 @@
     };
   }
 
-  global.DarklabProjectEntities = {
+  const DarklabProjectEntities = {
     createProjectEntitiesController,
   };
+  exportedDarklabProjectEntities = DarklabProjectEntities;
 })(globalThis);
+
+export {
+  exportedDarklabProjectEntities as DarklabProjectEntities,};

@@ -1,6 +1,11 @@
 // Project evidence package controller.
 // Loaded before shell_chrome.js; shell chrome supplies Projects state and shared UI helpers.
 
+import { enhanceAppSelects as importedEnhanceAppSelects } from '../../ui/ui_helpers.js';
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+
+let exportedDarklabProjectPackages = null;
+
 (function initProjectPackages(global) {
   if (typeof document === 'undefined') return;
 
@@ -9,6 +14,7 @@
     let wizard = null;
     const downloadTimers = new WeakMap();
     const packageJobPollMs = 750;
+    const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig : () => ({});
     const defaultPackagePresets = Object.freeze([
       Object.freeze({
         id: 'evidence',
@@ -111,11 +117,16 @@
       const packageId = String(pkg && pkg.id || '');
       const summary = summaryFor(projectId);
       if (!packageId || !summary || !Array.isArray(summary.packages)) return;
-      summary.packages = summary.packages.map(item => (
-        String(item && item.id || '') === packageId
-          ? { ...item, ...pkg }
-          : item
-      ));
+      let replaced = false;
+      summary.packages = summary.packages.map((item) => {
+        if (String(item && item.id || '') !== packageId) return item;
+        replaced = true;
+        return { ...item, ...pkg };
+      });
+      if (!replaced) summary.packages = [
+        { ...pkg },
+        ...summary.packages,
+      ];
     }
 
     function selectableArtifactItems(summary) {
@@ -248,13 +259,32 @@
       return parts.filter(Boolean).join(' · ');
     }
 
+    function packageChips(pkg) {
+      const chips = ctx.entityMetadataChips(pkg);
+      const summary = ctx.projectProvenanceSummary?.(manifestFor(pkg), { fallbackKind: 'evidence_package' });
+      if (summary?.chips?.length) {
+        const provenanceChip = summary.chips.find(chip => String(chip.label || '').startsWith('source:'))
+          || summary.chips[0];
+        if (provenanceChip) chips.push(provenanceChip);
+      }
+      return chips;
+    }
+
     function openManifest(pkg) {
       if (!ctx.manifestOverlay || !ctx.manifestJson) {
         throw new Error('Manifest preview is not available.');
       }
       const name = String(pkg && pkg.name || 'package').trim() || 'package';
+      const manifest = manifestFor(pkg);
       if (ctx.manifestTitle) ctx.manifestTitle.textContent = `${name} manifest`;
-      ctx.manifestJson.textContent = JSON.stringify(manifestFor(pkg), null, 2);
+      if (ctx.manifestSummary) {
+        ctx.manifestSummary.replaceChildren();
+        ctx.manifestSummary.appendChild(
+          ctx.projectProvenanceSummaryElement?.(manifest, { fallbackKind: 'evidence_package' })
+            || document.createElement('div'),
+        );
+      }
+      ctx.manifestJson.textContent = JSON.stringify(manifest, null, 2);
       ctx.manifestOverlay.classList.remove('u-hidden');
       ctx.manifestOverlay.classList.add('open');
       ctx.manifestOverlay.setAttribute('aria-hidden', 'false');
@@ -269,6 +299,7 @@
       ctx.manifestOverlay.classList.add('u-hidden');
       ctx.manifestOverlay.classList.remove('open');
       ctx.manifestOverlay.setAttribute('aria-hidden', 'true');
+      if (ctx.manifestSummary) ctx.manifestSummary.replaceChildren();
       if (ctx.manifestJson) ctx.manifestJson.textContent = '';
       ctx.syncProjectWorkspaceNestedSuppression?.();
     }
@@ -411,8 +442,10 @@
       ctx.wizardOverlay.classList.add('open');
       ctx.wizardOverlay.setAttribute('aria-hidden', 'false');
       ctx.installProjectMobileKeyboardGuards?.();
-      if (typeof global.enhanceAppSelects === 'function') {
-        global.enhanceAppSelects(ctx.wizardBody);
+      const enhanceAppSelects = (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects)
+        || null;
+      if (typeof enhanceAppSelects === 'function') {
+        enhanceAppSelects(ctx.wizardBody);
       }
       if (Number.isFinite(scrollTop)) {
         const scrollBody = ctx.wizardBody.querySelector('.project-package-wizard-body');
@@ -1154,31 +1187,61 @@
       if (wizard.includePrivateNotes && summary?.project?.note) {
         projectPreview.note = summary.project.note;
       }
+      const selectedEntityIds = {
+        run_ids: Array.from(wizard.selection.runIds),
+        transcript_run_ids: Array.from(wizard.selection.transcriptRunIds)
+          .filter(runId => wizard.selection.runIds.has(String(runId || ''))),
+        finding_ids: Array.from(wizard.selection.findingIds),
+        artifact_ids: Array.from(wizard.selection.artifactIds),
+        target_ids: Array.from(wizard.selection.targetIds),
+      };
+      const counts = {
+        runs: wizard.selection.runIds.size,
+        findings: wizard.selection.findingIds.size,
+        artifacts: wizard.selection.artifactIds.size,
+        targets: wizard.selection.targetIds.size,
+      };
+      const options = {
+        manifest_json: true,
+        raw_artifacts: !!wizard.includeArtifacts && wizard.redactionMode !== 'redacted',
+        redacted_artifact_derivatives: !!wizard.includeArtifacts && wizard.redactionMode === 'redacted',
+        index_html: true,
+        transcripts_html: wizard.selection.transcriptRunIds.size > 0,
+      };
       return {
-        package_format_version: 1,
+        package_format_version: 2,
         preset: wizard.preset,
-        options: {
-          manifest_json: true,
-          raw_artifacts: !!wizard.includeArtifacts && wizard.redactionMode !== 'redacted',
-          redacted_artifact_derivatives: !!wizard.includeArtifacts && wizard.redactionMode === 'redacted',
-          index_html: true,
-          transcripts_html: wizard.selection.transcriptRunIds.size > 0,
-        },
+        options,
         redaction_mode: wizard.redactionMode || 'raw',
         include_private_notes: !!wizard.includePrivateNotes,
-        counts: {
-          runs: wizard.selection.runIds.size,
-          findings: wizard.selection.findingIds.size,
-          artifacts: wizard.selection.artifactIds.size,
-          targets: wizard.selection.targetIds.size,
-        },
-        selected_entity_ids: {
-          run_ids: Array.from(wizard.selection.runIds),
-          transcript_run_ids: Array.from(wizard.selection.transcriptRunIds)
-            .filter(runId => wizard.selection.runIds.has(String(runId || ''))),
-          finding_ids: Array.from(wizard.selection.findingIds),
-          artifact_ids: Array.from(wizard.selection.artifactIds),
-          target_ids: Array.from(wizard.selection.targetIds),
+        counts,
+        selected_entity_ids: selectedEntityIds,
+        provenance: {
+          schema_version: 1,
+          kind: 'evidence_package',
+          build: {
+            redaction_mode: wizard.redactionMode || 'raw',
+            include_private_notes: !!wizard.includePrivateNotes,
+            include_artifacts: !!wizard.includeArtifacts,
+            preset: wizard.preset,
+            options,
+            selected_entity_ids: selectedEntityIds,
+            selected_entity_counts: Object.fromEntries(
+              Object.entries(selectedEntityIds).map(([key, value]) => [key, value.length]),
+            ),
+            included_entity_counts: counts,
+          },
+          sources: {
+            project: projectPreview,
+            project_links: {
+              origin_sources: [],
+              note: 'Project-link origin details are added when provenance fields are requested.',
+            },
+          },
+          privacy: {
+            redaction_mode: wizard.redactionMode || 'raw',
+            private_notes_included: !!wizard.includePrivateNotes,
+          },
         },
         estimated_archive: estimate,
         skipped_preview: skipped,
@@ -1215,7 +1278,8 @@
           || (wizard.redactionMode === 'redacted' && !!redactedArtifactWarning(artifact))
         )).length
         : 0;
-      const maxLines = Math.max(1, Number(global.APP_CONFIG?.max_output_lines || 5000));
+      const config = appConfig() || {};
+      const maxLines = Math.max(1, Number(config.max_output_lines || 5000));
       const transcriptHtmlBytes = selectedTranscriptRuns.reduce((total, run) => {
         const lineCount = Math.max(0, Number(run.output_line_count || 0));
         return total + estimateTranscriptHtmlBytes(lineCount, maxLines);
@@ -1238,10 +1302,10 @@
         + transcriptHtmlBytes
         + metadataBytes;
       const estimatedUncompressedBytes = requiredArchiveBytes + transcriptTextCompanionBytes;
-      const maxArchiveBytes = Math.max(0, Number(global.APP_CONFIG?.evidence_package_max_mb || 0)) * 1024 * 1024;
+      const maxArchiveBytes = Math.max(0, Number(config.evidence_package_max_mb || 0)) * 1024 * 1024;
       const maxUncompressedArchiveBytes = Math.max(
         0,
-        Number(global.APP_CONFIG?.evidence_package_max_uncompressed_mb || 0),
+        Number(config.evidence_package_max_uncompressed_mb || 0),
       ) * 1024 * 1024;
       const estimatedCompressedArchiveBytes = rawArtifactBytes
         + estimateTextZipBytes(redactedArtifactBytes)
@@ -1342,6 +1406,12 @@
         });
         skippedWrap.appendChild(list);
         wrap.appendChild(skippedWrap);
+      }
+      if (typeof ctx.projectProvenanceSummaryElement === 'function') {
+        wrap.appendChild(ctx.projectProvenanceSummaryElement(preview, {
+          fallbackKind: 'evidence_package',
+          title: 'Provenance summary',
+        }));
       }
       const pre = document.createElement('pre');
       pre.className = 'project-package-manifest-json project-package-preview-json nice-scroll';
@@ -1448,6 +1518,7 @@
       mergePackageIntoSummary(projectId, created.package);
       ctx.setWorkspaceTab?.('packages');
       ctx.setProjectWorkspaceMessage?.('Package created.');
+      ctx.renderProjectExplorer?.();
     }
 
     function waitForPackageJobPoll() {
@@ -1631,7 +1702,7 @@
           title: pkg.name,
           meta: metaText(pkg),
           detail,
-          chips: ctx.entityMetadataChips(pkg),
+          chips: packageChips(pkg),
           accessory: accessory(projectId, pkg),
         }));
       });
@@ -1857,7 +1928,11 @@
     };
   }
 
-  global.DarklabProjectPackages = {
+  const DarklabProjectPackages = {
     createProjectPackagesController,
   };
+  exportedDarklabProjectPackages = DarklabProjectPackages;
 })(globalThis);
+
+export {
+  exportedDarklabProjectPackages as DarklabProjectPackages,};

@@ -2,6 +2,12 @@
 // Single source of truth for all export formatting (save html, save pdf,
 // permalink save html). All callers go through these helpers so the rendered
 // output is consistent across every save surface.
+import { DarklabOutputCore as importedOutputCore } from './core/output_core.js';
+import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_output_model.js';
+import { _getThemeRegistry as importedGetThemeRegistry } from './features/theme/theme.js';
+
+let ExportHtmlUtils = null;
+
 (function () {
   // HTML export deliberately inlines the runtime theme variables so downloaded
   // files preserve the active palette without depending on the live app shell.
@@ -33,7 +39,8 @@
     '--terminal-line-height',
   ];
   function runOutputModel() {
-    return window.DarklabRunOutputModel || null;
+    return (typeof importedRunOutputModel !== 'undefined' && importedRunOutputModel)
+      || null;
   }
 
   function fallbackLineEvent(line) {
@@ -256,7 +263,8 @@
   }
 
   function buildExportCommandOutcomeSummary(command, rawLines) {
-    const core = window.DarklabOutputCore || null;
+    const core = (typeof importedOutputCore !== 'undefined' && importedOutputCore)
+      || null;
     if (!core || typeof core.buildCommandOutcomeSummary !== 'function') return null;
     const normalizer = typeof core.normalizeCommandOutcomeSummary === 'function'
       ? core.normalizeCommandOutcomeSummary
@@ -325,11 +333,12 @@
   }
 
   function getThemeExportVars() {
-    const registryCurrent = window.ThemeRegistry
-      && window.ThemeRegistry.current
-      && window.ThemeRegistry.current.vars
-      && typeof window.ThemeRegistry.current.vars === 'object'
-      ? window.ThemeRegistry.current.vars
+    const themeRegistry = typeof importedGetThemeRegistry === 'function' ? importedGetThemeRegistry() : null;
+    const registryCurrent = themeRegistry
+      && themeRegistry.current
+      && themeRegistry.current.vars
+      && typeof themeRegistry.current.vars === 'object'
+      ? themeRegistry.current.vars
       : null;
     if (registryCurrent && Object.keys(registryCurrent).length) return registryCurrent;
     const current = window.ThemeCssVars && window.ThemeCssVars.current;
@@ -348,7 +357,8 @@
   }
 
   function getThemeExportColorScheme() {
-    const registryCurrent = window.ThemeRegistry && window.ThemeRegistry.current;
+    const themeRegistry = typeof importedGetThemeRegistry === 'function' ? importedGetThemeRegistry() : null;
+    const registryCurrent = themeRegistry && themeRegistry.current;
     if (registryCurrent && typeof registryCurrent.color_scheme === 'string' && registryCurrent.color_scheme.trim()) {
       return registryCurrent.color_scheme.trim();
     }
@@ -582,7 +592,7 @@ ${includeHighlightToggle ? buildTerminalExportScript() : ''}
     return chunks.join('\n');
   }
 
-  window.ExportHtmlUtils = {
+  ExportHtmlUtils = {
     exportTimestamp,
     buildExportMetaLine,
     normalizeExportTranscriptLine,
@@ -615,4 +625,76 @@ ${includeHighlightToggle ? buildTerminalExportScript() : ''}
     fetchVendorFontFacesCss,
     fetchTerminalExportCss,
   };
+  if (typeof window !== 'undefined') {
+    window.ExportHtmlUtils = ExportHtmlUtils;
+  }
 })();
+
+const {
+  appendCommandOutcomeSummaryLines,
+  buildExportCommandOutcomeSummary,
+  buildExportDocumentModel,
+  buildExportHeaderModel,
+  buildExportLineSummary,
+  buildExportLinesHtml,
+  buildExportMetaLine,
+  buildExportRunMetaHtml,
+  buildExportRunMetaItems,
+  buildTerminalExportHeaderHtml,
+  buildTerminalExportHtml,
+  buildTerminalExportStyles,
+  commandOutcomeSummaryToLines,
+  escapeExportAttr,
+  escapeExportHtml,
+  exportTimestamp,
+  fetchTerminalExportCss,
+  fetchVendorFontFacesCss,
+  getThemeExportColorScheme,
+  getThemeExportVars,
+  isCommandOutcomeSummaryLine,
+  isPlainEvent,
+  isPromptEchoEvent,
+  lineEventFromWire,
+  lineLegacyClass,
+  normalizeExportRunMeta,
+  normalizeExportTranscriptLine,
+  normalizeExportTranscriptLines,
+  renderExportEntityContent,
+  renderExportLineContent,
+  renderExportPromptEcho,
+} = ExportHtmlUtils;
+
+export {
+  ExportHtmlUtils,
+  appendCommandOutcomeSummaryLines,
+  buildExportCommandOutcomeSummary,
+  buildExportDocumentModel,
+  buildExportHeaderModel,
+  buildExportLineSummary,
+  buildExportLinesHtml,
+  buildExportMetaLine,
+  buildExportRunMetaHtml,
+  buildExportRunMetaItems,
+  buildTerminalExportHeaderHtml,
+  buildTerminalExportHtml,
+  buildTerminalExportStyles,
+  commandOutcomeSummaryToLines,
+  escapeExportAttr,
+  escapeExportHtml,
+  exportTimestamp,
+  fetchTerminalExportCss,
+  fetchVendorFontFacesCss,
+  getThemeExportColorScheme,
+  getThemeExportVars,
+  isCommandOutcomeSummaryLine,
+  isPlainEvent,
+  isPromptEchoEvent,
+  lineEventFromWire,
+  lineLegacyClass,
+  normalizeExportRunMeta,
+  normalizeExportTranscriptLine,
+  normalizeExportTranscriptLines,
+  renderExportEntityContent,
+  renderExportLineContent,
+  renderExportPromptEcho,
+};

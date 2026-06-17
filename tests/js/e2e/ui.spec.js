@@ -10,6 +10,7 @@ import {
   waitForHistoryRuns,
   browserSessionId,
   seedExternalHistoryRuns,
+  seedProjectMonitoringFixture,
 } from './helpers.js'
 
 const PROJECT_LINK_RUN_COMMAND = 'dig projects.playwright.example +short'
@@ -158,6 +159,156 @@ print(json.dumps({"runId": run_id, "artifactId": artifact_id, "findingId": findi
     throw new Error(`Failed to seed project evidence fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
   }
   return JSON.parse(result.stdout)
+}
+
+function seedLargeProjectReportFixture(testInfo, { sessionId, projectId, count = 60 }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id, raw_count = sys.argv[1:5]
+count = int(raw_count)
+workspace_name = "sess_" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+workspace_root = Path(data_dir) / "workspaces" / workspace_name
+workspace_root.mkdir(parents=True, exist_ok=True)
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+run_ids = []
+artifact_ids = []
+finding_ids = []
+target_ids = []
+try:
+    for index in range(count):
+        suffix = f"{index:03d}"
+        run_id = f"run_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        artifact_id = f"rfa_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        finding_id = f"fnd_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        target_id = f"ent_report_large_{uuid.uuid4().hex[:10]}_{suffix}"
+        command = f"large-report-run-{suffix} --target report-target-{suffix}.example.test"
+        artifact_rel = f"reports/large-evidence-{suffix}.txt"
+        artifact_content = f"large evidence artifact {suffix}\nselector coverage artifact {suffix}\n"
+        artifact_path = workspace_root / artifact_rel
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(artifact_content, encoding="utf-8")
+        byte_size = len(artifact_content.encode("utf-8"))
+        conn.execute(
+            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, ?, 'external', ?, datetime('now', ?), datetime('now', ?), 0, ?, 0, 2, 1, 0)",
+            (
+                run_id,
+                session_id,
+                command,
+                f"+{index} seconds",
+                f"+{index} seconds",
+                json.dumps([command, f"large selector evidence {suffix}"]),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'active_project', datetime('now', ?))",
+            (f"pln_report_large_run_{uuid.uuid4().hex[:10]}_{suffix}", project_id, run_id, f"+{index} seconds"),
+        )
+        conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
+            "VALUES (?, ?, ?, ?, ?, 'output', ?, 'workspace_flag', 'text/plain', 'text', datetime('now', ?))",
+            (
+                artifact_id,
+                session_id,
+                run_id,
+                artifact_rel,
+                f"large-evidence-{suffix}.txt",
+                byte_size,
+                f"+{index} seconds",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
+            "VALUES (?, ?, ?, 'finding', ?, ?, 1, 'info', ?, 'new', datetime('now', ?))",
+            (
+                finding_id,
+                session_id,
+                run_id,
+                f"Large selector finding {suffix}",
+                f"large selector finding evidence {suffix}",
+                "fp-" + finding_id,
+                f"+{index} seconds",
+            ),
+        )
+        canonical_value = f"report-target-{suffix}.example.test"
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, 'domain', ?, ?, datetime('now', ?), datetime('now', ?), datetime('now', ?))",
+            (
+                target_id,
+                session_id,
+                canonical_value,
+                "sig-" + target_id,
+                f"+{index} seconds",
+                f"+{index} seconds",
+                f"+{index} seconds",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now', ?))",
+            (f"pln_report_large_ent_{uuid.uuid4().hex[:10]}_{suffix}", project_id, target_id, f"+{index} seconds"),
+        )
+        run_ids.append(run_id)
+        artifact_ids.append(artifact_id)
+        finding_ids.append(finding_id)
+        target_ids.append(target_id)
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "count": count,
+    "runIds": run_ids,
+    "artifactIds": artifact_ids,
+    "findingIds": finding_ids,
+    "targetIds": target_ids,
+    "includedArtifactText": "large evidence artifact 059",
+    "excludedArtifactText": "large evidence artifact 005",
+    "artifactFilterQuery": "large-evidence",
+}))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId, projectId, String(count)], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed large report fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
+function readReportArchiveText(zipPath) {
+  const script = String.raw`
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    chunks = []
+    for name in archive.namelist():
+        if name.endswith((".html", ".md", ".json")):
+            chunks.append(archive.read(name).decode("utf-8", errors="replace"))
+print("\n".join(chunks))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, zipPath], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to inspect report archive: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return result.stdout
 }
 
 function seedAutoPromoteAtlasEntity(testInfo, { sessionId }) {
@@ -616,14 +767,124 @@ test.describe('project workspace modal', () => {
       commands: [PROJECT_LINK_RUN_COMMAND],
     })
     await switchProjectTab(page, 'runs')
+    const activeProject = await readActiveProject(page)
+    const projectId = activeProject.project?.id || ''
+    expect(projectId).toBeTruthy()
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
-    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
+    const [linkResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return response.request().method() === 'POST'
+          && url.pathname === `/projects/${projectId}/links`
+      }),
+      page.locator('#confirm-host [data-confirm-action-id="add"]').click(),
+    ])
+    expect(linkResponse.ok()).toBe(true)
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     const runRow = page.locator('.project-explorer-item').filter({ hasText: seededRun.command }).first()
+    await expect.poll(async () => page.evaluate(async ({ id, command }) => {
+      const params = new URLSearchParams({ page_size: '25' })
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/runs?${params.toString()}`, { cache: 'no-store' })
+      if (!resp.ok) return false
+      const data = await resp.json()
+      const runs = Array.isArray(data.runs) ? data.runs : []
+      return runs.some(run => String(run && run.command || '') === command)
+    }, { id: projectId, command: seededRun.command })).toBe(true)
     await expect(runRow).toBeVisible()
     return { runRow, command: seededRun.command }
   }
+
+  test('records project actions in the diagnostics audit viewer', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Audit ${Date.now()}`)
+    await linkExternalRunToOpenProject(page, testInfo)
+
+    await page.goto(`/diag/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`)
+    await expect(page.locator('body.diag-page')).toBeVisible()
+    const auditRow = page.locator('.diag-audit-table tbody tr', {
+      hasText: projectId,
+    }).first()
+    await expect(auditRow).toContainText('project.link', { timeout: 15_000 })
+    await expect(auditRow).toContainText(`project:${projectId}`)
+    await auditRow.locator('.diag-audit-details summary').click()
+    await expect(auditRow.locator('.diag-audit-details pre')).toContainText('"event_type": "project.link"')
+    await expect(auditRow.locator('.diag-audit-details pre')).toContainText('"source": "manual"')
+    await expect(page.getByRole('link', { name: 'CSV' })).toHaveAttribute(
+      'href',
+      new RegExp(`/diag/audit/export\\?event_type=project\\.link&project_id=${projectId}`),
+    )
+    await expect(page.getByRole('link', { name: 'JSON' })).toHaveAttribute(
+      'href',
+      new RegExp(`/diag/audit/export\\?format=json&event_type=project\\.link&project_id=${projectId}`),
+    )
+  })
+
+  test('opens Project Activity and filters project-link rows', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Activity ${Date.now()}`)
+    await linkExternalRunToOpenProject(page, testInfo)
+
+    await switchProjectTab(page, 'activity')
+    const activityRoot = page.locator('[data-project-activity-root]')
+    await expect(activityRoot).toBeVisible()
+    await expect(activityRoot.locator('.project-activity-row').first()).toContainText('Project Link', { timeout: 15_000 })
+
+    await activityRoot.locator('[data-project-activity-filter="event_type"]').fill('project.link')
+    const filtered = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname === `/projects/${projectId}/activity`
+        && url.searchParams.get('event_type') === 'project.link'
+    })
+    await activityRoot.locator('[data-project-activity-action="apply"]').click()
+    expect((await filtered).ok()).toBe(true)
+
+    const row = activityRoot.locator('.project-activity-row').first()
+    await expect(row).toContainText('Project Link')
+    await expect(row).toContainText(`project:${projectId}`)
+    await row.locator('.project-activity-details-toggle').click()
+    await expect(row.locator('.project-activity-detail-list')).toContainText('source')
+    await expect(row.locator('.project-activity-detail-list')).toContainText('manual')
+  })
+
+  test('opens Project Monitoring through the real Projects tab', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Monitoring ${Date.now()}`)
+    const fixture = seedProjectMonitoringFixture(testInfo, {
+      sessionId: await browserSessionId(page),
+      projectId,
+    })
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+
+    const monitoringResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${projectId}/monitoring`
+    })
+    await switchProjectTab(page, 'monitoring')
+    expect((await monitoringResponse).ok()).toBe(true)
+
+    const root = page.locator(`[data-project-monitoring-root="${projectId}"]`)
+    await expect(root).toBeVisible({ timeout: 15_000 })
+    await expect(root.locator('.project-monitoring-count.is-changed')).toContainText('2')
+    await expect(root).toContainText('Ports Browser Watch')
+    await expect(root).toContainText('Deleted Current Watch')
+    await expect(root).toContainText('New open port 443/tcp https')
+
+    const availableFire = root.locator(`[data-project-monitoring-fire-id="${fixture.changedFireId}"]`).first()
+    await expect(availableFire.locator('[data-project-monitoring-action="details"]').first()).toBeEnabled()
+    await expect(availableFire.locator('[data-project-monitoring-action="compare"]').first()).toBeEnabled()
+
+    const missingCurrentFire = root.locator(`[data-project-monitoring-fire-id="${fixture.deletedFireId}"]`).first()
+    await expect(missingCurrentFire).toContainText('Deleted Current Watch')
+    await expect(missingCurrentFire.locator('[data-project-monitoring-action="details"]').first()).toBeDisabled()
+    await expect(missingCurrentFire.locator('[data-project-monitoring-action="compare"]').first()).toBeDisabled()
+  })
 
   test('creates an active project, manages targets, and edits linked run metadata', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
@@ -938,10 +1199,15 @@ test.describe('project workspace modal', () => {
     await linkExternalRunToOpenProject(page, testInfo)
 
     await switchProjectTab(page, 'packages')
+    const packagePresetsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET' && url.pathname === '/projects/package-presets'
+    })
     await page.locator('[data-project-action="package-wizard-open"]').click()
     const wizard = page.locator('#project-package-wizard-overlay')
     await expect(wizard).toHaveClass(/\bopen\b/)
     await expect(wizard.locator('.project-package-step.is-active')).toContainText('Preset')
+    expect((await packagePresetsResponse).ok()).toBe(true)
     await page.locator('[data-project-package-field="labels"]').fill('handoff, e2e')
     await page.locator('[data-project-package-field="notes"]').fill('Package notes from Playwright')
 
@@ -965,6 +1231,7 @@ test.describe('project workspace modal', () => {
     const packageRow = page.locator('.project-explorer-item').filter({ hasText: 'Browser evidence' }).first()
     await expect(packageRow).toBeVisible()
     await expect(packageRow).toContainText('handoff')
+    await expect(packageRow).toContainText('source: manual')
     await expect(packageRow).toContainText('note')
 
     await packageRow.locator('[data-project-action="package-edit"]').click()
@@ -979,7 +1246,9 @@ test.describe('project workspace modal', () => {
 
     await packageRow.locator('[data-project-action="package-manifest"]').click()
     await expect(page.locator('#project-package-manifest-overlay')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#project-package-manifest-json')).toContainText('"package_format_version": 1')
+    await expect(page.locator('#project-package-manifest-summary')).toContainText('Provenance summary')
+    await expect(page.locator('#project-package-manifest-summary')).toContainText('manual')
+    await expect(page.locator('#project-package-manifest-json')).toContainText('"package_format_version": 2')
     await expect(page.locator('#project-package-manifest-json')).toContainText('"runs": 1')
     await page.locator('.project-package-manifest-close').click()
     await expect(page.locator('#project-package-manifest-overlay')).not.toHaveClass(/\bopen\b/)
@@ -1003,6 +1272,171 @@ test.describe('project workspace modal', () => {
       return data.packages || []
     }, projectId)
     expect(packages).toEqual([])
+  })
+
+  test('builds a project report preview and export archive', async ({ page }, testInfo) => {
+    test.setTimeout(75_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Report ${Date.now()}`)
+    const sessionId = await browserSessionId(page)
+    seedProjectEvidenceFixture(testInfo, { sessionId, projectId })
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+
+    await switchProjectTab(page, 'report')
+    const reportRoot = page.locator('.project-report-root', {
+      has: page.locator('[data-project-report-action="save"]'),
+    }).first()
+    await expect(reportRoot.locator('[data-project-report-metadata="engagement_name"]')).toBeVisible()
+    await reportRoot.locator('[data-project-report-metadata="engagement_name"]').fill('Browser engagement report')
+    await reportRoot.locator('[data-project-report-metadata="date_range"]').fill('2026-06-01 to 2026-06-05')
+    await reportRoot.locator('[data-project-report-metadata="executive_summary"]').fill('Executive summary from Playwright.')
+    await reportRoot.locator('[data-project-report-metadata="methodology"]').fill('Reviewed linked runs and artifacts.')
+
+    const saveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname === `/projects/${projectId}/report`
+    })
+    await reportRoot.locator('[data-project-report-action="save"]').click()
+    expect((await saveResponse).ok()).toBe(true)
+    await expect(reportRoot.locator('.project-report-message')).toContainText('Report draft saved.')
+
+    await reportRoot.locator('[data-project-report-action="preview"]').click()
+    const frame = reportRoot.frameLocator('.project-report-preview-frame')
+    await expect(frame.locator('body')).toContainText('Browser engagement report', { timeout: 15_000 })
+    await expect(frame.locator('body')).toContainText('Generated by darklab_shell')
+    await expect(frame.locator('body')).toContainText('Executive summary from Playwright.')
+    await expect(frame.locator('body')).toContainText('artifact evidence from Playwright')
+
+    await page.evaluate(() => {
+      window.__reportPrintCalled = false
+      window.__reportPrintHtml = ''
+      window.open = () => ({
+        document: {
+          open() {},
+          write(html) { window.__reportPrintHtml = String(html || '') },
+          close() {},
+        },
+        focus() {},
+        print() { window.__reportPrintCalled = true },
+      })
+    })
+    await reportRoot.locator('[data-project-report-action="print"]').click()
+    await expect.poll(() => page.evaluate(() => window.__reportPrintCalled), { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => window.__reportPrintHtml)).toContain('Browser engagement report')
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      reportRoot.locator('[data-project-report-action="export"]').click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(/playwright-report-\d+-engagement-report\.zip/)
+    await expect(reportRoot.locator('.project-report-message')).toContainText('Report download started.')
+  })
+
+  test('keeps large report selector paging, exclusions, draft reload, and exports stable', async ({ page }, testInfo) => {
+    test.setTimeout(120_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Large Report ${Date.now()}`)
+    const sessionId = await browserSessionId(page)
+    const fixture = seedLargeProjectReportFixture(testInfo, { sessionId, projectId, count: 60 })
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+
+    await switchProjectTab(page, 'report')
+    const reportRoot = page.locator('.project-report-root', {
+      has: page.locator('[data-project-report-action="save"]'),
+    }).first()
+    const editor = reportRoot.locator('.project-report-editor')
+    const artifactsGroup = reportRoot.locator('.project-report-selection-group', {
+      has: page.locator('h4', { hasText: 'Artifacts' }),
+    }).first()
+    const artifactFilter = artifactsGroup.locator('[data-project-report-selection-filter="q"]')
+    const allArtifacts = artifactsGroup.locator('[data-project-report-action="selection-all"][data-selection-key="artifact_ids"]')
+    const noArtifacts = artifactsGroup.locator('[data-project-report-action="selection-none"][data-selection-key="artifact_ids"]')
+    const nextArtifacts = artifactsGroup.locator('[data-project-report-action="selection-next"][data-selection-key="artifact_ids"]')
+    const prevArtifacts = artifactsGroup.locator('[data-project-report-action="selection-prev"][data-selection-key="artifact_ids"]')
+
+    async function expectReportEditorStayedPut(before) {
+      const scrollAnchorTolerance = 360
+      await expect.poll(async () => editor.evaluate((node) => node.scrollTop), { timeout: 5_000 })
+        .toBeGreaterThanOrEqual(Math.max(0, before - scrollAnchorTolerance))
+    }
+
+    async function clickAndKeepScroll(locator) {
+      await expect(locator).toBeVisible({ timeout: 15_000 })
+      await locator.click({ trial: true })
+      const before = await editor.evaluate((node) => node.scrollTop)
+      await locator.click()
+      await expectReportEditorStayedPut(before)
+    }
+
+    await expect(artifactFilter).toBeVisible({ timeout: 20_000 })
+    await expect(artifactsGroup.locator('.project-report-selection-row')).toHaveCount(50, { timeout: 15_000 })
+    await expect(nextArtifacts).toBeEnabled()
+    const filteredArtifactsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.ok()
+        && url.pathname === `/projects/${projectId}/artifacts`
+        && url.searchParams.get('offset') === '0'
+        && url.searchParams.get('q') === fixture.artifactFilterQuery
+    })
+    await artifactFilter.fill(fixture.artifactFilterQuery)
+    await filteredArtifactsResponse
+    await expect(artifactFilter).toHaveValue(fixture.artifactFilterQuery)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
+    await expect(artifactsGroup).toContainText('large-evidence-059.txt')
+
+    await clickAndKeepScroll(noArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('0 selected')
+    await clickAndKeepScroll(allArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('60 selected')
+
+    await clickAndKeepScroll(nextArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('51-60 of 60', { timeout: 15_000 })
+    const excludedRow = artifactsGroup.locator('.project-report-selection-row', { hasText: 'large-evidence-005.txt' })
+    await expect(excludedRow).toBeVisible()
+    const beforeToggle = await editor.evaluate((node) => node.scrollTop)
+    await excludedRow.locator('[data-project-report-selection="artifact_ids"]').uncheck()
+    await expectReportEditorStayedPut(beforeToggle)
+
+    await clickAndKeepScroll(prevArtifacts)
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('1-50 of 60', { timeout: 15_000 })
+
+    await reportRoot.locator('[data-project-report-metadata="engagement_name"]').fill('Large browser selector report')
+    const saveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname === `/projects/${projectId}/report`
+    })
+    await reportRoot.locator('[data-project-report-action="save"]').click()
+    const savedReportResponse = await saveResponse
+    expect(savedReportResponse.ok()).toBe(true)
+    const savedReportBody = JSON.parse(savedReportResponse.request().postData() || '{}')
+    expect(savedReportBody.draft.selection_filters.artifact_ids.q).toBe(fixture.artifactFilterQuery)
+    expect(savedReportBody.draft.selection_exclude_ids.artifact_ids).toHaveLength(1)
+    await expect(reportRoot.locator('.project-report-message')).toContainText('Report draft saved.')
+
+    await reportRoot.locator('[data-project-report-action="reload"]').click()
+    await expect(artifactsGroup.locator('.project-report-selection-summary')).toContainText('59 selected', {
+      timeout: 15_000,
+    })
+    await clickAndKeepScroll(nextArtifacts)
+    await expect(excludedRow.locator('[data-project-report-selection="artifact_ids"]')).not.toBeChecked()
+
+    await reportRoot.locator('[data-project-report-action="preview"]').click()
+    const frame = reportRoot.frameLocator('.project-report-preview-frame')
+    await expect(frame.locator('body')).toContainText('Large browser selector report', { timeout: 20_000 })
+    await expect(frame.locator('body')).toContainText(fixture.includedArtifactText)
+    await expect(frame.locator('body')).not.toContainText(fixture.excludedArtifactText)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      reportRoot.locator('[data-project-report-action="export"]').click(),
+    ])
+    const archiveText = readReportArchiveText(await download.path())
+    expect(archiveText).toContain(fixture.includedArtifactText)
+    expect(archiveText).not.toContain(fixture.excludedArtifactText)
   })
 
   test('edits finding and artifact metadata and previews project artifacts', async ({ page }, testInfo) => {

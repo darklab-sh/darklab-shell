@@ -1,10 +1,79 @@
 // Options modal encrypted secrets panel.
+import { showToast as importedShowToast } from '../../core/utils.js';
+import { apiFetch as importedApiFetch } from '../../session.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import {
+  getCommandRegistryData as importedGetCommandRegistryData,
+  setCommandRegistryData as importedSetCommandRegistryData,
+} from '../command-registry/command_registry_bridge.js';
+import {
+  hideModalOverlay as importedHideModalOverlay,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  showModalOverlay as importedShowModalOverlay,
+} from '../../ui/ui_helpers.js';
+import { setSecretsHandlers as importedSetSecretsHandlers } from './secrets_bridge.js';
 
 const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+const SECRETS_PANEL_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 let _optionsSecretsLoaded = false;
 let _optionsSecretsLoading = false;
 let _optionsSecretsCanManage = true;
 let _providerStatusFocusReturn = null;
+
+function _optionsSecretsGlobalFunction(name) {
+  return typeof SECRETS_PANEL_GLOBAL?.[name] === 'function' ? SECRETS_PANEL_GLOBAL[name] : null;
+}
+
+function _optionsSecretsApiFetch(...args) {
+  const fetcher = (typeof importedApiFetch === 'function' && importedApiFetch)
+    || _optionsSecretsGlobalFunction('apiFetch');
+  return typeof fetcher === 'function' ? fetcher(...args) : Promise.reject(new Error('apiFetch unavailable'));
+}
+
+function _optionsSecretsAppendLine(...args) {
+  const append = _optionsSecretsGlobalFunction('appendLine');
+  if (append) append(...args);
+}
+
+function _optionsSecretsSetStatus(...args) {
+  const set = _optionsSecretsGlobalFunction('setStatus');
+  if (set) set(...args);
+}
+
+function _optionsSecretsShowToast(message, tone) {
+  const toast = typeof importedShowToast === 'function'
+    ? importedShowToast
+    : _optionsSecretsGlobalFunction('showToast');
+  if (toast) toast(message, tone);
+}
+
+function _optionsSecretsShowConfirm(options) {
+  const confirm = typeof importedShowConfirm === 'function'
+    ? importedShowConfirm
+    : _optionsSecretsGlobalFunction('showConfirm');
+  return confirm ? confirm(options) : Promise.resolve(null);
+}
+
+function _optionsSecretsHideModalOverlay(overlay) {
+  const hide = typeof importedHideModalOverlay === 'function'
+    ? importedHideModalOverlay
+    : _optionsSecretsGlobalFunction('hideModalOverlay');
+  if (hide) hide(overlay);
+}
+
+function _optionsSecretsShowModalOverlay(overlay, display) {
+  const show = typeof importedShowModalOverlay === 'function'
+    ? importedShowModalOverlay
+    : _optionsSecretsGlobalFunction('showModalOverlay');
+  if (show) show(overlay, display);
+}
+
+function _optionsSecretsRefocusComposerAfterAction(options) {
+  const refocus = typeof importedRefocusComposerAfterAction === 'function'
+    ? importedRefocusComposerAfterAction
+    : _optionsSecretsGlobalFunction('refocusComposerAfterAction');
+  if (refocus) refocus(options);
+}
 
 function _optionsSecretsListEl() {
   return document.getElementById('options-secrets-list');
@@ -45,7 +114,7 @@ function _optionsSecretsShowMsg(message, isError = false) {
 function _optionsSecretsToast(message, tone = 'success') {
   const text = String(message || '').trim();
   if (!text) return;
-  if (typeof showToast === 'function') showToast(text, tone);
+  if (typeof importedShowToast === 'function' || _optionsSecretsGlobalFunction('showToast')) _optionsSecretsShowToast(text, tone);
   else _optionsSecretsShowMsg(text, tone === 'error');
 }
 
@@ -73,23 +142,48 @@ function _optionsSecretConsumerInputValue(secret) {
   return envs.join(', ');
 }
 
-async function _ensureOptionsSecretCatalog() {
-  if (typeof commandRegistryData !== 'undefined' && commandRegistryData) return commandRegistryData;
-  if (typeof apiFetch !== 'function') return null;
+function _optionsCommandRegistryData() {
+  if (typeof importedGetCommandRegistryData === 'function') {
+    const data = importedGetCommandRegistryData();
+    if (data) return data;
+  }
+  if (typeof window !== 'undefined' && window.commandRegistryData) return window.commandRegistryData;
+  if (typeof globalThis !== 'undefined' && globalThis.commandRegistryData) return globalThis.commandRegistryData;
+  return null;
+}
+
+function _setOptionsCommandRegistryData(data) {
+  if (typeof importedSetCommandRegistryData === 'function') importedSetCommandRegistryData(data);
+}
+
+function _optionsCatalogHasRequiredData(data, requirements = {}) {
+  if (!data) return false;
+  if (requirements.intelProviders) return Array.isArray(data.intel_providers);
+  return (
+    Array.isArray(data.secret_consumers)
+    || (Array.isArray(data.commands) && data.commands.length > 0)
+  );
+}
+
+async function _ensureOptionsSecretCatalog(requirements = {}) {
+  const current = _optionsCommandRegistryData();
+  if (_optionsCatalogHasRequiredData(current, requirements)) return current;
+  if (typeof importedApiFetch !== 'function' && !_optionsSecretsGlobalFunction('apiFetch')) return null;
   try {
-    const resp = await apiFetch('/commands/catalog');
+    const resp = await _optionsSecretsApiFetch('/commands/catalog');
     const data = await resp.json().catch(() => ({}));
     if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
-    if (typeof commandRegistryData !== 'undefined') commandRegistryData = data;
+    _setOptionsCommandRegistryData(data);
     return data;
   } catch (err) {
-    if (typeof logClientError === 'function') logClientError('failed to load secret consumer catalog', err);
+    const logError = _optionsSecretsGlobalFunction('logClientError');
+    if (logError) logError('failed to load secret consumer catalog', err);
     return null;
   }
 }
 
 function _optionsKnownSecretChoices() {
-  const data = typeof commandRegistryData !== 'undefined' ? commandRegistryData : null;
+  const data = _optionsCommandRegistryData();
   const commands = Array.isArray(data?.commands) ? data.commands : [];
   const secretConsumers = Array.isArray(data?.secret_consumers) ? data.secret_consumers : [];
   const byName = new Map();
@@ -295,7 +389,7 @@ function _optionsProviderRow(provider, secretNames, secrets = []) {
 }
 
 async function _loadOptionsSecretsForProviderStatus() {
-  const resp = await apiFetch('/session/secrets', { cache: 'no-store' });
+  const resp = await _optionsSecretsApiFetch('/session/secrets', { cache: 'no-store' });
   const data = await resp.json().catch(() => ({}));
   if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
   return Array.isArray(data.secrets) ? data.secrets : [];
@@ -311,13 +405,13 @@ function closeProviderStatusModal({ refocus = true } = {}) {
   if (!overlay) return;
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
-  if (typeof hideModalOverlay === 'function') hideModalOverlay(overlay);
+  _optionsSecretsHideModalOverlay(overlay);
   if (refocus) {
     const target = _providerStatusFocusReturn;
     if (target && typeof target.focus === 'function') {
       try { target.focus({ preventScroll: true }); } catch (_) { /* non-critical */ }
-    } else if (typeof refocusComposerAfterAction === 'function') {
-      refocusComposerAfterAction({ preventScroll: true });
+    } else {
+      _optionsSecretsRefocusComposerAfterAction({ preventScroll: true });
     }
   }
   _providerStatusFocusReturn = null;
@@ -330,7 +424,7 @@ async function openProviderStatusModal() {
   _optionsSecretsShowMsg('');
   try {
     const [catalog, secrets] = await Promise.all([
-      _ensureOptionsSecretCatalog(),
+      _ensureOptionsSecretCatalog({ intelProviders: true }),
       _loadOptionsSecretsForProviderStatus(),
     ]);
     const providers = Array.isArray(catalog?.intel_providers) ? catalog.intel_providers : [];
@@ -369,7 +463,7 @@ async function openProviderStatusModal() {
       : document.getElementById('options-provider-status-btn');
     overlay.classList.remove('u-hidden');
     overlay.setAttribute('aria-hidden', 'false');
-    if (typeof showModalOverlay === 'function') showModalOverlay(overlay, 'flex');
+    _optionsSecretsShowModalOverlay(overlay, 'flex');
     _providerStatusModalEl()?.querySelector('.provider-status-close')?.focus({ preventScroll: true });
     return true;
   } catch (err) {
@@ -479,7 +573,7 @@ async function refreshOptionsSecrets({ force = false } = {}) {
   _optionsSecretsSetBusy(true);
   _optionsSecretsShowMsg('');
   try {
-    const resp = await apiFetch('/session/secrets', { cache: 'no-store' });
+    const resp = await _optionsSecretsApiFetch('/session/secrets', { cache: 'no-store' });
     const data = await resp.json().catch(() => ({}));
     if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
     _optionsSecretsCanManage = data.can_manage !== false;
@@ -510,7 +604,6 @@ function _optionsSecretInput(labelText, input) {
 }
 
 async function openSecretEditor({ secret = null, name = '', source = 'options' } = {}) {
-  if (typeof showConfirm !== 'function') return null;
   await _ensureOptionsSecretCatalog();
   const existingName = _normalizeOptionsSecretName(secret?.name || name);
   const isExisting = Boolean(secret && secret.name);
@@ -658,7 +751,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
         return false;
       }
       try {
-        const resp = await apiFetch('/session/secrets', {
+        const resp = await _optionsSecretsApiFetch('/session/secrets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -684,7 +777,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
     },
   };
 
-  const choice = await showConfirm({
+  const choice = await _optionsSecretsShowConfirm({
     body: {
       text: isExisting ? `Replace ${existingName}?` : 'Store a new encrypted secret.',
       note: 'The value is sent to the server once, encrypted, and never shown here again.',
@@ -705,8 +798,8 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
 
 async function deleteOptionsSecret(name) {
   const normalizedName = _normalizeOptionsSecretName(name);
-  if (!normalizedName || typeof showConfirm !== 'function') return false;
-  const choice = await showConfirm({
+  if (!normalizedName) return false;
+  const choice = await _optionsSecretsShowConfirm({
     body: {
       text: `Delete ${normalizedName}?`,
       note: 'Commands that require this secret will stop before launch until it is set again.',
@@ -720,7 +813,7 @@ async function deleteOptionsSecret(name) {
   if (choice !== 'delete') return false;
   _optionsSecretsSetBusy(true);
   try {
-    const resp = await apiFetch(`/session/secrets/${encodeURIComponent(normalizedName)}`, {
+    const resp = await _optionsSecretsApiFetch(`/session/secrets/${encodeURIComponent(normalizedName)}`, {
       method: 'DELETE',
     });
     const data = await resp.json().catch(() => ({}));
@@ -738,30 +831,30 @@ async function handleSecretCommand(cmd, tabId = null) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
   if (sub !== 'set') {
-    appendLine("secret: browser prompt is only used for 'secret set NAME'", '', tabId);
-    appendLine("run 'secret list', 'secret unset NAME', or 'secret show-consumers' normally", '', tabId);
-    setStatus('fail');
+    _optionsSecretsAppendLine("secret: browser prompt is only used for 'secret set NAME'", '', tabId);
+    _optionsSecretsAppendLine("run 'secret list', 'secret unset NAME', or 'secret show-consumers' normally", '', tabId);
+    _optionsSecretsSetStatus('fail');
     return true;
   }
   if (parts.length !== 3) {
-    appendLine('usage: secret set NAME', '', tabId);
-    appendLine('Do not put the value on the command line. The browser prompt collects it safely.', 'builtin-note', tabId);
-    setStatus('fail');
+    _optionsSecretsAppendLine('usage: secret set NAME', '', tabId);
+    _optionsSecretsAppendLine('Do not put the value on the command line. The browser prompt collects it safely.', 'builtin-note', tabId);
+    _optionsSecretsSetStatus('fail');
     return true;
   }
   const name = _normalizeOptionsSecretName(parts[2]);
   if (!_optionsSecretNameIsValid(name)) {
-    appendLine('secret: secret names must start with a letter and use letters, numbers, or underscores', 'exit-fail', tabId);
-    setStatus('fail');
+    _optionsSecretsAppendLine('secret: secret names must start with a letter and use letters, numbers, or underscores', 'exit-fail', tabId);
+    _optionsSecretsSetStatus('fail');
     return true;
   }
   const choice = await openSecretEditor({ name, source: 'terminal' });
   if (choice === 'save') {
-    appendLine(`${name} stored.`, 'builtin-success', tabId);
-    setStatus('ok');
+    _optionsSecretsAppendLine(`${name} stored.`, 'builtin-success', tabId);
+    _optionsSecretsSetStatus('ok');
   } else {
-    appendLine('Secret set canceled.', '', tabId);
-    setStatus('idle');
+    _optionsSecretsAppendLine('Secret set canceled.', '', tabId);
+    _optionsSecretsSetStatus('idle');
   }
   return true;
 }
@@ -790,11 +883,26 @@ document.addEventListener('app:scope-changed', () => {
   }
 });
 
-globalThis.refreshOptionsSecrets = refreshOptionsSecrets;
-globalThis.invalidateOptionsSecrets = invalidateOptionsSecrets;
-globalThis.openSecretEditor = openSecretEditor;
-globalThis.openProviderStatusModal = openProviderStatusModal;
-globalThis.closeProviderStatusModal = closeProviderStatusModal;
-globalThis.isProviderStatusModalOpen = isProviderStatusModalOpen;
-globalThis.deleteOptionsSecret = deleteOptionsSecret;
-globalThis.handleSecretCommand = handleSecretCommand;
+if (typeof importedSetSecretsHandlers === 'function') {
+  importedSetSecretsHandlers({
+    refreshOptionsSecrets,
+    invalidateOptionsSecrets,
+    openSecretEditor,
+    openProviderStatusModal,
+    closeProviderStatusModal,
+    isProviderStatusModalOpen,
+    deleteOptionsSecret,
+    handleSecretCommand,
+  });
+}
+
+export {
+  refreshOptionsSecrets,
+  invalidateOptionsSecrets,
+  openSecretEditor,
+  openProviderStatusModal,
+  closeProviderStatusModal,
+  isProviderStatusModalOpen,
+  deleteOptionsSecret,
+  handleSecretCommand,
+};

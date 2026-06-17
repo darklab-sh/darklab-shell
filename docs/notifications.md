@@ -33,7 +33,7 @@ Channels subscribe to one or more trigger names:
 | `scheduled_run_failed` | A scheduled run could not be started or completed by the scheduler path. |
 | `test` | A manual test send from the UI, terminal built-in, API, or CLI. |
 
-The app currently emits `run_complete` and `test` from the shipped run and channel-management surfaces. The other trigger names are accepted by the channel contract and only produce deliveries when a matching app source enqueues them.
+The shipped app emits `run_complete`, `scheduled_run_failed`, watcher state triggers, and `test` from run, automation, watcher, and channel-management surfaces. Other trigger names are accepted by the channel contract and only produce deliveries when a matching app source enqueues them.
 
 ## Payload Shape
 
@@ -109,6 +109,8 @@ Notifications are queued in `notification_events`. A dedicated worker claims due
 - If Postgres restarts while the worker is polling, the worker logs `NOTIFICATION_WORKER_DATABASE_INTERRUPTED` and retries instead of treating the restart as a delivery failure.
 
 The delivery audit is visible from the Options **Notifications** tab by opening a channel's **Deliveries** row. It is also available through `/api/v1/notification-events`, terminal `notify events`, and `darklab notify events`.
+
+Channel create, update, mute/unmute, delete, and manual test actions also write `notification.config_change` rows to the operator audit log. Those config-change rows show what changed and where it came from, but they do not store webhook URLs, bot tokens, Pushover keys, SMTP passwords, or replacement secret values. Secret writes still use the separate secret audit path.
 
 ## Webhook Quickstart
 
@@ -210,7 +212,7 @@ The SMTP password is read from the environment variable named by `notifications.
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
 - [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts

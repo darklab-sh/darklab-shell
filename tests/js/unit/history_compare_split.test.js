@@ -60,6 +60,14 @@ function loadCompareHelpers({
       _renderHistoryCompareSplitPane,
       fetchAndRenderHistoryComparison,
     })`,
+    `window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;
+     window.getCompareViewModePreference = getCompareViewModePreference;
+     window.getCompareContextPreference = getCompareContextPreference;
+     window.getPreference = (name) => {
+       if (name === 'pref_compare_view_mode') return getCompareViewModePreference();
+       if (name === 'pref_compare_context') return getCompareContextPreference();
+       return '';
+     };`,
   )
   return { ...fns, apiFetch, showToast, clipboard, applyCompareViewModePreference, applyCompareContextPreference }
 }
@@ -276,7 +284,7 @@ describe('history compare split renderer', () => {
     await flushPromises()
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    expect(apiFetch).toHaveBeenCalledWith('/history/compare?left=run-a&right=run-b')
+    expect(apiFetch).toHaveBeenCalledWith('/history/compare?left=run-a&right=run-b', undefined)
     expect(showToast).not.toHaveBeenCalledWith('Failed to compare runs', 'error')
     expect(document.getElementById('history-compare-overlay')?.classList.contains('open')).toBe(true)
     expect(document.activeElement?.id).toBe('history-compare-modal')

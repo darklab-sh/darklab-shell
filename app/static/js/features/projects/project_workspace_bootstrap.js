@@ -1,6 +1,8 @@
 // Project workspace binding/bootstrap controller.
 // Loaded before shell_chrome.js; shell chrome supplies elements and controller factories.
 
+let exportedDarklabProjectWorkspaceBootstrap = null;
+
 (function projectWorkspaceBootstrapModule(global) {
   'use strict';
 
@@ -33,13 +35,16 @@
 
     function bindPackageWizard() {
       ctx.projectPackageWizardOverlay?.addEventListener('input', (event) => {
-        ctx.projectPackagesController?.()?.handleInput(event);
+        const controller = ctx.projectPackagesController?.();
+        controller?.handleInput(event);
       });
       ctx.projectPackageWizardOverlay?.addEventListener('change', (event) => {
-        ctx.projectPackagesController?.()?.handleChange(event);
+        const controller = ctx.projectPackagesController?.();
+        controller?.handleChange(event);
       });
       ctx.projectPackageWizardOverlay?.addEventListener('click', async (event) => {
-        await ctx.projectPackagesController?.()?.handleWizardOverlayClick(event);
+        const controller = ctx.projectPackagesController?.();
+        if (controller) await controller.handleWizardOverlayClick(event);
       });
     }
 
@@ -47,6 +52,14 @@
       const bindDismissibleFn = optionalFn(ctx.bindDismissible);
       if (!bindDismissibleFn) return;
 
+      if (ctx.projectWorkspaceOverlay) {
+        bindDismissibleFn(ctx.projectWorkspaceOverlay, {
+          level: 'modal',
+          isOpen: ctx.isProjectWorkspaceOpen,
+          onClose: () => ctx.closeProjectWorkspace?.(),
+          closeButtons: null,
+        });
+      }
       if (ctx.projectTargetEditorOverlay) {
         bindDismissibleFn(ctx.projectTargetEditorOverlay, {
           level: 'modal',
@@ -113,6 +126,10 @@
       ctx.projectDetailsController?.()?.bindFormEvents();
       ctx.projectEntityEditorController?.()?.bindFormEvents();
       ctx.projectWorkspaceEventsController?.()?.bindEvents();
+      const projectMobileRoot = ctx.projectWorkspaceModal?.querySelector('#project-mobile-root');
+      projectMobileRoot?.addEventListener('click', (event) => {
+        void ctx.projectWorkspaceEventsController?.()?.handleClick(event);
+      }, true);
 
       ctx.projectMobileTabs?.addEventListener('scroll', () => {
         ctx.syncProjectMobileTabEdges?.();
@@ -129,7 +146,11 @@
     };
   }
 
-  global.DarklabProjectWorkspaceBootstrap = {
+  const DarklabProjectWorkspaceBootstrap = {
     createProjectWorkspaceBootstrapController,
   };
+  exportedDarklabProjectWorkspaceBootstrap = DarklabProjectWorkspaceBootstrap;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceBootstrap as DarklabProjectWorkspaceBootstrap,};

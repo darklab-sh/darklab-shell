@@ -1,11 +1,129 @@
 // ── Session token options panel ──
 
+import { copyTextToClipboard as importedCopyTextToClipboard, showToast as importedShowToast } from '../../core/utils.js';
+import { flushRecentValues as importedFlushRecentValues, loadRecentValues as importedLoadRecentValues } from '../autocomplete/suggestions.js';
+import { reloadSessionHistory as importedReloadSessionHistory } from '../history/history_actions.js';
+import { hydrateCmdHistory as importedHydrateCmdHistory } from '../history/history_recall.js';
+import { maskSessionToken as importedMaskSessionToken } from '../../core/session_core.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from '../../runtime_bridge.js';
+import {
+  getSessionId as importedGetSessionId,
+  updateSessionId as importedUpdateSessionId,
+} from '../../session.js';
+import { applyMobileTextInputDefaults as importedApplyMobileTextInputDefaults } from '../../ui/ui_helpers.js';
+import { reloadWorkflowCatalog as importedReloadWorkflowCatalog } from '../workflows/workflows.js';
+import { setSessionTokenHandlers as importedSetSessionTokenHandlers } from './session_token_bridge.js';
+
+const SESSION_TOKEN_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _sessionTokenGlobalFunction(name) {
+  const fn = SESSION_TOKEN_GLOBAL?.[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _sessionTokenApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || _sessionTokenGlobalFunction('apiFetch');
+  return fetcher ? fetcher(...args) : Promise.reject(new Error('apiFetch unavailable'));
+}
+
+function _sessionTokenCurrentId() {
+  if (typeof importedGetSessionId === 'function') return importedGetSessionId();
+  return typeof SESSION_TOKEN_GLOBAL?.SESSION_ID !== 'undefined' ? SESSION_TOKEN_GLOBAL.SESSION_ID : '';
+}
+
+function _sessionTokenUpdateSessionId(value) {
+  if (typeof importedUpdateSessionId === 'function') importedUpdateSessionId(value);
+}
+
+function _sessionTokenMask(value) {
+  const mask = typeof importedMaskSessionToken === 'function'
+    ? importedMaskSessionToken
+    : null;
+  return mask ? mask(value) : String(value || '');
+}
+
+function _sessionTokenShowToast(message, tone = 'success') {
+  const toast = typeof importedShowToast === 'function'
+    ? importedShowToast
+    : _sessionTokenGlobalFunction('showToast');
+  if (!toast) return;
+  if (tone === 'success') toast(message);
+  else toast(message, tone);
+}
+
+function _sessionTokenShowConfirm(options) {
+  const confirm = _sessionTokenGlobalFunction('showConfirm');
+  return confirm ? confirm(options) : Promise.resolve(false);
+}
+
+function _sessionTokenCopyText(value) {
+  const copy = typeof importedCopyTextToClipboard === 'function'
+    ? importedCopyTextToClipboard
+    : _sessionTokenGlobalFunction('copyTextToClipboard');
+  return copy ? copy(value) : Promise.reject(new Error('Clipboard unavailable'));
+}
+
+function _sessionTokenApplyMobileTextInputDefaults(input) {
+  const apply = typeof importedApplyMobileTextInputDefaults === 'function'
+    ? importedApplyMobileTextInputDefaults
+    : _sessionTokenGlobalFunction('applyMobileTextInputDefaults');
+  if (apply) {
+    apply(input);
+    return true;
+  }
+  return false;
+}
+
+function _sessionTokenLoadRecentValues() {
+  const load = typeof importedLoadRecentValues === 'function'
+    ? importedLoadRecentValues
+    : _sessionTokenGlobalFunction('loadRecentValues');
+  return load ? load() : Promise.resolve(null);
+}
+
+function _sessionTokenFlushRecentValues() {
+  const flush = typeof importedFlushRecentValues === 'function'
+    ? importedFlushRecentValues
+    : _sessionTokenGlobalFunction('flushRecentValues');
+  return flush ? flush() : Promise.resolve(null);
+}
+
+function _sessionTokenHydrateCmdHistory(runs) {
+  const hydrate = typeof importedHydrateCmdHistory === 'function'
+    ? importedHydrateCmdHistory
+    : _sessionTokenGlobalFunction('hydrateCmdHistory');
+  if (hydrate) hydrate(runs);
+}
+
+function _sessionTokenReloadSessionHistory() {
+  const reload = typeof importedReloadSessionHistory === 'function'
+    ? importedReloadSessionHistory
+    : _sessionTokenGlobalFunction('reloadSessionHistory');
+  return reload ? reload() : Promise.resolve(null);
+}
+
+function _sessionTokenReloadWorkflowCatalog() {
+  const reload = typeof importedReloadWorkflowCatalog === 'function'
+    ? importedReloadWorkflowCatalog
+    : _sessionTokenGlobalFunction('reloadWorkflowCatalog');
+  return reload ? reload() : Promise.resolve(null);
+}
+
 function _updateOptionsSessionTokenStatus() {
   const el = document.getElementById('options-session-token-status');
   if (!el) return;
   const token = localStorage.getItem('session_token');
   const hasToken = Boolean(token);
-  el.textContent = hasToken ? maskSessionToken(token) : 'No session token — anonymous session';
+  el.textContent = hasToken ? _sessionTokenMask(token) : 'No session token — anonymous session';
   el.classList.toggle('is-active', hasToken);
   // Generate only when no token; Rotate, Clear, Copy only when one is active.
   const generateBtn = document.getElementById('options-session-token-generate-btn');
@@ -38,13 +156,16 @@ function _optionsTokenShowMsg(msg, isError = false) {
 function _optionsTokenToast(message, tone = 'success') {
   const text = String(message || '').trim();
   if (!text) return;
-  if (typeof showToast === 'function') showToast(text, tone);
+  const toast = typeof importedShowToast === 'function'
+    ? importedShowToast
+    : _sessionTokenGlobalFunction('showToast');
+  if (toast && tone === 'success') toast(text);
+  else if (toast) toast(text, tone);
   else _optionsTokenShowMsg(text, tone === 'error');
 }
 
 async function _waitForMigrateChoice(msg) {
-  if (typeof showConfirm !== 'function') return false;
-  return await showConfirm({
+  return await _sessionTokenShowConfirm({
     body: msg,
     actions: [
       { id: 'cancel', label: 'Cancel',       role: 'cancel' },
@@ -84,12 +205,12 @@ function _optionsMigrationResultText(data = {}) {
 
 async function _clearActiveSessionToken() {
   localStorage.removeItem('session_token');
-  const uuid = localStorage.getItem('session_id') || SESSION_ID;
-  updateSessionId(uuid);
-  if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
-  if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
-  if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-  if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+  const uuid = localStorage.getItem('session_id') || _sessionTokenCurrentId();
+  _sessionTokenUpdateSessionId(uuid);
+  await _sessionTokenLoadRecentValues().catch(() => {});
+  _sessionTokenHydrateCmdHistory([]);
+  await _sessionTokenReloadSessionHistory().catch(() => {});
+  _sessionTokenReloadWorkflowCatalog().catch(() => {});
   _updateOptionsSessionTokenStatus();
   return uuid;
 }
@@ -97,12 +218,12 @@ async function _clearActiveSessionToken() {
 async function confirmClearSessionToken() {
   const token = localStorage.getItem('session_token');
   if (!token) return { cleared: false, anonymousSessionId: null };
-  if (typeof showConfirm !== 'function') {
+  if (!_sessionTokenGlobalFunction('showConfirm')) {
     const uuid = await _clearActiveSessionToken();
     return { cleared: true, anonymousSessionId: uuid };
   }
 
-  const choice = await showConfirm({
+  const choice = await _sessionTokenShowConfirm({
     body: {
       text: 'Clear the current session token from this browser?',
       note: 'If you have not saved it elsewhere, you will not be able to recover it from the app, and history tied to it will no longer be accessible from this browser.',
@@ -115,10 +236,10 @@ async function confirmClearSessionToken() {
         role: 'secondary',
         onActivate: async () => {
           try {
-            await copyTextToClipboard(token);
-            showToast('Token copied to clipboard');
+            await _sessionTokenCopyText(token);
+            _sessionTokenShowToast('Token copied to clipboard');
           } catch (_) {
-            showToast('Failed to copy token', 'error');
+            _sessionTokenShowToast('Failed to copy token', 'error');
           }
           return false;
         },
@@ -134,22 +255,20 @@ async function confirmClearSessionToken() {
 }
 
 document.getElementById('options-session-token-copy-btn')?.addEventListener('click', async () => {
-  if (typeof flushRecentValues === 'function') {
-    await flushRecentValues().catch(() => {});
-  }
+  await _sessionTokenFlushRecentValues().catch(() => {});
   const token = localStorage.getItem('session_token');
   if (!token) return;
-  copyTextToClipboard(token)
-    .then(() => showToast('Token copied to clipboard'))
-    .catch(() => showToast('Failed to copy token', 'error'));
+  _sessionTokenCopyText(token)
+    .then(() => _sessionTokenShowToast('Token copied to clipboard'))
+    .catch(() => _sessionTokenShowToast('Failed to copy token', 'error'));
 });
 
 document.getElementById('options-session-token-generate-btn')?.addEventListener('click', async () => {
-  const oldSessionId = SESSION_ID;
+  const oldSessionId = _sessionTokenCurrentId();
   _optionsTokenSetBusy(true);
   _optionsTokenShowMsg('');
   try {
-    const resp = await apiFetch('/session/token/generate');
+    const resp = await _sessionTokenApiFetch('/session/token/generate');
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
       _optionsTokenToast(`Failed to generate token — ${d.error || resp.status}`, 'error');
@@ -157,9 +276,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     }
     const { session_token: newToken } = await resp.json();
 
-    if (typeof flushRecentValues === 'function') {
-      await flushRecentValues().catch(() => {});
-    }
+    await _sessionTokenFlushRecentValues().catch(() => {});
 
     // Count runs/files on OLD session before switching identity.
     let runCount = 0;
@@ -167,7 +284,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     let workflowCount = 0;
     let recentValueCount = 0;
     try {
-      const countResp = await apiFetch('/session/run-count');
+      const countResp = await _sessionTokenApiFetch('/session/run-count');
       if (countResp.ok) {
         const countData = await countResp.json();
         runCount = countData.count || 0;
@@ -201,15 +318,17 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     }
 
     localStorage.setItem('session_token', newToken);
-    updateSessionId(newToken);
-    if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
-    if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
-    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+    _sessionTokenUpdateSessionId(newToken);
+    await _sessionTokenLoadRecentValues().catch(() => {});
+    const seedStars = _sessionTokenGlobalFunction('_seedLocalStorageStarsToServer');
+    if (seedStars) await seedStars();
+    await _sessionTokenReloadSessionHistory().catch(() => {});
+    _sessionTokenReloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
-    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
-    copyTextToClipboard(newToken)
-      .then(() => showToast('New token copied to clipboard'))
+    const refreshWorkspaceFiles = _sessionTokenGlobalFunction('refreshWorkspaceFiles');
+    if (refreshWorkspaceFiles) refreshWorkspaceFiles().catch(() => {});
+    _sessionTokenCopyText(newToken)
+      .then(() => _sessionTokenShowToast('New token copied to clipboard'))
       .catch(() => {});
   } catch (err) {
     _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
@@ -223,16 +342,14 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
 // so validation errors keep the modal open instead of firing the real flow.
 document.getElementById('options-session-token-set-btn')?.addEventListener('click', async () => {
   _optionsTokenShowMsg('');
-  if (typeof showConfirm !== 'function') return;
+  if (!_sessionTokenGlobalFunction('showConfirm')) return;
 
   const input = document.createElement('input');
   input.type = 'text';
   input.id = 'session-token-set-input';
   input.className = 'options-token-input modal-token-input';
   input.placeholder = 'tok_... or UUID';
-  if (typeof applyMobileTextInputDefaults === 'function') {
-    applyMobileTextInputDefaults(input);
-  } else {
+  if (!_sessionTokenApplyMobileTextInputDefaults(input)) {
     input.autocomplete = 'off';
     input.autocapitalize = 'none';
     input.autocorrect = 'off';
@@ -254,7 +371,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   });
 
   let value = '';
-  const choice = await showConfirm({
+  const choice = await _sessionTokenShowConfirm({
     body: {
       text: 'Enter a session token to switch to.',
       note: 'Accepts tok_... format or a UUID from another session.',
@@ -284,7 +401,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
           if (isTok) {
             let verifyErr = null;
             try {
-              const vResp = await apiFetch('/session/token/verify', {
+              const vResp = await _sessionTokenApiFetch('/session/token/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: value }),
@@ -313,20 +430,18 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
 
   if (choice !== 'apply') return;
 
-  const oldSessionId = SESSION_ID;
+  const oldSessionId = _sessionTokenCurrentId();
   _optionsTokenSetBusy(true);
   _optionsTokenShowMsg('');
   try {
-    if (typeof flushRecentValues === 'function') {
-      await flushRecentValues().catch(() => {});
-    }
+    await _sessionTokenFlushRecentValues().catch(() => {});
 
     let runCount = 0;
     let workspaceFileCount = 0;
     let workflowCount = 0;
     let recentValueCount = 0;
     try {
-      const countResp = await apiFetch('/session/run-count');
+      const countResp = await _sessionTokenApiFetch('/session/run-count');
       if (countResp.ok) {
         const countData = await countResp.json();
         runCount = countData.count || 0;
@@ -360,14 +475,16 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
     }
 
     localStorage.setItem('session_token', value);
-    updateSessionId(value);
-    if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
-    if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
-    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+    _sessionTokenUpdateSessionId(value);
+    await _sessionTokenLoadRecentValues().catch(() => {});
+    const seedStars = _sessionTokenGlobalFunction('_seedLocalStorageStarsToServer');
+    if (seedStars) await seedStars();
+    await _sessionTokenReloadSessionHistory().catch(() => {});
+    _sessionTokenReloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
-    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
-    showToast('Session token applied');
+    const refreshWorkspaceFiles = _sessionTokenGlobalFunction('refreshWorkspaceFiles');
+    if (refreshWorkspaceFiles) refreshWorkspaceFiles().catch(() => {});
+    _sessionTokenShowToast('Session token applied');
   } catch (err) {
     _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
   } finally {
@@ -376,11 +493,11 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
 });
 
 document.getElementById('options-session-token-rotate-btn')?.addEventListener('click', async () => {
-  const oldSessionId = SESSION_ID;
+  const oldSessionId = _sessionTokenCurrentId();
   _optionsTokenSetBusy(true);
   _optionsTokenShowMsg('');
   try {
-    const genResp = await apiFetch('/session/token/generate');
+    const genResp = await _sessionTokenApiFetch('/session/token/generate');
     if (!genResp.ok) {
       const d = await genResp.json().catch(() => ({}));
       _optionsTokenToast(`Failed to generate token — ${d.error || genResp.status}`, 'error');
@@ -402,16 +519,17 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
     _optionsTokenToast(_optionsMigrationResultText(migrateData));
 
     localStorage.setItem('session_token', newToken);
-    updateSessionId(newToken);
-  if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
-    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
+    _sessionTokenUpdateSessionId(newToken);
+    await _sessionTokenLoadRecentValues().catch(() => {});
+    await _sessionTokenReloadSessionHistory().catch(() => {});
+    _sessionTokenReloadWorkflowCatalog().catch(() => {});
 
     _updateOptionsSessionTokenStatus();
-    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
-    copyTextToClipboard(newToken)
-      .then(() => showToast('New token copied to clipboard'))
-      .catch(() => showToast('Token rotated'));
+    const refreshWorkspaceFiles = _sessionTokenGlobalFunction('refreshWorkspaceFiles');
+    if (refreshWorkspaceFiles) refreshWorkspaceFiles().catch(() => {});
+    _sessionTokenCopyText(newToken)
+      .then(() => _sessionTokenShowToast('New token copied to clipboard'))
+      .catch(() => _sessionTokenShowToast('Token rotated'));
   } catch (err) {
     _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
   } finally {
@@ -421,5 +539,13 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
 
 document.getElementById('options-session-token-clear-btn')?.addEventListener('click', async () => {
   const result = await confirmClearSessionToken();
-  if (result.cleared) showToast('Session token cleared');
+  if (result.cleared) _sessionTokenShowToast('Session token cleared');
 });
+
+if (typeof importedSetSessionTokenHandlers === 'function') {
+  importedSetSessionTokenHandlers({
+    updateOptionsSessionTokenStatus: _updateOptionsSessionTokenStatus,
+  });
+}
+
+export { _updateOptionsSessionTokenStatus };

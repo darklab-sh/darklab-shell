@@ -4,7 +4,7 @@ This document explains how project docs should be written and kept up to date.
 
 The goal is not to make the docs shorter for its own sake. The goal is to keep the useful detail while making each page easier to scan, browse, and review.
 
-For planned doc cleanup work, see [TODO.md](TODO.md). This file is the standing guide for how docs should sound and be shaped.
+For documentation cleanup backlog, see [TODO.md](TODO.md). This file is the standing guide for how docs should sound and be shaped.
 
 ---
 
@@ -320,7 +320,7 @@ Before finishing doc changes, check:
 - Are sibling sections more consistent than before?
 - Do anchors and cross-links still resolve?
 - For CHANGELOG entries, does the T2 short vs T2 long choice match the ≥5-sentence / multi-concept threshold?
-- Does `python -m pytest tests/py/test_docs.py -q` still pass (28/28)?
+- Does `python -m pytest tests/py/test_docs.py -q` still pass?
 - Does `npm run lint:md` still report zero errors?
 
 ---

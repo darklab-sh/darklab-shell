@@ -23,7 +23,9 @@
 // scrim-backed modals, sheet coordination. Those are separate behaviors
 // with their own dismissal ordering and are handled by the
 // dismissible-surface helpers.
-(function (global) {
+import { bindPressable as importedBindPressable } from './ui_pressable.js';
+
+const bindDisclosure = (function (global) {
   'use strict';
 
   function _applyPanelState(panel, open, openClass, hiddenClass) {
@@ -35,7 +37,10 @@
   function bindDisclosure(trigger, opts) {
     if (!trigger || !opts) return null;
     if (trigger.dataset && trigger.dataset.disclosureBound === '1') return null;
-    if (typeof global.bindPressable !== 'function') return null;
+    const pressable = typeof importedBindPressable === 'function'
+      ? importedBindPressable
+      : null;
+    if (!pressable) return null;
 
     const panel = opts.panel || null;
     const openClass = Object.prototype.hasOwnProperty.call(opts, 'openClass')
@@ -56,7 +61,7 @@
 
     sync(false);
 
-    global.bindPressable(trigger, {
+    pressable(trigger, {
       refocusComposer: opts.refocusComposer === true,
       clearPressStyle: !!opts.clearPressStyle,
       preventFocusTheft: !!opts.preventFocusTheft,
@@ -81,5 +86,7 @@
     };
   }
 
-  global.bindDisclosure = bindDisclosure;
+  return bindDisclosure;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export { bindDisclosure };

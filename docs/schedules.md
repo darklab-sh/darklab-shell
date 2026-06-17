@@ -2,7 +2,7 @@
 
 Scheduled runs let a durable session token keep running one saved command on a cadence, even when no browser tab is open. Use them for routine checks such as a daily `nmap`, an hourly health probe, or a recurring passive recon command that should land in normal History.
 
-Schedules are owned by the active personal or team scope. Anonymous browser sessions cannot create them because the worker needs a durable `tok_` token it can check after the browser closes, and token revocation must stop future personal fires. Team-owned schedules stay with the team and are visible to other members when that team scope is active. Team viewers can read schedules and fire audit rows, while schedule creation, edits, deletes, and manual fires require automation-management permission.
+Schedules are owned by the active personal or team scope. Anonymous browser sessions cannot create them because the worker needs a durable `tok_` token it can check after the browser closes, and token revocation must stop later personal fires. Team-owned schedules stay with the team and are visible to other members when that team scope is active. Team viewers can read schedules and fire audit rows, while schedule creation, edits, deletes, and manual fires require automation-management permission.
 
 ## Creating Schedules
 
@@ -53,6 +53,8 @@ darklab schedule create --every hourly -- nmap -p 80 darklab.sh
 ## Firing And History Links
 
 Due schedules are fired by the scheduler worker, not by Flask request handlers. The worker launches schedules through the same brokered run path as browser and API starts, including command policy, command registry rewrites, workspace output handling, history persistence, Atlas capture, active-project capture, and outbound `run_complete` notifications. Scheduled runs keep the personal or team scope of the schedule that created them.
+
+The same worker also runs the daily retention pass for expired runs, snapshots, run-output artifacts, and audit rows. That keeps retention active in containers that stay up for weeks.
 
 Each fire writes a `schedule_fires` audit row. Successful fires store the run id on the audit row and on the schedule. History rows and Run Details use that link to show a `scheduled` badge, and clicking the badge reopens the originating schedule.
 
@@ -141,7 +143,7 @@ Useful places to inspect scheduler behavior:
 - [FEATURES.md](../FEATURES.md) - user-facing scheduled-runs feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
 - [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](api.md) - API and `darklab schedule` CLI usage

@@ -9,8 +9,12 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from config import CFG
+from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
+from services.audit.automation import record_schedule_event, run_now_details
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType
 from services.scheduler.commands import ScheduleCommandValidationError
 from services.scheduler.cron import ScheduleCronError, default_timezone, next_fire, normalize_cron, validate_timezone
 from services.scheduler.route_helpers import (
@@ -279,11 +283,21 @@ def schedules_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         payload = normalize_schedule_create_payload(data, session_id)
-        schedule = create_schedule(
-            session_id,
-            team_id=owner_scope.team_id,
-            **payload,
-        )
+        with db_connect() as conn:
+            schedule = create_schedule(
+                session_id,
+                team_id=owner_scope.team_id,
+                **payload,
+                conn=conn,
+            )
+            record_schedule_event(
+                AuditEventType.SCHEDULE_CREATE,
+                schedule,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                conn=conn,
+            )
+            conn.commit()
     except (
         ScheduleError,
         ScheduleCronError,
@@ -323,7 +337,18 @@ def schedules_update(schedule_id):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         updates = normalize_schedule_update_payload(data, session_id)
-        updated = update_schedule(schedule.id, updates)
+        with db_connect() as conn:
+            updated = update_schedule(schedule.id, updates, conn=conn)
+            if updated is not None:
+                record_schedule_event(
+                    AuditEventType.SCHEDULE_UPDATE,
+                    updated,
+                    audit_fields=route_audit_fields(session_id, request, owner_scope),
+                    source="browser",
+                    details={"changed_fields": sorted(key for key in updates if key != "workspace_cwd")},
+                    conn=conn,
+                )
+            conn.commit()
     except (
         ScheduleError,
         ScheduleCronError,
@@ -364,7 +389,17 @@ def schedules_delete(schedule_id):
         schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
-    removed = delete_schedule(schedule.id)
+    with db_connect() as conn:
+        removed = delete_schedule(schedule.id, conn=conn)
+        record_schedule_event(
+            AuditEventType.SCHEDULE_DELETE,
+            schedule,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+            source="browser",
+            details={"deleted_count": 1 if removed else 0},
+            conn=conn,
+        )
+        conn.commit()
     log.info("SCHEDULE_DELETED", extra=_schedule_log_payload(schedule, session_id=session_id, removed=removed))
     return jsonify({"removed": removed})
 
@@ -387,10 +422,21 @@ def schedules_run_now(schedule_id):
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     try:
-        from core import database
-
-        with database.db_connect() as conn:
+        with db_connect() as conn:
             status, refreshed, fired_at = fire_schedule_now(conn, schedule)
+            record_schedule_event(
+                AuditEventType.SCHEDULE_RUN_NOW,
+                refreshed or schedule,
+                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                source="browser",
+                details=run_now_details(
+                    status,
+                    fired_at=fired_at,
+                    run_id=(refreshed or schedule).last_run_id,
+                    last_error=(refreshed or schedule).last_error,
+                ),
+                conn=conn,
+            )
             conn.commit()
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _schedule_error_response(exc)

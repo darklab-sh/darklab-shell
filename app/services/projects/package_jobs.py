@@ -17,6 +17,8 @@ import time
 from config import CFG, resolve_data_dir
 from core.helpers import get_log_session_id
 from services import metrics as app_metrics
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.package_archive import build_evidence_package_archive
 
@@ -188,6 +190,65 @@ def discard_evidence_package_archive_job(job_id, *, archive=True):
             pass
 
 
+def _audit_failure_reason(status, error=""):
+    if str(status or "").strip().lower() != "failed":
+        return ""
+    normalized = str(error or "").strip().lower()
+    if "package not found" in normalized:
+        return "package_not_found"
+    if "project not found" in normalized:
+        return "project_not_found"
+    if "invalid job id" in normalized:
+        return "invalid_job_id"
+    if "too large" in normalized or "size limit" in normalized:
+        return "size_limit"
+    return "build_failed"
+
+
+def _audit_log_extra(job, *, details):
+    return {
+        "job_id": str(job.get("id") or ""),
+        "project_id": str(job.get("project_id") or ""),
+        "package_id": str(job.get("package_id") or ""),
+        "team_id": str(job.get("team_id") or ""),
+        "actor_member_id": str(job.get("actor_member_id") or ""),
+        **dict(details),
+    }
+
+
+def _record_job_audit(job, *, status, error="", archive_bytes=0, metrics=None):
+    details = {
+        "project_id": str(job.get("project_id") or ""),
+        "package_id": str(job.get("package_id") or ""),
+        "job_id": str(job.get("id") or ""),
+        "status": status,
+    }
+    reason = _audit_failure_reason(status, error)
+    if reason:
+        details["reason"] = reason
+    if archive_bytes:
+        details["archive_bytes"] = int(archive_bytes)
+    if isinstance(metrics, dict):
+        for key in ("run_count", "finding_count", "artifact_count", "target_count"):
+            if key in metrics:
+                details[key] = int(metrics.get(key) or 0)
+    try:
+        record_event(
+            AuditEventType.PACKAGE_BUILD,
+            target_id=str(job.get("package_id") or ""),
+            project_id=str(job.get("project_id") or ""),
+            job_id=str(job.get("id") or ""),
+            correlation_id=str(job.get("id") or ""),
+            session_id=str(job.get("session_id") or ""),
+            actor_session_id=str(job.get("session_id") or ""),
+            team_id=str(job.get("team_id") or ""),
+            actor_member_id=str(job.get("actor_member_id") or ""),
+            details=details,
+        )
+    except Exception:
+        log.exception("PACKAGE_BUILD_AUDIT_FAILED", extra=_audit_log_extra(job, details=details))
+
+
 def _run_job(job_id, cfg_snapshot):
     job = _read_job(job_id)
     if not isinstance(job, dict):
@@ -217,6 +278,7 @@ def _run_job(job_id, cfg_snapshot):
             progress_callback=_progress,
             archive_dir=str(_JOB_DIR),
             team_id=str(job.get("team_id") or ""),
+            build_job_id=str(job.get("id") or ""),
         )
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - started)
@@ -231,6 +293,7 @@ def _run_job(job_id, cfg_snapshot):
             "error_status": 413,
             "error": str(exc),
         })
+        _record_job_audit(job, status="failed", error=str(exc))
         _update("failed", "failed", str(exc), error=str(exc), error_status=413)
         return
     except Exception as exc:
@@ -245,15 +308,18 @@ def _run_job(job_id, cfg_snapshot):
             "stage": "archive",
             "error": str(exc),
         })
+        _record_job_audit(job, status="failed", error=str(exc))
         _update("failed", "failed", "Package archive build failed.", error=str(exc), error_status=500)
         return
     if archive is None:
         app_metrics.record_evidence_package_build("not_found", time.perf_counter() - started)
+        _record_job_audit(job, status="failed", error="package not found")
         _update("failed", "not_found", "Package not found.", error="package not found", error_status=404)
         return
     destination = _archive_path(job_id)
     if destination is None:
         app_metrics.record_evidence_package_build("error", time.perf_counter() - started)
+        _record_job_audit(job, status="failed", error="invalid job id")
         _update("failed", "failed", "Package archive build failed.", error="invalid job id", error_status=500)
         return
     os.replace(archive["path"], destination)
@@ -269,6 +335,7 @@ def _run_job(job_id, cfg_snapshot):
             int(metrics.get("skipped_items") or 0) - int(metrics.get("skipped_artifacts") or 0),
         ),
     )
+    _record_job_audit(job, status="complete", archive_bytes=archive_bytes, metrics=metrics)
     _update(
         "complete",
         "complete",

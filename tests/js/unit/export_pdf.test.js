@@ -2,25 +2,26 @@ import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { vi } from 'vitest'
+import { stripEsmExports } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../../')
 
-// Load export_pdf.js into an isolated context and return window.ExportPdfUtils.
+// Load export_pdf.js into an isolated context and return the module API.
 // Callers may inject a custom document to avoid the canvas / getComputedStyle
 // requirements; omit it to use the real jsdom document (canvas unsupported).
 function loadExportPdfUtils(overrides = {}) {
-  const src = readFileSync(resolve(REPO_ROOT, 'app/static/js/export_pdf.js'), 'utf8')
+  const src = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/export_pdf.js'), 'utf8'))
   const w = { ...(overrides.windowProps ?? {}) }
   const globals = {
     window: w,
     document: overrides.document ?? document,
     getComputedStyle: overrides.getComputedStyle ?? getComputedStyle,
+    getAppConfig: overrides.getAppConfig ?? (() => w.APP_CONFIG || {}),
     Node: overrides.Node ?? Node,
     ...overrides.extra,
   }
-  new Function(...Object.keys(globals), src)(...Object.values(globals))
-  return w.ExportPdfUtils
+  return new Function(...Object.keys(globals), `${src}\nreturn ExportPdfUtils;`)(...Object.values(globals))
 }
 
 // A document mock that provides working canvas and div primitives so
@@ -118,10 +119,11 @@ function makeMockJsPDF() {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ExportPdfUtils module', () => {
-  it('exposes ExportPdfUtils on window with the expected API', () => {
+  it('exposes ExportPdfUtils as an ESM-compatible module API', () => {
     // Use real jsdom document — only testing the module shape, not canvas calls.
     const utils = loadExportPdfUtils()
     expect(typeof utils).toBe('object')
+    expect(typeof utils.loadJsPdf).toBe('function')
     expect(typeof utils.buildTerminalExportPdf).toBe('function')
     expect(typeof utils.parseCssColor).toBe('function')
     expect(typeof utils.themeColors).toBe('function')

@@ -1,3 +1,34 @@
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
+import { cmdInput as importedCmdInput } from './core/dom.js';
+import { openOptions as importedOpenOptions } from './app.js';
+import {
+  openFaq as importedOpenFaq,
+  openWorkflows as importedOpenWorkflows,
+  toggleHistoryPanelSurface as importedToggleHistoryPanelSurface,
+} from './controller_action_bridge.js';
+import {
+  _recordTourOpenedOnceThisSession as importedRecordTourOpenedOnceThisSession,
+  activateOptionsTab as importedActivateOptionsTab,
+  recordTourOpened as importedRecordTourOpened,
+} from './features/preferences/preferences.js';
+import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_overlay.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
+import { openProjectWorkspace as importedOpenProjectWorkspace } from './features/projects/project_context_bridge.js';
+import { openWorkspace as importedOpenWorkspace } from './workspace.js';
+import {
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  syncModalOverlayState as importedSyncModalOverlayState,
+} from './ui/ui_helpers.js';
+import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from './ui/ui_focus_trap.js';
+import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+
+let exportedOpenTourModal = null;
+let exportedCloseTourModal = null;
+let exportedVisibleTourModalChapters = null;
+let exportedRenderTourIllustration = null;
+
 (function (global) {
   'use strict';
 
@@ -20,37 +51,82 @@
   let _currentIndex = 0;
   let _returnFocusEl = null;
 
+  function _tourAppConfig() {
+    return typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : null;
+  }
+
+  function _tourUseMobileViewportMode() {
+    const useMobile = typeof importedUseMobileTerminalViewportMode === 'function' ? importedUseMobileTerminalViewportMode : null;
+    return !!(useMobile && useMobile());
+  }
+
+  function _tourCmdInput() {
+    return (typeof importedCmdInput !== 'undefined' && importedCmdInput) || null;
+  }
+
+  function _tourRefocusComposerAfterAction(options = undefined) {
+    const refocus = typeof importedRefocusComposerAfterAction === 'function' ? importedRefocusComposerAfterAction : null;
+    if (refocus) refocus(options);
+  }
+
+  function _tourSetComposerValue(command) {
+    const setValue = typeof importedSetComposerValue === 'function' ? importedSetComposerValue : null;
+    if (!setValue) return false;
+    setValue(command, command.length, command.length, { dispatch: false });
+    return true;
+  }
+
+  function _tourBindPressable(el, options) {
+    const bind = typeof importedBindPressable === 'function' ? importedBindPressable : null;
+    return bind ? bind(el, options) : null;
+  }
+
+  function _tourBindFocusTrap(modal) {
+    const bind = typeof importedBindFocusTrap === 'function' ? importedBindFocusTrap : null;
+    if (bind) bind(modal);
+  }
+
+  function _tourBindDismissible(overlay, options) {
+    const bind = typeof importedBindDismissible === 'function' ? importedBindDismissible : null;
+    return bind ? bind(overlay, options) : null;
+  }
+
+  function _tourSyncModalOverlayState() {
+    const sync = typeof importedSyncModalOverlayState === 'function' ? importedSyncModalOverlayState : null;
+    if (sync) sync();
+  }
+
   const TOUR_MODAL_ACTIONS = {
     autocomplete: { label: 'nmap -sV -', command: 'nmap -sV -' },
-    history: { label: 'Open History', opener: () => global.toggleHistoryPanelSurface?.(true) },
-    workflows: { label: 'Open Workflows', opener: () => global.openWorkflows?.() },
-    projects: { label: 'Open Projects', opener: () => global.openProjectWorkspace?.() },
+    history: { label: 'Open History', opener: () => importedToggleHistoryPanelSurface?.(true) },
+    workflows: { label: 'Open Workflows', opener: () => importedOpenWorkflows?.() },
+    projects: { label: 'Open Projects', opener: () => importedOpenProjectWorkspace?.() },
     team_mode: {
       label: 'Open Teams',
       opener: () => {
-        global.openOptions?.();
-        global.activateOptionsTab?.('teams', { persist: false, focus: true });
+        importedOpenOptions?.();
+        importedActivateOptionsTab?.('teams', { persist: false, focus: true });
       },
     },
-    atlas: { label: 'Open Atlas', opener: () => global.openAtlas?.({ source: 'tour' }) },
-    session_files: { label: 'Open Files', opener: () => global.openWorkspace?.() },
-    session_tokens: { label: 'Open Options', opener: () => global.openOptions?.() },
-    closer: { label: 'Open FAQ', opener: () => global.openFaq?.() },
+    atlas: { label: 'Open Atlas', opener: () => importedOpenAtlas?.({ source: 'tour' }) },
+    session_files: { label: 'Open Files', opener: () => importedOpenWorkspace?.() },
+    session_tokens: { label: 'Open Options', opener: () => importedOpenOptions?.() },
+    closer: { label: 'Open FAQ', opener: () => importedOpenFaq?.() },
   };
 
   function _isMobileViewport() {
-    return typeof global.useMobileTerminalViewportMode === 'function'
-      && global.useMobileTerminalViewportMode();
+    return _tourUseMobileViewportMode();
   }
 
   function _tourEnabled() {
-    return !!(global.APP_CONFIG && global.APP_CONFIG.tour_enabled === true);
+    return !!(_tourAppConfig()?.tour_enabled === true);
   }
 
   function _visibleTourModalChapters() {
     if (!_tourEnabled() || _isMobileViewport()) return [];
-    const chapters = Array.isArray(global.APP_CONFIG?.tour_chapters)
-      ? global.APP_CONFIG.tour_chapters
+    const appConfig = _tourAppConfig();
+    const chapters = Array.isArray(appConfig?.tour_chapters)
+      ? appConfig.tour_chapters
       : [];
     return chapters.filter(chapter => chapter && typeof chapter === 'object');
   }
@@ -368,15 +444,12 @@
   function _loadSampleCommand(sample) {
     const command = String(sample || '').trim();
     if (!command) return;
-    if (typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction();
+    _tourRefocusComposerAfterAction();
+    if (!_tourSetComposerValue(command)) {
+      const fallbackInput = _tourCmdInput();
+      if (fallbackInput) fallbackInput.value = command;
     }
-    if (typeof global.setComposerValue === 'function') {
-      global.setComposerValue(command, command.length, command.length, { dispatch: false });
-    } else if (global.cmdInput) {
-      global.cmdInput.value = command;
-    }
-    const input = global.cmdInput || document.getElementById('cmd');
+    const input = _tourCmdInput() || document.getElementById('cmd');
     if (input && typeof input.dispatchEvent === 'function') {
       setTimeout(() => input.dispatchEvent(new Event('input')), 0);
     }
@@ -403,15 +476,12 @@
 
   function _bindPressable(el, onActivate) {
     if (!el) return;
-    if (typeof global.bindPressable === 'function') {
-      global.bindPressable(el, {
-        refocusComposer: false,
-        clearPressStyle: true,
-        onActivate,
-      });
-    } else {
-      el.addEventListener('click', onActivate);
-    }
+    if (_tourBindPressable(el, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate,
+    })) return;
+    el.addEventListener('click', onActivate);
   }
 
   function _ensureTourModal() {
@@ -454,22 +524,20 @@
     _bindPressable(prevBtn, () => _goTourChapter(-1));
     _bindPressable(nextBtn, () => _goTourChapter(1));
 
-    if (typeof global.bindFocusTrap === 'function') {
-      global.bindFocusTrap(modal);
+    _tourBindFocusTrap(modal);
+    if (_tourBindDismissible(overlay, {
+      level: 'modal',
+      isOpen: () => overlay.classList.contains('open'),
+      onClose: closeTourModal,
+      closeButtons: closeBtn,
+    })) {
+      _overlay = overlay;
+      return overlay;
     }
-    if (typeof global.bindDismissible === 'function') {
-      global.bindDismissible(overlay, {
-        level: 'modal',
-        isOpen: () => overlay.classList.contains('open'),
-        onClose: closeTourModal,
-        closeButtons: closeBtn,
-      });
-    } else {
-      overlay.addEventListener('click', event => {
-        if (event.target === overlay) closeTourModal();
-      });
-      closeBtn.addEventListener('click', closeTourModal);
-    }
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) closeTourModal();
+    });
+    closeBtn.addEventListener('click', closeTourModal);
     _overlay = overlay;
     return overlay;
   }
@@ -562,10 +630,10 @@
   }
 
   async function _recordTourModalOpened() {
-    if (typeof global._recordTourOpenedOnceThisSession === 'function') {
-      await global._recordTourOpenedOnceThisSession();
-    } else if (typeof global.recordTourOpened === 'function') {
-      try { await global.recordTourOpened(); } catch (_) { /* best-effort */ }
+    if (typeof importedRecordTourOpenedOnceThisSession === 'function') {
+      await importedRecordTourOpenedOnceThisSession();
+    } else if (typeof importedRecordTourOpened === 'function') {
+      try { await importedRecordTourOpened(); } catch (_) { /* best-effort */ }
     }
   }
 
@@ -583,7 +651,7 @@
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
-    global.syncModalOverlayState?.();
+    _tourSyncModalOverlayState();
     _recordTourModalOpened();
     const schedule = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
@@ -597,7 +665,7 @@
     _overlay.classList.remove('open');
     _overlay.classList.add('u-hidden');
     _overlay.setAttribute('aria-hidden', 'true');
-    global.syncModalOverlayState?.();
+    _tourSyncModalOverlayState();
     if (options && options.skipRefocus) {
       _returnFocusEl = null;
       return;
@@ -612,13 +680,18 @@
       return;
     }
     _returnFocusEl = null;
-    if (typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({ preventScroll: true });
-    }
+    _tourRefocusComposerAfterAction({ preventScroll: true });
   }
 
-  global.openTourModal = openTourModal;
-  global.closeTourModal = closeTourModal;
-  global._visibleTourModalChapters = _visibleTourModalChapters;
-  global._renderTourIllustration = _renderTourIllustration;
+  exportedOpenTourModal = openTourModal;
+  exportedCloseTourModal = closeTourModal;
+  exportedVisibleTourModalChapters = _visibleTourModalChapters;
+  exportedRenderTourIllustration = _renderTourIllustration;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export {
+  exportedOpenTourModal as openTourModal,
+  exportedCloseTourModal as closeTourModal,
+  exportedVisibleTourModalChapters as _visibleTourModalChapters,
+  exportedRenderTourIllustration as _renderTourIllustration,
+};

@@ -1,5 +1,88 @@
 // Workspace-terminal command parsing and path helpers used by runner.js.
 
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import {
+  getActiveTabId as importedGetActiveTabId,
+  getTab as importedGetTab,
+} from '../../core/state.js';
+import {
+  displayPath as importedWorkspaceDisplayPath,
+  normalizeCommandPath as importedNormalizeWorkspaceCommandPath,
+} from '../../core/workspace_core.js';
+import { schedulePersistTabSessionState as importedSchedulePersistTabSessionState } from '../tabs/tab_session_state.js';
+import {
+  getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
+  getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
+  refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache,
+} from '../workspace/workspace_autocomplete_cache.js';
+import {
+  hasComposerPromptHandler as importedHasComposerPromptHandler,
+  syncShellPrompt as importedSyncShellPrompt,
+} from '../terminal/composer_prompt_bridge.js';
+
+const RUNNER_WORKSPACE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _runnerWorkspaceConfig() {
+  if (typeof importedGetAppConfig !== 'undefined' && typeof importedGetAppConfig === 'function') {
+    return importedGetAppConfig() || {};
+  }
+  return RUNNER_WORKSPACE_GLOBAL.APP_CONFIG || {};
+}
+
+function _runnerWorkspaceEnabled() {
+  return _runnerWorkspaceConfig().workspace_enabled === true;
+}
+
+function _runnerWorkspaceActiveTabId() {
+  if (typeof importedGetActiveTabId !== 'undefined' && typeof importedGetActiveTabId === 'function') {
+    return importedGetActiveTabId();
+  }
+  return typeof RUNNER_WORKSPACE_GLOBAL.APP_STATE_API?.getActiveTabId === 'function'
+    ? RUNNER_WORKSPACE_GLOBAL.APP_STATE_API.getActiveTabId()
+    : null;
+}
+
+function _runnerWorkspaceGetTab(tabId) {
+  if (typeof importedGetTab !== 'undefined' && typeof importedGetTab === 'function') return importedGetTab(tabId);
+  return typeof RUNNER_WORKSPACE_GLOBAL.APP_STATE_API?.getTab === 'function'
+    ? RUNNER_WORKSPACE_GLOBAL.APP_STATE_API.getTab(tabId)
+    : null;
+}
+
+function _runnerWorkspaceDisplayPath(path = '') {
+  const display = (typeof importedWorkspaceDisplayPath !== 'undefined' && importedWorkspaceDisplayPath)
+    || RUNNER_WORKSPACE_GLOBAL.workspaceDisplayPath;
+  if (display === _workspaceDisplayPath) return null;
+  return typeof display === 'function' ? display(_normalizeWorkspaceTerminalPath(path)) : null;
+}
+
+function _runnerWorkspaceNormalizeCommandPath(path = '', cwd = '') {
+  const normalize = (
+    typeof importedNormalizeWorkspaceCommandPath !== 'undefined'
+    && importedNormalizeWorkspaceCommandPath
+  ) || RUNNER_WORKSPACE_GLOBAL.normalizeWorkspaceCommandPath;
+  return typeof normalize === 'function' ? normalize(path, cwd) : null;
+}
+
+function _runnerWorkspaceSchedulePersistTabSessionState() {
+  const schedulePersist = (
+    typeof importedSchedulePersistTabSessionState !== 'undefined'
+    && importedSchedulePersistTabSessionState
+  ) || RUNNER_WORKSPACE_GLOBAL.schedulePersistTabSessionState;
+  if (typeof schedulePersist === 'function') schedulePersist();
+}
+
+function _workspaceCacheApi() {
+  return {
+    getDirectoryHints: (typeof importedGetWorkspaceAutocompleteDirectoryHints !== 'undefined' && importedGetWorkspaceAutocompleteDirectoryHints)
+      || RUNNER_WORKSPACE_GLOBAL.getWorkspaceAutocompleteDirectoryHints,
+    getFileHints: (typeof importedGetWorkspaceAutocompleteFileHints !== 'undefined' && importedGetWorkspaceAutocompleteFileHints)
+      || RUNNER_WORKSPACE_GLOBAL.getWorkspaceAutocompleteFileHints,
+    refresh: (typeof importedRefreshWorkspaceFileCache !== 'undefined' && importedRefreshWorkspaceFileCache)
+      || RUNNER_WORKSPACE_GLOBAL.refreshWorkspaceFileCache,
+  };
+}
+
 function _workspaceDeleteCommand(cmd) {
   const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
@@ -133,22 +216,27 @@ function _workspaceCommandTokens(cmd) {
   return tokens;
 }
 
-function _workspaceCwd(tabId = activeTabId) {
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+function _workspaceCwd(tabId = _runnerWorkspaceActiveTabId()) {
+  const tab = _runnerWorkspaceGetTab(tabId);
   return _normalizeWorkspaceTerminalPath(tab && tab.workspaceCwd || '');
 }
 
 function _setWorkspaceCwd(tabId, path = '') {
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  const tab = _runnerWorkspaceGetTab(tabId);
   const normalized = _normalizeWorkspaceTerminalPath(path);
   if (tab) tab.workspaceCwd = normalized;
-  if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
-  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  const syncPrompt = (
+    typeof importedHasComposerPromptHandler === 'function'
+    && importedHasComposerPromptHandler('syncShellPrompt')
+  ) ? importedSyncShellPrompt : RUNNER_WORKSPACE_GLOBAL.syncShellPrompt;
+  if (typeof syncPrompt === 'function') syncPrompt();
+  _runnerWorkspaceSchedulePersistTabSessionState();
   return normalized;
 }
 
 function _workspaceDisplayPath(path = '') {
-  if (typeof workspaceDisplayPath === 'function') return workspaceDisplayPath(_normalizeWorkspaceTerminalPath(path));
+  const displayed = _runnerWorkspaceDisplayPath(path);
+  if (displayed !== null) return displayed;
   const normalized = _normalizeWorkspaceTerminalPath(path);
   return normalized ? `/${normalized}` : '/';
 }
@@ -162,8 +250,9 @@ function _resolveWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCwd(), def
   const text = String(rawPath ?? '').trim();
   const normalizedCwd = _normalizeWorkspaceTerminalPath(cwd);
   if (!text && defaultToCwd) return normalizedCwd;
-  if (typeof normalizeWorkspaceCommandPath === 'function') {
-    return _normalizeWorkspaceTerminalPath(normalizeWorkspaceCommandPath(text || '.', normalizedCwd));
+  const normalizedCommandPath = _runnerWorkspaceNormalizeCommandPath(text || '.', normalizedCwd);
+  if (normalizedCommandPath !== null) {
+    return _normalizeWorkspaceTerminalPath(normalizedCommandPath);
   }
   const base = text.startsWith('/') ? [] : normalizedCwd.split('/').filter(Boolean);
   const parts = String(text || '.').split('/').filter(Boolean);
@@ -183,14 +272,16 @@ function _workspacePathExists(path = '', kind = 'any') {
   const target = String(path || '').split('/').filter(Boolean).join('/');
   if (!target) return kind === 'directory' || kind === 'any';
   if (kind === 'directory' || kind === 'any') {
-    const dirHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
-      ? getWorkspaceAutocompleteDirectoryHints()
+    const getDirectoryHints = _workspaceCacheApi().getDirectoryHints;
+    const dirHints = typeof getDirectoryHints === 'function'
+      ? getDirectoryHints()
       : [];
     if (dirHints.some(item => String(item && item.value || '') === target)) return true;
   }
   if (kind === 'file' || kind === 'any') {
-    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
-      ? getWorkspaceAutocompleteFileHints()
+    const getFileHints = _workspaceCacheApi().getFileHints;
+    const fileHints = typeof getFileHints === 'function'
+      ? getFileHints()
       : [];
     if (fileHints.some(item => String(item && item.value || '') === target)) return true;
   }
@@ -216,8 +307,9 @@ function _workspaceGlobMatches(pattern = '', path = '') {
 function _workspaceEntryHints(kind = 'any') {
   const entries = [];
   if (kind === 'directory' || kind === 'any') {
-    const dirHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
-      ? getWorkspaceAutocompleteDirectoryHints()
+    const getDirectoryHints = _workspaceCacheApi().getDirectoryHints;
+    const dirHints = typeof getDirectoryHints === 'function'
+      ? getDirectoryHints()
       : [];
     (Array.isArray(dirHints) ? dirHints : []).forEach((item) => {
       const path = String(item && item.value || '').split('/').filter(Boolean).join('/');
@@ -225,8 +317,9 @@ function _workspaceEntryHints(kind = 'any') {
     });
   }
   if (kind === 'file' || kind === 'any') {
-    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
-      ? getWorkspaceAutocompleteFileHints()
+    const getFileHints = _workspaceCacheApi().getFileHints;
+    const fileHints = typeof getFileHints === 'function'
+      ? getFileHints()
       : [];
     (Array.isArray(fileHints) ? fileHints : []).forEach((item) => {
       const path = String(item && item.value || '').split('/').filter(Boolean).join('/');
@@ -260,13 +353,14 @@ function _resolveExistingWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCw
 }
 
 async function _ensureWorkspaceCache() {
-  if (typeof refreshWorkspaceFileCache === 'function') {
-    await refreshWorkspaceFileCache();
+  const refresh = _workspaceCacheApi().refresh;
+  if (typeof refresh === 'function') {
+    await refresh();
   }
 }
 
 function _isWorkspaceDeleteCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+  if (!_runnerWorkspaceEnabled()) {
     return false;
   }
   const parts = _workspaceCommandTokens(cmd);
@@ -276,7 +370,7 @@ function _isWorkspaceDeleteCommand(cmd) {
 }
 
 function _isWorkspaceEditorCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+  if (!_runnerWorkspaceEnabled()) {
     return false;
   }
   const parts = _workspaceCommandTokens(cmd);
@@ -286,7 +380,7 @@ function _isWorkspaceEditorCommand(cmd) {
 }
 
 function _isWorkspaceDownloadCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+  if (!_runnerWorkspaceEnabled()) {
     return false;
   }
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
@@ -294,17 +388,49 @@ function _isWorkspaceDownloadCommand(cmd) {
 }
 
 function _isWorkspaceMoveCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+  if (!_runnerWorkspaceEnabled()) {
     return false;
   }
   return !!_workspaceMoveCommand(cmd);
 }
 
 function _isWorkspaceTerminalCommand(cmd) {
-  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) return false;
+  if (!_runnerWorkspaceEnabled()) return false;
   const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
   if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
   if (root === 'file' && ['list', 'ls', 'show', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
   return false;
 }
+
+if (typeof window !== 'undefined') {
+}
+
+export {
+  _ensureWorkspaceCache,
+  _isWorkspaceDeleteCommand,
+  _isWorkspaceDownloadCommand,
+  _isWorkspaceEditorCommand,
+  _isWorkspaceMoveCommand,
+  _isWorkspaceTerminalCommand,
+  _normalizeWorkspaceTerminalPath,
+  _resolveExistingWorkspaceCommandPath,
+  _resolveWorkspaceCommandPath,
+  _setWorkspaceCwd,
+  _workspaceCommandTokens,
+  _workspaceCwd,
+  _workspaceDeleteCommand,
+  _workspaceDeleteTarget,
+  _workspaceDisplayPath,
+  _workspaceDownloadTarget,
+  _workspaceEditorCommand,
+  _workspaceEntryHints,
+  _workspaceExpandPathPattern,
+  _workspaceGlobMatches,
+  _workspaceGlobSegmentToRegExp,
+  _workspaceListCommand,
+  _workspaceListTarget,
+  _workspaceMoveCommand,
+  _workspacePathExists,
+  _workspacePathHasGlob,
+};

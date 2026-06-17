@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const FINDING_TRIAGE_EDITOR_SRC = readFileSync(
+const FINDING_TRIAGE_EDITOR_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/findings/finding_triage_editor.js'),
   'utf8',
-)
+))
 
 function mountEditor() {
   document.body.innerHTML = `
@@ -80,6 +81,10 @@ async function flushPromises(count = 5) {
   }
 }
 
+function loadEditor() {
+  new Function(FINDING_TRIAGE_EDITOR_SRC)()
+}
+
 describe('finding triage editor', () => {
   beforeEach(() => {
     mountEditor()
@@ -89,7 +94,6 @@ describe('finding triage editor', () => {
     window.bindFocusTrap = vi.fn(() => ({ dispose: vi.fn() }))
     installAppSelectStubs()
     window.refocusComposerAfterAction = vi.fn()
-    new Function(FINDING_TRIAGE_EDITOR_SRC)()
   })
 
   it('loads, saves, and compacts remediation and verification details', async () => {
@@ -119,6 +123,7 @@ describe('finding triage editor', () => {
       return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 404))
     })
     window.apiFetch = apiFetch
+    loadEditor()
 
     await window.DarklabFindingTriageEditor.open(finding, { onSaved: saved })
     await flushPromises()
@@ -169,6 +174,7 @@ describe('finding triage editor', () => {
       return Promise.resolve(jsonResponse({ triage: {} }))
     })
     window.apiFetch = apiFetch
+    loadEditor()
 
     await window.DarklabFindingTriageEditor.open(finding, { canEdit: false })
     await flushPromises()
@@ -217,6 +223,7 @@ describe('finding triage editor', () => {
       return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 404))
     })
     window.apiFetch = apiFetch
+    loadEditor()
 
     await window.DarklabFindingTriageEditor.open(
       { id: 'finding-a', title: 'Finding A', verification_status: 'not_started' },
@@ -245,6 +252,7 @@ describe('finding triage editor', () => {
     window.bindFocusTrap.mockClear()
     window.enhanceAppSelects.mockClear()
     window.apiFetch = vi.fn(() => Promise.resolve(jsonResponse({ error: 'Could not load details.' }, 500)))
+    loadEditor()
 
     await window.DarklabFindingTriageEditor.open({ id: 'finding-error', title: 'Finding error' })
     await flushPromises()

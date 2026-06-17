@@ -1,15 +1,140 @@
 // History delete/clear confirmations and shared loading state.
+import { historyLoadOverlay as importedHistoryLoadOverlay } from '../../core/dom.js';
+import { getAppState as importedGetAppState } from '../../core/state.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import {
+  _getStarred as importedGetStarred,
+  _saveStarred as importedSaveStarred,
+} from './history_actions.js';
+import {
+  refreshHistoryPanel as importedRefreshHistoryPanel,
+  renderHistory as importedRenderHistory,
+} from '../../history.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+} from '../../runtime_bridge.js';
 
-let pendingHistAction = null;
+let _pendingHistActionFallback = null;
+const HISTORY_MUTATIONS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyMutationState() {
+  if (typeof importedGetAppState === 'function') return importedGetAppState();
+  if (typeof HISTORY_MUTATIONS_GLOBAL.APP_STATE_API?.getState === 'function') return HISTORY_MUTATIONS_GLOBAL.APP_STATE_API.getState();
+  return HISTORY_MUTATIONS_GLOBAL.APP_STATE || null;
+}
+
+function _historyPendingAction() {
+  const state = _historyMutationState();
+  if (state) return state.pendingHistAction || null;
+  return _pendingHistActionFallback;
+}
+
+function _historySetPendingAction(action) {
+  const state = _historyMutationState();
+  if (state) state.pendingHistAction = action || null;
+  _pendingHistActionFallback = action || null;
+  return action || null;
+}
+
+function _historyMutationCmdHistory() {
+  const state = _historyMutationState();
+  if (state && Array.isArray(state.cmdHistory)) return state.cmdHistory;
+  return [];
+}
+
+function _historyMutationSetCmdHistory(next) {
+  const value = Array.isArray(next) ? next : [];
+  const state = _historyMutationState();
+  if (state) state.cmdHistory = value;
+  return value;
+}
+
+function _historyMutationRecentPreviewHistory() {
+  const state = _historyMutationState();
+  if (state && Array.isArray(state.recentPreviewHistory)) return state.recentPreviewHistory;
+  return [];
+}
+
+function _historyMutationSetRecentPreviewHistory(next) {
+  const value = Array.isArray(next) ? next : [];
+  const state = _historyMutationState();
+  if (state) state.recentPreviewHistory = value;
+  return value;
+}
+
+function _historyMutationGetStarred() {
+  const getStarred = (typeof importedGetStarred !== 'undefined' && importedGetStarred)
+    || HISTORY_MUTATIONS_GLOBAL._getStarred;
+  return typeof getStarred === 'function' ? getStarred() : new Set();
+}
+
+function _historyMutationSaveStarred(starred) {
+  const saveStarred = (typeof importedSaveStarred !== 'undefined' && importedSaveStarred)
+    || HISTORY_MUTATIONS_GLOBAL._saveStarred;
+  if (typeof saveStarred === 'function') saveStarred(starred);
+}
+
+function _historyMutationLoadOverlay() {
+  return (typeof importedHistoryLoadOverlay !== 'undefined' && importedHistoryLoadOverlay)
+    || HISTORY_MUTATIONS_GLOBAL.historyLoadOverlay
+    || null;
+}
 
 function _historyActiveScopeCan(capability) {
-  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan(capability) : true;
+  const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+    || null;
+  return typeof can === 'function' ? can(capability) : true;
 }
 
 function _historyScopeDeniedMessage(action) {
-  return typeof teamScopeDeniedMessage === 'function'
-    ? teamScopeDeniedMessage(action)
+  const denied = (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+    || null;
+  return typeof denied === 'function'
+    ? denied(action)
     : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+}
+
+function _historyMutationShowToast(message, tone = 'success') {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || HISTORY_MUTATIONS_GLOBAL.showToast
+    || null;
+  if (typeof toast === 'function') toast(message, tone);
+}
+
+function _historyMutationShowConfirm(options) {
+  const confirm = (typeof importedShowConfirm !== 'undefined' && importedShowConfirm)
+    || HISTORY_MUTATIONS_GLOBAL.showConfirm
+    || null;
+  return typeof confirm === 'function' ? confirm(options) : Promise.resolve(null);
+}
+
+function _historyMutationRenderHistory() {
+  const render = (typeof importedRenderHistory !== 'undefined' && importedRenderHistory)
+    || HISTORY_MUTATIONS_GLOBAL.renderHistory;
+  if (typeof render === 'function') render();
+}
+
+function _historyMutationRefreshHistoryPanel() {
+  const refresh = (typeof importedRefreshHistoryPanel !== 'undefined' && importedRefreshHistoryPanel)
+    || HISTORY_MUTATIONS_GLOBAL.refreshHistoryPanel;
+  if (typeof refresh === 'function') refresh();
+}
+
+function _historyMutationApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || HISTORY_MUTATIONS_GLOBAL.apiFetch;
+  return typeof fetcher === 'function' ? fetcher(...args) : Promise.reject(new Error('apiFetch unavailable'));
 }
 
 function _historyCanManageHistory() {
@@ -17,7 +142,7 @@ function _historyCanManageHistory() {
 }
 
 function _historyShowPermissionDenied(action = 'delete team history') {
-  if (typeof showToast === 'function') showToast(_historyScopeDeniedMessage(action), 'error');
+  _historyMutationShowToast(_historyScopeDeniedMessage(action), 'error');
 }
 
 async function _historyMutationError(resp, fallback) {
@@ -94,7 +219,7 @@ function _buildHistoryAtlasCleanupContent(cleanup) {
 
 async function _loadHistoryAtlasCleanup(runId) {
   try {
-    const resp = await apiFetch(`/history/${encodeURIComponent(runId)}/atlas-cleanup-preview`, { cache: 'no-store' });
+    const resp = await _historyMutationApiFetch(`/history/${encodeURIComponent(runId)}/atlas-cleanup-preview`, { cache: 'no-store' });
     if (!resp.ok) return null;
     const data = await resp.json().catch(() => ({}));
     return data.cleanup || null;
@@ -108,7 +233,7 @@ function confirmHistAction(type, id, command, itemType = 'run') {
     _historyShowPermissionDenied('delete team history');
     return;
   }
-  pendingHistAction = { type, id, command, itemType };
+  _historySetPendingAction({ type, id, command, itemType });
   const runDelete = type === 'delete' && itemType !== 'snapshot' && id;
   const isBulk = type === 'clear';
   const buildBody = (cleanup) => (isBulk
@@ -133,7 +258,7 @@ function confirmHistAction(type, id, command, itemType = 'run') {
       ];
   const showDeleteConfirm = (cleanup) => {
     const content = runDelete ? _buildHistoryAtlasCleanupContent(cleanup) : null;
-    return showConfirm({
+    return _historyMutationShowConfirm({
       body: buildBody(cleanup),
       content,
       tone: 'warning',
@@ -141,13 +266,15 @@ function confirmHistAction(type, id, command, itemType = 'run') {
       refocusOnResolve: false,
     }).then((choice) => {
       if (!choice || choice === 'cancel') {
-        pendingHistAction = null;
+        _historySetPendingAction(null);
         return;
       }
-      if (pendingHistAction && content) {
-        pendingHistAction.pruneCuratedAtlas = !!content.querySelector('[data-history-atlas-cleanup-curated]')?.checked;
-        pendingHistAction.pruneAtlas = !!content.querySelector('[data-history-atlas-cleanup]')?.checked
-          || pendingHistAction.pruneCuratedAtlas;
+      const pending = _historyPendingAction();
+      if (pending && content) {
+        pending.pruneCuratedAtlas = !!content.querySelector('[data-history-atlas-cleanup-curated]')?.checked;
+        pending.pruneAtlas = !!content.querySelector('[data-history-atlas-cleanup]')?.checked
+          || pending.pruneCuratedAtlas;
+        _historySetPendingAction(pending);
       }
       if (choice === 'nonfav') executeHistAction('clear-nonfav');
       else if (choice === 'all') executeHistAction();
@@ -162,13 +289,14 @@ function confirmHistAction(type, id, command, itemType = 'run') {
 }
 
 function executeHistAction(type) {
-  const action  = type || (pendingHistAction && pendingHistAction.type);
-  const id      = pendingHistAction && pendingHistAction.id;
-  const command = pendingHistAction && pendingHistAction.command;
-  const itemType = pendingHistAction && pendingHistAction.itemType;
-  const pruneAtlas = !!(pendingHistAction && pendingHistAction.pruneAtlas);
-  const pruneCuratedAtlas = !!(pendingHistAction && pendingHistAction.pruneCuratedAtlas);
-  pendingHistAction = null;
+  const pending = _historyPendingAction();
+  const action  = type || (pending && pending.type);
+  const id      = pending && pending.id;
+  const command = pending && pending.command;
+  const itemType = pending && pending.itemType;
+  const pruneAtlas = !!(pending && pending.pruneAtlas);
+  const pruneCuratedAtlas = !!(pending && pending.pruneCuratedAtlas);
+  _historySetPendingAction(null);
   if (action === 'delete') {
     const params = new URLSearchParams();
     if (pruneAtlas) params.set('prune_atlas', '1');
@@ -177,60 +305,85 @@ function executeHistAction(type) {
     const deleteUrl = itemType === 'snapshot'
       ? `/share/${id}`
       : `/history/${id}${query ? `?${query}` : ''}`;
-    apiFetch(deleteUrl, { method: 'DELETE' }).then(async (resp) => {
+    _historyMutationApiFetch(deleteUrl, { method: 'DELETE' }).then(async (resp) => {
       if (!resp.ok) throw await _historyMutationError(resp, 'Failed to delete run');
       if (itemType === 'snapshot') {
-        refreshHistoryPanel();
+        _historyMutationRefreshHistoryPanel();
         return;
       }
-      const s = _getStarred();
+      const s = _historyMutationGetStarred();
       if (s.has(command)) {
         s.delete(command);
-        _saveStarred(s);
-        apiFetch('/session/starred', {
+        _historyMutationSaveStarred(s);
+        _historyMutationApiFetch('/session/starred', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command }),
         }).catch(() => {});
       }
-      cmdHistory = cmdHistory.filter(c => c !== command);
-      recentPreviewHistory = recentPreviewHistory.filter(c => c !== command);
-      renderHistory();
-      refreshHistoryPanel();
-    }).catch((err) => showToast(err.userFacing ? err.message : 'Failed to delete run', 'error'));
+      _historyMutationSetCmdHistory(_historyMutationCmdHistory().filter(c => c !== command));
+      _historyMutationSetRecentPreviewHistory(
+        _historyMutationRecentPreviewHistory().filter(c => c !== command),
+      );
+      _historyMutationRenderHistory();
+      _historyMutationRefreshHistoryPanel();
+    }).catch((err) => _historyMutationShowToast(err.userFacing ? err.message : 'Failed to delete run', 'error'));
   } else if (action === 'clear-nonfav') {
-    apiFetch('/history?type=runs')
+    _historyMutationApiFetch('/history?type=runs')
       .then(r => r.json())
       .then(data => {
-        const starred   = _getStarred();
+        const starred   = _historyMutationGetStarred();
         const toDelete  = data.runs.filter(r => !starred.has(r.command));
         const deleteCmds = new Set(toDelete.map(r => r.command));
-        cmdHistory = cmdHistory.filter(c => !deleteCmds.has(c));
-        recentPreviewHistory = recentPreviewHistory.filter(c => !deleteCmds.has(c));
-        renderHistory();
+        _historyMutationSetCmdHistory(_historyMutationCmdHistory().filter(c => !deleteCmds.has(c)));
+        _historyMutationSetRecentPreviewHistory(
+          _historyMutationRecentPreviewHistory().filter(c => !deleteCmds.has(c)),
+        );
+        _historyMutationRenderHistory();
         return Promise.all(toDelete.map(async (r) => {
-          const resp = await apiFetch(`/history/${r.id}`, { method: 'DELETE' });
+          const resp = await _historyMutationApiFetch(`/history/${r.id}`, { method: 'DELETE' });
           if (!resp.ok) throw await _historyMutationError(resp, 'Failed to clear history');
           return resp;
         }));
       })
-      .then(() => refreshHistoryPanel())
-      .catch((err) => showToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
+      .then(() => _historyMutationRefreshHistoryPanel())
+      .catch((err) => _historyMutationShowToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
   } else {
-    apiFetch('/history', { method: 'DELETE' }).then(async (resp) => {
+    _historyMutationApiFetch('/history', { method: 'DELETE' }).then(async (resp) => {
       if (!resp.ok) throw await _historyMutationError(resp, 'Failed to clear history');
-      _saveStarred(new Set());
-      apiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
-      cmdHistory = [];
-      recentPreviewHistory = [];
-      renderHistory();
-      refreshHistoryPanel();
-    }).catch((err) => showToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
+      _historyMutationSaveStarred(new Set());
+      _historyMutationApiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
+      _historyMutationSetCmdHistory([]);
+      _historyMutationSetRecentPreviewHistory([]);
+      _historyMutationRenderHistory();
+      _historyMutationRefreshHistoryPanel();
+    }).catch((err) => _historyMutationShowToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
   }
 }
 
 function _setHistoryLoadState(loading) {
-  if (!historyLoadOverlay) return;
-  if (loading) showHistoryLoadOverlay();
-  else hideHistoryLoadOverlay();
+  if (!_historyMutationLoadOverlay()) return;
+  if (loading && typeof HISTORY_MUTATIONS_GLOBAL.showHistoryLoadOverlay === 'function') {
+    HISTORY_MUTATIONS_GLOBAL.showHistoryLoadOverlay();
+  } else if (!loading && typeof HISTORY_MUTATIONS_GLOBAL.hideHistoryLoadOverlay === 'function') {
+    HISTORY_MUTATIONS_GLOBAL.hideHistoryLoadOverlay();
+  }
 }
+
+if (typeof window !== 'undefined') {
+}
+
+export {
+  _buildHistoryAtlasCleanupContent,
+  _historyActiveScopeCan,
+  _historyCanManageHistory,
+  _historyCleanupLabel,
+  _historyCuratedCleanupLabel,
+  _historyMutationError,
+  _historyScopeDeniedMessage,
+  _historyShowPermissionDenied,
+  _loadHistoryAtlasCleanup,
+  _setHistoryLoadState,
+  confirmHistAction,
+  executeHistAction,
+};

@@ -73,6 +73,34 @@ describe('session.js', () => {
     })
   })
 
+  it('logClientError forwards safe event and level fields to the client log endpoint', async () => {
+    const { logClientError, fetchCalls } = loadSession({
+      storageData: { session_id: 'session-log', client_id: 'client-log' },
+    })
+    const err = new Error('lazy module failed')
+
+    logClientError('lazy asset load failed', err, {
+      event: 'LAZY_ASSET_LOAD_FAILED',
+      level: 'error',
+      asset_name: 'project_report',
+    })
+    await Promise.resolve()
+
+    expect(fetchCalls).toHaveLength(1)
+    expect(fetchCalls[0][0]).toBe('/log')
+    expect(JSON.parse(fetchCalls[0][1].body)).toEqual({
+      context: 'lazy asset load failed',
+      message: 'lazy module failed',
+      event: 'LAZY_ASSET_LOAD_FAILED',
+      level: 'error',
+      details: {
+        event: 'LAZY_ASSET_LOAD_FAILED',
+        level: 'error',
+        asset_name: 'project_report',
+      },
+    })
+  })
+
   it('describeFetchError returns a friendly offline message for network failures', () => {
     const { describeFetchError } = loadSession()
 
@@ -238,10 +266,10 @@ describe('session.js', () => {
     delete window.loadSessionPreferences
   })
 
-  it('storage event calls _updateOptionsSessionTokenStatus when available', () => {
-    const _updateOptionsSessionTokenStatus = vi.fn()
-    loadSession({ storageData: { session_id: 'uuid-b' } })
-    window._updateOptionsSessionTokenStatus = _updateOptionsSessionTokenStatus
+  it('storage event calls the registered session-token status updater when available', () => {
+    const updateOptionsSessionTokenStatus = vi.fn()
+    const { setSessionTokenHandlers } = loadSession({ storageData: { session_id: 'uuid-b' } })
+    setSessionTokenHandlers({ updateOptionsSessionTokenStatus })
 
     window.dispatchEvent(
       new StorageEvent('storage', {
@@ -250,15 +278,12 @@ describe('session.js', () => {
       }),
     )
 
-    expect(_updateOptionsSessionTokenStatus).toHaveBeenCalled()
-    delete window._updateOptionsSessionTokenStatus
+    expect(updateOptionsSessionTokenStatus).toHaveBeenCalled()
   })
 
-  it('storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent', () => {
+  it('storage event does not throw when reloadSessionHistory and session-token status updater are absent', () => {
     loadSession({ storageData: { session_id: 'uuid-c' } })
-    // Confirm neither global is defined
     delete window.reloadSessionHistory
-    delete window._updateOptionsSessionTokenStatus
 
     expect(() => {
       window.dispatchEvent(

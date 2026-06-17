@@ -1,161 +1,159 @@
-// darklab_shell Command Registry and FAQ command helpers.
+// darklab_shell Command Registry modal and command catalog helpers.
+import {
+  commandCatalogBody as importedCommandCatalogBody,
+  commandCatalogOverlay as importedCommandCatalogOverlay,
+  commandRegistryBody as importedCommandRegistryBody,
+  commandRegistryCategories as importedCommandRegistryCategories,
+  commandRegistryOverlay as importedCommandRegistryOverlay,
+  commandRegistrySearch as importedCommandRegistrySearch,
+  commandRegistrySubtitle as importedCommandRegistrySubtitle,
+} from '../../core/dom.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  getVisibleComposerInput as importedGetVisibleComposerInput,
+  markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+} from '../../ui/ui_helpers.js';
+import { activateFaqCommandChip as importedActivateFaqCommandChip } from './faq_helpers.js';
+import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
+import {
+  getCommandRegistryData as importedGetCommandRegistryData,
+  setCommandRegistryHandlers as importedSetCommandRegistryHandlers,
+} from './command_registry_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from '../../runtime_bridge.js';
 
-let allowedCommandsFaqData = null;
-let commandRegistryData = null;
-let commandRegistryCategory = 'All';
-let commandRegistryQuery = '';
-let faqHandleRegistry = [];
-const FAQ_CATEGORY_ORDER = [
-  'Getting started',
-  'Core features',
-  'Privacy & sessions',
-  'Keyboard & controls',
-  'Tool-specific behavior',
-  'Limits & retention',
-  'Other',
-];
-const FAQ_CATEGORY_OTHER = 'Other';
+const COMMAND_REGISTRY_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
-function faqSlug(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'item';
-}
-
-function normalizeFaqCategory(category) {
-  const text = String(category || '').trim();
-  return FAQ_CATEGORY_ORDER.includes(text) ? text : FAQ_CATEGORY_OTHER;
-}
-
-function getFaqHashTarget() {
-  const hash = String(window.location.hash || '').replace(/^#/, '');
-  if (!hash) return null;
-  const params = new URLSearchParams(hash);
-  const question = params.get('faq');
-  const section = params.get('faq-section');
-  if (question) return { kind: 'question', slug: question };
-  if (section) return { kind: 'section', slug: section };
+function _commandRegistryGlobalData() {
+  if (typeof importedGetCommandRegistryData === 'function') {
+    const data = importedGetCommandRegistryData();
+    if (data) return data;
+  }
+  if (typeof window !== 'undefined' && window.commandRegistryData) return window.commandRegistryData;
+  if (typeof globalThis !== 'undefined' && globalThis.commandRegistryData) return globalThis.commandRegistryData;
   return null;
 }
 
-function replaceFaqHash(kind, slug) {
-  if (!window.history || typeof window.history.replaceState !== 'function') return;
-  const base = `${window.location.pathname}${window.location.search}`;
-  window.history.replaceState(null, '', `${base}#${kind}=${encodeURIComponent(slug)}`);
+let commandRegistryData = _commandRegistryGlobalData();
+let commandRegistryCategory = 'All';
+let commandRegistryQuery = '';
+
+function _commandRegistryOverlay() {
+  if (typeof importedCommandRegistryOverlay !== 'undefined' && importedCommandRegistryOverlay) return importedCommandRegistryOverlay;
+  return COMMAND_REGISTRY_GLOBAL.commandRegistryOverlay || null;
 }
 
-function clearFaqHash() {
-  const target = getFaqHashTarget();
-  if (!target || !window.history || typeof window.history.replaceState !== 'function') return;
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+function _commandRegistryBody() {
+  if (typeof importedCommandRegistryBody !== 'undefined' && importedCommandRegistryBody) return importedCommandRegistryBody;
+  return COMMAND_REGISTRY_GLOBAL.commandRegistryBody || null;
 }
 
-function applyFaqHashTarget() {
-  if (!faqBody) return false;
-  const target = getFaqHashTarget();
-  if (!target) return false;
-  if (target.kind === 'question') {
-    const matched = faqHandleRegistry.find(handle => handle.panel.dataset.faqQuestion === target.slug);
-    if (!matched) return false;
-    matched.open();
-    if (typeof matched.panel.scrollIntoView === 'function') matched.panel.scrollIntoView({ block: 'start' });
-    return true;
-  }
-  if (target.kind === 'section') {
-    const section = [...faqBody.querySelectorAll('[data-faq-section]')]
-      .find(el => el.dataset.faqSection === target.slug);
-    if (!section) return false;
-    if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
-    return true;
-  }
-  return false;
+function _commandRegistrySearch() {
+  if (typeof importedCommandRegistrySearch !== 'undefined' && importedCommandRegistrySearch) return importedCommandRegistrySearch;
+  return COMMAND_REGISTRY_GLOBAL.commandRegistrySearch || null;
 }
 
-function _buildFaqLimitsContent(cfg) {
-  if (!cfg) return '';
-  function _fmtDuration(s) {
-    if (s >= 3600 && s % 3600 === 0) return (s / 3600) + (s / 3600 === 1 ? ' hour' : ' hours');
-    if (s >= 60 && s % 60 === 0) return (s / 60) + (s / 60 === 1 ? ' minute' : ' minutes');
-    return s + (s === 1 ? ' second' : ' seconds');
-  }
-  const timeout = cfg.command_timeout_seconds || 0;
-  const maxLines = cfg.max_output_lines || 0;
-  const retention = cfg.permalink_retention_days || 0;
-
-  const rows = [
-    {
-      label: 'Command timeout',
-      value: timeout > 0
-        ? `<strong>${_fmtDuration(timeout)}</strong> — commands are automatically killed after this time; a notice appears inline in the output`
-        : '<strong>None</strong> — commands run until they finish or you click ■ Kill',
-    },
-    {
-      label: 'Output line limit',
-      value: maxLines > 0
-        ? `<strong>${maxLines.toLocaleString()} lines</strong> per tab — older lines are dropped from the top when this is reached`
-        : '<strong>Unlimited</strong>',
-    },
-    {
-      label: 'Permalink & history retention',
-      value: retention > 0
-        ? `<strong>${retention} day${retention === 1 ? '' : 's'}</strong> — run history and share links are deleted after this period`
-        : '<strong>Unlimited</strong> — run history and share links are kept indefinitely',
-    },
-  ];
-
-  const frag = document.createDocumentFragment();
-  const list = document.createElement('div');
-  list.className = 'faq-limits-list';
-  rows.forEach(r => {
-    const row = document.createElement('div');
-    row.className = 'faq-limits-row';
-
-    const labelEl = document.createElement('div');
-    labelEl.className = 'faq-limits-label';
-    labelEl.textContent = r.label;
-
-    const valueEl = document.createElement('div');
-    valueEl.className = 'faq-limits-value';
-    valueEl.innerHTML = r.value;
-
-    row.appendChild(labelEl);
-    row.appendChild(valueEl);
-    list.appendChild(row);
-  });
-  frag.appendChild(list);
-  return frag;
+function _commandRegistryCategoriesEl() {
+  if (typeof importedCommandRegistryCategories !== 'undefined' && importedCommandRegistryCategories) return importedCommandRegistryCategories;
+  return COMMAND_REGISTRY_GLOBAL.commandRegistryCategories || null;
 }
 
-function renderFaqLimits(cfg) {
-  const limitsEl = document.getElementById('faq-limits-text');
-  if (!limitsEl || !cfg) return;
-  limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
+function _commandRegistrySubtitleEl() {
+  if (typeof importedCommandRegistrySubtitle !== 'undefined' && importedCommandRegistrySubtitle) return importedCommandRegistrySubtitle;
+  return COMMAND_REGISTRY_GLOBAL.commandRegistrySubtitle || null;
+}
+
+function _commandCatalogOverlay() {
+  if (typeof importedCommandCatalogOverlay !== 'undefined' && importedCommandCatalogOverlay) return importedCommandCatalogOverlay;
+  return COMMAND_REGISTRY_GLOBAL.commandCatalogOverlay || null;
+}
+
+function _commandCatalogBody() {
+  if (typeof importedCommandCatalogBody !== 'undefined' && importedCommandCatalogBody) return importedCommandCatalogBody;
+  return COMMAND_REGISTRY_GLOBAL.commandCatalogBody || null;
+}
+
+function _commandRegistryRefocusComposerAfterAction(options) {
+  const refocus = typeof importedRefocusComposerAfterAction === 'function'
+    ? importedRefocusComposerAfterAction
+    : (typeof COMMAND_REGISTRY_GLOBAL.refocusComposerAfterAction === 'function' ? COMMAND_REGISTRY_GLOBAL.refocusComposerAfterAction : null);
+  if (refocus) refocus(options);
+}
+
+function _commandRegistryBlurVisibleComposerInputIfMobile() {
+  const blur = typeof importedBlurVisibleComposerInputIfMobile === 'function'
+    ? importedBlurVisibleComposerInputIfMobile
+    : (typeof COMMAND_REGISTRY_GLOBAL.blurVisibleComposerInputIfMobile === 'function' ? COMMAND_REGISTRY_GLOBAL.blurVisibleComposerInputIfMobile : null);
+  if (blur) blur();
+}
+
+function _commandRegistryMarkInteractionSurfaceReady(name, overlay, modal) {
+  const mark = typeof importedMarkInteractionSurfaceReady === 'function'
+    ? importedMarkInteractionSurfaceReady
+    : (typeof COMMAND_REGISTRY_GLOBAL.markInteractionSurfaceReady === 'function' ? COMMAND_REGISTRY_GLOBAL.markInteractionSurfaceReady : null);
+  if (mark) mark(name, overlay, modal);
+}
+
+function _commandRegistryBindPressable(el, options) {
+  const bind = typeof importedBindPressable === 'function'
+    ? importedBindPressable
+    : (typeof COMMAND_REGISTRY_GLOBAL.bindPressable === 'function' ? COMMAND_REGISTRY_GLOBAL.bindPressable : null);
+  return bind ? bind(el, options) : null;
+}
+
+function _commandRegistryApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || (typeof COMMAND_REGISTRY_GLOBAL.apiFetch === 'function' ? COMMAND_REGISTRY_GLOBAL.apiFetch : null);
+  if (!fetcher) return Promise.reject(new Error('apiFetch is not available'));
+  return fetcher(...args);
+}
+
+function _commandRegistryClientError(context, err) {
+  const log = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedRuntimeLogClientError === 'function'
+      ? importedRuntimeLogClientError
+      : null
+  ) || (typeof COMMAND_REGISTRY_GLOBAL.logClientError === 'function' ? COMMAND_REGISTRY_GLOBAL.logClientError : null);
+  if (log) log(context, err);
 }
 
 function showCommandRegistryOverlay() {
-  if (!commandRegistryOverlay) return;
-  commandRegistryOverlay.classList.remove('u-hidden');
-  commandRegistryOverlay.classList.add('open');
-  commandRegistryOverlay.setAttribute('aria-hidden', 'false');
+  const overlay = _commandRegistryOverlay();
+  if (!overlay) return;
+  overlay.classList.remove('u-hidden');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
 }
 
 function hideCommandRegistryOverlay() {
-  if (!commandRegistryOverlay) return;
-  commandRegistryOverlay.classList.add('u-hidden');
-  commandRegistryOverlay.classList.remove('open');
-  commandRegistryOverlay.setAttribute('aria-hidden', 'true');
+  const overlay = _commandRegistryOverlay();
+  if (!overlay) return;
+  overlay.classList.add('u-hidden');
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
 }
 
 function isCommandRegistryOverlayOpen() {
-  return !!(commandRegistryOverlay && commandRegistryOverlay.classList.contains('open'));
+  const overlay = _commandRegistryOverlay();
+  return !!(overlay && overlay.classList.contains('open'));
 }
 
 function closeCommandRegistry() {
   hideCommandRegistryOverlay();
-  refocusComposerAfterAction({ defer: true });
+  _commandRegistryRefocusComposerAfterAction({ defer: true });
 }
 
 function _commandRegistryCommands() {
@@ -203,8 +201,9 @@ function _commandRegistrySummaryText(command) {
 }
 
 function renderCommandRegistryCategories() {
-  if (!commandRegistryCategories) return;
-  commandRegistryCategories.replaceChildren();
+  const categoriesEl = _commandRegistryCategoriesEl();
+  if (!categoriesEl) return;
+  categoriesEl.replaceChildren();
   _commandRegistryCategories().forEach(category => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -217,7 +216,7 @@ function renderCommandRegistryCategories() {
       commandRegistryCategory = category;
       renderCommandRegistry();
     });
-    commandRegistryCategories.appendChild(button);
+    categoriesEl.appendChild(button);
   });
 }
 
@@ -254,7 +253,16 @@ function makeCommandRegistryRow(command) {
   chev.textContent = '›';
 
   row.append(rootEl, text, chev);
-  row.addEventListener('click', () => openCommandCatalogModal(root));
+  const openDetails = () => openCommandCatalogModal(root);
+  if (_commandRegistryBindPressable(row, {
+      onActivate: openDetails,
+      clearPressStyle: true,
+    })) {
+    return row;
+  }
+  {
+    row.addEventListener('click', openDetails);
+  }
   return row;
 }
 
@@ -285,20 +293,26 @@ function makeCommandRegistryPipeSection(pipes) {
 }
 
 function renderCommandRegistry() {
-  if (!commandRegistryBody) return;
+  const body = _commandRegistryBody();
+  if (!body) return;
+  const globalData = _commandRegistryGlobalData();
+  if (globalData) {
+    commandRegistryData = globalData;
+  }
   renderCommandRegistryCategories();
   const total = _commandRegistryCommands().length;
-  if (commandRegistrySubtitle) {
-    commandRegistrySubtitle.textContent = total
+  const subtitle = _commandRegistrySubtitleEl();
+  if (subtitle) {
+    subtitle.textContent = total
       ? `${total} supported command${total === 1 ? '' : 's'} from the command registry.`
       : 'Browse supported tools, examples, flags, and subcommands.';
   }
-  commandRegistryBody.replaceChildren();
+  body.replaceChildren();
   if (!commandRegistryData) {
     const loading = document.createElement('div');
     loading.className = 'command-registry-empty';
     loading.textContent = 'Loading command registry...';
-    commandRegistryBody.appendChild(loading);
+    body.appendChild(loading);
     return;
   }
   const commands = _commandRegistryFilteredCommands();
@@ -308,110 +322,98 @@ function renderCommandRegistry() {
     empty.textContent = total
       ? 'No commands match that search.'
       : 'No command registry entries are available right now.';
-    commandRegistryBody.appendChild(empty);
+    body.appendChild(empty);
   } else {
     commands.forEach(command => {
       const row = makeCommandRegistryRow(command);
-      if (row) commandRegistryBody.appendChild(row);
+      if (row) body.appendChild(row);
     });
   }
   const pipeSection = makeCommandRegistryPipeSection(commandRegistryData?.pipe_helpers);
-  if (pipeSection) commandRegistryBody.appendChild(pipeSection);
+  if (pipeSection) body.appendChild(pipeSection);
 }
 
 function openCommandRegistry() {
-  if (!commandRegistryOverlay || !commandRegistryBody) return;
-  _closeMajorOverlays();
-  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  const overlay = _commandRegistryOverlay();
+  const body = _commandRegistryBody();
+  if (!overlay || !body) return;
+  const close = (typeof importedCloseMajorOverlays === 'function' && importedCloseMajorOverlays)
+    || COMMAND_REGISTRY_GLOBAL._closeMajorOverlays;
+  if (typeof close === 'function') close();
+  _commandRegistryBlurVisibleComposerInputIfMobile();
   renderCommandRegistry();
   showCommandRegistryOverlay();
-  if (typeof markInteractionSurfaceReady === 'function') {
-    markInteractionSurfaceReady('command-registry', commandRegistryOverlay, document.getElementById('command-registry-modal'));
-  }
+  _commandRegistryMarkInteractionSurfaceReady('command-registry', overlay, document.getElementById('command-registry-modal'));
   const mobileMode = document.body && document.body.classList.contains('mobile-terminal-mode');
-  if (!mobileMode && commandRegistrySearch) {
-    window.setTimeout(() => commandRegistrySearch.focus(), 0);
+  const search = _commandRegistrySearch();
+  if (!mobileMode && search) {
+    window.setTimeout(() => search.focus(), 0);
   }
 }
 
-function wireCommandRegistryOpenButtons(root = document) {
-  if (!root) return;
-  root.querySelectorAll('[data-command-registry-open]').forEach(btn => {
-    if (btn.dataset.commandRegistryOpenWired === '1') return;
-    btn.dataset.commandRegistryOpenWired = '1';
-    btn.addEventListener('click', () => openCommandRegistry());
-  });
-}
-
-commandRegistrySearch?.addEventListener('input', () => {
-  commandRegistryQuery = commandRegistrySearch.value || '';
+_commandRegistrySearch()?.addEventListener('input', () => {
+  commandRegistryQuery = _commandRegistrySearch()?.value || '';
   renderCommandRegistry();
 });
 
-function openAutocompleteForVisibleComposer() {
-  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
-    if (typeof acHide === 'function') acHide();
-    return false;
-  }
-  const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-  if (!input || typeof input.value !== 'string') return false;
-  const value = input.value;
-  const cursor = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
-  if (!value.trim() || typeof getAutocompleteMatches !== 'function') return false;
-  const matches = getAutocompleteMatches(value, cursor);
-  acFiltered = typeof limitAutocompleteMatchesForDisplay === 'function'
-    ? limitAutocompleteMatchesForDisplay(matches, 12)
-    : matches.slice(0, 12);
-  acIndex = -1;
-  if (!acFiltered.length) {
-    if (typeof acHide === 'function') acHide();
-    return false;
-  }
-  if (typeof acShow === 'function') acShow(acFiltered);
-  return true;
-}
-
-function activateFaqCommandChip(cmd) {
-  if (!cmd) return;
-  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
-    if (typeof acHide === 'function') acHide();
-    return;
-  }
-  const next = `${cmd} `;
-  setComposerValue(next, next.length, next.length, { dispatch: false });
-  _closeMajorOverlays();
-  refocusComposerAfterAction({ defer: true });
-  setTimeout(() => {
-    openAutocompleteForVisibleComposer();
-  }, 0);
-}
-if (typeof globalThis !== 'undefined') globalThis.activateFaqCommandChip = activateFaqCommandChip;
-
 function showCommandCatalogOverlay() {
-  if (!commandCatalogOverlay) return;
-  commandCatalogOverlay.classList.remove('u-hidden');
-  commandCatalogOverlay.classList.add('open');
-  commandCatalogOverlay.setAttribute('aria-hidden', 'false');
+  const overlay = _commandCatalogOverlay();
+  if (!overlay) return;
+  overlay.classList.remove('u-hidden');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
 }
 
 function hideCommandCatalogOverlay() {
-  if (!commandCatalogOverlay) return;
-  commandCatalogOverlay.classList.add('u-hidden');
-  commandCatalogOverlay.classList.remove('open');
-  commandCatalogOverlay.setAttribute('aria-hidden', 'true');
+  const overlay = _commandCatalogOverlay();
+  if (!overlay) return;
+  overlay.classList.add('u-hidden');
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
 }
 
 function isCommandCatalogOverlayOpen() {
-  return !!(commandCatalogOverlay && commandCatalogOverlay.classList.contains('open'));
+  const overlay = _commandCatalogOverlay();
+  return !!(overlay && overlay.classList.contains('open'));
 }
 
 function closeCommandCatalogModal() {
   hideCommandCatalogOverlay();
-  refocusComposerAfterAction({ defer: true });
+  _commandRegistryRefocusComposerAfterAction({ defer: true });
 }
 
 function commandCatalogText(value, fallback = '') {
   return String(value || fallback || '').trim();
+}
+
+function activateCommandCatalogExample(value) {
+  const command = commandCatalogText(value);
+  if (!command) return;
+  const next = `${command} `;
+  if (typeof importedActivateFaqCommandChip === 'function') {
+    importedActivateFaqCommandChip(command);
+  }
+  const mobileInput = document.getElementById('mobile-cmd');
+  const desktopInput = document.getElementById('cmd');
+  const visibleInput = typeof importedGetVisibleComposerInput === 'function'
+    ? importedGetVisibleComposerInput()
+    : null;
+  const target = document.body?.classList?.contains('mobile-terminal-mode')
+    ? (mobileInput || visibleInput || desktopInput)
+    : (visibleInput || mobileInput || desktopInput);
+  if (target && target.value !== next) {
+    if (typeof importedSetComposerValue === 'function') {
+      importedSetComposerValue(next, next.length, next.length, { dispatch: false });
+    }
+    target.value = next;
+    if (typeof target.setSelectionRange === 'function') target.setSelectionRange(next.length, next.length);
+  }
+  if (mobileInput && mobileInput.value !== next) {
+    mobileInput.value = next;
+    if (typeof mobileInput.setSelectionRange === 'function') {
+      mobileInput.setSelectionRange(next.length, next.length);
+    }
+  }
 }
 
 function appendCommandCatalogSection(body, title, items, rowBuilder) {
@@ -460,6 +462,14 @@ function makeCommandCatalogExampleRow(item) {
   chip.title = 'Load this example into the prompt';
   chip.textContent = value;
   chip.dataset.commandExample = value;
+  const activate = () => activateCommandCatalogExample(value);
+  chip.addEventListener('click', activate);
+  chip.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    activate();
+  });
+  chip.dataset.commandExampleWired = '1';
   const description = document.createElement('span');
   description.className = 'command-catalog-note';
   description.textContent = commandCatalogText(item?.description);
@@ -535,12 +545,12 @@ function appendCommandCatalogSubcommand(body, root, item) {
   body.appendChild(section);
 }
 
-function wireCommandCatalogExamples(root = commandCatalogBody) {
+function wireCommandCatalogExamples(root = _commandCatalogBody()) {
   if (!root) return;
   root.querySelectorAll('[data-command-example]').forEach(chip => {
     if (chip.dataset.commandExampleWired === '1') return;
     chip.dataset.commandExampleWired = '1';
-    const activate = () => activateFaqCommandChip(chip.dataset.commandExample || '');
+    const activate = () => activateCommandCatalogExample(chip.dataset.commandExample || '');
     chip.addEventListener('click', activate);
     chip.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -551,8 +561,9 @@ function wireCommandCatalogExamples(root = commandCatalogBody) {
 }
 
 function renderCommandCatalogModal(data) {
-  if (!commandCatalogBody) return;
-  commandCatalogBody.replaceChildren();
+  const body = _commandCatalogBody();
+  if (!body) return;
+  body.replaceChildren();
   const rootLabel = [
     commandCatalogText(data?.root, 'command'),
     commandCatalogText(data?.subcommand),
@@ -569,222 +580,69 @@ function renderCommandCatalogModal(data) {
   meta.className = 'command-catalog-meta';
   meta.textContent = commandCatalogText(data?.category, 'Allowed command');
   summary.append(root, description, meta);
-  commandCatalogBody.appendChild(summary);
+  body.appendChild(summary);
 
-  appendCommandCatalogSection(commandCatalogBody, 'Examples', data?.examples || [], makeCommandCatalogExampleRow);
-  appendCommandCatalogSection(commandCatalogBody, 'Arguments', data?.arguments || [], makeCommandCatalogArgumentRow);
-  (data?.subcommands || []).forEach(item => appendCommandCatalogSubcommand(commandCatalogBody, data?.root, item));
-  appendCommandCatalogSection(commandCatalogBody, 'Flags', data?.flags || [], makeCommandCatalogFlagRow);
-  appendCommandCatalogSection(commandCatalogBody, 'Workspace File Flags', data?.workspace_flags || [], item => (
+  appendCommandCatalogSection(body, 'Examples', data?.examples || [], makeCommandCatalogExampleRow);
+  appendCommandCatalogSection(body, 'Arguments', data?.arguments || [], makeCommandCatalogArgumentRow);
+  (data?.subcommands || []).forEach(item => appendCommandCatalogSubcommand(body, data?.root, item));
+  appendCommandCatalogSection(body, 'Flags', data?.flags || [], makeCommandCatalogFlagRow);
+  appendCommandCatalogSection(body, 'Workspace File Flags', data?.workspace_flags || [], item => (
     makeCommandCatalogRow(item?.flag, [item?.mode, item?.value].map(value => commandCatalogText(value)).filter(Boolean).join(' · '))
   ));
-  appendCommandCatalogSection(commandCatalogBody, 'App Handling', data?.runtime_notes || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(body, 'App Handling', data?.runtime_notes || [], makeCommandCatalogNoteRow);
 
   const knowledge = data?.knowledge || {};
-  appendCommandCatalogSection(commandCatalogBody, 'Notes', knowledge.notes || [], makeCommandCatalogNoteRow);
-  appendCommandCatalogSection(commandCatalogBody, 'Gotchas', knowledge.gotchas || [], makeCommandCatalogNoteRow);
-  appendCommandCatalogSection(commandCatalogBody, 'Safe Defaults', knowledge.safe_defaults || [], makeCommandCatalogNoteRow);
-  appendCommandCatalogSection(commandCatalogBody, 'Common Flags', knowledge.common_flags || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(body, 'Notes', knowledge.notes || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(body, 'Gotchas', knowledge.gotchas || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(body, 'Safe Defaults', knowledge.safe_defaults || [], makeCommandCatalogNoteRow);
+  appendCommandCatalogSection(body, 'Common Flags', knowledge.common_flags || [], makeCommandCatalogNoteRow);
   if (knowledge.artifact_behavior) {
-    appendCommandCatalogSection(commandCatalogBody, 'Artifact Behavior', [knowledge.artifact_behavior], makeCommandCatalogNoteRow);
+    appendCommandCatalogSection(body, 'Artifact Behavior', [knowledge.artifact_behavior], makeCommandCatalogNoteRow);
   }
 
-  wireCommandCatalogExamples(commandCatalogBody);
+  wireCommandCatalogExamples(body);
 }
 
 async function openCommandCatalogModal(cmd) {
   const root = commandCatalogText(cmd).toLowerCase();
-  if (!root || !commandCatalogOverlay || !commandCatalogBody) return;
+  const overlay = _commandCatalogOverlay();
+  const body = _commandCatalogBody();
+  if (!root || !overlay || !body) return;
   const title = document.getElementById('command-catalog-title');
   if (title) title.textContent = root.toUpperCase();
-  commandCatalogBody.textContent = 'Loading...';
+  body.textContent = 'Loading...';
   showCommandCatalogOverlay();
   try {
-    const resp = await apiFetch(`/commands/catalog/${encodeURIComponent(root)}`);
+    const resp = await _commandRegistryApiFetch(`/commands/catalog/${encodeURIComponent(root)}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     renderCommandCatalogModal(await resp.json());
   } catch (err) {
-    logClientError('failed to load command catalog details', err);
-    commandCatalogBody.textContent = 'Command details are unavailable right now.';
+    _commandRegistryClientError('failed to load command catalog details', err);
+    body.textContent = 'Command details are unavailable right now.';
   }
 }
 
-function wireFaqCommandChips(root = faqBody) {
-  if (!root) return;
-  root.querySelectorAll('.faq-chip[data-faq-command]').forEach(chip => {
-    if (chip.dataset.faqWired === '1') return;
-    chip.dataset.faqWired = '1';
-    chip.addEventListener('click', () => {
-      activateFaqCommandChip(chip.dataset.faqCommand || '');
-    });
-    chip.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      e.preventDefault();
-      activateFaqCommandChip(chip.dataset.faqCommand || '');
-    });
+if (typeof importedSetCommandRegistryHandlers === 'function') {
+  importedSetCommandRegistryHandlers({
+    openCommandRegistry,
+    closeCommandRegistry,
+    isCommandRegistryOverlayOpen,
+    renderCommandRegistry,
   });
 }
 
-function shouldShowVisualTourFaqLink() {
-  if (!(APP_CONFIG && APP_CONFIG.tour_enabled === true)) return false;
-  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return false;
-  const chapters = Array.isArray(APP_CONFIG.tour_chapters) ? APP_CONFIG.tour_chapters : [];
-  return chapters.some(chapter => chapter && typeof chapter === 'object');
-}
-
-function appendVisualTourFaqLink() {
-  if (!faqBody || !shouldShowVisualTourFaqLink()) return null;
-  const item = document.createElement('div');
-  item.className = 'faq-tour-entry';
-
-  const title = document.createElement('div');
-  title.className = 'faq-tour-entry-title';
-  title.textContent = 'Tour the app';
-
-  const body = document.createElement('div');
-  body.className = 'faq-tour-entry-body';
-  const copy = document.createElement('span');
-  copy.textContent = 'Open a quick visual walkthrough of the shell, history, projects, workflows, and other core features.';
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'btn btn-secondary btn-compact faq-tour-open';
-  button.textContent = 'Open visual tour';
-  button.setAttribute('aria-label', 'Open the visual tour');
-  const activate = () => {
-    if (typeof openTourModal === 'function') {
-      const opened = openTourModal({ source: 'faq' });
-      if (opened && typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) {
-        clearFaqHash();
-        hideFaqOverlay();
-      }
-    }
-  };
-  if (typeof bindPressable === 'function') {
-    bindPressable(button, {
-      refocusComposer: false,
-      clearPressStyle: true,
-      onActivate: activate,
-    });
-  } else {
-    button.addEventListener('click', activate);
-  }
-  body.append(copy, button);
-  item.append(title, body);
-  faqBody.prepend(item);
-  return item;
-}
-
-function renderAllowedCommandsFaq(data) {
-  const el = document.getElementById('faq-allowed-text');
-  if (!el || !data) return;
-  el.replaceChildren();
-  const intro = document.createElement('div');
-  intro.className = 'allowed-intro';
-  const count = Array.isArray(data.commands) ? data.commands.length : 0;
-  intro.textContent = count
-    ? `Open the Command Registry to browse ${count} supported command${count === 1 ? '' : 's'}, examples, flags, and subcommands.`
-    : 'Open the Command Registry to browse supported commands, examples, flags, and subcommands.';
-  el.appendChild(intro);
-  const actions = document.createElement('div');
-  actions.className = 'allowed-actions';
-  const openBtn = document.createElement('button');
-  openBtn.type = 'button';
-  openBtn.className = 'btn btn-secondary btn-compact';
-  openBtn.textContent = 'Open Command Registry';
-  openBtn.dataset.commandRegistryOpen = '1';
-  actions.appendChild(openBtn);
-  const cliHint = document.createElement('span');
-  cliHint.className = 'allowed-cli-hint';
-  cliHint.textContent = 'Terminal helpers: commands, commands --external, commands info <command>';
-  actions.appendChild(cliHint);
-  el.appendChild(actions);
-  wireCommandRegistryOpenButtons(el);
-}
-
-function renderFaqItems(items) {
-  // FAQ content is backend-driven so operators can extend it, but chips and
-  // special UI sections are still wired client-side after the HTML is inserted.
-  if (!faqBody) return;
-  faqBody.innerHTML = '';
-  const faqHandles = [];
-  const grouped = new Map(FAQ_CATEGORY_ORDER.map(category => [category, []]));
-  (items || []).forEach(item => {
-    if (!item || typeof item !== 'object') return;
-    const category = normalizeFaqCategory(item && item.category);
-    grouped.get(category).push(item);
-  });
-
-  FAQ_CATEGORY_ORDER.forEach(category => {
-    const sectionItems = grouped.get(category) || [];
-    if (!sectionItems.length) return;
-
-    const section = document.createElement('section');
-    section.className = 'faq-section';
-    section.id = `faq-section-${faqSlug(category)}`;
-    section.dataset.faqSection = faqSlug(category);
-
-    const header = document.createElement('div');
-    header.className = 'faq-section-header';
-    header.textContent = category;
-    header.setAttribute('tabindex', '-1');
-    section.appendChild(header);
-
-    sectionItems.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'faq-item';
-      const questionSlug = faqSlug(item.question);
-      div.id = `faq-${questionSlug}`;
-      div.dataset.faqQuestion = questionSlug;
-
-      const q = document.createElement('div');
-      q.className = 'faq-q';
-      q.textContent = item.question || '';
-
-      const a = document.createElement('div');
-      a.className = 'faq-a';
-      if (item.ui_kind === 'allowed_commands') {
-        a.id = 'faq-allowed-text';
-        a.textContent = 'Loading…';
-      } else if (item.ui_kind === 'limits') {
-        a.id = 'faq-limits-text';
-        a.textContent = 'Loading…';
-      } else if (item.answer_html) {
-        a.innerHTML = item.answer_html;
-      } else {
-        a.textContent = item.answer || '';
-      }
-
-      q.setAttribute('role', 'button');
-      q.setAttribute('tabindex', '0');
-      // FAQ question is a disclosure trigger. role="button" divs never receive
-      // DOM focus from click, so the pressable's blur is a no-op — the
-      // disclosure helper inherits clearPressStyle to punch through sticky
-      // :hover highlights.
-      const handle = bindDisclosure(q, {
-        panel: div,
-        openClass: 'faq-open',
-        clearPressStyle: true,
-        onToggle: (open) => {
-          if (open && typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) {
-            replaceFaqHash('faq', questionSlug);
-          }
-        },
-      });
-      if (handle) faqHandles.push({ ...handle, panel: div });
-
-      div.appendChild(q);
-      div.appendChild(a);
-      section.appendChild(div);
-    });
-    faqBody.appendChild(section);
-  });
-
-  faqHandleRegistry = faqHandles;
-  const openedFromHash = applyFaqHashTarget();
-  if (!openedFromHash && faqHandles[0]) faqHandles[0].open();
-
-  appendVisualTourFaqLink();
-  renderAllowedCommandsFaq(allowedCommandsFaqData);
-  renderFaqLimits(APP_CONFIG);
-  wireFaqCommandChips(faqBody);
-}
+export {
+  showCommandRegistryOverlay,
+  hideCommandRegistryOverlay,
+  isCommandRegistryOverlayOpen,
+  closeCommandRegistry,
+  renderCommandRegistry,
+  openCommandRegistry,
+  showCommandCatalogOverlay,
+  hideCommandCatalogOverlay,
+  closeCommandCatalogModal,
+  isCommandCatalogOverlayOpen,
+  wireCommandCatalogExamples,
+  renderCommandCatalogModal,
+  openCommandCatalogModal,
+};

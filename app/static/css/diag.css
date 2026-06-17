@@ -125,11 +125,19 @@ body.diag-page::before { display: none; }
   flex: 0 0 auto;
 }
 
+.diag-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .diag-main {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-areas:
     "app      db       redis    assets"
+    "ai       ai       pty      pty"
     "classify classify classify classify"
     "drift    drift    drift    drift"
     "dbd      dbd      redisd   redisd"
@@ -145,6 +153,11 @@ body.diag-page::before { display: none; }
   box-sizing: border-box;
 }
 
+.diag-audit-main {
+  display: block;
+  max-width: 1480px;
+}
+
 /* ── Section card ──────────────────────────────────────────────────────────── */
 .diag-section {
   background: var(--theme-panel-bg);
@@ -157,9 +170,11 @@ body.diag-page::before { display: none; }
 .diag-section.s-db       { grid-area: db; }
 .diag-section.s-redis    { grid-area: redis; }
 .diag-section.s-assets   { grid-area: assets; }
+.diag-section.s-ai       { grid-area: ai; }
 .diag-section.s-db-details { grid-area: dbd; }
 .diag-section.s-redis-details { grid-area: redisd; }
 .diag-section.s-storage { grid-area: storage; }
+.diag-section.s-pty      { grid-area: pty; }
 .diag-section.s-config   { grid-area: cfg; }
 .diag-section.s-classifier { grid-area: classify; }
 .diag-section.s-classifier-drift { grid-area: drift; }
@@ -167,6 +182,7 @@ body.diag-page::before { display: none; }
 .diag-section.s-outcomes { grid-area: outcomes; }
 .diag-section.s-cmds     { grid-area: cmds; }
 .diag-section.s-tools    { grid-area: tools; }
+.diag-section.s-audit    { width: 100%; }
 
 .diag-summary-card {
   min-height: 128px;
@@ -428,7 +444,8 @@ body.diag-page::before { display: none; }
 
 /* ── Classifier inspector ─────────────────────────────────────────────────── */
 .diag-classifier-form,
-.diag-drift-form {
+.diag-drift-form,
+.diag-audit-filter-form {
   display: grid;
   gap: 12px;
   padding: 16px 18px;
@@ -443,6 +460,12 @@ body.diag-page::before { display: none; }
 .diag-classifier-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
+  gap: 12px;
+}
+
+.diag-audit-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -610,6 +633,91 @@ body.diag-page::before { display: none; }
   font-size: 11px;
   white-space: pre-wrap;
 }
+.diag-audit-table-wrap {
+  overflow-x: auto;
+}
+.diag-audit-table {
+  table-layout: fixed;
+  min-width: 1080px;
+}
+.diag-audit-table .diag-audit-col-created { width: 250px; }
+.diag-audit-table .diag-audit-col-event { width: 220px; }
+.diag-audit-table .diag-audit-col-actor { width: 160px; }
+.diag-audit-table .diag-audit-col-target { width: 380px; }
+.diag-audit-table .diag-audit-col-scope { width: 304px; }
+.diag-audit-table .diag-audit-col-details { width: 92px; }
+.diag-audit-table th:not(:first-child) {
+  text-align: left;
+}
+.diag-audit-table th,
+.diag-audit-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diag-audit-table td {
+  vertical-align: top;
+}
+.diag-audit-target a,
+.diag-audit-target span,
+.diag-audit-scope-base,
+.diag-audit-team-id {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+.diag-audit-target a,
+.diag-audit-target span {
+  max-width: 100%;
+}
+.diag-audit-scope-base { max-width: 78px; }
+.diag-audit-team-id { max-width: calc(100% - 82px); }
+.diag-audit-scope {
+  max-width: 304px;
+}
+.diag-audit-details-cell {
+  overflow: visible !important;
+  width: 92px;
+}
+.diag-audit-time,
+.diag-audit-event {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.diag-audit-details summary {
+  cursor: pointer;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.diag-audit-details pre {
+  width: min(560px, calc(100vw - 48px));
+  min-width: 320px;
+  max-width: 560px;
+  max-height: 220px;
+  margin: 26px 0 0;
+  transform: translateX(calc(-100% + 92px));
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  background: var(--theme-bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.diag-audit-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--theme-panel-border);
+}
 .diag-storage-summary {
   display: flex;
   flex-wrap: wrap;
@@ -764,6 +872,7 @@ body.diag-page::before { display: none; }
     grid-template-areas:
       "app       db"
       "redis     assets"
+      "ai        pty"
       "classify  classify"
       "dbd       dbd"
       "redisd    redisd"
@@ -775,6 +884,7 @@ body.diag-page::before { display: none; }
   }
   .diag-config-grid { grid-template-columns: 1fr; }
   .diag-classifier-grid { grid-template-columns: 1fr; }
+  .diag-audit-filter-grid { grid-template-columns: 1fr; }
   .diag-cmd-cols { grid-template-columns: 1fr; }
   .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--theme-panel-border); }
 }
@@ -784,6 +894,10 @@ body.diag-page::before { display: none; }
    the header for the touch context. Desktop browsers at the same width keep
    the full header chrome and no back button, matching the shell's behaviour. */
 @media (max-width: 900px) and (pointer: coarse) {
+  body.diag-page {
+    overflow-x: hidden;
+  }
+
   body.diag-page .diag-topbar {
     flex-direction: column;
     align-items: stretch;
@@ -821,5 +935,113 @@ body.diag-page::before { display: none; }
     padding: 4px 20px 8px;
     font-size: 10px;
     gap: 4px 14px;
+  }
+
+  body.diag-page .diag-main:not(.diag-audit-main) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "app"
+      "db"
+      "redis"
+      "assets"
+      "ai"
+      "pty"
+      "classify"
+      "drift"
+      "dbd"
+      "redisd"
+      "storage"
+      "cfg"
+      "usage"
+      "outcomes"
+      "cmds"
+      "tools";
+    gap: 12px;
+    max-width: 100%;
+    padding: 14px 12px 32px;
+    overflow-x: hidden;
+  }
+
+  body.diag-page .diag-main:not(.diag-audit-main) > .diag-section {
+    height: max-content;
+  }
+
+  body.diag-page .diag-summary-body,
+  body.diag-page .diag-classifier-form,
+  body.diag-page .diag-drift-form,
+  body.diag-page .diag-classifier-result,
+  body.diag-page .diag-drift-result {
+    padding-inline: 12px;
+  }
+
+  body.diag-page .diag-section-title {
+    padding-inline: 12px;
+  }
+
+  body.diag-page .diag-summary-value,
+  body.diag-page .diag-summary-meta,
+  body.diag-page .diag-summary-pills span,
+  body.diag-page .diag-count-value,
+  body.diag-page .diag-chip,
+  body.diag-page code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  body.diag-page .diag-table,
+  body.diag-page .diag-table tbody,
+  body.diag-page .diag-table tr,
+  body.diag-page .diag-table td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  body.diag-page .diag-table tr + tr td {
+    border-top: none;
+  }
+
+  body.diag-page .diag-table tr {
+    padding: 9px 12px;
+    border-top: 1px solid var(--theme-panel-border);
+  }
+
+  body.diag-page .diag-table tr:first-child {
+    border-top: none;
+  }
+
+  body.diag-page .diag-table td {
+    padding: 2px 0;
+  }
+
+  body.diag-page .diag-table td:first-child,
+  body.diag-page .diag-table td:last-child {
+    width: 100%;
+    padding-right: 0;
+    white-space: normal;
+  }
+
+  body.diag-page .diag-table td:first-child {
+    margin-bottom: 3px;
+  }
+
+  body.diag-page .diag-storage-table td,
+  body.diag-page .diag-storage-table th {
+    white-space: normal;
+  }
+
+  body.diag-page .diag-stat-val {
+    width: 100% !important;
+    white-space: normal;
+  }
+
+  body.diag-page .diag-storage-group summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  body.diag-page .diag-storage-shadow td:first-child {
+    padding-left: 0;
   }
 }

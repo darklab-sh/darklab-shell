@@ -1,6 +1,8 @@
 // Project Details tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+let exportedDarklabProjectDetails = null;
+
 (function projectDetailsModule(global) {
   'use strict';
 
@@ -247,7 +249,14 @@
       ctx.projectLabelsInput?.addEventListener('input', () => {
         hideLabelsSavedIndicator();
       });
+      ctx.projectLabelsInput?.addEventListener('change', () => {
+        saveLabelsNow().catch(() => {});
+      });
       ctx.projectLabelsForm?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        saveLabelsNow().catch(() => {});
+      });
+      ctx.projectLabelsSaveButton?.addEventListener('click', (event) => {
         event.preventDefault();
         saveLabelsNow().catch(() => {});
       });
@@ -685,7 +694,11 @@
     };
   }
 
-  global.DarklabProjectDetails = {
+  const DarklabProjectDetails = {
     createProjectDetailsController,
   };
+  exportedDarklabProjectDetails = DarklabProjectDetails;
 })(globalThis);
+
+export {
+  exportedDarklabProjectDetails as DarklabProjectDetails,};

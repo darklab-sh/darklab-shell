@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="{{ current_theme.color_scheme }}">
+<title>{{ app_name }} — audit log</title>
+<link rel="icon" type="image/x-icon" href="{{ static_asset('/static/favicon.ico') }}">
+{% include "app_stylesheets.html" %}
+{% for href in asset_bundle('terminal-export') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
+{% for href in asset_bundle('diag') %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
+{% include "theme_vars_style.html" %}
+</head>
+<body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
+
+<div class="diag-topbar">
+  <header class="export-header diag-header">
+    <div class="export-header-copy diag-header-copy">
+      <h1 class="diag-header-title">{{ app_name }}</h1>
+      <span class="diag-header-meta">audit log</span>
+    </div>
+    <div class="diag-header-actions">
+      <a href="/diag" class="btn btn-secondary btn-compact diag-nav-btn">diagnostics</a>
+      <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+    </div>
+  </header>
+  <div class="diag-status-bar">
+    <span class="diag-live-indicator diag-refreshed-at" aria-live="polite">
+      <span class="diag-live-dot"></span>
+      <span>Refreshed at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
+    </span>
+  </div>
+</div>
+
+<main class="diag-main diag-audit-main">
+  {% set filters = data.filters or {} %}
+
+  <section class="diag-section s-audit">
+    <div class="diag-section-title">
+      Audit Log
+      <span class="diag-section-title-count">
+        {{ data.events|length }} shown{% if data.has_more %} · more available{% endif %}
+      </span>
+    </div>
+
+    {% if not data.audit_log_enabled %}
+    <div class="diag-storage-banner diag-warn">
+      Audit logging is disabled. Existing rows are shown, but new product actions are not being recorded.
+    </div>
+    {% endif %}
+
+    <form class="diag-audit-filter-form" method="get" action="/diag/audit">
+      <div class="diag-audit-filter-grid">
+        <label class="diag-field">
+          <span>Event type</span>
+          <select class="form-select" name="event_type">
+            <option value="">all events</option>
+            {% for event_type in data.event_type_options %}
+            <option value="{{ event_type.value }}"{% if filters.event_type == event_type.value %} selected{% endif %}>{{ event_type.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="diag-field">
+          <span>Actor</span>
+          <input type="text" name="actor" value="{{ filters.actor }}" placeholder="member id, display name, or session">
+        </label>
+        <label class="diag-field">
+          <span>Team</span>
+          <input type="text" name="team_id" value="{{ filters.team_id }}" placeholder="team id">
+        </label>
+        <label class="diag-field">
+          <span>Project</span>
+          <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="project id">
+        </label>
+        <label class="diag-field">
+          <span>Target type</span>
+          <select class="form-select" name="target_type">
+            <option value="">all targets</option>
+            {% for target_type in data.target_types %}
+            <option value="{{ target_type }}"{% if filters.target_type == target_type %} selected{% endif %}>{{ target_type }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="diag-field">
+          <span>Target id</span>
+          <input type="text" name="target_id" value="{{ filters.target_id }}" placeholder="target id">
+        </label>
+        <label class="diag-field">
+          <span>Correlation</span>
+          <input type="text" name="correlation_id" value="{{ filters.correlation_id }}" placeholder="job or request chain">
+        </label>
+        <label class="diag-field">
+          <span>From</span>
+          <input type="text" name="date_from" value="{{ filters.date_from }}" placeholder="YYYY-MM-DD or timestamp">
+        </label>
+        <label class="diag-field">
+          <span>To</span>
+          <input type="text" name="date_to" value="{{ filters.date_to }}" placeholder="YYYY-MM-DD or timestamp">
+        </label>
+        <label class="diag-field">
+          <span>Page size</span>
+          <input type="number" name="limit" min="1" max="500" value="{{ data.limit }}">
+        </label>
+      </div>
+      <div class="diag-classifier-actions">
+        <button class="btn btn-primary btn-compact" type="submit">Apply</button>
+        <a class="btn btn-secondary btn-compact" href="/diag/audit">Clear</a>
+        <a class="btn btn-secondary btn-compact" href="/diag/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}">CSV</a>
+        <a class="btn btn-secondary btn-compact" href="/diag/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}">JSON</a>
+      </div>
+    </form>
+
+    {% if data.events %}
+    <div class="diag-audit-table-wrap">
+      <table class="diag-table diag-audit-table">
+        <colgroup>
+          <col class="diag-audit-col-created">
+          <col class="diag-audit-col-event">
+          <col class="diag-audit-col-actor">
+          <col class="diag-audit-col-target">
+          <col class="diag-audit-col-scope">
+          <col class="diag-audit-col-details">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>created</th>
+            <th>event</th>
+            <th>actor</th>
+            <th>target</th>
+            <th>scope</th>
+            <th>details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in data.events %}
+          <tr>
+            <td class="diag-audit-time">{{ event.created }}</td>
+            <td>
+              <span class="diag-audit-event">{{ event.event_type }}</span>
+              {% if event.correlation_id %}
+              <span class="diag-muted">· {{ event.correlation_id }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {{ event.actor_display_name or event.actor_member_id or event.actor_session_label or '—' }}
+              {% if event.actor_role %}<span class="diag-muted">· {{ event.actor_role }}</span>{% endif %}
+            </td>
+            <td class="diag-audit-target">
+              {% if event.target_href %}
+              <a href="{{ event.target_href }}">{{ event.target_type }}:{{ event.target_id }}</a>
+              {% elif event.target_id %}
+              <span>{{ event.target_type }}:{{ event.target_id }}</span>
+              {% else %}
+              <span class="diag-muted">{{ event.target_type or '—' }}</span>
+              {% endif %}
+            </td>
+            <td class="diag-audit-scope">
+              {% if event.project_href %}
+              <a class="diag-audit-scope-base" href="{{ event.project_href }}">project</a>
+              {% elif event.project_id %}
+              <span class="diag-audit-scope-base">project</span>
+              {% else %}
+              <span class="diag-muted diag-audit-scope-base">personal</span>
+              {% endif %}
+              {% if event.team_id %}
+              <span class="diag-muted diag-audit-team-id" title="{{ event.team_id }}">· {{ event.team_id }}</span>
+              {% endif %}
+            </td>
+            <td class="diag-audit-details-cell">
+              <details class="diag-audit-details">
+                <summary>details</summary>
+                <pre>{{ event.details_json }}</pre>
+              </details>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="diag-empty">No audit events match these filters.</div>
+    {% endif %}
+
+    <div class="diag-audit-pagination">
+      {% if data.offset > 0 %}
+      <a class="btn btn-secondary btn-compact" href="/diag/audit{% if data.previous_query %}?{{ data.previous_query }}{% endif %}">Previous</a>
+      {% endif %}
+      {% if data.has_more %}
+      <a class="btn btn-secondary btn-compact" href="/diag/audit?{{ data.next_query }}">Next</a>
+      {% endif %}
+      <span class="diag-muted">Exports cap at {{ data.export_max_rows }} rows and mark truncation when filters match more.</span>
+    </div>
+  </section>
+</main>
+</body>
+</html>

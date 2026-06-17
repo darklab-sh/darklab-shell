@@ -1,6 +1,8 @@
 // Project mobile shell controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+let exportedDarklabProjectMobileShell = null;
+
 (function projectMobileShellModule(global) {
   'use strict';
 
@@ -146,7 +148,11 @@
     };
   }
 
-  global.DarklabProjectMobileShell = {
+  const DarklabProjectMobileShell = {
     createProjectMobileShellController,
   };
+  exportedDarklabProjectMobileShell = DarklabProjectMobileShell;
 })(globalThis);
+
+export {
+  exportedDarklabProjectMobileShell as DarklabProjectMobileShell,};

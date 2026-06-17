@@ -150,6 +150,7 @@ class TestKillRoute:
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.active_run_pid_start_matches", return_value=True), \
              mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=0)) as run_cmd, \
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-scan"})
@@ -164,11 +165,28 @@ class TestKillRoute:
         )
         killpg.assert_not_called()
 
+    def test_kill_skips_scanner_sudo_path_when_pid_start_time_changed(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.active_run_pid_start_matches", return_value=False), \
+             mock.patch("blueprints.run.subprocess.run") as run_cmd, \
+             mock.patch("blueprints.run.os.killpg") as killpg:
+            resp = client.post("/kill", json={"run_id": "run-scan-reused"})
+
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["killed"] is True
+        run_cmd.assert_not_called()
+        killpg.assert_not_called()
+
     def test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race(self):
         client = get_client()
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.active_run_pid_start_matches", return_value=True), \
              mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=1)), \
              mock.patch("blueprints.run.time.sleep"), \
              mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):

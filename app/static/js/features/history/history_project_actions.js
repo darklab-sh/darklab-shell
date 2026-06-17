@@ -1,95 +1,273 @@
 // Project-linking helpers for History rows and Run Details actions.
+import { historyProjectFilter as importedHistoryProjectFilter } from '../../core/dom.js';
+import { DarklabHistoryCore as importedHistoryCore } from '../../core/history_core.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import {
+  enhanceAppSelects as importedEnhanceAppSelects,
+  syncAppSelect as importedSyncAppSelect,
+} from '../../ui/ui_helpers.js';
+import {
+  getHistoryProjectOptionsState as importedGetHistoryProjectOptionsState,
+  refreshHistoryPanel as importedRefreshHistoryPanel,
+  setHistoryProjectOptionsState as importedSetHistoryProjectOptionsState,
+} from '../../history.js';
+import { getHistoryRunModalState as importedGetHistoryRunModalState } from './history_run_modal_state_bridge.js';
+import {
+  apiFetch as importedRuntimeApiFetch,
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedRuntimeLogClientError,
+} from '../../runtime_bridge.js';
+
+const HISTORY_PROJECT_ACTIONS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+let fallbackHistoryProjectOptions = [];
+let fallbackHistoryProjectOptionsLoaded = false;
+let fallbackHistoryProjectOptionsLoading = null;
+
+function _historyProjectCore() {
+  return (typeof importedHistoryCore !== 'undefined' && importedHistoryCore)
+    || null;
+}
+
+function _historyProjectNormalizeFilterValue(value) {
+  const core = _historyProjectCore();
+  if (core && typeof core.normalizeFilterValue === 'function') return core.normalizeFilterValue(value);
+  if (typeof HISTORY_PROJECT_ACTIONS_GLOBAL._normalizeHistoryFilterValue === 'function') {
+    return HISTORY_PROJECT_ACTIONS_GLOBAL._normalizeHistoryFilterValue(value);
+  }
+  return String(value || '').trim();
+}
+
+function _historyProjectFilterRef() {
+  return (typeof importedHistoryProjectFilter !== 'undefined' && importedHistoryProjectFilter)
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.historyProjectFilter
+    || null;
+}
+
+function _historyProjectShowToast(message, tone = 'success') {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.showToast
+    || null;
+  if (typeof toast === 'function') toast(message, tone);
+}
+
+function _historyProjectShowConfirm(options) {
+  const confirm = (typeof importedShowConfirm !== 'undefined' && importedShowConfirm)
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.showConfirm
+    || null;
+  return typeof confirm === 'function' ? confirm(options) : Promise.resolve(null);
+}
+
+function _historyProjectEnhanceAppSelects(root) {
+  const enhance = (typeof importedEnhanceAppSelects !== 'undefined' && importedEnhanceAppSelects)
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.enhanceAppSelects
+    || null;
+  if (typeof enhance === 'function') enhance(root);
+  return typeof enhance === 'function';
+}
+
+function _historyProjectSyncAppSelect(select) {
+  const sync = (typeof importedSyncAppSelect !== 'undefined' && importedSyncAppSelect)
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.syncAppSelect
+    || null;
+  if (typeof sync === 'function') sync(select);
+}
+
+function _historyProjectUseMobileTerminalViewportMode() {
+  const useMobile = (
+    typeof importedUseMobileTerminalViewportMode !== 'undefined'
+    && importedUseMobileTerminalViewportMode
+  )
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.useMobileTerminalViewportMode;
+  return typeof useMobile === 'function' ? useMobile() : false;
+}
+
+function _historyProjectRefreshHistoryPanel() {
+  const refresh = (typeof importedRefreshHistoryPanel !== 'undefined' && importedRefreshHistoryPanel)
+    || HISTORY_PROJECT_ACTIONS_GLOBAL.refreshHistoryPanel;
+  return typeof refresh === 'function' ? refresh() : Promise.resolve();
+}
+
+function _historyProjectApiFetch(...args) {
+  const fetcher = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('apiFetch')
+    && typeof importedRuntimeApiFetch === 'function'
+      ? importedRuntimeApiFetch
+      : null
+  ) || HISTORY_PROJECT_ACTIONS_GLOBAL.apiFetch;
+  return typeof fetcher === 'function' ? fetcher(...args) : Promise.reject(new Error('apiFetch unavailable'));
+}
+
+function _historyProjectLogClientError(...args) {
+  const logger = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedRuntimeLogClientError === 'function'
+      ? importedRuntimeLogClientError
+      : null
+  ) || HISTORY_PROJECT_ACTIONS_GLOBAL.logClientError;
+  if (typeof logger === 'function') logger(...args);
+}
+
+function _historyProjectLogEvent(context, err, details = {}) {
+  _historyProjectLogClientError(context, err, details);
+}
+
+function _historyProjectLogPayload(event, level, run, project, options = {}, extra = {}) {
+  return {
+    event,
+    level,
+    run_id: String(run?.id || ''),
+    project_id: String(project?.id || ''),
+    operation: String(options.operation || ''),
+    include_entities: options.includeEntities === true,
+    include_curated_entities: options.includeCuratedEntities === true,
+    http_status: Number(extra.httpStatus || 0) || null,
+  };
+}
+
+function _historyProjectRefreshProjectWorkspace() {
+  const refresh = HISTORY_PROJECT_ACTIONS_GLOBAL.refreshProjectWorkspace;
+  return typeof refresh === 'function' ? refresh() : Promise.resolve();
+}
+
+function _historyProjectOptionsState() {
+  if (typeof importedGetHistoryProjectOptionsState === 'function') {
+    return importedGetHistoryProjectOptionsState();
+  }
+  return {
+    options: fallbackHistoryProjectOptions,
+    loaded: fallbackHistoryProjectOptionsLoaded,
+    loading: fallbackHistoryProjectOptionsLoading,
+  };
+}
+
+function _setHistoryProjectOptionsState(updates = {}) {
+  if (typeof importedSetHistoryProjectOptionsState === 'function') {
+    return importedSetHistoryProjectOptionsState(updates);
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'options')) {
+    fallbackHistoryProjectOptions = Array.isArray(updates.options) ? updates.options : [];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'loaded')) {
+    fallbackHistoryProjectOptionsLoaded = updates.loaded === true;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'loading')) {
+    fallbackHistoryProjectOptionsLoading = updates.loading || null;
+  }
+  return _historyProjectOptionsState();
+}
+
 function _historyProjectDisplayName(project) {
   if (!project || typeof project !== 'object') return '';
   return String(project.name || project.slug || project.id || '').trim();
 }
 
 function _historyProjectLabelForId(projectId) {
-  const normalized = _normalizeHistoryFilterValue(projectId);
+  const normalized = _historyProjectNormalizeFilterValue(projectId);
   if (!normalized || normalized === 'all') return '';
-  const project = _historyProjectOptions.find(item => String(item && item.id || '') === normalized);
+  const project = _historyProjectOptionsState().options.find(item => String(item && item.id || '') === normalized);
   return _historyProjectDisplayName(project) || normalized;
 }
 
 function _syncHistoryProjectFilterOptions() {
-  if (typeof historyProjectFilter === 'undefined' || !historyProjectFilter) return;
-  const selected = _normalizeHistoryFilterValue(_historyFilters.projectId) || 'all';
-  historyProjectFilter.replaceChildren();
+  const projectFilter = _historyProjectFilterRef();
+  if (!projectFilter) return;
+  const selected = _historyProjectNormalizeFilterValue(window._historyFilters.projectId) || 'all';
+  const projectOptions = _historyProjectOptionsState().options;
+  projectFilter.replaceChildren();
   const allOption = document.createElement('option');
   allOption.value = 'all';
   allOption.textContent = 'project: all';
-  historyProjectFilter.appendChild(allOption);
-  _historyProjectOptions.forEach((project) => {
+  projectFilter.appendChild(allOption);
+  projectOptions.forEach((project) => {
     const projectId = String(project && project.id || '');
     if (!projectId) return;
     const option = document.createElement('option');
     option.value = projectId;
     option.textContent = `project: ${_historyProjectDisplayName(project) || projectId}`;
-    historyProjectFilter.appendChild(option);
+    projectFilter.appendChild(option);
   });
-  if (selected !== 'all' && !_historyProjectOptions.some(project => String(project && project.id || '') === selected)) {
+  if (selected !== 'all' && !projectOptions.some(project => String(project && project.id || '') === selected)) {
     const stale = document.createElement('option');
     stale.value = selected;
     stale.textContent = `project: ${selected}`;
-    historyProjectFilter.appendChild(stale);
+    projectFilter.appendChild(stale);
   }
-  historyProjectFilter.value = selected;
-  if (typeof syncAppSelect === 'function') syncAppSelect(historyProjectFilter);
+  projectFilter.value = selected;
+  _historyProjectSyncAppSelect(projectFilter);
 }
 
 function _ensureHistoryProjectFilterOptions() {
-  if (_historyProjectOptionsLoaded) return Promise.resolve(_historyProjectOptions);
-  if (_historyProjectOptionsLoading) return _historyProjectOptionsLoading;
-  _historyProjectOptionsLoading = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
-    .then((resp) => {
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
-    })
-    .then((data) => {
-      _historyProjectOptions = (Array.isArray(data.projects) ? data.projects : [])
-        .filter(project => project && project.id)
-        .sort((a, b) => _historyProjectDisplayName(a).localeCompare(
-          _historyProjectDisplayName(b),
-          undefined,
-          { sensitivity: 'base', numeric: true },
-        ));
-      _historyProjectOptionsLoaded = true;
+  const state = _historyProjectOptionsState();
+  if (state.loaded) return Promise.resolve(state.options);
+  if (state.loading) return state.loading;
+  const loading = _historyLoadProjectFilterOptions()
+    .then(projects => {
+      _setHistoryProjectOptionsState({ options: projects, loaded: true });
       _syncHistoryProjectFilterOptions();
-      return _historyProjectOptions;
+      return projects;
     })
-    .catch((err) => {
-      if (typeof logClientError === 'function') logClientError('failed to load /projects for history filter', err);
-      return _historyProjectOptions;
+    .catch(err => {
+      _historyProjectLogClientError('failed to load history project filter options', err);
+      throw err;
     })
     .finally(() => {
-      _historyProjectOptionsLoading = null;
+      _setHistoryProjectOptionsState({ loading: null });
     });
-  return _historyProjectOptionsLoading;
+  _setHistoryProjectOptionsState({ loading });
+  return loading;
 }
 
 async function _historyLoadActiveProject() {
-  if (typeof getActiveProjectContext === 'function') {
-    const current = getActiveProjectContext();
-    if (current && current.id) return current;
-  }
-  if (typeof refreshActiveProjectContext === 'function') {
+  if (typeof HISTORY_PROJECT_ACTIONS_GLOBAL.refreshActiveProjectContext === 'function') {
     try {
-      const refreshed = await refreshActiveProjectContext();
+      const refreshed = await HISTORY_PROJECT_ACTIONS_GLOBAL.refreshActiveProjectContext();
       if (refreshed && refreshed.id) return refreshed;
-    } catch (_) {}
+    } catch (err) {
+      _historyProjectLogEvent('history project active refresh failed', err, {
+        event: 'HISTORY_PROJECT_ACTIVE_REFRESH_FAILED',
+        level: 'warning',
+        operation: 'refresh-active-project-context',
+      });
+    }
   }
   try {
-    const resp = await apiFetch('/projects/active', { cache: 'no-store' });
-    if (!resp.ok) return null;
+    const resp = await _historyProjectApiFetch('/projects/active', { cache: 'no-store' });
+    if (!resp.ok) {
+      _historyProjectLogEvent('history project active refresh failed', new Error(`HTTP ${resp.status}`), {
+        event: 'HISTORY_PROJECT_ACTIVE_REFRESH_FAILED',
+        level: 'warning',
+        operation: 'load-active-project',
+        http_status: resp.status,
+      });
+      return null;
+    }
     const data = await resp.json();
     return data && data.project && data.project.id ? data.project : null;
-  } catch (_) {
+  } catch (err) {
+    _historyProjectLogEvent('history project active refresh failed', err, {
+      event: 'HISTORY_PROJECT_ACTIVE_REFRESH_FAILED',
+      level: 'warning',
+      operation: 'load-active-project',
+    });
     return null;
   }
 }
 
 async function _historyLoadProjects() {
-  const resp = await apiFetch('/projects', { cache: 'no-store' });
+  const resp = await _historyProjectApiFetch('/projects', { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return (Array.isArray(data.projects) ? data.projects : [])
+    .filter(project => project && project.id && project.status !== 'archived')
+    .sort((a, b) => _historyProjectDisplayName(a).localeCompare(_historyProjectDisplayName(b)));
+}
+
+async function _historyLoadProjectFilterOptions() {
+  const resp = await _historyProjectApiFetch('/projects?include_archived=1', { cache: 'no-store' });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return (Array.isArray(data.projects) ? data.projects : [])
@@ -111,7 +289,7 @@ async function _historyLinkRunToProject(run, project, options = {}) {
   const includeEntities = !!options.includeEntities;
   if (!run || !run.id) throw new Error('Run is missing its identifier.');
   if (!project || !project.id) throw new Error('Project is missing its identifier.');
-  const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+  const resp = await _historyProjectApiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -126,8 +304,26 @@ async function _historyLinkRunToProject(run, project, options = {}) {
     try {
       const data = await resp.json();
       detail = data && data.error ? data.error : '';
-    } catch (_) {}
-    throw new Error(detail || `HTTP ${resp.status}`);
+    } catch (err) {
+      _historyProjectLogEvent('history project link response parse failed', err, {
+        event: 'HISTORY_PROJECT_LINK_FAILED',
+        level: 'error',
+        ..._historyProjectLogPayload('HISTORY_PROJECT_LINK_FAILED', 'error', run, project, {
+          ...options,
+          operation: 'link-run',
+        }, { httpStatus: resp.status }),
+      });
+    }
+    const err = new Error(detail || `HTTP ${resp.status}`);
+    _historyProjectLogEvent('history project link failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_LINK_FAILED',
+      'error',
+      run,
+      project,
+      { ...options, operation: 'link-run' },
+      { httpStatus: resp.status },
+    ));
+    throw err;
   }
   let link = null;
   let entityStats = null;
@@ -142,16 +338,32 @@ async function _historyLinkRunToProject(run, project, options = {}) {
     run.project_links.push({ ...link, project });
     run.project_link_count = run.project_links.length;
   }
-  if (typeof refreshProjectWorkspace === 'function') {
-    try { await refreshProjectWorkspace(); } catch (_) {}
+  try {
+    await _historyProjectRefreshProjectWorkspace();
+  } catch (err) {
+    _historyProjectLogEvent('history project refresh after link failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_REFRESH_AFTER_LINK_FAILED',
+      'warning',
+      run,
+      project,
+      { ...options, operation: 'refresh-project-workspace-after-link' },
+    ));
   }
   const name = _historyProjectDisplayName(project) || 'project';
   const addedEntities = includeEntities ? Number(entityStats && entityStats.added || 0) : 0;
-  showToast(addedEntities
+  _historyProjectShowToast(addedEntities
     ? `Run and ${addedEntities.toLocaleString()} ${addedEntities === 1 ? 'entity' : 'entities'} added to ${name}`
     : `Run added to ${name}`);
-  if (typeof refreshHistoryPanel === 'function') {
-    try { await refreshHistoryPanel(); } catch (_) {}
+  try {
+    await _historyProjectRefreshHistoryPanel();
+  } catch (err) {
+    _historyProjectLogEvent('history project refresh after link failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_REFRESH_AFTER_LINK_FAILED',
+      'warning',
+      run,
+      project,
+      { ...options, operation: 'refresh-history-panel-after-link' },
+    ));
   }
 }
 
@@ -161,7 +373,7 @@ async function _historyLoadProjectRunEntityPreview(project, runIds) {
     .map(runId => String(runId || '').trim())
     .filter(Boolean);
   if (!projectId || !ids.length) return null;
-  const resp = await apiFetch(`/projects/${encodeURIComponent(projectId)}/links/run-entities/preview`, {
+  const resp = await _historyProjectApiFetch(`/projects/${encodeURIComponent(projectId)}/links/run-entities/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_ids: ids }),
@@ -177,7 +389,7 @@ async function _historyLoadProjectRunEntityRemovePreview(project, runIds) {
     .map(runId => String(runId || '').trim())
     .filter(Boolean);
   if (!projectId || !ids.length) return null;
-  const resp = await apiFetch(`/projects/${encodeURIComponent(projectId)}/links/run-entities/remove-preview`, {
+  const resp = await _historyProjectApiFetch(`/projects/${encodeURIComponent(projectId)}/links/run-entities/remove-preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_ids: ids }),
@@ -336,7 +548,7 @@ async function _historyConfirmAddRunToProject(run, project) {
   const option = _historyProjectRunEntityOptionContent();
   await _historyRefreshProjectRunEntityOption(option, project, [run && run.id]);
   const content = option.wrap.classList.contains('u-hidden') ? null : option.wrap;
-  const choice = await showConfirm({
+  const choice = await _historyProjectShowConfirm({
     body: `Add this run to ${_historyProjectDisplayName(project) || 'this project'}?`,
     content,
     tone: null,
@@ -372,7 +584,9 @@ function _historyProjectFromLink(link) {
 function _historyRunProjectLinks(run) {
   const links = Array.isArray(run?.project_links) ? run.project_links.slice() : [];
   try {
-    const state = typeof _historyRunModalState !== 'undefined' ? _historyRunModalState : null;
+    const state = typeof importedGetHistoryRunModalState === 'function'
+      ? importedGetHistoryRunModalState()
+      : null;
     const projectState = state && state.projectState;
     const project = projectState && projectState.project;
     const runId = String(run && run.id || '');
@@ -406,7 +620,7 @@ async function _historyUnlinkRunFromProject(run, project, options = {}) {
   const includeCuratedEntities = !!options.includeCuratedEntities;
   if (!run || !run.id) throw new Error('Run is missing its identifier.');
   if (!project || !project.id) throw new Error('Project is missing its identifier.');
-  const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+  const resp = await _historyProjectApiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -421,16 +635,42 @@ async function _historyUnlinkRunFromProject(run, project, options = {}) {
     try {
       const data = await resp.json();
       detail = data && data.error ? data.error : '';
-    } catch (_) {}
-    throw new Error(detail || `HTTP ${resp.status}`);
+    } catch (err) {
+      _historyProjectLogEvent('history project unlink response parse failed', err, _historyProjectLogPayload(
+        'HISTORY_PROJECT_UNLINK_FAILED',
+        'error',
+        run,
+        project,
+        { ...options, operation: 'unlink-run' },
+        { httpStatus: resp.status },
+      ));
+    }
+    const err = new Error(detail || `HTTP ${resp.status}`);
+    _historyProjectLogEvent('history project unlink failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_UNLINK_FAILED',
+      'error',
+      run,
+      project,
+      { ...options, operation: 'unlink-run' },
+      { httpStatus: resp.status },
+    ));
+    throw err;
   }
   let entityStats = null;
   try {
     const data = await resp.json();
     entityStats = data && data.unlinked_entities ? data.unlinked_entities : null;
   } catch (_) {}
-  if (typeof refreshProjectWorkspace === 'function') {
-    try { await refreshProjectWorkspace(); } catch (_) {}
+  try {
+    await _historyProjectRefreshProjectWorkspace();
+  } catch (err) {
+    _historyProjectLogEvent('history project refresh after unlink failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_REFRESH_AFTER_LINK_FAILED',
+      'warning',
+      run,
+      project,
+      { ...options, operation: 'refresh-project-workspace-after-unlink' },
+    ));
   }
   if (Array.isArray(run.project_links)) {
     run.project_links = run.project_links.filter(item => String(item && item.project_id || '') !== String(project.id || ''));
@@ -438,18 +678,26 @@ async function _historyUnlinkRunFromProject(run, project, options = {}) {
   }
   const name = _historyProjectDisplayName(project) || 'project';
   const removedEntities = includeEntities ? Number(entityStats && entityStats.removed || 0) : 0;
-  showToast(removedEntities
+  _historyProjectShowToast(removedEntities
     ? `Run and ${removedEntities.toLocaleString()} ${removedEntities === 1 ? 'entity' : 'entities'} removed from ${name}`
     : `Run removed from ${name}`);
-  if (typeof refreshHistoryPanel === 'function') {
-    try { await refreshHistoryPanel(); } catch (_) {}
+  try {
+    await _historyProjectRefreshHistoryPanel();
+  } catch (err) {
+    _historyProjectLogEvent('history project refresh after unlink failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_REFRESH_AFTER_LINK_FAILED',
+      'warning',
+      run,
+      project,
+      { ...options, operation: 'refresh-history-panel-after-unlink' },
+    ));
   }
 }
 
 async function _historyAddRunToActiveProject(run) {
   const project = await _historyLoadActiveProject();
   if (!project || !project.id) {
-    showToast('No active project selected', 'error');
+    _historyProjectShowToast('No active project selected', 'error');
     return;
   }
   const confirmed = await _historyConfirmAddRunToProject(run, project);
@@ -468,7 +716,7 @@ function _historyProjectPickerContentForLinks(links) {
 async function _historyRemoveRunFromProject(run) {
   const links = _historyRunProjectLinks(run);
   if (!links.length) {
-    showToast('This run is not linked to a project', 'error');
+    _historyProjectShowToast('This run is not linked to a project', 'error');
     return;
   }
   let project = links[0].project;
@@ -488,9 +736,8 @@ async function _historyRemoveRunFromProject(run) {
       const selectedProject = projects.find(item => String(item.id || '') === select.value);
       _historyRefreshProjectRunEntityRemoveOption(removeOption, selectedProject, [run && run.id]);
     });
-    if (typeof enhanceAppSelects === 'function') {
-      enhanceAppSelects(wrap);
-      if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+    if (_historyProjectEnhanceAppSelects(wrap)) {
+      if (_historyProjectUseMobileTerminalViewportMode()) {
         wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
       }
     }
@@ -501,7 +748,7 @@ async function _historyRemoveRunFromProject(run) {
       content = removeOption.wrap;
     }
   }
-  const choice = await showConfirm({
+  const choice = await _historyProjectShowConfirm({
     body: links.length > 1
       ? 'Remove this run from a project'
       : `Remove this run from ${_historyProjectDisplayName(project) || 'this project'}?`,
@@ -521,8 +768,19 @@ async function _historyRemoveRunFromProject(run) {
       includeEntities: removeOption.includeAnyEntities(),
       includeCuratedEntities: removeOption.includeCuratedEntities(),
     });
-  } catch (_) {
-    showToast('Failed to remove run from project', 'error');
+  } catch (err) {
+    _historyProjectLogEvent('history project unlink failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_UNLINK_FAILED',
+      'error',
+      run,
+      project,
+      {
+        includeEntities: removeOption.includeAnyEntities(),
+        includeCuratedEntities: removeOption.includeCuratedEntities(),
+        operation: 'remove-run-from-project',
+      },
+    ));
+    _historyProjectShowToast('Failed to remove run from project', 'error');
   }
 }
 
@@ -555,11 +813,11 @@ async function _historyAddRunToProject(run) {
     ]);
     projects = _historyOrderProjectsForPicker(loadedProjects, activeProject);
   } catch (_) {
-    showToast('Failed to load projects', 'error');
+    _historyProjectShowToast('Failed to load projects', 'error');
     return;
   }
   if (!projects.length) {
-    showToast('No projects available', 'error');
+    _historyProjectShowToast('No projects available', 'error');
     return;
   }
   const { wrap, select } = _historyProjectPickerContent(projects);
@@ -572,7 +830,7 @@ async function _historyAddRunToProject(run) {
   };
   select.addEventListener('change', updateEntityOption);
   updateEntityOption();
-  const choicePromise = showConfirm({
+  const choicePromise = _historyProjectShowConfirm({
     body: 'Add this run to a project',
     content: wrap,
     tone: null,
@@ -583,9 +841,8 @@ async function _historyAddRunToProject(run) {
     ],
     refocusOnResolve: false,
   });
-  if (typeof enhanceAppSelects === 'function') {
-    enhanceAppSelects(wrap);
-    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+  if (_historyProjectEnhanceAppSelects(wrap)) {
+    if (_historyProjectUseMobileTerminalViewportMode()) {
       wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
     }
   }
@@ -596,7 +853,42 @@ async function _historyAddRunToProject(run) {
     await _historyLinkRunToProject(run, project, {
       includeEntities: !!entityOption.checkbox.checked && !entityOption.checkbox.disabled,
     });
-  } catch (_) {
-    showToast('Failed to add run to project', 'error');
+  } catch (err) {
+    _historyProjectLogEvent('history project link failed', err, _historyProjectLogPayload(
+      'HISTORY_PROJECT_LINK_FAILED',
+      'error',
+      run,
+      project,
+      {
+        includeEntities: !!entityOption.checkbox.checked && !entityOption.checkbox.disabled,
+        operation: 'add-run-to-project',
+      },
+    ));
+    _historyProjectShowToast('Failed to add run to project', 'error');
   }
 }
+
+if (typeof window !== 'undefined') {
+}
+
+export {
+  _ensureHistoryProjectFilterOptions,
+  _historyAddRunToActiveProject,
+  _historyAddRunToProject,
+  _historyConfirmAddRunToProject,
+  _historyLinkRunToProject,
+  _historyLoadActiveProject,
+  _historyLoadProjects,
+  _historyOrderProjectsForPicker,
+  _historyProjectDisplayName,
+  _historyProjectFromLink,
+  _historyProjectLabelForId,
+  _historyProjectPickerContent,
+  _historyProjectRunEntityOptionContent,
+  _historyRefreshProjectRunEntityOption,
+  _historyRefreshProjectRunEntityRemoveOption,
+  _historyRemoveRunFromProject,
+  _historyRunProjectLinks,
+  _historyUnlinkRunFromProject,
+  _syncHistoryProjectFilterOptions,
+};

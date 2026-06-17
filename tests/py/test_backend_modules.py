@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest.mock as mock
 from contextlib import contextmanager
 from copy import deepcopy
@@ -47,6 +48,9 @@ from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQ
 import services.projects.workspace as project_workspace
 import services.projects.auto_promote as project_auto_promote
 import services.projects.package_presets as package_presets
+import services.projects.provenance as project_provenance
+import services.reports.storage as report_storage
+import services.reports.templates as report_templates
 import app as shell_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
@@ -88,6 +92,8 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, LineRole
 from services.runs.output_store import (
     RunOutputCapture,
     RUN_OUTPUT_DIR,
+    artifact_rel_path_for_run,
+    delete_artifact_file,
     load_full_output_entries,
     load_full_output_events,
     load_full_output_lines,
@@ -2771,6 +2777,182 @@ class TestPackagePresetCatalog:
             package_presets.normalize_package_preset_catalog({"presets": raw_presets})
 
 
+class TestReportTemplateCatalog:
+    def setup_method(self):
+        report_templates.clear_report_template_catalog_cache()
+
+    def teardown_method(self):
+        report_templates.clear_report_template_catalog_cache()
+
+    def test_default_report_template_sections_match_plan(self):
+        catalog = report_templates.load_report_template_catalog({
+            "report_templates_file": str(REPO_ROOT / "app" / "conf" / "report_templates.yaml"),
+        })
+
+        templates = {template["id"]: template for template in catalog.templates}
+        assert list(templates) == ["standard"]
+        assert [section["type"] for section in templates["standard"]["sections"]] == [
+            "cover",
+            "executive_summary",
+            "scope_targets",
+            "methodology",
+            "findings_by_severity",
+            "included_runs",
+            "artifacts",
+            "appendix",
+        ]
+
+    def test_report_template_loader_falls_back_to_defaults_for_bad_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report_templates.yaml"
+            path.write_text(textwrap.dedent("""
+            templates:
+              - id: broken
+                sections:
+                  - type: nope
+            """))
+
+            with mock.patch.object(report_templates.log, "warning") as warning:
+                catalog = report_templates.load_report_template_catalog({"report_templates_file": str(path)})
+
+        assert catalog.source_path.endswith("app/conf/report_templates.yaml")
+        assert [template["id"] for template in catalog.templates] == ["standard"]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("REPORT_TEMPLATES_OVERRIDE_INVALID",)
+        assert warning.call_args.kwargs["extra"]["path"] == str(path)
+
+    def test_report_draft_storage_handles_scope_and_conflicts(self, tmp_path):
+        db_path = str(tmp_path / "reports.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            database.db_init()
+            saved = report_storage.save_report_draft(
+                "session-report",
+                "project-1",
+                {
+                    "metadata": {"engagement_name": "June assessment", "date_range": "2026-06-01 to 2026-06-05"},
+                    "selection_modes": {"run_ids": "all", "target_ids": "all"},
+                    "selection_filters": {
+                        "run_ids": {"q": "nmap"},
+                        "target_ids": {"q": "api", "type": "domain", "auto_discovered": True},
+                        "finding_ids": {"review_state": "new", "severity": "high"},
+                    },
+                    "selection_exclude_ids": {
+                        "run_ids": ["run-1", "run-2", "run-3"],
+                        "target_ids": ["target-1"],
+                    },
+                },
+            )
+            assert saved["draft"]["metadata"]["engagement_name"] == "June assessment"
+            assert saved["draft"]["metadata"]["date_range"] == "2026-06-01 to 2026-06-05"
+            assert saved["draft"]["selection_modes"]["run_ids"] == "all"
+            assert saved["draft"]["selection_filters"]["run_ids"]["q"] == "nmap"
+            assert saved["draft"]["selection_filters"]["target_ids"] == {
+                "q": "api",
+                "type": "domain",
+                "auto_discovered": True,
+            }
+            assert saved["draft"]["selection_filters"]["finding_ids"] == {
+                "q": "",
+                "review_state": "new",
+                "severity": "high",
+            }
+            assert saved["draft"]["selection_exclude_ids"]["run_ids"] == ["run-1", "run-2", "run-3"]
+            assert saved["draft"]["selection_exclude_ids"]["target_ids"] == ["target-1"]
+            reloaded_saved = report_storage.get_report_draft("session-report", "project-1")
+            assert reloaded_saved is not None
+            assert reloaded_saved["draft"]["selection_exclude_ids"]["run_ids"] == ["run-1", "run-2", "run-3"]
+            assert reloaded_saved["draft"]["selection_filters"]["run_ids"]["q"] == "nmap"
+
+            with pytest.raises(ProjectWorkspaceError, match="YYYY-MM-DD to YYYY-MM-DD"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-date-format",
+                    {"metadata": {"date_range": "June 1 - June 5"}},
+                )
+
+            with pytest.raises(ProjectWorkspaceError, match="invalid calendar date"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-date-value",
+                    {"metadata": {"date_range": "2026-06-31 to 2026-07-01"}},
+                )
+
+            with pytest.raises(ProjectWorkspaceError, match="on or after"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-date-order",
+                    {"metadata": {"date_range": "2026-06-05 to 2026-06-01"}},
+                )
+
+            legacy = report_storage.save_report_draft(
+                "session-report",
+                "project-legacy-entity-selection",
+                {"selection": {"entity_ids": ["target-legacy"]}},
+            )
+            assert legacy["draft"]["selection"]["target_ids"] == ["target-legacy"]
+            assert "entity_ids" not in legacy["draft"]["selection"]
+
+            with pytest.raises(ProjectWorkspaceError, match="unsupported report run_ids filter"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-invalid-selection-filter",
+                    {"selection_filters": {"run_ids": {"q": "nmap", "status": "done"}}},
+                )
+
+            oversized_selection = [f"run-{index}" for index in range(501)]
+            with pytest.raises(ProjectWorkspaceError, match="limited to 500 ids per section"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-oversized-manual-selection",
+                    {"selection": {"run_ids": oversized_selection}},
+                )
+
+            oversized_exclusions = [f"run-{index}" for index in range(501)]
+            with pytest.raises(ProjectWorkspaceError, match="limited to 500 ids per section"):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-oversized-selection-exclusions",
+                    {"selection_exclude_ids": {"run_ids": oversized_exclusions}},
+                )
+
+            updated = report_storage.save_report_draft(
+                "session-report",
+                "project-1",
+                {"metadata": {"engagement_name": "Final report"}},
+                expected_updated=saved["updated"],
+            )
+            assert updated["draft"]["metadata"]["engagement_name"] == "Final report"
+
+            with pytest.raises(report_storage.ReportDraftConflict):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-1",
+                    {"metadata": {"engagement_name": "Missing update token"}},
+                )
+
+            with pytest.raises(report_storage.ReportDraftConflict):
+                report_storage.save_report_draft(
+                    "session-report",
+                    "project-1",
+                    {"metadata": {"engagement_name": "Stale report"}},
+                    expected_updated=saved["updated"],
+                )
+
+            team_saved = report_storage.save_report_draft(
+                "session-report",
+                "project-1",
+                {"metadata": {"engagement_name": "Team report"}},
+                team_id="team-1",
+            )
+            assert team_saved["team_id"] == "team-1"
+            personal_draft = report_storage.get_report_draft("session-report", "project-1")
+            team_draft = report_storage.get_report_draft("session-report", "project-1", team_id="team-1")
+            assert personal_draft is not None
+            assert team_draft is not None
+            assert personal_draft["id"] == updated["id"]
+            assert team_draft["id"] == team_saved["id"]
+
+
 class TestDatabaseBackend:
     def test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect(self):
         assert database_backend.configured_database_backend({}) == database_backend.DatabaseBackend.SQLITE
@@ -2792,6 +2974,21 @@ class TestDatabaseBackend:
             'ON CONFLICT("session_id", "name") DO UPDATE SET '
             '"value" = excluded."value", "updated" = excluded."updated"'
         )
+        assert sqlite3.IntegrityError in database_backend.integrity_error_types(database_backend.DatabaseBackend.SQLITE)
+
+    def test_connect_sqlite_enables_wal_autocheckpoint(self, tmp_path):
+        db_path = tmp_path / "wal-autocheckpoint.db"
+        conn = database_backend.connect_sqlite(str(db_path))
+        try:
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            synchronous = conn.execute("PRAGMA synchronous").fetchone()[0]
+            wal_autocheckpoint = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+        finally:
+            conn.close()
+
+        assert journal_mode == "wal"
+        assert synchronous == 1
+        assert wal_autocheckpoint == 1000
 
     def test_postgres_backend_exposes_dialect_and_pool_settings(self, monkeypatch):
         monkeypatch.delenv("PGOPTIONS", raising=False)
@@ -2827,6 +3024,7 @@ class TestDatabaseBackend:
             False,
             "-c jit=off",
         )
+        assert sqlite3.IntegrityError in database_backend.integrity_error_types(database_backend.DatabaseBackend.POSTGRES)
         with pytest.raises(database_backend.DatabaseBackendError, match="SQLite-specific SQL"):
             database_backend.require_sqlite_backend(cfg, "db_connect")
 
@@ -3155,6 +3353,7 @@ class TestPostgresMigrations:
         "secrets",
         "notification_channels",
         "notification_events",
+        "audit_events",
         "schedules",
         "schedule_fires",
         "watchers",
@@ -3176,6 +3375,7 @@ class TestPostgresMigrations:
         "entity_notes",
         "finding_triage_details",
         "evidence_packages",
+        "project_reports",
     )
 
     @staticmethod
@@ -3253,6 +3453,11 @@ class TestPostgresMigrations:
             "0026",
             "0027",
             "0028",
+            "0029",
+            "0030",
+            "0031",
+            "0032",
+            "0033",
         ]
         for table_name in (
             "runs",
@@ -3274,6 +3479,7 @@ class TestPostgresMigrations:
             "secrets",
             "notification_channels",
             "notification_events",
+            "audit_events",
             "schedules",
             "schedule_fires",
             "watchers",
@@ -3295,6 +3501,7 @@ class TestPostgresMigrations:
             "entity_notes",
             "finding_triage_details",
             "evidence_packages",
+            "project_reports",
         ):
             assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
         assert "JSONB NOT NULL DEFAULT" in sql
@@ -3304,6 +3511,20 @@ class TestPostgresMigrations:
         assert "suppressed_reason TEXT NOT NULL DEFAULT ''" in sql
         assert "suppressed_at TEXT NOT NULL DEFAULT ''" in sql
         assert "runs_fts" not in sql
+
+    def test_watcher_monitoring_incremental_migration_adds_enum_constraints(self):
+        from core.migrations import MIGRATIONS
+
+        migration = next(item for item in MIGRATIONS if item.version == "0032")
+        sql = "\n".join(migration.statements)
+
+        assert "watcher_fires_fire_kind_check" in sql
+        assert "watcher_fires_ack_state_check" in sql
+        assert "fire_kind NOT IN" in sql
+        assert "ack_state NOT IN" in sql
+        assert "CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))" in sql
+        assert "'baseline_created'" in sql
+        assert "'baseline_accepted'" in sql
 
     def test_sqlite_schema_matches_postgres_migration_core_shape(self):
         from core.migrations import MIGRATIONS
@@ -4388,6 +4609,68 @@ class TestSchedulerFoundation:
         assert fired_ids == [due.id]
         assert [dict(row) for row in rows] == [{"schedule_id": due.id, "status": "fired", "run_id": "run_worker_once"}]
 
+    def test_scheduler_worker_run_once_runs_daily_retention(self, monkeypatch, tmp_path):
+        from services.scheduler import worker
+
+        cfg = {
+            **app_config.CFG,
+            "permalink_retention_days": 30,
+            "audit_retention_days": 30,
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+        }
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) "
+                "VALUES ('scheduler-old-run', 'tok_scheduler_retention', 'echo old', datetime('now', '-100 days'))"
+            )
+            conn.execute(
+                "INSERT INTO audit_events (id, event_type, target_type, created) "
+                "VALUES ('scheduler-old-audit', 'history.delete', 'run', ?)",
+                ((datetime.now(timezone.utc) - timedelta(days=100)).isoformat(),),
+            )
+            conn.commit()
+
+        monkeypatch.setattr(worker, "CFG", cfg)
+        monkeypatch.setattr(worker, "_last_retention_check_monotonic", None)
+
+        assert worker.run_once(limit=5) == 0
+
+        with database.db_connect() as conn:
+            counts = {
+                "runs": conn.execute("SELECT COUNT(*) FROM runs WHERE id = 'scheduler-old-run'").fetchone()[0],
+                "audit_events": conn.execute(
+                    "SELECT COUNT(*) FROM audit_events WHERE id = 'scheduler-old-audit'"
+                ).fetchone()[0],
+            }
+        assert counts == {"runs": 0, "audit_events": 0}
+
+    def test_scheduler_retention_guard_skips_until_interval_elapses(self, monkeypatch):
+        from services.scheduler import worker
+
+        prune_retention = mock.Mock(return_value={"runs": 1, "snapshots": 0})
+        prune_events = mock.Mock(return_value=2)
+        monkeypatch.setattr(worker.database, "prune_retention", prune_retention)
+        monkeypatch.setattr(worker, "prune_events", prune_events)
+        monkeypatch.setattr(worker, "_last_retention_check_monotonic", None)
+
+        first = worker.maybe_run_retention(mock.Mock(), monotonic_now=100.0, cfg={})
+        second = worker.maybe_run_retention(mock.Mock(), monotonic_now=101.0, cfg={})
+        third = worker.maybe_run_retention(
+            mock.Mock(),
+            monotonic_now=100.0 + worker.RETENTION_CHECK_INTERVAL_SECONDS + 1,
+            cfg={},
+        )
+
+        assert first == {"runs": 1, "snapshots": 0, "audit_events": 2}
+        assert second == {"runs": 0, "snapshots": 0, "audit_events": 0}
+        assert third == {"runs": 1, "snapshots": 0, "audit_events": 2}
+        assert prune_retention.call_count == 2
+        assert prune_events.call_count == 2
+
     def test_scheduler_postgres_lock_exits_when_already_held(self, monkeypatch):
         from services.scheduler import worker
 
@@ -4454,17 +4737,28 @@ class TestWatchersFoundation:
             (token, "2026-05-20T10:00:00+00:00", ""),
         )
 
-    def _insert_run(self, conn, run_id: str, lines: list[str], *, exit_code: int = 0):
+    def _insert_run(
+        self,
+        conn,
+        run_id: str,
+        lines: list[str],
+        *,
+        session_id: str = "tok_watchers",
+        team_id: str = "",
+        exit_code: int = 0,
+        finished: str | None = "2026-05-20T10:00:01+00:00",
+    ):
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, session_id, team_id, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
-                "tok_watchers",
+                session_id,
+                team_id,
                 "nmap -sV darklab.sh",
                 "2026-05-20T10:00:00+00:00",
-                "2026-05-20T10:00:01+00:00",
+                finished,
                 exit_code,
                 json.dumps(lines),
                 len(lines),
@@ -4490,6 +4784,35 @@ class TestWatchersFoundation:
             ),
         )
 
+    def _insert_project(self, conn, project_id: str, *, session_id: str = "tok_watchers", team_id: str = ""):
+        conn.execute(
+            "INSERT INTO projects "
+            "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, '', 'active', '', ?, ?)",
+            (
+                project_id,
+                session_id,
+                team_id,
+                project_id,
+                project_id,
+                "2026-05-20T10:00:00+00:00",
+                "2026-05-20T10:00:00+00:00",
+            ),
+        )
+
+    def _link_project_run(self, conn, project_id: str, run_id: str):
+        conn.execute(
+            "INSERT INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'manual', ?)",
+            (
+                f"plink_{project_id}_{run_id}",
+                project_id,
+                run_id,
+                "2026-05-20T10:00:00+00:00",
+            ),
+        )
+
     def test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists(self, monkeypatch, tmp_path):
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
@@ -4504,6 +4827,11 @@ class TestWatchersFoundation:
                 cadence_preset="hourly",
                 label="Nmap drift",
                 options={"suppress_removals": True},
+                policy={
+                    "ignore_line_patterns": ["timing jitter"],
+                    "alert_after_repeated_changes": 2,
+                    "alert_signal_classes": ["ports"],
+                },
                 conn=conn,
             )
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
@@ -4536,6 +4864,11 @@ class TestWatchersFoundation:
         assert watcher.baseline_run_id == "run_baseline"
         assert watcher.command_text == "nmap -sV darklab.sh"
         assert watcher.options == {"suppress_removals": True, "notify_metadata_changes": False}
+        assert watcher.policy == {
+            "ignore_line_patterns": ["timing jitter"],
+            "alert_after_repeated_changes": 2,
+            "alert_signal_classes": ["ports"],
+        }
         assert schedule is not None
         assert schedule.owner_kind == "watcher"
         assert schedule.owner_id == watcher.id
@@ -4554,6 +4887,620 @@ class TestWatchersFoundation:
             "paused_watchers": 1,
             "paused_schedules": 1,
         }
+
+    def test_watcher_project_membership_infers_single_same_scope_run_link(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
+            self._insert_project(conn, "prj_personal")
+            self._insert_project(conn, "prj_team", team_id="team_watchers")
+            self._link_project_run(conn, "prj_personal", "run_baseline")
+            self._link_project_run(conn, "prj_team", "run_baseline")
+
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            team_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                team_id="team_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            with pytest.raises(watcher_service.WatcherError, match="same scope"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="nmap -sV darklab.sh",
+                    baseline_run_id="run_baseline",
+                    project_id="prj_team",
+                    cadence_preset="hourly",
+                    conn=conn,
+                )
+
+        assert watcher.project_id == "prj_personal"
+        assert team_watcher.project_id == "prj_team"
+
+    def test_deleting_project_clears_watcher_membership(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
+        from services.projects import crud as project_crud
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_personal")
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                project_id="prj_personal",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            with mock.patch.object(project_crud.log, "info") as info_log:
+                assert project_crud.delete_project("tok_watchers", "prj_personal", conn=conn) is True
+            refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
+
+        assert refreshed is not None
+        assert refreshed.project_id == ""
+        assert info_log.call_args.args == ("PROJECT_WATCHER_MEMBERSHIP_CLEARED",)
+        assert info_log.call_args.kwargs["extra"] == {
+            "project_id": "prj_personal",
+            "session": get_log_session_id("tok_watchers"),
+            "team_id": "",
+            "watcher_count": 1,
+        }
+
+    def test_project_monitoring_payload_counts_project_watchers_and_missing_run_refs(self, monkeypatch, tmp_path):
+        from services.projects import monitoring as project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_current", ["443/tcp open https"])
+            changed = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_missing",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                changed,
+                run_id="run_current",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{
+                        "key": "443/tcp",
+                        "port": "443",
+                        "proto": "tcp",
+                        "state": "open",
+                        "service": "https",
+                    }],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                changed.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id="run_current",
+                consecutive_changed=1,
+                conn=conn,
+            )
+            quiet = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="httpx https://darklab.sh",
+                project_id="prj_monitor",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                quiet,
+                run_id="run_recovered_missing",
+                diff_summary={"classifier": "textual"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="recovered",
+                fire_kind="recovered",
+            )
+            watcher_service.set_watcher_state(
+                quiet.id,
+                state="ok",
+                state_reason="no_change",
+                consecutive_no_change=3,
+                conn=conn,
+            )
+
+            conn.commit()
+            with mock.patch.object(project_monitoring.log, "debug") as debug_log, \
+                 mock.patch.object(project_monitoring.log, "warning") as warning_log:
+                payload = project_monitoring.get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=4)
+
+        assert payload is not None
+        assert payload["counts"] == {
+            "active": 0,
+            "changed": 1,
+            "failed": 0,
+            "quiet": 1,
+            "paused": 0,
+        }
+        assert [monitor["dashboard_state"] for monitor in payload["monitors"]] == ["quiet", "changed"]
+        changed_monitor = next(item for item in payload["monitors"] if item["id"] == changed.id)
+        assert changed_monitor["latest_fire"]["fire_kind"] == "changed"
+        assert changed_monitor["latest_fire"]["run_available"] is True
+        assert changed_monitor["latest_fire"]["baseline_run_available"] is False
+        assert changed_monitor["latest_fire"]["run"]["command"] == "nmap -sV darklab.sh"
+        assert changed_monitor["latest_fire"]["rollup"]["classifier"] == "ports"
+        assert changed_monitor["latest_fire"]["rollup"]["severity"] == "critical"
+        assert changed_monitor["latest_fire"]["rollup"]["top_signals"][0]["label"] == "New open port 443/tcp https"
+        assert changed_monitor["monitor_group"] == {
+            "key": "ports",
+            "label": "External perimeter/ports",
+            "command_root": "nmap",
+        }
+        quiet_monitor = next(item for item in payload["monitors"] if item["id"] == quiet.id)
+        assert quiet_monitor["monitor_group"]["key"] == "web"
+        assert payload["summary"]["changed_monitor_count"] == 1
+        assert payload["summary"]["recovered_monitor_count"] == 1
+        assert payload["summary"]["failed_monitor_count"] == 0
+        assert payload["summary"]["highest_severity"] == "critical"
+        assert payload["summary"]["top_changes"][0]["label"] == "New open port 443/tcp https"
+        assert payload["summary"]["top_changes"][0]["severity"] == "critical"
+        assert payload["summary"]["links"] == {
+            "project_monitoring": "/projects/prj_monitor/monitoring",
+            "project_monitoring_summary": "/projects/prj_monitor/monitoring/summary",
+        }
+        assert {item["value"] for item in payload["filter_options"]["groups"]} == {"ports", "web"}
+        assert {item["value"] for item in payload["filter_options"]["severities"]} == {"critical"}
+        assert warning_log.call_args.args == ("PROJECT_MONITORING_RUN_REF_MISSING",)
+        assert warning_log.call_args.kwargs["extra"]["project_id"] == "prj_monitor"
+        assert warning_log.call_args.kwargs["extra"]["missing_run_count"] == 1
+        assert warning_log.call_args.kwargs["extra"]["missing_baseline_count"] == 1
+        assert warning_log.call_args.kwargs["extra"]["affected_monitor_count"] == 2
+        built_log = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_MONITORING_PAYLOAD_BUILT",))
+        assert built_log.kwargs["extra"]["watcher_count"] == 2
+        assert built_log.kwargs["extra"]["timeline_count"] == 2
+        assert built_log.kwargs["extra"]["run_ref_requested_count"] == 3
+        assert built_log.kwargs["extra"]["run_ref_found_count"] == 1
+
+    def test_project_monitoring_payload_keeps_deleted_current_run_visible(self, monkeypatch, tmp_path):
+        from services.projects import monitoring as project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_deleted_current",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id="run_deleted_current",
+                consecutive_changed=1,
+                conn=conn,
+            )
+            conn.commit()
+
+            with mock.patch.object(project_monitoring.log, "warning") as warning_log:
+                payload = project_monitoring.get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=4)
+
+        assert payload is not None
+        monitor = payload["monitors"][0]
+        timeline_fire = payload["timeline"][0]
+        assert monitor["id"] == watcher.id
+        assert monitor["latest_fire"]["id"] == fire.id
+        assert monitor["latest_fire"]["run_available"] is False
+        assert monitor["latest_fire"]["baseline_run_available"] is True
+        assert monitor["latest_fire"]["run"] is None
+        assert monitor["latest_fire"]["baseline_run"]["id"] == "run_base"
+        assert timeline_fire["id"] == fire.id
+        assert timeline_fire["run_available"] is False
+        assert timeline_fire["baseline_run_available"] is True
+        assert payload["summary"]["top_changes"][0]["fire_id"] == fire.id
+        assert payload["summary"]["top_changes"][0]["run_available"] is False
+        assert payload["summary"]["top_changes"][0]["baseline_run_available"] is True
+        assert warning_log.call_args.args == ("PROJECT_MONITORING_RUN_REF_MISSING",)
+        assert warning_log.call_args.kwargs["extra"]["missing_run_count"] == 1
+        assert warning_log.call_args.kwargs["extra"]["missing_baseline_count"] == 0
+
+    def test_project_monitoring_triage_state_uses_unbounded_unresolved_fire(self, monkeypatch, tmp_path):
+        from services.projects.monitoring import get_project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_old_change", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_recent_same_1", ["80/tcp open http"])
+            self._insert_run(conn, "run_recent_same_2", ["80/tcp open http"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_old_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.update_watcher_fire_ack(conn, old_fire.id, ack_state="needs_action")
+            recent_one = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_recent_same_1",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="no_change",
+                fire_kind="no_change",
+            )
+            watcher_service.update_watcher_fire_ack(conn, recent_one.id, ack_state="resolved")
+            recent_two = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_recent_same_2",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="no_change",
+                fire_kind="no_change",
+            )
+            watcher_service.update_watcher_fire_ack(conn, recent_two.id, ack_state="resolved")
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:00:00+00:00", old_fire.id))
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:02:00+00:00", recent_one.id))
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:03:00+00:00", recent_two.id))
+            conn.commit()
+
+            payload = get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=2)
+
+        assert payload is not None
+        monitor = payload["monitors"][0]
+        assert [fire["id"] for fire in monitor["fires"]] == [recent_two.id, recent_one.id]
+        assert monitor["current_triage_state"] == "needs_action"
+        assert monitor["current_triage_fire"]["id"] == old_fire.id
+        assert monitor["current_triage_fire"]["run_available"] is True
+        assert monitor["current_triage_fire"]["rollup"]["severity"] == "critical"
+        assert old_fire.id not in {fire["id"] for fire in payload["timeline"]}
+
+    def test_project_monitoring_summary_uses_unbounded_unresolved_fires(self, monkeypatch, tmp_path):
+        from services.projects.monitoring import get_project_monitoring
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_old_change", ["80/tcp open http", "443/tcp open https"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_old_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.update_watcher_fire_ack(conn, old_fire.id, ack_state="needs_action")
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:00:00+00:00", old_fire.id),
+            )
+            for index in range(30):
+                run_id = f"run_recent_same_{index}"
+                recent_fire = watcher_service.record_watcher_fire(
+                    conn,
+                    watcher,
+                    run_id=run_id,
+                    diff_summary={"classifier": "ports"},
+                    diff_kind="none",
+                    state_at_fire="ok",
+                    state_reason="no_change",
+                    fire_kind="no_change",
+                )
+                watcher_service.update_watcher_fire_ack(conn, recent_fire.id, ack_state="resolved")
+                conn.execute(
+                    "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                    (f"2026-05-20T10:{index:02d}:00+00:00", recent_fire.id),
+                )
+            conn.commit()
+
+            payload = get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=25)
+
+        assert payload is not None
+        assert old_fire.id not in {fire["id"] for fire in payload["timeline"]}
+        assert payload["summary"]["highest_severity"] == "critical"
+        assert payload["summary"]["top_changes"][0]["fire_id"] == old_fire.id
+        assert payload["summary"]["top_changes"][0]["label"] == "New open port 443/tcp https"
+        assert payload["summary"]["top_changes"][0]["run_available"] is True
+
+    @pytest.mark.parametrize(
+        ("summary", "expected"),
+        [
+            (
+                {
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                {"severity": "critical", "added": 1, "removed": 0, "changed": 0, "signal_kind": "port_added"},
+            ),
+            (
+                {
+                    "classifier": "ports",
+                    "added_ports": [{"key": "25/tcp", "state": "closed", "service": "smtp"}],
+                },
+                {"severity": "informational", "added": 1, "removed": 0, "changed": 0, "signal_kind": "port_added"},
+            ),
+            (
+                {
+                    "classifier": "ports",
+                    "changed_port_count": 1,
+                    "changed_ports": [{
+                        "before": {"key": "443/tcp", "service": "https"},
+                        "after": {"key": "443/tcp", "service": "nginx"},
+                    }],
+                },
+                {"severity": "important", "added": 0, "removed": 0, "changed": 1, "signal_kind": "port_changed"},
+            ),
+            (
+                {
+                    "classifier": "ports",
+                    "removed_ports": [{"key": "22/tcp", "state": "open", "service": "ssh"}],
+                },
+                {"severity": "informational", "added": 0, "removed": 1, "changed": 0, "signal_kind": "port_removed"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "added_finding_count": 1,
+                    "added_findings": [{"title": "Remote code execution", "severity": "high"}],
+                },
+                {"severity": "critical", "added": 1, "removed": 0, "changed": 0, "signal_kind": "finding_added"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "added_findings": [{"title": "Weak TLS", "severity": "medium"}],
+                },
+                {"severity": "important", "added": 1, "removed": 0, "changed": 0, "signal_kind": "finding_added"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "added_findings": [{"title": "Verbose banner", "severity": "low"}],
+                },
+                {"severity": "informational", "added": 1, "removed": 0, "changed": 0, "signal_kind": "finding_added"},
+            ),
+            (
+                {
+                    "classifier": "findings",
+                    "removed_findings": [{"title": "Old finding", "severity": "critical"}],
+                },
+                {"severity": "informational", "added": 0, "removed": 1, "changed": 0, "signal_kind": "finding_removed"},
+            ),
+            (
+                {
+                    "classifier": "tls",
+                    "changed_tls_fields": [{"field": "issuer", "before": "Old CA", "after": "New CA"}],
+                },
+                {"severity": "critical", "added": 0, "removed": 0, "changed": 1, "signal_kind": "tls_changed"},
+            ),
+            (
+                {
+                    "classifier": "tls",
+                    "changed_tls_fields": [{"field": "subject", "before": "old", "after": "new"}],
+                },
+                {"severity": "informational", "added": 0, "removed": 0, "changed": 1, "signal_kind": "tls_changed"},
+            ),
+            (
+                {"classifier": "hosts", "added_hosts": [{"host": "new.darklab.sh"}]},
+                {"severity": "important", "added": 1, "removed": 0, "changed": 0, "signal_kind": "host_added"},
+            ),
+            (
+                {"classifier": "hosts", "removed_hosts": [{"host": "old.darklab.sh"}]},
+                {"severity": "informational", "added": 0, "removed": 1, "changed": 0, "signal_kind": "host_removed"},
+            ),
+            (
+                {"classifier": "textual", "added_line_count": 2, "entity_added_count": 1},
+                {"severity": "informational", "added": 3, "removed": 0, "changed": 0, "signal_kind": "text_added"},
+            ),
+            (
+                {"classifier": "custom", "added": ["one"], "changed_count": 2, "removed_count": 1},
+                {"severity": "informational", "added": 1, "removed": 1, "changed": 2, "signal_kind": "added"},
+            ),
+        ],
+    )
+    def test_watcher_fire_rollup_maps_classifier_summaries_to_severity_defaults(self, summary, expected):
+        from services.diff.rollups import build_fire_rollup
+
+        rollup = build_fire_rollup(
+            summary,
+            diff_kind="signal",
+            truncated=True,
+            run_id="run_current",
+            baseline_run_id="run_base",
+        )
+
+        assert rollup["severity"] == expected["severity"]
+        assert rollup["added"] == expected["added"]
+        assert rollup["removed"] == expected["removed"]
+        assert rollup["changed"] == expected["changed"]
+        assert rollup["top_signals"][0]["kind"] == expected["signal_kind"]
+        assert rollup["truncated"] is True
+        assert rollup["source_run_id"] == "run_current"
+        assert rollup["baseline_run_id"] == "run_base"
+
+    def test_watcher_fire_rollup_bounds_top_signals(self):
+        from services.diff.rollups import build_fire_rollup
+
+        rollup = build_fire_rollup(
+            {
+                "classifier": "ports",
+                "added_ports": [
+                    {"key": "80/tcp", "state": "open", "service": "http"},
+                    {"key": "443/tcp", "state": "open", "service": "https"},
+                    {"key": "8443/tcp", "state": "open", "service": "https-alt"},
+                ],
+            },
+            top_limit=2,
+        )
+
+        assert rollup["severity"] == "critical"
+        assert [signal["label"] for signal in rollup["top_signals"]] == [
+            "New open port 80/tcp http",
+            "New open port 443/tcp https",
+        ]
+
+    def test_sqlite_watcher_monitoring_backfill_infers_projects_and_fire_state(self, monkeypatch, tmp_path):
+        def insert_watcher(conn, watcher_id: str, baseline_run_id: str, *, team_id: str = "") -> None:
+            conn.execute(
+                "INSERT INTO watchers "
+                "(id, session_token, team_id, project_id, label, command_text, schedule_id, baseline_run_id, "
+                "last_diff_summary_json, state, options_json, policy_json, created, updated) "
+                "VALUES (?, ?, ?, '', ?, ?, ?, ?, '{}', 'ok', '{}', '{}', ?, ?)",
+                (
+                    watcher_id,
+                    "tok_watchers",
+                    team_id,
+                    watcher_id,
+                    "nmap -sV darklab.sh",
+                    f"sch_{watcher_id}",
+                    baseline_run_id,
+                    "2026-05-20T10:00:00+00:00",
+                    "2026-05-20T10:00:00+00:00",
+                ),
+            )
+
+        def insert_fire(conn, fire_id: str, state_at_fire: str, summary: dict[str, object]) -> None:
+            conn.execute(
+                "INSERT INTO watcher_fires "
+                "(id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind, state_at_fire, created) "
+                "VALUES (?, 'w_same', 'run_same', ?, ?, 'none', ?, ?)",
+                (
+                    fire_id,
+                    f"run_{fire_id}",
+                    json.dumps(summary),
+                    state_at_fire,
+                    "2026-05-20T10:00:00+00:00",
+                ),
+            )
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            for run_id in ("run_same", "run_ambiguous", "run_unlinked", "run_cross", "run_team"):
+                self._insert_run(conn, run_id, ["80/tcp open http"])
+            for project_id in ("prj_same", "prj_ambiguous_a", "prj_ambiguous_b", "prj_cross"):
+                self._insert_project(conn, project_id)
+            self._insert_project(conn, "prj_team", team_id="team_watchers")
+            self._link_project_run(conn, "prj_same", "run_same")
+            self._link_project_run(conn, "prj_ambiguous_a", "run_ambiguous")
+            self._link_project_run(conn, "prj_ambiguous_b", "run_ambiguous")
+            self._link_project_run(conn, "prj_cross", "run_cross")
+            self._link_project_run(conn, "prj_team", "run_team")
+            insert_watcher(conn, "w_same", "run_same")
+            insert_watcher(conn, "w_ambiguous", "run_ambiguous")
+            insert_watcher(conn, "w_unlinked", "run_unlinked")
+            insert_watcher(conn, "w_cross", "run_cross", team_id="team_watchers")
+            insert_watcher(conn, "w_team", "run_team", team_id="team_watchers")
+            insert_fire(conn, "fire_changed", "changed", {"classifier": "ports"})
+            insert_fire(conn, "fire_failed", "error", {"classifier": "textual"})
+            insert_fire(conn, "fire_no_change", "ok", {"classifier": "textual"})
+            insert_fire(conn, "fire_paused", "paused", {"classifier": "textual"})
+            insert_fire(conn, "fire_baseline", "ok", {"classifier": "baseline", "baseline_created": True})
+            conn.commit()
+
+            database._migrate_schema(conn)
+            conn.commit()
+
+            watcher_rows = conn.execute(
+                "SELECT id, project_id FROM watchers "
+                "WHERE id IN ('w_same', 'w_ambiguous', 'w_unlinked', 'w_cross', 'w_team') "
+                "ORDER BY id",
+            ).fetchall()
+            fire_rows = conn.execute(
+                "SELECT id, fire_kind, state_reason FROM watcher_fires ORDER BY id",
+            ).fetchall()
+
+        assert {row["id"]: row["project_id"] for row in watcher_rows} == {
+            "w_ambiguous": "",
+            "w_cross": "",
+            "w_same": "prj_same",
+            "w_team": "prj_team",
+            "w_unlinked": "",
+        }
+        assert {row["id"]: (row["fire_kind"], row["state_reason"]) for row in fire_rows} == {
+            "fire_baseline": ("baseline_created", "baseline_created"),
+            "fire_changed": ("changed", "diff_detected"),
+            "fire_failed": ("failed", "run_failed"),
+            "fire_no_change": ("no_change", "no_change"),
+            "fire_paused": ("paused", "paused"),
+        }
+
 
     def test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
@@ -4608,6 +5555,15 @@ class TestWatchersFoundation:
                     baseline_run_id="run_baseline",
                     cadence_preset="hourly",
                     options={"suppress_removals": "yes"},
+                    conn=conn,
+                )
+            with pytest.raises(watcher_service.WatcherError, match="unsupported watcher policy field"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="echo nope",
+                    baseline_run_id="run_baseline",
+                    cadence_preset="hourly",
+                    policy={"unknown": True},
                     conn=conn,
                 )
 
@@ -4700,8 +5656,55 @@ class TestWatchersFoundation:
         assert first.diff_kind == "signal"
         assert first.notification_event_ids == ["nte_1"]
         assert first.state_at_fire == "changed"
+        assert first.fire_kind == "changed"
+        assert first.ack_state == "new"
+
+    def test_accept_baseline_requires_completed_owned_watcher_fire(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._register_token(conn, "tok_other_watchers")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_valid", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_unrelated", ["80/tcp open http", "8443/tcp open https"])
+            self._insert_run(conn, "run_unfinished", ["80/tcp open http"], finished=None)
+            self._insert_run(
+                conn,
+                "run_foreign",
+                ["22/tcp open ssh"],
+                session_id="tok_other_watchers",
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_valid",
+                diff_summary={"classifier": "ports", "added_port_count": 1},
+                diff_kind="signal",
+                state_at_fire="changed",
+                fire_kind="changed",
+            )
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_unfinished")
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_foreign")
+
+            for rejected_run_id in ("missing", "run_unrelated", "run_unfinished", "run_foreign"):
+                with pytest.raises(watcher_service.WatcherError, match="completed run from this watcher"):
+                    watcher_service.accept_baseline(watcher.id, run_id=rejected_run_id, conn=conn)
+
+            accepted = watcher_service.accept_baseline(watcher.id, run_id="run_valid", conn=conn)
+
+        assert accepted is not None
+        assert accepted.baseline_run_id == "run_valid"
 
     def test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
 
@@ -4715,27 +5718,40 @@ class TestWatchersFoundation:
                 label="old label",
                 conn=conn,
             )
-            updated = watcher_service.update_watcher(
-                watcher.id,
-                {
-                    "label": "Home page drift",
-                    "command_text": "curl https://darklab.sh/status",
-                    "cadence_preset": "daily",
-                    "options": {"notify_metadata_changes": True},
-                },
-                conn=conn,
-            )
-            paused = watcher_service.pause_watcher(watcher.id, "operator paused", conn=conn)
-            resumed = watcher_service.resume_watcher(watcher.id, conn=conn)
-            assert resumed is not None
-            watcher_service.record_watcher_fire(conn, resumed, run_id="run_latest")
-            accepted = watcher_service.accept_baseline(watcher.id, conn=conn)
+            with mock.patch.object(watcher_service.log, "debug") as debug_log, \
+                 mock.patch.object(watcher_service.log, "info") as info_log:
+                updated = watcher_service.update_watcher(
+                    watcher.id,
+                    {
+                        "label": "Home page drift",
+                        "command_text": "curl https://darklab.sh/status",
+                        "cadence_preset": "daily",
+                        "options": {"notify_metadata_changes": True},
+                        "policy": {
+                            "ignore_line_patterns": ["Date:"],
+                            "alert_after_repeated_changes": 3,
+                            "alert_signal_classes": ["entities", "findings"],
+                        },
+                    },
+                    conn=conn,
+                )
+                paused = watcher_service.pause_watcher(watcher.id, "operator paused", conn=conn)
+                resumed = watcher_service.resume_watcher(watcher.id, conn=conn)
+                assert resumed is not None
+                self._insert_run(conn, "run_latest", ["200 OK"])
+                watcher_service.record_watcher_fire(conn, resumed, run_id="run_latest")
+                accepted = watcher_service.accept_baseline(watcher.id, conn=conn)
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
 
         assert updated is not None
         assert updated.label == "Home page drift"
         assert updated.command_text == "curl https://darklab.sh/status"
         assert updated.options == {"suppress_removals": False, "notify_metadata_changes": True}
+        assert updated.policy == {
+            "ignore_line_patterns": ["Date:"],
+            "alert_after_repeated_changes": 3,
+            "alert_signal_classes": ["entities", "findings"],
+        }
         assert paused is not None
         assert paused.state == "paused"
         assert resumed.state == "ok"
@@ -4745,10 +5761,25 @@ class TestWatchersFoundation:
         assert schedule.command_text == "curl https://darklab.sh/status"
         assert schedule.cadence_preset == "daily"
         assert schedule.enabled is True
+        prepared = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_UPDATE_PREPARED",))
+        assert prepared.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert prepared.kwargs["extra"]["next_command_changed"] is True
+        assert prepared.kwargs["extra"]["ignore_line_pattern_count"] == 1
+        updated_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_UPDATED",))
+        assert updated_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert updated_log.kwargs["extra"]["changed_fields"] == "label,command_text,options,policy,cadence_preset"
+        assert updated_log.kwargs["extra"]["policy_changed"] is True
+        assert updated_log.kwargs["extra"]["options_changed"] is True
+        assert updated_log.kwargs["extra"]["schedule_changed"] is True
+        accepted_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_BASELINE_ACCEPTED",))
+        assert accepted_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert accepted_log.kwargs["extra"]["baseline_run_id"] == "run_latest"
 
     def test_watcher_schedule_fire_launches_run_and_records_pending_fire(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
         from services.scheduler import dispatch as scheduler_dispatch
         from services.scheduler import service as schedule_service
+        from services.watchers import runner as watcher_runner
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
@@ -4764,7 +5795,8 @@ class TestWatchersFoundation:
             assert schedule is not None
             monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", lambda _schedule: "run_fire")
 
-            status = scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00")
+            with mock.patch.object(watcher_runner.log, "info") as info_log:
+                status = scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00")
             refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
             fires, total = watcher_service.list_watcher_fires(watcher.id, conn=conn)
             schedule_fires = conn.execute(
@@ -4783,6 +5815,9 @@ class TestWatchersFoundation:
         assert [(row["status"], row["run_id"], row["reason"]) for row in schedule_fires] == [
             ("fired", "run_fire", "started watcher run"),
         ]
+        fired_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_FIRED",))
+        assert fired_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert fired_log.kwargs["extra"]["run_id"] == "run_fire"
         assert schedule_refs["run_fire"]["schedule_id"] == watcher.schedule_id
         assert schedule_refs["run_fire"]["owner_kind"] == "watcher"
         assert schedule_refs["run_fire"]["owner_id"] == watcher.id
@@ -4792,6 +5827,7 @@ class TestWatchersFoundation:
         monkeypatch,
         tmp_path,
     ):
+        from core.helpers import get_log_session_id
         from services.notifications.models import TRIGGER_WATCHER_CHANGED
         from services.scheduler import dispatch as scheduler_dispatch
         from services.scheduler import service as schedule_service
@@ -4815,20 +5851,22 @@ class TestWatchersFoundation:
 
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             assert schedule is not None
-            assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00") == "fired"
-            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
-            watcher_finalize.finalize_watcher_run("run_baseline", conn=conn)
-            captured = watcher_service.get_watcher(watcher.id, conn=conn)
-            assert captured is not None
-            assert captured.baseline_run_id == "run_baseline"
-            assert captured.state == "ok"
-            assert captured.state_reason == "baseline_created"
+            with mock.patch.object(watcher_finalize.log, "debug") as debug_log, \
+                 mock.patch.object(watcher_finalize.log, "info") as info_log:
+                assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00") == "fired"
+                self._insert_run(conn, "run_baseline", ["80/tcp open http"])
+                watcher_finalize.finalize_watcher_run("run_baseline", conn=conn)
+                captured = watcher_service.get_watcher(watcher.id, conn=conn)
+                assert captured is not None
+                assert captured.baseline_run_id == "run_baseline"
+                assert captured.state == "ok"
+                assert captured.state_reason == "baseline_created"
 
-            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
-            assert schedule is not None
-            assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:10:00+00:00") == "fired"
-            self._insert_run(conn, "run_changed", ["80/tcp open http", "443/tcp open https"])
-            watcher_finalize.finalize_watcher_run("run_changed", conn=conn)
+                schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+                assert schedule is not None
+                assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:10:00+00:00") == "fired"
+                self._insert_run(conn, "run_changed", ["80/tcp open http", "443/tcp open https"])
+                watcher_finalize.finalize_watcher_run("run_changed", conn=conn)
 
             changed = watcher_service.get_watcher(watcher.id, conn=conn)
             fires, total = watcher_service.list_watcher_fires(watcher.id, conn=conn)
@@ -4836,6 +5874,7 @@ class TestWatchersFoundation:
                 "SELECT trigger, status, run_id FROM notification_events ORDER BY created ASC",
             ).fetchall()
             accepted = watcher_service.accept_baseline(watcher.id, run_id="run_changed", conn=conn)
+            accepted_fire = watcher_service.list_watcher_fires(watcher.id, conn=conn)[0][0]
 
         assert changed is not None
         assert changed.state == "changed"
@@ -4846,6 +5885,10 @@ class TestWatchersFoundation:
             ("run_changed", "signal", "changed"),
             ("run_baseline", "none", "ok"),
         ]
+        assert [(fire.run_id, fire.fire_kind, fire.state_reason) for fire in fires] == [
+            ("run_changed", "changed", "diff_detected"),
+            ("run_baseline", "baseline_created", "baseline_created"),
+        ]
         assert fires[1].diff_summary["baseline_created"] is True
         assert [(row["trigger"], row["status"], row["run_id"]) for row in events] == [
             (TRIGGER_WATCHER_CHANGED, "pending", "run_changed"),
@@ -4854,6 +5897,172 @@ class TestWatchersFoundation:
         assert accepted.baseline_run_id == "run_changed"
         assert accepted.state == "ok"
         assert accepted.consecutive_changed == 0
+        assert accepted_fire.fire_kind == "baseline_accepted"
+        assert accepted_fire.state_reason == "baseline_accepted"
+        baseline_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_BASELINE_CAPTURED",))
+        assert baseline_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert baseline_log.kwargs["extra"]["baseline_run_id"] == "run_baseline"
+        assert baseline_log.kwargs["extra"]["fire_kind"] == "baseline_created"
+        assert baseline_log.kwargs["extra"]["fire_id"]
+        policy_log = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_ALERT_POLICY_EVALUATED",))
+        assert policy_log.kwargs["extra"]["classifier"] == "ports"
+        assert policy_log.kwargs["extra"]["detected_signal_classes"] == "ports"
+        assert policy_log.kwargs["extra"]["selected_signal_classes"] == ""
+        assert policy_log.kwargs["extra"]["should_alert"] is True
+        assert policy_log.kwargs["extra"]["suppression_reason"] == "none"
+        changed_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_CHANGED",))
+        assert changed_log.kwargs["extra"]["diff_kind"] == "signal"
+        assert changed_log.kwargs["extra"]["truncated"] is False
+        assert changed_log.kwargs["extra"]["classifier"] == "ports"
+        assert changed_log.kwargs["extra"]["consecutive_changed"] == 1
+        assert changed_log.kwargs["extra"]["suppression_reason"] == "none"
+
+    def test_watcher_notification_policy_gates_repeated_and_signal_class_alerts(self, monkeypatch, tmp_path):
+        from services.notifications.models import TRIGGER_WATCHER_CHANGED
+        from services.watchers import finalize as watcher_finalize
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
+            self._insert_run(conn, "run_threshold_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_threshold_first", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_threshold_second", ["80/tcp open http", "8443/tcp open https-alt"])
+            threshold_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV threshold.darklab.sh",
+                baseline_run_id="run_threshold_base",
+                cadence_preset="hourly",
+                policy={"alert_after_repeated_changes": 2},
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(conn, threshold_watcher, run_id="run_threshold_first", state_at_fire="firing")
+            with mock.patch.object(watcher_finalize.log, "debug") as debug_log, \
+                 mock.patch.object(watcher_finalize.log, "info") as info_log:
+                watcher_finalize.finalize_watcher_run("run_threshold_first", conn=conn)
+                first_event_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
+                threshold_after_first = watcher_service.get_watcher(threshold_watcher.id, conn=conn)
+                assert threshold_after_first is not None
+                watcher_service.record_watcher_fire(
+                    conn,
+                    threshold_after_first,
+                    run_id="run_threshold_second",
+                    state_at_fire="firing",
+                )
+                watcher_finalize.finalize_watcher_run("run_threshold_second", conn=conn)
+
+                self._insert_run(conn, "run_text_base", ["https://old.darklab.sh"])
+                self._insert_run(conn, "run_text_current", ["https://old.darklab.sh", "https://new.darklab.sh"])
+                conn.execute(
+                    "UPDATE runs SET command = ?, output_preview = ? WHERE id = ?",
+                    (
+                        "curl https://darklab.sh",
+                        json.dumps([{
+                            "text": "https://old.darklab.sh",
+                            "kind": "info",
+                            "role": "body",
+                            "line_index": 0,
+                        }]),
+                        "run_text_base",
+                    ),
+                )
+                conn.execute(
+                    "UPDATE runs SET command = ?, output_preview = ? WHERE id = ?",
+                    (
+                        "curl https://darklab.sh",
+                        json.dumps([
+                            {
+                                "text": "https://old.darklab.sh",
+                                "kind": "info",
+                                "role": "body",
+                                "line_index": 0,
+                            },
+                            {
+                                "text": "https://new.darklab.sh",
+                                "kind": "info",
+                                "role": "body",
+                                "line_index": 1,
+                            },
+                        ]),
+                        "run_text_current",
+                    ),
+                )
+                text_watcher = watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="curl https://darklab.sh",
+                    baseline_run_id="run_text_base",
+                    cadence_preset="daily",
+                    policy={"alert_signal_classes": ["ports"]},
+                    conn=conn,
+                )
+                watcher_service.record_watcher_fire(conn, text_watcher, run_id="run_text_current", state_at_fire="firing")
+                watcher_finalize.finalize_watcher_run("run_text_current", conn=conn)
+
+                self._insert_run(conn, "run_ports_base", ["80/tcp open http"])
+                self._insert_run(conn, "run_ports_current", ["80/tcp open http", "443/tcp open https"])
+                port_watcher = watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="nmap -sV ports.darklab.sh",
+                    baseline_run_id="run_ports_base",
+                    cadence_preset="hourly",
+                    policy={"alert_signal_classes": ["ports"]},
+                    conn=conn,
+                )
+                watcher_service.record_watcher_fire(conn, port_watcher, run_id="run_ports_current", state_at_fire="firing")
+                watcher_finalize.finalize_watcher_run("run_ports_current", conn=conn)
+
+            final_events = conn.execute(
+                "SELECT trigger, run_id FROM notification_events ORDER BY created ASC",
+            ).fetchall()
+            threshold_fires = watcher_service.list_watcher_fires(threshold_watcher.id, conn=conn)[0]
+            text_fire = watcher_service.list_watcher_fires(text_watcher.id, conn=conn)[0][0]
+            port_fire = watcher_service.list_watcher_fires(port_watcher.id, conn=conn)[0][0]
+            refreshed_threshold = watcher_service.get_watcher(threshold_watcher.id, conn=conn)
+            refreshed_text = watcher_service.get_watcher(text_watcher.id, conn=conn)
+            refreshed_port = watcher_service.get_watcher(port_watcher.id, conn=conn)
+
+        assert first_event_count == 0
+        assert [(row["trigger"], row["run_id"]) for row in final_events] == [
+            (TRIGGER_WATCHER_CHANGED, "run_threshold_second"),
+            (TRIGGER_WATCHER_CHANGED, "run_ports_current"),
+        ]
+        fires_by_run = {fire.run_id: fire for fire in threshold_fires}
+        assert fires_by_run["run_threshold_first"].notification_event_ids == []
+        assert len(fires_by_run["run_threshold_second"].notification_event_ids) == 1
+        assert text_fire.notification_event_ids == []
+        assert len(port_fire.notification_event_ids) == 1
+        assert refreshed_threshold is not None
+        assert refreshed_threshold.state == "changed"
+        assert refreshed_threshold.consecutive_changed == 2
+        assert refreshed_threshold.last_diff_summary["classifier"] == "ports"
+        assert refreshed_text is not None
+        assert refreshed_text.state == "changed"
+        assert refreshed_text.consecutive_changed == 1
+        assert refreshed_text.last_diff_summary["classifier"] == "textual"
+        assert refreshed_port is not None
+        assert refreshed_port.state == "changed"
+        policy_reasons = [
+            call.kwargs["extra"]["suppression_reason"]
+            for call in debug_log.call_args_list
+            if call.args == ("WATCHER_ALERT_POLICY_EVALUATED",)
+        ]
+        assert policy_reasons == [
+            "threshold_not_met",
+            "none",
+            "signal_class_filtered",
+            "none",
+        ]
+        changed_logs = [
+            call.kwargs["extra"]
+            for call in info_log.call_args_list
+            if call.args == ("WATCHER_CHANGED",)
+        ]
+        assert [(item["run_id"], item["alert_suppressed"], item["notification_count"]) for item in changed_logs] == [
+            ("run_threshold_first", True, 0),
+            ("run_threshold_second", False, 1),
+            ("run_text_current", True, 0),
+            ("run_ports_current", False, 1),
+        ]
 
     def test_watcher_textual_diff_reports_entity_delta(self):
         from services.watchers.classifiers import textual
@@ -4936,6 +6145,8 @@ class TestWatchersFoundation:
         assert refreshed.last_diff_summary["added_port_count"] == 1
         assert fire.diff_kind == "signal"
         assert fire.state_at_fire == "changed"
+        assert fire.fire_kind == "changed"
+        assert fire.state_reason == "diff_detected"
         assert len(fire.notification_event_ids) == 1
         assert event_count == 1
 
@@ -4958,7 +6169,8 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             watcher_service.record_watcher_fire(conn, watcher, run_id="run_same", state_at_fire="firing")
-            watcher_finalize.finalize_watcher_run("run_same", conn=conn)
+            with mock.patch.object(watcher_finalize.log, "debug") as debug_log:
+                watcher_finalize.finalize_watcher_run("run_same", conn=conn)
             quiet_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
             conn.execute("UPDATE watchers SET state = ? WHERE id = ?", ("changed", watcher.id))
             changed = watcher_service.get_watcher(watcher.id, conn=conn)
@@ -4970,11 +6182,19 @@ class TestWatchersFoundation:
             recovered_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
 
         assert quiet_count == 0
+        quiet_log = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_NO_CHANGE_RECORDED",))
+        assert quiet_log.kwargs["extra"]["state_reason"] == "no_change"
+        assert quiet_log.kwargs["extra"]["fire_kind"] == "no_change"
+        assert quiet_log.kwargs["extra"]["consecutive_no_change"] == 1
+        assert quiet_log.kwargs["extra"]["notification_count"] == 0
         assert recovered is not None
         assert recovered.state == "ok"
         assert recovered.state_reason == "recovered"
         assert recovered.consecutive_changed == 0
         assert recovered_count == 1
+        fire = watcher_service.list_watcher_fires(recovered.id, conn=conn)[0][0]
+        assert fire.fire_kind == "recovered"
+        assert fire.state_reason == "recovered"
 
     def test_watcher_finalize_failed_run_disables_after_threshold(self, monkeypatch, tmp_path):
         from services.notifications.models import TRIGGER_WATCHER_ERROR
@@ -5011,6 +6231,8 @@ class TestWatchersFoundation:
         assert schedule is not None
         assert schedule.enabled is False
         assert fire.state_at_fire == "error"
+        assert fire.fire_kind == "failed"
+        assert fire.state_reason == "run_failed"
         assert len(fire.notification_event_ids) == 1
 
     def test_deleted_baseline_run_pauses_watcher_and_owned_schedule(self, monkeypatch, tmp_path):
@@ -5578,6 +6800,32 @@ class TestNotificationsPhase0:
 
         deleted_lines, _ = builtin_commands.execute_builtin_command(f"notify delete {channel_id}", "tok_notifications")
         assert "deleted" in "\n".join(str(line.get("text", "")) for line in deleted_lines)
+        with database.db_connect() as audit_conn:
+            audit_rows = audit_conn.execute(
+                "SELECT event_type, target_type, target_id, details "
+                "FROM audit_events WHERE target_id = ? ORDER BY created, id",
+                (channel_id,),
+            ).fetchall()
+        audit_payloads = [
+            {
+                "event_type": row["event_type"],
+                "target_type": row["target_type"],
+                "target_id": row["target_id"],
+                "details": json.loads(row["details"] or "{}"),
+            }
+            for row in audit_rows
+        ]
+        assert [row["event_type"] for row in audit_payloads] == [
+            "notification.config_change",
+            "notification.config_change",
+            "notification.config_change",
+            "notification.config_change",
+        ]
+        assert {row["target_type"] for row in audit_payloads} == {"notification"}
+        assert [row["details"]["action"] for row in audit_payloads] == ["update", "test", "update", "delete"]
+        assert {row["details"]["source"] for row in audit_payloads} == {"terminal_builtin"}
+        assert audit_payloads[1]["details"]["count"] == 1
+        assert "https://hooks.example.test/darklab" not in json.dumps(audit_payloads)
 
     def test_notify_builtin_keeps_secret_channel_creation_in_options(self, monkeypatch, tmp_path):
         conn = self._notification_db(monkeypatch, tmp_path)
@@ -5708,6 +6956,36 @@ class TestNotificationsPhase0:
         assert code_match.group(1) not in team_actions_json
         assert create_recovery_match.group(1) not in team_actions_json
         assert rotate_recovery_match.group(1) not in team_actions_json
+        with database.db_connect() as conn:
+            audit_rows = conn.execute(
+                "SELECT event_type, target_type, target_id, actor_role, details "
+                "FROM audit_events WHERE target_id = ? ORDER BY created, id",
+                (team_id,),
+            ).fetchall()
+        audit_payloads = [
+            {
+                "event_type": row["event_type"],
+                "target_type": row["target_type"],
+                "target_id": row["target_id"],
+                "actor_role": row["actor_role"],
+                "details": json.loads(row["details"] or "{}"),
+            }
+            for row in audit_rows
+        ]
+        assert [row["event_type"] for row in audit_payloads] == [
+            "team.create",
+            "team.invite",
+            "team.join",
+            "team.recovery_rotate",
+        ]
+        assert {row["target_type"] for row in audit_payloads} == {"team"}
+        assert {row["details"]["source"] for row in audit_payloads} == {"terminal_builtin"}
+        assert audit_payloads[2]["details"]["kind"] == "invite"
+        assert audit_payloads[3]["details"]["target_recovery_id"].startswith("trec_")
+        audit_json = json.dumps(audit_payloads)
+        assert code_match.group(1) not in audit_json
+        assert create_recovery_match.group(1) not in audit_json
+        assert rotate_recovery_match.group(1) not in audit_json
         rejected = [
             call.kwargs["extra"]
             for call in mock_warning.call_args_list
@@ -8762,6 +10040,18 @@ class TestDerivedCommandRegistry:
         schedule_every_hints = context["schedule"]["subcommands"]["create"]["arg_hints"]["--every"]
         assert [item["value"] for item in schedule_every_hints] == list(CADENCE_PRESETS)
         assert context["schedule"]["subcommands"]["info"]["arg_hints"]["__positional__"][0]["value"] == "<schedule-id>"
+        shodan_scan_context = context["shodan"]["subcommands"]["scan"]
+        assert [
+            item["value"] for item in shodan_scan_context["arg_hints"]["__positional__"]
+        ] == ["internet", "list", "protocols", "status", "submit"]
+        assert (
+            shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value"]
+            == "<ip-or-cidr>"
+        )
+        assert (
+            shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value_type"]
+            == "target"
+        )
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
         assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
             "list",
@@ -8881,7 +10171,8 @@ class TestDerivedCommandRegistry:
         assert is_command_allowed("shodan domain darklab.sh")[0]
         assert is_command_allowed("shodan honeyscore 8.8.8.8")[0]
         assert is_command_allowed("shodan stats apache")[0]
-        assert is_command_allowed("shodan scan 8.8.8.8")[0]
+        assert is_command_allowed("shodan scan submit 8.8.8.8")[0]
+        assert not is_command_allowed("shodan scan submit 127.0.0.1")[0]
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -10816,6 +12107,23 @@ class TestRunBrokerMemoryStore:
             assert isinstance(run_broker._store(), run_broker._MemoryRunBrokerStore)
 
 
+class TestProcessRedisWorkerConfiguration:
+    def test_multi_worker_requires_redis(self):
+        with mock.patch.object(process.log, "critical") as critical:
+            with pytest.raises(RuntimeError, match="Redis is required when WEB_CONCURRENCY=4"):
+                process.validate_redis_worker_configuration(None, workers=4)
+
+        critical.assert_called_once()
+        assert critical.call_args.args == ("REDIS_REQUIRED_FOR_MULTI_WORKER",)
+        assert critical.call_args.kwargs["extra"]["workers"] == 4
+
+    def test_single_worker_allows_in_process_fallback(self):
+        process.validate_redis_worker_configuration(None, workers=1)
+
+    def test_multi_worker_allows_redis_client(self):
+        process.validate_redis_worker_configuration(object(), workers=4)
+
+
 # ── pid_register / pid_pop (in-process mode) ─────────────────────────────────
 
 class TestPidMap:
@@ -11072,6 +12380,57 @@ class TestActiveRunMetadata:
             assert "run-owned" not in process._pid_map
             assert "run-owned" not in process._active_run_meta
 
+    def test_active_run_pid_start_matches_current_process(self):
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            process.active_run_register(
+                "run-current",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            assert process.active_run_pid_start_matches(
+                "run-current",
+                12345,
+                session_id="session-1",
+            )
+
+    def test_active_run_pid_start_rejects_reused_process(self):
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            process.active_run_register(
+                "run-reused",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_start_time", return_value="202"):
+            assert not process.active_run_pid_start_matches(
+                "run-reused",
+                12345,
+                session_id="session-1",
+            )
+
+    def test_active_run_pid_start_rejects_legacy_metadata_without_start_time(self):
+        with mock.patch.object(process, "_pid_start_time", return_value=None):
+            process.active_run_register(
+                "run-legacy",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_start_time", return_value="101"):
+            assert not process.active_run_pid_start_matches(
+                "run-legacy",
+                12345,
+                session_id="session-1",
+            )
+
     def test_active_runs_for_session_prunes_dead_pid(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):
             process.active_run_register(
@@ -11110,6 +12469,60 @@ class TestActiveRunMetadata:
             assert fake_redis.get("procmeta:run-reused") is None
             assert fake_redis.get("proc:run-reused") is None
             assert fake_redis.smembers("sessionprocs:session-1") == set()
+
+    def test_active_runs_for_team_uses_team_index_without_procmeta_scan(self):
+        fake_redis = process._FakeRedisClient()
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_maybe_cleanup_stale_active_run_metadata"),
+        ):
+            process.active_run_register(
+                "run-team-1",
+                45678,
+                "session-1",
+                "nuclei -u https://darklab.sh",
+                "2026-01-01T00:00:00Z",
+                team_id="team-1",
+            )
+            process.active_run_register(
+                "run-personal",
+                56789,
+                "session-2",
+                "ping darklab.sh",
+                "2026-01-01T00:00:01Z",
+            )
+            process.pid_register("run-team-1", 45678)
+            process.pid_register("run-personal", 56789)
+
+            with mock.patch.object(fake_redis, "scan_iter", wraps=fake_redis.scan_iter) as scan_iter:
+                runs = process.active_runs_for_team("team-1")
+
+        assert [item["run_id"] for item in runs] == ["run-team-1"]
+        assert fake_redis.smembers("teamprocs:team-1") == {"run-team-1"}
+        scan_iter.assert_not_called()
+
+    def test_active_run_remove_clears_team_index(self):
+        fake_redis = process._FakeRedisClient()
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+        ):
+            process.active_run_register(
+                "run-team-remove",
+                45678,
+                "session-1",
+                "httpx -u https://darklab.sh",
+                "2026-01-01T00:00:00Z",
+                team_id="team-1",
+            )
+
+            process.active_run_remove("run-team-remove")
+
+        assert fake_redis.get("procmeta:run-team-remove") is None
+        assert fake_redis.smembers("sessionprocs:session-1") == set()
+        assert fake_redis.smembers("teamprocs:team-1") == set()
 
     def test_pid_pop_for_session_requires_matching_session(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):
@@ -11187,16 +12600,18 @@ class TestActiveRunMetadata:
             fake_redis.set("procmeta:run-live", process.json.dumps(live))
             fake_redis.set("proc:run-live", 33333)
             fake_redis.sadd("sessionprocs:session-1", "run-missing-proc", "run-old-container", "run-live")
+            fake_redis.sadd("teamprocs:team-1", "run-missing-proc", "run-old-container", "run-live")
 
             result = process.cleanup_stale_active_run_metadata()
 
-        assert result == {"metadata_removed": 2, "session_members_removed": 2}
+        assert result == {"metadata_removed": 2, "session_members_removed": 2, "team_members_removed": 2}
         assert fake_redis.get("procmeta:run-missing-proc") is None
         assert fake_redis.get("procmeta:run-old-container") is None
         assert fake_redis.get("proc:run-old-container") is None
         assert fake_redis.get("procmeta:run-live") is not None
         assert fake_redis.get("proc:run-live") == 33333
         assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
+        assert fake_redis.smembers("teamprocs:team-1") == {"run-live"}
 
     def test_active_runs_for_session_periodically_cleans_unindexed_stale_metadata(self):
         fake_redis = process._FakeRedisClient()
@@ -13478,9 +14893,16 @@ class TestOutputSignals:
 class TestRunOutputCapture:
     def teardown_method(self):
         if os.path.isdir(RUN_OUTPUT_DIR):
-            for name in os.listdir(RUN_OUTPUT_DIR):
-                if name.startswith("test-run-output-"):
-                    os.unlink(os.path.join(RUN_OUTPUT_DIR, name))
+            for root, dirs, files in os.walk(RUN_OUTPUT_DIR, topdown=False):
+                for name in files:
+                    if name.startswith("test-run-output-"):
+                        os.unlink(os.path.join(root, name))
+                for name in dirs:
+                    path = os.path.join(root, name)
+                    try:
+                        os.rmdir(path)
+                    except OSError:
+                        pass
 
     @staticmethod
     def _artifact_rows(rel_path):
@@ -13548,6 +14970,8 @@ class TestRunOutputCapture:
         assert capture.full_output_available is True
         artifact_rel_path = capture.artifact_rel_path
         assert artifact_rel_path is not None
+        assert artifact_rel_path == artifact_rel_path_for_run("test-run-output-artifact")
+        assert os.path.exists(os.path.join(RUN_OUTPUT_DIR, artifact_rel_path))
         assert load_full_output_lines(artifact_rel_path) == ["alpha", "beta"]
         assert load_full_output_entries(artifact_rel_path) == [
             {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
@@ -13561,8 +14985,43 @@ class TestRunOutputCapture:
         assert rows[1]["kind"] == "info"
         assert rows[1]["role"] == "body"
 
+    def test_artifact_rel_path_uses_two_level_hash_shards(self):
+        run_id = "test-run-output-sharded-path"
+        digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+
+        assert artifact_rel_path_for_run(run_id) == os.path.join(
+            digest[:2],
+            digest[:4],
+            f"{run_id}.txt.gz",
+        )
+
+    def test_delete_artifact_file_removes_sharded_artifact(self):
+        capture = RunOutputCapture(
+            "test-run-output-sharded-delete",
+            preview_limit=2,
+            persist_full_output=True,
+            full_output_max_bytes=0
+        )
+        capture.add_event(line_event_from_legacy("delete me"))
+        capture.finalize()
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        artifact_path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        shard_dir = os.path.dirname(artifact_path)
+        assert os.path.exists(artifact_path)
+
+        delete_artifact_file(artifact_rel_path)
+
+        assert not os.path.exists(artifact_path)
+        assert not os.path.exists(shard_dir)
+
     def test_full_output_artifact_round_trips_signal_metadata(self):
-        capture = RunOutputCapture("test-run-output-signals", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
+        capture = RunOutputCapture(
+            "test-run-output-signals",
+            preview_limit=5,
+            persist_full_output=True,
+            full_output_max_bytes=0
+        )
         capture.add_event(line_event_from_legacy(
             "443/tcp open https",
             signals=(LineSignal.findings,),
@@ -13853,8 +15312,9 @@ class TestRunOutputCapture:
             persist_full_output=True,
             full_output_max_bytes=0,
         )
-        assert capture.artifact_rel_path == "test-run-output-empty.txt.gz"
-        assert not os.path.exists(os.path.join(RUN_OUTPUT_DIR, capture.artifact_rel_path))
+        expected_rel_path = artifact_rel_path_for_run("test-run-output-empty")
+        assert capture.artifact_rel_path == expected_rel_path
+        assert not os.path.exists(os.path.join(RUN_OUTPUT_DIR, expected_rel_path))
 
         capture.finalize()
 
@@ -14626,6 +16086,871 @@ class TestPermalinkErrorPage:
 
 # ── database init and pruning ─────────────────────────────────────────────────
 
+class TestAuditEvents:
+    def _audit_conn(self):
+        tmp = tempfile.TemporaryDirectory()
+        db_path = os.path.join(tmp.name, "audit.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0, "audit_retention_days": 0}):
+                database.db_init()
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return tmp, conn
+
+    def _seed_project(self, conn, project_id, session_id, *, team_id=""):
+        conn.execute(
+            "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                project_id,
+                session_id,
+                team_id,
+                project_id,
+                project_id,
+                "2026-06-06T00:00:00+00:00",
+                "2026-06-06T00:00:00+00:00",
+            ),
+        )
+
+    def test_recorder_hashes_session_identity_and_bounds_details(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditEventFilters, list_events
+        from services.audit.recorder import record_event
+        from services.teams.storage import token_hash
+
+        tmp, conn = self._audit_conn()
+        try:
+            event_id = record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_secret_value",
+                team_id="team-1",
+                actor_member_id="tmem_1",
+                actor_role="operator",
+                actor_display_name="Casey",
+                target_id="finding-1",
+                project_id="project-1",
+                details={"review_state": "confirmed", "raw_payload": "not stored"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            payload = list_events(AuditEventFilters(actor_member_id="tmem_1"), conn=conn)
+            hash_payload = list_events(AuditEventFilters(actor=token_hash("tok_secret_value")), conn=conn)
+            label_payload = list_events(AuditEventFilters(actor="tok_secr"), conn=conn)
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id
+        assert len(payload["events"]) == 1
+        assert len(hash_payload["events"]) == 1
+        assert len(label_payload["events"]) == 1
+        event = payload["events"][0]
+        assert event["owner_session_hash"] == token_hash("tok_secret_value")
+        assert event["actor_session_hash"] == token_hash("tok_secret_value")
+        assert event["actor_session_label"] == "tok_secr********"
+        assert event["actor_role"] == "operator"
+        assert event["actor_display_name"] == "Casey"
+        assert event["target_type"] == "finding"
+        assert event["details"]["review_state"] == "confirmed"
+        assert event["details"]["omitted_detail_keys"] == 1
+        assert "raw_payload" not in event["details"]
+
+    def test_fail_closed_events_reject_unknown_detail_keys(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import AuditRecordError, record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            with pytest.raises(AuditRecordError):
+                record_event(
+                    AuditEventType.SECRET_CREATE,
+                    session_id="tok_secret_value",
+                    target_id="OPENAI_API_KEY",
+                    details={"secret_value": "nope"},
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                )
+            row = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()
+            conn.execute("DROP TABLE audit_events")
+            with mock.patch("services.audit.recorder.log.warning") as warning:
+                with pytest.raises(AuditRecordError):
+                    record_event(
+                        AuditEventType.SECRET_CREATE,
+                        session_id="tok_secret_value",
+                        target_id="OPENAI_API_KEY",
+                        project_id="proj_1",
+                        correlation_id="corr_1",
+                        job_id="job_1",
+                        details={"secret_name": "OPENAI_API_KEY", "source": "test"},
+                        conn=conn,
+                        cfg={"audit_log_enabled": True},
+                    )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert row["count"] == 0
+        warning.assert_called_once()
+        assert warning.call_args.args == ("AUDIT_EVENT_RECORD_BLOCKED",)
+        extra = warning.call_args.kwargs["extra"]
+        assert extra["event_type"] == "secret.create"
+        assert extra["target_type"] == "secret"
+        assert extra["target_id"] == "OPENAI_API_KEY"
+        assert extra["project_id"] == "proj_1"
+        assert extra["correlation_id"] == "corr_1"
+        assert extra["job_id"] == "job_1"
+        assert extra["recording_mode"] == "fail_closed"
+        assert extra["details"] == {"secret_name": "OPENAI_API_KEY", "source": "test"}
+        assert "tok_secret_value" not in json.dumps(extra)
+
+    def test_disabled_audit_log_noops_without_writes(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            event_id = record_event(
+                AuditEventType.SECRET_CREATE,
+                session_id="tok_secret_value",
+                target_id="OPENAI_API_KEY",
+                conn=conn,
+                cfg={"audit_log_enabled": False},
+            )
+            row = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id is None
+        assert row["count"] == 0
+
+    def test_retention_prunes_old_rows_and_disabled_warning_is_once(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+        from services.audit import retention
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_secret_value",
+                target_id="old",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-05-01T00:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_secret_value",
+                target_id="new",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-05T00:00:00+00:00",
+            )
+            pruned = retention.prune_events(
+                conn=conn,
+                now="2026-06-06T00:00:00+00:00",
+                cfg={"audit_retention_days": 30},
+            )
+            rows = conn.execute("SELECT target_id FROM audit_events ORDER BY target_id").fetchall()
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert pruned == 1
+        assert [row["target_id"] for row in rows] == ["new"]
+
+        retention._disabled_warning_emitted = False
+        with mock.patch.object(retention.log, "warning") as warning:
+            retention.warn_if_disabled({"audit_log_enabled": False})
+            retention.warn_if_disabled({"audit_log_enabled": False})
+        assert warning.call_count == 1
+
+    def test_event_registry_covers_policy_for_every_event_type(self):
+        from services.audit.models import AuditEventType, AuditTargetType, RecordingMode, event_spec
+
+        for event_type in AuditEventType:
+            spec = event_spec(event_type)
+            assert spec.event_type == event_type
+            assert isinstance(spec.target_type, AuditTargetType)
+            assert spec.recording_mode in {RecordingMode.FAIL_CLOSED, RecordingMode.BEST_EFFORT}
+            assert "source" in spec.allowed_detail_keys
+
+        assert event_spec(AuditEventType.FILE_DELETE).recording_mode == RecordingMode.FAIL_CLOSED
+        assert event_spec(AuditEventType.FILE_WRITE).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.FILE_MOVE).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.PACKAGE_BUILD).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.REPORT_BUILD).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.SECRET_CREATE).recording_mode == RecordingMode.FAIL_CLOSED
+        assert event_spec(AuditEventType.FINDING_REVIEW_CHANGE).recording_mode == RecordingMode.BEST_EFFORT
+        assert event_spec(AuditEventType.SESSION_TOKEN_REVOKE).target_type == AuditTargetType.SESSION_TOKEN
+        for team_event in (
+            AuditEventType.TEAM_CREATE,
+            AuditEventType.TEAM_JOIN,
+            AuditEventType.TEAM_INVITE,
+            AuditEventType.TEAM_REVOKE,
+            AuditEventType.TEAM_MEMBER_REMOVE,
+            AuditEventType.TEAM_LEAVE,
+            AuditEventType.TEAM_ARCHIVE,
+            AuditEventType.TEAM_REACTIVATE,
+            AuditEventType.TEAM_ROLE_CHANGE,
+            AuditEventType.TEAM_RECOVERY_ROTATE,
+            AuditEventType.TEAM_RECOVERY_REDEEM,
+        ):
+            assert event_spec(team_event).recording_mode == RecordingMode.FAIL_CLOSED
+
+    def test_build_audit_reason_codes_do_not_copy_raw_errors(self):
+        import services.projects.package_jobs as package_jobs
+        import services.reports.jobs as report_jobs
+
+        package_job = {
+            "id": "epj_0123456789abcdef01234567",
+            "session_id": "tok_package",
+            "project_id": "proj_1",
+            "package_id": "pkg_1",
+            "team_id": "team_1",
+            "actor_member_id": "tmem_1",
+        }
+        report_job = {
+            "id": "rpj_0123456789abcdef01234567",
+            "session_id": "tok_report",
+            "project_id": "proj_1",
+            "team_id": "team_1",
+            "actor_member_id": "tmem_1",
+        }
+        raw_error = "Traceback: /tmp/customer/acme.env token=secret exceeded size limit"
+        metrics = {"run_count": 2, "finding_count": 3, "artifact_count": 4, "target_count": 5}
+
+        with mock.patch.object(package_jobs, "record_event") as package_record:
+            package_jobs._record_job_audit(
+                package_job,
+                status="failed",
+                error=raw_error,
+                archive_bytes=123,
+                metrics=metrics,
+            )
+        with mock.patch.object(report_jobs, "record_event") as report_record:
+            report_jobs._record_job_audit(
+                report_job,
+                status="failed",
+                reason="size_limit",
+                archive_bytes=456,
+                metrics=metrics,
+            )
+
+        package_details = package_record.call_args.kwargs["details"]
+        report_details = report_record.call_args.kwargs["details"]
+        assert package_details["reason"] == "size_limit"
+        assert report_details["reason"] == "size_limit"
+        assert raw_error not in json.dumps(package_details)
+        assert raw_error not in json.dumps(report_details)
+        assert package_details["archive_bytes"] == 123
+        assert report_details["archive_bytes"] == 456
+        assert package_details["run_count"] == 2
+        assert report_details["target_count"] == 5
+
+        with mock.patch.object(package_jobs, "record_event", side_effect=RuntimeError(raw_error)):
+            with mock.patch.object(package_jobs.log, "exception") as package_log:
+                package_jobs._record_job_audit(
+                    package_job,
+                    status="failed",
+                    error=raw_error,
+                    archive_bytes=123,
+                    metrics=metrics,
+                )
+        with mock.patch.object(report_jobs, "record_event", side_effect=RuntimeError(raw_error)):
+            with mock.patch.object(report_jobs.log, "exception") as report_log:
+                report_jobs._record_job_audit(
+                    report_job,
+                    status="failed",
+                    reason="size_limit",
+                    archive_bytes=456,
+                    metrics=metrics,
+                )
+        package_extra = package_log.call_args.kwargs["extra"]
+        report_extra = report_log.call_args.kwargs["extra"]
+        assert package_log.call_args.args == ("PACKAGE_BUILD_AUDIT_FAILED",)
+        assert report_log.call_args.args == ("REPORT_EXPORT_AUDIT_FAILED",)
+        assert package_extra["job_id"] == package_job["id"]
+        assert package_extra["project_id"] == "proj_1"
+        assert package_extra["package_id"] == "pkg_1"
+        assert package_extra["team_id"] == "team_1"
+        assert package_extra["actor_member_id"] == "tmem_1"
+        assert package_extra["status"] == "failed"
+        assert package_extra["reason"] == "size_limit"
+        assert package_extra["archive_bytes"] == 123
+        assert package_extra["run_count"] == 2
+        assert report_extra["job_id"] == report_job["id"]
+        assert report_extra["project_id"] == "proj_1"
+        assert report_extra["team_id"] == "team_1"
+        assert report_extra["actor_member_id"] == "tmem_1"
+        assert report_extra["status"] == "failed"
+        assert report_extra["reason"] == "size_limit"
+        assert report_extra["archive_bytes"] == 456
+        assert report_extra["target_count"] == 5
+        assert "customer" not in json.dumps(package_extra)
+        assert "customer" not in json.dumps(report_extra)
+
+    def test_report_export_job_read_failures_warn_without_raw_json(self, tmp_path, monkeypatch):
+        import services.reports.jobs as report_jobs
+
+        monkeypatch.setattr(report_jobs, "_JOB_DIR", tmp_path)
+        job_id = "rpj_0123456789abcdef01234567"
+        (tmp_path / f"{job_id}.json").write_text('{"token": "secret"', encoding="utf-8")
+
+        with mock.patch.object(report_jobs.log, "warning") as warning:
+            assert report_jobs._read_job(job_id) is None
+
+        warning.assert_called_once()
+        assert warning.call_args.args == ("REPORT_EXPORT_JOB_READ_FAILED",)
+        assert warning.call_args.kwargs["exc_info"] is True
+        extra = warning.call_args.kwargs["extra"]
+        assert extra["job_id"] == job_id
+        assert extra["operation"] == "read"
+        assert extra["exception_type"] == "JSONDecodeError"
+        assert "secret" not in json.dumps(extra)
+
+    def test_report_export_cleanup_warns_when_archive_delete_fails(self, tmp_path, monkeypatch):
+        import services.reports.jobs as report_jobs
+
+        monkeypatch.setattr(report_jobs, "_JOB_DIR", tmp_path)
+        job_id = "rpj_0123456789abcdef01234567"
+        job_path = tmp_path / f"{job_id}.json"
+        archive_path = tmp_path / "missing.zip"
+        job_path.write_text(json.dumps({
+            "id": job_id,
+            "project_id": "proj_1",
+            "team_id": "team_1",
+            "actor_member_id": "tmem_1",
+            "archive_path": str(archive_path),
+            "updated_at": "2026-01-01T00:00:00Z",
+        }), encoding="utf-8")
+        old_time = time.time() - (3 * 60 * 60)
+        os.utime(job_path, (old_time, old_time))
+
+        with mock.patch.object(report_jobs.log, "warning") as warning:
+            report_jobs.cleanup_report_export_jobs()
+
+        archive_warning = next(
+            call for call in warning.call_args_list
+            if call.args == ("REPORT_EXPORT_JOB_CLEANUP_FAILED",)
+        )
+        assert archive_warning.kwargs["exc_info"] is True
+        extra = archive_warning.kwargs["extra"]
+        assert extra["job_id"] == job_id
+        assert extra["path"] == str(archive_path)
+        assert extra["operation"] == "unlink_archive"
+        assert extra["exception_type"] == "FileNotFoundError"
+
+    def test_run_now_audit_details_do_not_copy_last_error(self):
+        from services.audit.automation import record_watcher_event, run_now_details
+        from services.audit.models import AuditEventType
+
+        details = run_now_details(
+            "fire_failed",
+            fired_at="2026-06-06T12:00:00+00:00",
+            run_id="",
+            last_error="broker failed while reading /tmp/customer/acme.env",
+        )
+        success_details = run_now_details(
+            "fired",
+            fired_at="2026-06-06T12:01:00+00:00",
+            run_id="run_1",
+            last_error="stale old failure",
+        )
+
+        assert details == {
+            "status": "fire_failed",
+            "fired_at": "2026-06-06T12:00:00+00:00",
+            "run_id": "",
+            "reason": "fire_failed",
+        }
+        assert "customer" not in json.dumps(details)
+        assert success_details == {
+            "status": "fired",
+            "fired_at": "2026-06-06T12:01:00+00:00",
+            "run_id": "run_1",
+            "reason": "",
+        }
+        watcher = SimpleNamespace(
+            id="wch_1",
+            schedule_id="sch_1",
+            baseline_run_id="run_base",
+            last_run_id="run_1",
+            state="changed",
+            state_reason="raw failure while reading /tmp/customer/acme.env",
+            label="Nightly",
+        )
+        with mock.patch("services.audit.automation.record_event") as record:
+            record_watcher_event(
+                AuditEventType.WATCHER_RUN_NOW,
+                watcher,
+                audit_fields={"session_id": "tok_1"},
+                source="test",
+                details=success_details,
+            )
+        assert record.call_args.kwargs["details"]["reason"] == ""
+        assert "customer" not in json.dumps(record.call_args.kwargs["details"])
+
+    def test_same_transaction_rollback_removes_fail_closed_audit_row(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            conn.execute("CREATE TABLE product_actions (id TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            conn.commit()
+            conn.execute("INSERT INTO product_actions (id, value) VALUES (?, ?)", ("action-1", "delete"))
+            event_id = record_event(
+                AuditEventType.PROJECT_DELETE,
+                session_id="tok_delete",
+                target_id="project-rollback",
+                details={"deleted_count": 1, "source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+            )
+            conn.rollback()
+            audit_count = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()["count"]
+            product_count = conn.execute("SELECT COUNT(*) AS count FROM product_actions").fetchone()["count"]
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id
+        assert audit_count == 0
+        assert product_count == 0
+
+    def test_best_effort_recorder_failure_logs_sanitized_fallback(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            conn.execute("DROP TABLE audit_events")
+            with mock.patch("services.audit.recorder.log.warning") as warning:
+                event_id = record_event(
+                    AuditEventType.FINDING_REVIEW_CHANGE,
+                    session_id="tok_best_effort",
+                    target_id="finding-best-effort",
+                    details={"review_state": "triaged", "raw_payload": "secret body"},
+                    conn=conn,
+                    cfg={"audit_log_enabled": True},
+                )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert event_id is None
+        warning.assert_called_once()
+        assert warning.call_args.args == ("AUDIT_EVENT_RECORD_FAILED",)
+        extra = warning.call_args.kwargs["extra"]
+        assert extra["event_type"] == "finding.review_change"
+        assert extra["details"] == {"review_state": "triaged", "omitted_detail_keys": 1}
+        assert "secret body" not in json.dumps(extra)
+
+    def test_best_effort_shared_connection_failure_rolls_back_only_savepoint(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+
+        class PostgresLikeConn:
+            def __init__(self):
+                self.poisoned = False
+                self.statements: list[str] = []
+
+            def execute(self, sql, params=()):
+                normalized = " ".join(str(sql).strip().upper().split())
+                if normalized.startswith("SAVEPOINT"):
+                    self.statements.append("SAVEPOINT")
+                    return None
+                if normalized.startswith("INSERT INTO AUDIT_EVENTS"):
+                    self.statements.append("AUDIT_INSERT")
+                    self.poisoned = True
+                    raise RuntimeError("audit insert failed")
+                if normalized.startswith("ROLLBACK TO SAVEPOINT"):
+                    self.statements.append("ROLLBACK_TO_SAVEPOINT")
+                    self.poisoned = False
+                    return None
+                if normalized.startswith("RELEASE SAVEPOINT"):
+                    self.statements.append("RELEASE_SAVEPOINT")
+                    return None
+                if self.poisoned:
+                    raise RuntimeError("current transaction is aborted")
+                self.statements.append("PRODUCT_WRITE")
+                return None
+
+        conn = PostgresLikeConn()
+        with mock.patch("services.audit.recorder.log.warning") as warning:
+            event_id = record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_best_effort",
+                target_id="finding-best-effort",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+            )
+        conn.execute("INSERT INTO product_actions (id) VALUES (?)", ("action-1",))
+
+        assert event_id is None
+        warning.assert_called_once()
+        assert conn.statements == [
+            "SAVEPOINT",
+            "AUDIT_INSERT",
+            "ROLLBACK_TO_SAVEPOINT",
+            "RELEASE_SAVEPOINT",
+            "PRODUCT_WRITE",
+        ]
+
+    def test_list_events_filters_owner_scope_and_paginates(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditEventFilters, list_events
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-owner-old",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_other",
+                target_id="finding-other",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-owner-new",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:02+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-owner-next-day",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-07T00:00:00+00:00",
+            )
+            first_page = list_events(AuditEventFilters(session_id="tok_owner"), conn=conn, limit=1)
+            second_page = list_events(AuditEventFilters(session_id="tok_owner"), conn=conn, limit=1, offset=1)
+            same_day = list_events(
+                AuditEventFilters(
+                    session_id="tok_owner",
+                    target_type="finding",
+                    date_from="2026-06-06",
+                    date_to="2026-06-06",
+                ),
+                conn=conn,
+                limit=10,
+            )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert [event["target_id"] for event in first_page["events"]] == ["finding-owner-next-day"]
+        assert first_page["has_more"] is True
+        assert [event["target_id"] for event in second_page["events"]] == ["finding-owner-new"]
+        assert second_page["has_more"] is True
+        assert [event["target_id"] for event in same_day["events"]] == [
+            "finding-owner-new",
+            "finding-owner-old",
+        ]
+
+    def test_scoped_events_personal_excludes_team_and_actor_only_rows(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditEventFilters, list_scoped_events
+        from services.audit.recorder import record_event
+        from services.teams.storage import token_hash
+
+        tmp, conn = self._audit_conn()
+        try:
+            self._seed_project(conn, "proj_personal_activity", "tok_owner")
+            self._seed_project(conn, "proj_team_activity", "tok_owner", team_id="team_same_actor")
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                target_id="finding-personal",
+                project_id="proj_personal_activity",
+                details={
+                    "review_state": "triaged",
+                    "correlation_id": "corr_hidden",
+                    "counts": {
+                        "user_agent": "Mozilla hidden",
+                        "client_ip": "203.0.113.10",
+                        "safe": "kept",
+                        "children": [
+                            {
+                                "actor_session_label": "tok_owne********",
+                                "owner_session_hash": "owner_hash_hidden",
+                                "safe_child": "kept child",
+                            },
+                            {
+                                "job_id": "job_hidden",
+                                "correlation_id": "corr_nested_hidden",
+                                "safe_job": "kept job",
+                            },
+                        ],
+                    },
+                },
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_owner",
+                team_id="team_same_actor",
+                actor_member_id="tmem_same_actor",
+                actor_role="operator",
+                actor_display_name="Same Actor",
+                target_id="finding-team",
+                project_id="proj_team_activity",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_other_owner",
+                actor_session_id="tok_owner",
+                target_id="finding-actor-only",
+                project_id="proj_foreign",
+                details={"review_state": "confirmed"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:02+00:00",
+            )
+            payload = list_scoped_events(
+                "tok_owner",
+                SimpleNamespace(is_team=False),
+                conn=conn,
+                limit=10,
+            )
+            hidden_label_payload = list_scoped_events(
+                "tok_owner",
+                SimpleNamespace(is_team=False),
+                AuditEventFilters(actor="tok_owne"),
+                conn=conn,
+                limit=10,
+            )
+            hidden_hash_payload = list_scoped_events(
+                "tok_owner",
+                SimpleNamespace(is_team=False),
+                AuditEventFilters(actor=token_hash("tok_owner"), actor_session_hash=token_hash("tok_owner")),
+                conn=conn,
+                limit=10,
+            )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert [event["target"]["id"] for event in payload["events"]] == ["finding-personal"]
+        assert hidden_label_payload["events"] == []
+        assert hidden_hash_payload["events"] == []
+        event = payload["events"][0]
+        assert event["scope"] == {
+            "kind": "personal",
+            "team_id": "",
+            "project_id": "proj_personal_activity",
+        }
+        assert event["details"] == {
+            "review_state": "triaged",
+            "counts": {
+                "safe": "kept",
+                "children": [
+                    {"safe_child": "kept child"},
+                    {"safe_job": "kept job"},
+                ],
+            },
+        }
+        event_json = json.dumps(event)
+        assert "owner_session_hash" not in event_json
+        assert "actor_session_hash" not in event_json
+        assert "actor_session_label" not in event_json
+        assert "client_ip" not in event_json
+        assert "correlation_id" not in event_json
+        assert "job_id" not in event_json
+        assert "owner_hash_hidden" not in event_json
+        assert "Mozilla hidden" not in event_json
+        assert "203.0.113.10" not in event_json
+        assert "corr_hidden" not in event_json
+        assert "corr_nested_hidden" not in event_json
+
+    def test_scoped_events_team_viewer_reads_project_activity_only_for_own_team(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditScopeError, list_scoped_events
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            self._seed_project(conn, "proj_team_visible", "tok_team_owner", team_id="team_visible")
+            self._seed_project(conn, "proj_team_foreign", "tok_team_owner", team_id="team_foreign")
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id="tok_team_owner",
+                team_id="team_visible",
+                actor_member_id="tmem_viewer",
+                actor_role="viewer",
+                actor_display_name="Viewer",
+                target_id="proj_team_visible",
+                project_id="proj_team_visible",
+                details={"source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.PROJECT_LINK,
+                session_id="tok_team_owner",
+                team_id="team_foreign",
+                target_id="proj_team_foreign",
+                project_id="proj_team_foreign",
+                details={"source": "test"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            viewer_scope = SimpleNamespace(
+                is_team=True,
+                team_id="team_visible",
+                member={"role": "viewer", "id": "tmem_viewer"},
+            )
+            payload = list_scoped_events(
+                "tok_viewer",
+                viewer_scope,
+                conn=conn,
+                project_id="proj_team_visible",
+                limit=10,
+            )
+            with pytest.raises(AuditScopeError) as foreign:
+                list_scoped_events(
+                    "tok_viewer",
+                    viewer_scope,
+                    conn=conn,
+                    project_id="proj_team_foreign",
+                )
+            with pytest.raises(AuditScopeError) as broad:
+                list_scoped_events("tok_viewer", viewer_scope, conn=conn, include_team_activity=True)
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert [event["target"]["id"] for event in payload["events"]] == ["proj_team_visible"]
+        assert payload["events"][0]["actor"] == {
+            "display_name": "Viewer",
+            "member_id": "tmem_viewer",
+            "role": "viewer",
+        }
+        assert payload["events"][0]["team_id"] == "team_visible"
+        assert foreign.value.code == "project_not_found"
+        assert broad.value.code == "team_activity_forbidden"
+
+    def test_scoped_events_team_activity_is_owner_admin_only_and_team_bound(self):
+        from services.audit.models import AuditEventType
+        from services.audit.queries import AuditScopeError, list_scoped_events
+        from services.audit.recorder import record_event
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.TEAM_CREATE,
+                session_id="tok_team_owner",
+                team_id="team_activity",
+                actor_member_id="tmem_owner",
+                actor_role="owner",
+                actor_display_name="Owner",
+                target_id="team_activity",
+                details={"source": "test", "role": "owner"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:00+00:00",
+            )
+            record_event(
+                AuditEventType.TEAM_CREATE,
+                session_id="tok_other_owner",
+                team_id="team_other_activity",
+                target_id="team_other_activity",
+                details={"source": "test", "role": "owner"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-06-06T12:00:01+00:00",
+            )
+            viewer_scope = SimpleNamespace(is_team=True, team_id="team_activity", member={"role": "viewer"})
+            admin_scope = SimpleNamespace(is_team=True, team_id="team_activity", member={"role": "admin"})
+            with pytest.raises(AuditScopeError) as viewer_error:
+                list_scoped_events("tok_viewer", viewer_scope, conn=conn, include_team_activity=True)
+            payload = list_scoped_events(
+                "tok_admin",
+                admin_scope,
+                conn=conn,
+                include_team_activity=True,
+                limit=10,
+            )
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+        assert viewer_error.value.code == "team_activity_forbidden"
+        assert [event["target"]["id"] for event in payload["events"]] == ["team_activity"]
+        assert payload["events"][0]["scope"]["kind"] == "team"
+        assert payload["events"][0]["details"] == {"source": "test", "role": "owner"}
+
+    def test_periodic_retention_guard_runs_once_per_interval(self):
+        from services.audit.models import AuditEventType
+        from services.audit.recorder import record_event
+        from services.audit import retention
+
+        tmp, conn = self._audit_conn()
+        try:
+            record_event(
+                AuditEventType.FINDING_REVIEW_CHANGE,
+                session_id="tok_retention",
+                target_id="old",
+                details={"review_state": "triaged"},
+                conn=conn,
+                cfg={"audit_log_enabled": True},
+                created="2026-05-01T00:00:00+00:00",
+            )
+            retention._last_retention_check_monotonic = 0.0
+            first = retention.maybe_prune_events(
+                conn=conn,
+                now="2026-06-06T00:00:00+00:00",
+                monotonic_now=retention.AUDIT_RETENTION_CHECK_INTERVAL_SECONDS + 1,
+                cfg={"audit_retention_days": 30},
+            )
+            second = retention.maybe_prune_events(
+                conn=conn,
+                now="2026-06-07T00:00:00+00:00",
+                monotonic_now=retention.AUDIT_RETENTION_CHECK_INTERVAL_SECONDS + 2,
+                cfg={"audit_retention_days": 30},
+            )
+            remaining = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()["count"]
+        finally:
+            retention._last_retention_check_monotonic = 0.0
+            conn.close()
+            tmp.cleanup()
+
+        assert first == 1
+        assert second == 0
+        assert remaining == 0
+
+
 class TestDatabaseInit:
     def _fresh_db(self, tmp):
         """Return a path to a new empty DB file in tmp."""
@@ -14648,6 +16973,77 @@ class TestDatabaseInit:
         assert "runs" in tables
         assert "snapshots" in tables
         assert "session_variables" in tables
+        assert "run_output_summary_status" in tables
+
+    def test_run_output_summary_backfill_marks_empty_runs_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("core.database.DB_PATH", db_path):
+                with database.db_connect() as conn:
+                    conn.execute(
+                        "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        ("run-empty-summary", "session-1", "echo hello", "2026-06-01", "[]"),
+                    )
+                    conn.commit()
+                    database._populate_run_output_summary(conn)
+                    database._populate_run_output_summary(conn)
+                    conn.commit()
+                    rows = conn.execute(
+                        "SELECT status, source, attempts, error "
+                        "FROM run_output_summary_status WHERE run_id = ?",
+                        ("run-empty-summary",),
+                    ).fetchall()
+
+        assert [dict(row) for row in rows] == [{
+            "status": "empty",
+            "source": "preview",
+            "attempts": 1,
+            "error": "",
+        }]
+
+    def test_run_output_summary_backfill_marks_failures_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("core.database.DB_PATH", db_path):
+                with database.db_connect() as conn:
+                    conn.execute(
+                        "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        ("run-failed-summary", "session-1", "cat missing", "2026-06-01", "{"),
+                    )
+                    conn.execute(
+                        "INSERT INTO run_output_artifacts (run_id, rel_path, created) VALUES (?, ?, ?)",
+                        ("run-failed-summary", "missing.jsonl.gz", "2026-06-01"),
+                    )
+                    conn.commit()
+                    with mock.patch(
+                        "core.database.load_full_output_entries",
+                        side_effect=OSError("missing artifact"),
+                    ) as load_entries:
+                        database._populate_run_output_summary(conn)
+                        database._populate_run_output_summary(conn)
+                    conn.commit()
+                    rows = conn.execute(
+                        "SELECT status, source, attempts, error "
+                        "FROM run_output_summary_status WHERE run_id = ?",
+                        ("run-failed-summary",),
+                    ).fetchall()
+                    summary_count = conn.execute(
+                        "SELECT COUNT(*) AS count FROM run_output_summary WHERE run_id = ?",
+                        ("run-failed-summary",),
+                    ).fetchone()["count"]
+
+        assert load_entries.call_count == 1
+        assert summary_count == 0
+        assert [dict(row) for row in rows] == [{
+            "status": "failed",
+            "source": "artifact",
+            "attempts": 1,
+            "error": "artifact_unreadable",
+        }]
 
     def test_creates_project_workspace_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -14715,6 +17111,8 @@ class TestDatabaseInit:
             "entity_notes",
             "finding_triage_details",
             "evidence_packages",
+            "project_reports",
+            "audit_events",
         }.issubset(tables)
         assert "project_targets" not in tables
         assert "finding_targets" not in tables
@@ -14916,6 +17314,8 @@ class TestDatabaseInit:
                     "atlas_entity_import_links",
                     "atlas_finding_import_occurrences",
                     "evidence_packages",
+                    "project_reports",
+                    "audit_events",
                 )
             }
             conn.close()
@@ -14934,6 +17334,8 @@ class TestDatabaseInit:
         assert column_types["atlas_entity_import_links"]["source_detail_json"] == "TEXT"
         assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
+        assert column_types["project_reports"]["draft"] == "TEXT"
+        assert column_types["audit_events"]["details"] == "TEXT"
 
     def test_atlas_import_source_helpers_are_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -16110,6 +18512,110 @@ SQL syntax error near q</response>
         detail = json.loads(rows[0]["source_detail"])
         assert detail["rule_id"] == rule["id"]
         assert detail["rule_name"] == "Alpha domains"
+        provenance = project_provenance.project_link_provenance(
+            "auto_promote_rule",
+            source_detail=detail,
+            confidence=1.0,
+            review_state="confirmed",
+        )
+        assert provenance["origin"] == "auto_promote_rule"
+        assert provenance["source_detail"] == {
+            "match_mode": "exact",
+            "rule_id": rule["id"],
+            "target_entity_kind": "domain",
+        }
+        assert "rule_name" not in provenance["source_detail"]
+        assert "pattern" not in provenance["source_detail"]
+
+    def test_project_link_provenance_maps_known_sources_and_bounds_source_detail(self):
+        source_detail = {
+            "candidate_count": 12,
+            "match_mode": "domain_suffix",
+            "rule_id": "par_123",
+            "target_entity_kind": "domain",
+            "rule_name": "Internal domains",
+            "pattern": "secret.internal.example",
+            "raw_command": "nmap secret.internal.example",
+            "notes": "Private operator note",
+            "source_category": "scan",
+            "oversized_reason": "x" * 240,
+        }
+
+        for source in sorted(database.PROJECT_LINK_SOURCES):
+            provenance = project_provenance.project_link_provenance(
+                source,
+                source_detail=source_detail,
+                confidence=1.5,
+                review_state="confirmed",
+            )
+            assert provenance["origin"] == source
+            assert provenance["confidence"] == 1.0
+            assert provenance["review_state"] == "confirmed"
+            assert provenance["source_detail"] == {
+                "candidate_count": 12,
+                "match_mode": "domain_suffix",
+                "rule_id": "par_123",
+                "source_category": "scan",
+                "target_entity_kind": "domain",
+            }
+
+        unknown = project_provenance.project_link_provenance("import", source_detail=source_detail)
+        assert unknown["origin"] == "unknown"
+        assert "rule_name" not in unknown["source_detail"]
+        assert "pattern" not in unknown["source_detail"]
+        assert "raw_command" not in unknown["source_detail"]
+        assert "notes" not in unknown["source_detail"]
+
+    def test_finding_target_references_avoid_substring_fallback_matches(self):
+        findings = [
+            {
+                "id": "f-ip-substring",
+                "raw_line": "Observed service on 10.0.0.10",
+                "title": "IP substring should not attach",
+            },
+            {
+                "id": "f-ip-token",
+                "raw_line": "Observed service on http://10.0.0.1:8080",
+                "title": "IP token should attach",
+            },
+            {
+                "id": "f-domain-prefix",
+                "raw_line": "notexample.com returned a finding",
+                "title": "Domain prefix should not attach",
+            },
+            {
+                "id": "f-domain-subdomain",
+                "raw_line": "www.example.com returned a finding",
+                "title": "Subdomain should not attach to the apex",
+            },
+            {
+                "id": "f-domain-url",
+                "raw_line": "https://example.com/login returned a finding",
+                "title": "Domain token should attach inside a URL",
+            },
+            {
+                "id": "f-explicit",
+                "raw_line": "Finding text does not mention the target",
+                "target_ids": ["target-domain"],
+            },
+        ]
+        targets = [
+            {"id": "target-ip", "type": "ip", "value": "10.0.0.1"},
+            {"id": "target-domain", "type": "domain", "value": "example.com"},
+        ]
+
+        project_provenance.attach_finding_target_references(findings, targets)
+        references_by_id = {
+            finding["id"]: [reference["target_id"] for reference in finding["target_references"]]
+            for finding in findings
+        }
+
+        assert references_by_id["f-ip-substring"] == []
+        assert references_by_id["f-ip-token"] == ["target-ip"]
+        assert references_by_id["f-domain-prefix"] == []
+        assert references_by_id["f-domain-subdomain"] == []
+        assert references_by_id["f-domain-url"] == ["target-domain"]
+        assert references_by_id["f-explicit"] == ["target-domain"]
 
     def test_auto_promote_create_obeys_project_rule_quota(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -16821,6 +19327,8 @@ SQL syntax error near q</response>
                 row[1] for row in conn.execute("PRAGMA index_list('finding_triage_details')").fetchall()
             }
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
+            report_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_reports')").fetchall()}
+            audit_indexes = {row[1] for row in conn.execute("PRAGMA index_list('audit_events')").fetchall()}
             conn.close()
 
         assert "idx_projects_session_status_updated" in project_indexes
@@ -16866,6 +19374,17 @@ SQL syntax error near q</response>
         assert "idx_finding_triage_details_team_unique" in finding_triage_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
+        assert "idx_project_reports_project_updated" in report_indexes
+        assert "idx_project_reports_personal_unique" in report_indexes
+        assert "idx_project_reports_team_unique" in report_indexes
+        assert "idx_audit_events_personal_created" in audit_indexes
+        assert "idx_audit_events_team_created" in audit_indexes
+        assert "idx_audit_events_actor_member_created" in audit_indexes
+        assert "idx_audit_events_actor_session_created" in audit_indexes
+        assert "idx_audit_events_type_created" in audit_indexes
+        assert "idx_audit_events_project_created" in audit_indexes
+        assert "idx_audit_events_target_created" in audit_indexes
+        assert "idx_audit_events_correlation" in audit_indexes
 
     def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
         conn = sqlite3.connect(":memory:")

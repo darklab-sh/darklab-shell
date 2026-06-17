@@ -14,7 +14,7 @@ from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_ru
 log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
@@ -156,6 +156,7 @@ def load_config(conf_dir=None):
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
+        "asset_bundle_mode":          "bundle",
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
         "data_dir":                   "",
@@ -165,6 +166,9 @@ def load_config(conf_dir=None):
         "database_pool_max":          5,
         "database_postgres_jit":       False,
         "permalink_retention_days":   365,
+        "audit_log_enabled":          True,
+        "audit_retention_days":       90,
+        "audit_export_max_rows":      10000,
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
@@ -200,6 +204,8 @@ def load_config(conf_dir=None):
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
+        "http_rate_limit_per_minute": 240,
+        "http_rate_limit_per_second": 60,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
         "team_read_rate_limit_per_minute": 180,
@@ -322,6 +328,7 @@ def load_config(conf_dir=None):
         "evidence_package_max_uncompressed_mb": 500,
         "evidence_package_max_artifacts": 100,
         "package_presets_file":       "package_presets.yaml",
+        "report_templates_file":      "report_templates.yaml",
         "evidence_package_download_rate_limit_per_minute": 10,
         "evidence_package_download_rate_limit_per_second": 2,
         "notifications": {
@@ -412,6 +419,9 @@ def load_config(conf_dir=None):
     env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
     if env_prometheus_multiproc_dir:
         defaults["prometheus_multiproc_dir"] = env_prometheus_multiproc_dir
+    env_asset_bundle_mode = str(os.environ.get("ASSET_BUNDLE_MODE") or "").strip()
+    if env_asset_bundle_mode:
+        defaults["asset_bundle_mode"] = env_asset_bundle_mode
     env_restricted_command_input_cidrs = str(os.environ.get("RESTRICTED_COMMAND_INPUT_CIDRS") or "").strip()
     if env_restricted_command_input_cidrs:
         defaults["restricted_command_input_cidrs"] = [
@@ -502,8 +512,16 @@ def load_config(conf_dir=None):
         "ai_feature_summary",
         "ai_feature_next_commands",
         "ai_feature_run_suggestions",
+        "audit_log_enabled",
     ):
         defaults[key] = _coerce_bool_value(defaults.get(key), bool(defaults[key]))
+    defaults["audit_retention_days"] = _coerce_int_value(
+        defaults.get("audit_retention_days"),
+        90,
+        minimum=0,
+    )
+    audit_export_max_rows = _coerce_int_value(defaults.get("audit_export_max_rows"), 10000, minimum=1)
+    defaults["audit_export_max_rows"] = min(audit_export_max_rows, 200000)
     for key, fallback, minimum in (
         ("ai_connect_timeout_seconds", 5, 1),
         ("ai_timeout_seconds", 120, 1),

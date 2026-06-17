@@ -730,6 +730,7 @@ function loadRunnerFns({
   getComposerValue: getComposerValueOverride = null,
   getVisibleComposerInput: getVisibleComposerInputOverride = null,
   welcomeActive = false,
+  welcomeDone = false,
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
@@ -855,6 +856,7 @@ function loadRunnerFns({
       'app/static/js/features/runner/runner_active_restore.js',
       'app/static/js/features/runner/runner_persistence.js',
       'app/static/js/features/runner/runner_workspace.js',
+      'app/static/js/runner_bridge.js',
       'app/static/js/runner.js',
     ],
     {
@@ -874,7 +876,7 @@ function loadRunnerFns({
       syncRunButtonDisabled: undefined,
       APP_CONFIG: appConfig,
       _welcomeActive: welcomeActive,
-      _welcomeDone: false,
+      _welcomeDone: welcomeDone,
       searchBar: document.createElement('div'),
       addToHistory,
       addToRecentPreview,
@@ -2569,6 +2571,14 @@ describe('submitCommand return contract', () => {
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
     })
     expect(submitCommand('   ')).toBe(true)
+
+    const doneWelcome = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      welcomeActive: true,
+      welcomeDone: true,
+      welcomeOwnsTab: () => true,
+    })
+    expect(doneWelcome.submitCommand('')).toBe(true)
   })
 
   it("returns 'settle' on empty input during active welcome", () => {
@@ -2677,11 +2687,12 @@ describe('submitCommand return contract', () => {
   })
 
   it('interruptPromptLine refocuses the visible mobile composer when present', () => {
-    const visibleInput = { focus: vi.fn() }
+    document.body.classList.add('mobile-terminal-mode')
     const { interruptPromptLine, cmdInput } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
-      getVisibleComposerInput: () => visibleInput,
     })
+    const visibleInput = document.getElementById('mobile-cmd')
+    visibleInput.focus = vi.fn()
 
     expect(interruptPromptLine('tab-1')).toBe(true)
     expect(visibleInput.focus).toHaveBeenCalled()
@@ -2712,6 +2723,7 @@ function loadSeedFns({
   const fns = fromDomScripts(
     [
       'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/runner_bridge.js',
       'app/static/js/runner.js',
     ],
     { localStorage: storage, apiFetch, loadStarredFromServer },
@@ -2787,10 +2799,13 @@ describe('_seedLocalStorageStarsToServer', () => {
     const storage = new MemoryStorage()
     storage.setItem('starred', 'not-json{{{')
     const apiFetch = vi.fn()
-    const fns = fromDomScript(
-      'app/static/js/runner.js',
+    const fns = fromDomScripts(
+      [
+        'app/static/js/runner_bridge.js',
+        'app/static/js/runner.js',
+      ],
       { localStorage: storage, apiFetch, loadStarredFromServer: vi.fn() },
-      '_seedLocalStorageStarsToServer',
+      '{ _seedLocalStorageStarsToServer }',
     )
 
     await fns._seedLocalStorageStarsToServer()
@@ -2851,6 +2866,7 @@ function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
   const fns = fromDomScripts(
     [
       'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/runner_bridge.js',
       'app/static/js/runner.js',
     ],
     {

@@ -1,3 +1,12 @@
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { showToast as importedShowToast } from '../../core/utils.js';
+import { syncModalOverlayState as importedSyncModalOverlayState } from '../../ui/ui_helpers.js';
+
+let exportedDarklabProjectWorkspaceShell = null;
+
 (function projectWorkspaceShellModule(global) {
   'use strict';
 
@@ -10,7 +19,7 @@
       ctx.projectWorkspaceOverlay.classList.remove('u-hidden');
       ctx.projectWorkspaceOverlay.classList.add('open');
       ctx.projectWorkspaceOverlay.setAttribute('aria-hidden', 'false');
-      global.syncModalOverlayState?.();
+      if (typeof importedSyncModalOverlayState === 'function') importedSyncModalOverlayState();
     }
 
     function hideOverlay() {
@@ -18,7 +27,7 @@
       ctx.projectWorkspaceOverlay.classList.add('u-hidden');
       ctx.projectWorkspaceOverlay.classList.remove('open');
       ctx.projectWorkspaceOverlay.setAttribute('aria-hidden', 'true');
-      global.syncModalOverlayState?.();
+      if (typeof importedSyncModalOverlayState === 'function') importedSyncModalOverlayState();
     }
 
     function isOpen() {
@@ -28,7 +37,7 @@
     function showWorkspaceToast(text, tone = 'success') {
       const toastFn = typeof ctx.showToast === 'function'
         ? ctx.showToast
-        : (global && typeof global.showToast === 'function' ? global.showToast : null);
+        : (typeof importedShowToast === 'function' ? importedShowToast : null);
       if (!toastFn) return false;
       toastFn(text, tone);
       return true;
@@ -61,14 +70,14 @@
     }
 
     function activeTeamScopeCan(capability) {
-      return typeof global.activeTeamScopeCan === 'function'
-        ? global.activeTeamScopeCan(capability)
-        : true;
+      const can = typeof importedActiveTeamScopeCan === 'function' ? importedActiveTeamScopeCan : null;
+      return typeof can === 'function' ? can(capability) : true;
     }
 
     function teamScopeDeniedMessage(action) {
-      return typeof global.teamScopeDeniedMessage === 'function'
-        ? global.teamScopeDeniedMessage(action)
+      const denied = typeof importedTeamScopeDeniedMessage === 'function' ? importedTeamScopeDeniedMessage : null;
+      return typeof denied === 'function'
+        ? denied(action)
         : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
@@ -223,5 +232,9 @@
     };
   }
 
-  global.DarklabProjectWorkspaceShell = { createProjectWorkspaceShellController };
+  const DarklabProjectWorkspaceShell = { createProjectWorkspaceShellController };
+  exportedDarklabProjectWorkspaceShell = DarklabProjectWorkspaceShell;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceShell as DarklabProjectWorkspaceShell,};

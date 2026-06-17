@@ -1,0 +1,376 @@
+{
+  "version": 1,
+  "globals": [
+    {
+      "name": "APP_CONFIG",
+      "purpose": "intentional_bootstrap",
+      "owner": "core/config.js",
+      "sources": ["*"],
+      "reason": "Server-rendered app configuration is intentionally exposed on window for bootstrapping and runtime config refresh.",
+      "removal_target": "Keep as the server bootstrap boundary for config data; remove only if templates pass config through a module bootstrap payload."
+    },
+    {
+      "name": "PermData",
+      "purpose": "intentional_bootstrap",
+      "owner": "permalink templates",
+      "sources": ["*"],
+      "reason": "Permalink/share pages receive server-rendered run data through a small window bridge before the controller starts.",
+      "removal_target": "Keep until permalink/share data is delivered through an explicit module bootstrap payload."
+    },
+    {
+      "name": "ThemeRegistry",
+      "purpose": "intentional_bootstrap",
+      "owner": "features/theme/theme.js",
+      "sources": ["/static/js/features/theme/theme.js"],
+      "reason": "The theme registry is bootstrapped from server theme data and kept on the browser boundary so theme application can update the active runtime entry.",
+      "removal_target": "Keep as the theme bootstrap/runtime registry boundary while internal consumers use explicit theme module imports."
+    },
+    {
+      "name": "AnsiUp",
+      "purpose": "vendor_global",
+      "owner": "vendor/ansi_up",
+      "sources": ["*"],
+      "reason": "ansi_up is vendored as a classic browser global used by output and permalink rendering.",
+      "removal_target": "Keep while ansi_up remains a classic vendor script; remove if it moves behind an imported wrapper."
+    },
+    {
+      "name": "jspdf",
+      "purpose": "vendor_global",
+      "owner": "vendor/jspdf",
+      "sources": ["*"],
+      "reason": "jsPDF is loaded as a classic vendor script and exposes window.jspdf.",
+      "removal_target": "Keep while jsPDF remains a classic lazy vendor script; remove if it moves behind an imported wrapper."
+    },
+    {
+      "name": "Terminal",
+      "purpose": "vendor_global",
+      "owner": "vendor/xterm",
+      "sources": ["*"],
+      "reason": "xterm.js is loaded as a classic vendor script and exposes Terminal for interactive PTY.",
+      "removal_target": "Keep while xterm remains a classic lazy vendor script; remove if it moves behind an imported wrapper."
+    },
+    {
+      "name": "FitAddon",
+      "purpose": "vendor_global",
+      "owner": "vendor/xterm-addon-fit",
+      "sources": ["*"],
+      "reason": "The xterm fit addon is loaded as a classic vendor script and exposes FitAddon for interactive PTY.",
+      "removal_target": "Keep while the fit addon remains a classic lazy vendor script; remove if it moves behind an imported wrapper."
+    },
+    {
+      "name": "showConfirm",
+      "purpose": "test_hook",
+      "owner": "ui/ui_confirm.js",
+      "sources": ["/static/js/ui/ui_confirm.js"],
+      "reason": "Browser interaction and screenshot tests open the shared confirm primitive directly to verify focus, keyboard, and layout contracts.",
+      "removal_target": "Remove when those tests drive an in-app action or import the module API directly in the page context."
+    },
+    {
+      "name": "cancelConfirm",
+      "purpose": "test_hook",
+      "owner": "ui/ui_confirm.js",
+      "sources": ["/static/js/ui/ui_confirm.js"],
+      "reason": "Unit and browser tests use the imperative cancel hook to resolve an open shared confirm without going through a caller-specific flow.",
+      "removal_target": "Remove when confirm tests import the module API directly instead of using the browser-global hook."
+    },
+    {
+      "name": "isConfirmOpen",
+      "purpose": "test_hook",
+      "owner": "ui/ui_confirm.js",
+      "sources": ["/static/js/ui/ui_confirm.js"],
+      "reason": "Focus and pressable tests inspect the shared confirm-open state directly while exercising modal interaction contracts.",
+      "removal_target": "Remove when confirm-state tests import the module API directly instead of using the browser-global hook."
+    },
+    {
+      "name": "__workflowCatalogItems",
+      "purpose": "lazy_placeholder",
+      "owner": "features/workflows/workflows.js",
+      "sources": [
+        "/static/js/core/lazy_assets.js",
+        "/static/js/features/workflows/workflows.js"
+      ],
+      "reason": "The lazy asset loader keeps the workflow catalog cache available before the Workflows module downloads; the module hydrates from the same cache when it loads.",
+      "removal_target": "Replace with an explicit Workflows bridge/cache module if the lazy loader no longer needs a pre-module cache."
+    },
+    {
+      "name": "acAccept",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "The composer controller and tests still use the autocomplete module API through the browser boundary while the composer/autocomplete cycle is being untangled.",
+      "removal_target": "Import autocomplete commands through the composer/autocomplete bridge and remove this browser publish."
+    },
+    {
+      "name": "acAutocompleteIsHintOnly",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acAutocompleteNextSelectableIndex",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acAutocompleteSelectableIndexes",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acAutocompleteSelectableItems",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acExpandSharedPrefix",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "The composer controller still invokes autocomplete actions through the browser boundary while the cycle is being untangled.",
+      "removal_target": "Import autocomplete actions through the composer/autocomplete bridge and remove this browser publish."
+    },
+    {
+      "name": "acHide",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "The composer controller still invokes autocomplete actions through the browser boundary while the cycle is being untangled.",
+      "removal_target": "Import autocomplete actions through the composer/autocomplete bridge and remove this browser publish."
+    },
+    {
+      "name": "acIsHintOnly",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acNextSelectableIndex",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acSelectableIndexes",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acSelectableItems",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "Keyboard handling and legacy harnesses read autocomplete selection helpers through the browser boundary while composer/autocomplete ownership remains split.",
+      "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
+    },
+    {
+      "name": "acShow",
+      "purpose": "module_api_bridge",
+      "owner": "autocomplete.js",
+      "sources": ["/static/js/autocomplete.js"],
+      "reason": "The composer controller still invokes autocomplete actions through the browser boundary while the cycle is being untangled.",
+      "removal_target": "Import autocomplete actions through the composer/autocomplete bridge and remove this browser publish."
+    },
+    {
+      "name": "getAutocompleteMatches",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["/static/js/features/autocomplete/suggestions.js"],
+      "reason": "Composer input reads autocomplete matching through the browser boundary while matching remains owned by the autocomplete feature module.",
+      "removal_target": "Import autocomplete matching through a neutral autocomplete bridge."
+    },
+    {
+      "name": "limitAutocompleteMatchesForDisplay",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["/static/js/features/autocomplete/suggestions.js"],
+      "reason": "Composer input reads autocomplete matching through the browser boundary while matching remains owned by the autocomplete feature module.",
+      "removal_target": "Import autocomplete matching through a neutral autocomplete bridge."
+    },
+    {
+      "name": "applyTimestampPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyLineNumberPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyWelcomeIntroPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyShareRedactionDefaultPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyHudClockPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyCommandOutcomeSummariesPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyConstellationFullDayPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyCompareViewModePreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyCompareContextPreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "applyPromptUsernamePreference",
+      "purpose": "module_api_bridge",
+      "owner": "features/preferences/preferences.js",
+      "sources": ["/static/js/features/preferences/preferences.js"],
+      "reason": "Capture flows and page-owned preference controls call the preference apply helpers through the browser boundary while source-mode and bundle-mode entry points share the same runtime contract.",
+      "removal_target": "Use imported preference helper APIs everywhere tests and page-owned controls can run inside an ES module context."
+    },
+    {
+      "name": "DarklabTeamScope",
+      "purpose": "module_api_bridge",
+      "owner": "features/team_scope.js",
+      "sources": ["/static/js/features/team_scope.js"],
+      "reason": "Team scope exposes an object API for existing UI hooks and tests while internal callers move to explicit imports.",
+      "removal_target": "Use named imports for team scope operations and remove the browser object publish."
+    },
+    {
+      "name": "ExportHtmlUtils",
+      "purpose": "module_api_bridge",
+      "owner": "export_html.js",
+      "sources": ["/static/js/export_html.js"],
+      "reason": "Permalink and export helpers share HTML export utilities through a browser bridge to avoid source-mode and page-owned import cycles.",
+      "removal_target": "Move export helpers behind an acyclic module import and remove this browser publish."
+    },
+    {
+      "name": "_setLnMode",
+      "purpose": "module_api_bridge",
+      "owner": "output.js",
+      "sources": ["/static/js/output.js"],
+      "reason": "Preference and test hooks still drive output display mode updates through the browser boundary.",
+      "removal_target": "Import output preference setters through an output bridge."
+    },
+    {
+      "name": "_setTsMode",
+      "purpose": "module_api_bridge",
+      "owner": "output.js",
+      "sources": ["/static/js/output.js"],
+      "reason": "Preference and test hooks still drive output display mode updates through the browser boundary.",
+      "removal_target": "Import output preference setters through an output bridge."
+    },
+    {
+      "name": "__darklabDismissibleRegistry",
+      "purpose": "module_api_bridge",
+      "owner": "ui/ui_dismissible.js",
+      "sources": ["/static/js/ui/ui_dismissible.js"],
+      "reason": "The dismissible helper keeps one shared registry on the browser object so repeated module evaluation can share Escape-dismiss state.",
+      "removal_target": "Replace with a module-owned registry once all loaders evaluate this module exactly once."
+    },
+    {
+      "name": "attachInteractivePtyCommand",
+      "purpose": "module_api_bridge",
+      "owner": "pty.js",
+      "sources": ["/static/js/pty.js"],
+      "reason": "Interactive PTY is lazy-loaded and exposes its command API through the browser boundary for the runner.",
+      "removal_target": "Move PTY behind a lazy module bridge with explicit imports."
+    },
+    {
+      "name": "detachInteractivePtyForTab",
+      "purpose": "module_api_bridge",
+      "owner": "pty.js",
+      "sources": ["/static/js/pty.js"],
+      "reason": "Interactive PTY is lazy-loaded and exposes its command API through the browser boundary for the runner.",
+      "removal_target": "Move PTY behind a lazy module bridge with explicit imports."
+    },
+    {
+      "name": "focusActiveInteractivePty",
+      "purpose": "module_api_bridge",
+      "owner": "pty.js",
+      "sources": ["/static/js/pty.js"],
+      "reason": "Interactive PTY is lazy-loaded and exposes its command API through the browser boundary for the runner.",
+      "removal_target": "Move PTY behind a lazy module bridge with explicit imports."
+    },
+    {
+      "name": "isInteractivePtyCommand",
+      "purpose": "module_api_bridge",
+      "owner": "pty.js",
+      "sources": ["/static/js/pty.js"],
+      "reason": "Interactive PTY is lazy-loaded and exposes its command API through the browser boundary for the runner.",
+      "removal_target": "Move PTY behind a lazy module bridge with explicit imports."
+    },
+    {
+      "name": "preloadInteractivePtyAssets",
+      "purpose": "module_api_bridge",
+      "owner": "pty.js",
+      "sources": ["/static/js/pty.js"],
+      "reason": "Interactive PTY is lazy-loaded and exposes its command API through the browser boundary for the runner.",
+      "removal_target": "Move PTY behind a lazy module bridge with explicit imports."
+    },
+    {
+      "name": "startInteractivePtyCommand",
+      "purpose": "module_api_bridge",
+      "owner": "pty.js",
+      "sources": ["/static/js/pty.js"],
+      "reason": "Interactive PTY is lazy-loaded and exposes its command API through the browser boundary for the runner.",
+      "removal_target": "Move PTY behind a lazy module bridge with explicit imports."
+    }
+  ]
+}

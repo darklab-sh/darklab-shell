@@ -1,4 +1,24 @@
 // ── Theme ──
+import { APP_CONFIG as importedAppConfig } from '../../core/config.js';
+import { themeSelect as importedThemeSelect } from '../../core/dom.js';
+import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
+import { buildPromptLabel as importedBuildPromptLabel } from '../../output.js';
+import { logClientError as importedLogClientError } from '../../session.js';
+import {
+  _persistCurrentSessionPreferences as importedPersistCurrentSessionPreferences,
+  getPreference as importedGetPreference,
+} from '../preferences/preferences.js';
+
+function _themeSelectEl() {
+  return (typeof importedThemeSelect !== 'undefined' && importedThemeSelect)
+    || (typeof document !== 'undefined' ? document.getElementById('theme-select') : null);
+}
+
+function _themeLogClientError(message, err) {
+  const log = typeof importedLogClientError === 'function' ? importedLogClientError : null;
+  if (log) log(message, err);
+}
+
 function _getThemeRegistry() {
   // Prefer the runtime /themes payload when present, then fall back to the
   // bootstrapped globals so the selector still works during partial failures.
@@ -67,7 +87,8 @@ function _findThemeEntry(name) {
 
 function _defaultThemeEntry() {
   const registry = _getThemeRegistry();
-  return registry.current || _findThemeEntry(APP_CONFIG?.default_theme || '') || {
+  const appConfig = typeof importedAppConfig !== 'undefined' ? importedAppConfig : null;
+  return registry.current || _findThemeEntry(appConfig?.default_theme || '') || {
     name: 'dark',
     label: 'Dark',
     source: 'built-in',
@@ -95,13 +116,20 @@ function _applyThemePreviewVars(target, vars) {
 
 function _persistThemeEntry(entry) {
   if (!entry) return;
-  try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist theme preference', err); }
+  try {
+    if (typeof importedPersistCurrentSessionPreferences === 'function') {
+      void importedPersistCurrentSessionPreferences();
+    }
+  } catch (err) {
+    _themeLogClientError('failed to persist theme preference', err);
+  }
 }
 
 function _savedThemeName() {
-  return getPreference('pref_theme_name')
+  const getPreference = typeof importedGetPreference === 'function' ? importedGetPreference : null;
+  return (getPreference ? getPreference('pref_theme_name') : '')
     || localStorage.getItem('theme')
-    || getPreference('pref_theme')
+    || (getPreference ? getPreference('pref_theme') : '')
     || '';
 }
 
@@ -156,8 +184,8 @@ function _buildThemePreviewCard(theme) {
   content.className = 'theme-card-preview-content';
   const prompt = document.createElement('span');
   prompt.className = 'theme-card-preview-prompt';
-  prompt.textContent = typeof buildPromptLabel === 'function'
-    ? buildPromptLabel()
+  prompt.textContent = typeof importedBuildPromptLabel === 'function'
+    ? importedBuildPromptLabel()
     : 'anon@darklab.sh:~ $';
   content.appendChild(prompt);
   for (let index = 0; index < 4; index += 1) {
@@ -211,6 +239,7 @@ function _buildThemePreviewCard(theme) {
 }
 
 function renderThemeSelectionOptions() {
+  const themeSelect = _themeSelectEl();
   if (!themeSelect || themeSelect.dataset.wired === '1') return;
   const themes = [..._getThemeThemes()].sort(_compareThemeEntries);
   themeSelect.innerHTML = '';
@@ -259,6 +288,7 @@ function renderThemeSelectionOptions() {
 function syncThemeSelectionControls() {
   const current = _resolveThemeEntry(document.body?.dataset?.theme || _savedThemeName());
   const themeName = current?.name || '';
+  const themeSelect = _themeSelectEl();
   if (!themeSelect) return;
   themeSelect.dataset.theme = themeName;
   themeSelect.querySelectorAll('[data-theme-name]').forEach(card => {
@@ -286,7 +316,27 @@ function applyThemeSelection(themeName, persist = true) {
   }
   if (persist) _persistThemeEntry(entry);
   syncThemeSelectionControls();
-  if (typeof emitUiEvent === 'function') {
-    emitUiEvent('app:theme-changed', { theme: entry.name });
+  if (typeof importedEmitUiEvent === 'function') {
+    importedEmitUiEvent('app:theme-changed', { theme: entry.name });
   }
 }
+
+const THEME_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+if (THEME_GLOBAL) {
+  THEME_GLOBAL.applyThemeSelection = applyThemeSelection;
+  THEME_GLOBAL.syncThemeSelectionControls = syncThemeSelectionControls;
+}
+
+export {
+  _compareThemeEntries,
+  _defaultThemeEntry,
+  _findThemeEntry,
+  _getThemeRegistry,
+  _getThemeThemes,
+  _normalizeThemeName,
+  _resolveThemeEntry,
+  _savedThemeName,
+  applyThemeSelection,
+  renderThemeSelectionOptions,
+  syncThemeSelectionControls,
+};

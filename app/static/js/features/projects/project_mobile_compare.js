@@ -1,5 +1,9 @@
 // Project mobile run comparison sheet controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
+import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+
+let exportedDarklabProjectMobileCompare = null;
 
 (function projectMobileCompareModule(global) {
   'use strict';
@@ -99,9 +103,7 @@
       overlay.addEventListener('click', (event) => {
         if (event.target === overlay) close();
       });
-      const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
-        ? global.bindDismissible
-        : null;
+      const bindDismissibleFn = typeof importedBindDismissible === 'function' ? importedBindDismissible : null;
       if (bindDismissibleFn) {
         bindDismissibleFn(overlay, {
           level: 'sheet',
@@ -110,9 +112,7 @@
           backdropEl: overlay,
         });
       }
-      const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
-        ? global.bindMobileSheet
-        : null;
+      const bindMobileSheetFn = typeof importedBindMobileSheet === 'function' ? importedBindMobileSheet : null;
       if (bindMobileSheetFn) bindMobileSheetFn(sheet, { onClose: () => close() });
       return overlay;
     }
@@ -254,7 +254,11 @@
     };
   }
 
-  global.DarklabProjectMobileCompare = {
+  const DarklabProjectMobileCompare = {
     createProjectMobileCompareController,
   };
+  exportedDarklabProjectMobileCompare = DarklabProjectMobileCompare;
 })(globalThis);
+
+export {
+  exportedDarklabProjectMobileCompare as DarklabProjectMobileCompare,};

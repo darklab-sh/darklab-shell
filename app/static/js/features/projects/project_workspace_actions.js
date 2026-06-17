@@ -1,8 +1,18 @@
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+
+let exportedDarklabProjectWorkspaceActions = null;
+
 (function projectWorkspaceActionsModule(global) {
   'use strict';
 
   function createProjectWorkspaceActionsController(context) {
     const ctx = context || {};
+
+    function projectShowConfirm() {
+      return typeof ctx.showConfirm === 'function'
+        ? ctx.showConfirm
+        : ((typeof importedShowConfirm !== 'undefined' && importedShowConfirm) || null);
+    }
 
     async function syncEntityLabels(entityType, entityId, nextLabels) {
       await ctx.EntityMetadataClient.syncEntityLabels(entityType, entityId, nextLabels, {
@@ -53,9 +63,7 @@
     }
 
     async function confirmRunLink(projectId, runIds, label) {
-      const confirmFn = typeof ctx.showConfirm === 'function'
-        ? ctx.showConfirm
-        : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
+      const confirmFn = projectShowConfirm();
       if (!confirmFn) return { includeEntities: false };
       let option = null;
       try {
@@ -108,9 +116,7 @@
     }
 
     async function confirmDestructive({ body, actionLabel, actionId, note }) {
-      const confirmFn = typeof ctx.showConfirm === 'function'
-        ? ctx.showConfirm
-        : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
+      const confirmFn = projectShowConfirm();
       if (!confirmFn) {
         throw new Error('Project destructive confirmations require showConfirm.');
       }
@@ -176,5 +182,9 @@
     };
   }
 
-  global.DarklabProjectWorkspaceActions = { createProjectWorkspaceActionsController };
+  const DarklabProjectWorkspaceActions = { createProjectWorkspaceActionsController };
+  exportedDarklabProjectWorkspaceActions = DarklabProjectWorkspaceActions;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceActions as DarklabProjectWorkspaceActions,};

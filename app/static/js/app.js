@@ -1,6 +1,285 @@
 // ── Desktop UI module ──
 // Shared helpers for keyboard shortcuts, overlays, and mobile-layout glue.
 
+import {
+  findWordBoundaryLeft,
+  findWordBoundaryRight,
+  getCmdSelection,
+  getComposerStateSnapshot,
+  getInputSelection,
+} from './features/terminal/composer_editing.js';
+import {
+  cmdInput as importedCmdInput,
+  mobileCmdInput as importedMobileCmdInput,
+  mobileComposerRow as importedMobileComposerRow,
+  optionsOverlay as importedOptionsOverlay,
+  shellPromptText as importedShellPromptText,
+  shellPromptWrap as importedShellPromptWrap,
+  themeOverlay as importedThemeOverlay,
+  themeSelect as importedThemeSelect,
+  tsBtn as importedTsBtn,
+} from './core/dom.js';
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
+import { maskSessionToken as importedMaskSessionToken } from './core/session_core.js';
+import {
+  getActiveTab as importedGetActiveTab,
+  getActiveTabId as importedGetActiveTabId,
+  getAppState as importedGetAppState,
+  getAutocompleteState as importedGetAutocompleteState,
+  getComposerState as importedGetComposerState,
+  getTabs as importedGetTabs,
+  setAutocompleteState as importedSetAutocompleteState,
+  setComposerState as importedSetComposerState,
+} from './core/state.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  focusAnyComposerInput as importedFocusAnyComposerInput,
+  focusComposerInput as importedFocusComposerInput,
+  focusElement as importedFocusElement,
+  getComposerInputs as importedGetComposerInputs,
+  getVisibleComposerInput as importedGetVisibleComposerInput,
+  hideHistoryPanel as importedHideHistoryPanel,
+  hideOptionsOverlay as importedHideOptionsOverlay,
+  hideThemeOverlay as importedHideThemeOverlay,
+  hideWorkspaceOverlay as importedHideWorkspaceOverlay,
+  isFaqOverlayOpen as importedIsFaqOverlayOpen,
+  isHistoryPanelOpen as importedIsHistoryPanelOpen,
+  isOptionsOverlayOpen as importedIsOptionsOverlayOpen,
+  isThemeOverlayOpen as importedIsThemeOverlayOpen,
+  isWorkflowsOverlayOpen as importedIsWorkflowsOverlayOpen,
+  isWorkspaceOverlayOpen as importedIsWorkspaceOverlayOpen,
+  markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  setMobileKeyboardOpenState as importedSetMobileKeyboardOpenState,
+  syncComposerSelection as importedSyncComposerSelection,
+  syncFocusedComposerState as importedSyncFocusedComposerState,
+} from './ui/ui_helpers.js';
+import {
+  _refreshFollowingOutputsAfterLayout as importedRefreshFollowingOutputsAfterLayout,
+  buildPromptLabel as importedBuildPromptLabel,
+  currentPromptWorkspacePath as importedCurrentPromptWorkspacePath,
+  syncOutputPrefixes as importedSyncOutputPrefixes,
+} from './output.js';
+import { clearFaqHash as importedClearFaqHash } from './features/command-registry/faq_helpers.js';
+import {
+  activateTab as importedActivateTab,
+  clearTab as importedClearTab,
+  createDefaultTabLabel as importedCreateDefaultTabLabel,
+  createTab as importedCreateTab,
+} from './tabs.js';
+import { closeTab as importedCloseTab } from './features/tabs/tab_close_lifecycle.js';
+import {
+  copyTab as importedCopyTab,
+  permalinkTab as importedPermalinkTab,
+} from './features/tabs/tab_exports.js';
+import {
+  renderThemeSelectionOptions as importedRenderThemeSelectionOptions,
+  syncThemeSelectionControls as importedSyncThemeSelectionControls,
+} from './features/theme/theme.js';
+import {
+  applyShareRedactionDefaultPreference as importedApplyShareRedactionDefaultPreference,
+  getShareRedactionDefaultPreference as importedGetShareRedactionDefaultPreference,
+  syncOptionsControls as importedSyncOptionsControls,
+} from './features/preferences/preferences.js';
+import { updateOptionsSessionTokenStatus as importedUpdateOptionsSessionTokenStatus } from './features/preferences/session_token_bridge.js';
+import {
+  closeAtlas as importedCloseAtlas,
+  isAtlasOverlayOpen as importedIsAtlasOverlayOpen,
+} from './features/atlas/atlas_bridge.js';
+import {
+  closeHistoryRunOverlay as importedCloseHistoryRunOverlay,
+  isHistoryRunOverlayOpen as importedIsHistoryRunOverlayOpen,
+} from './features/history/history_run_modal_state_bridge.js';
+import {
+  closeTeamScopeSelector as importedCloseTeamScopeSelector,
+  isTeamScopeSelectorOpen as importedIsTeamScopeSelectorOpen,
+} from './features/team_scope.js';
+import {
+  closeProjectWorkspace as importedCloseProjectWorkspace,
+  isProjectWorkspaceOpen as importedIsProjectWorkspaceOpen,
+} from './features/projects/project_context_bridge.js';
+import {
+  hasMobileShellLayoutHandler as importedHasMobileShellLayoutHandler,
+  useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode,
+} from './features/mobile/mobile_shell_layout_bridge.js';
+import { setComposerPromptHandlers as importedSetComposerPromptHandlers } from './features/terminal/composer_prompt_bridge.js';
+import { setShareRedactionHandlers as importedSetShareRedactionHandlers } from './features/tabs/share_redaction_bridge.js';
+import {
+  hasSecretsHandler as importedHasSecretsHandler,
+  refreshOptionsSecrets as importedRefreshOptionsSecrets,
+} from './features/preferences/secrets_bridge.js';
+import { setTimestampMode as importedSetOutputTimestampMode } from './output_mode_bridge.js';
+import { cancelWelcome as importedCancelWelcome } from './welcome_bridge.js';
+import { showConfirm as importedShowConfirm } from './ui/ui_confirm.js';
+import { setOverlayActionHandlers as importedSetOverlayActionHandlers } from './ui/overlay_actions_bridge.js';
+import {
+  hasRuntimeHandler as importedHasRuntimeHandler,
+  logClientError as importedLogClientError,
+} from './runtime_bridge.js';
+
+let importedHideCommandCatalogOverlay;
+let importedHideCommandRegistryOverlay;
+let importedIsCommandCatalogOverlayOpen;
+let importedIsCommandRegistryOverlayOpen;
+
+const APP_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _appFn(name, imported = null) {
+  const fn = APP_GLOBAL && APP_GLOBAL[name];
+  if (typeof fn === 'function') return fn;
+  return typeof imported === 'function' ? imported : null;
+}
+
+function _appValue(name, imported = undefined) {
+  return imported !== undefined ? imported : (APP_GLOBAL ? APP_GLOBAL[name] : undefined);
+}
+
+function _appEl(name, imported = undefined) {
+  return _appValue(name, imported) || null;
+}
+
+function _appConfig() {
+  const config = _appFn('getAppConfig', importedGetAppConfig)?.();
+  return config || _appValue('APP_CONFIG') || {};
+}
+
+function _appState() {
+  const state = _appFn('getAppState', importedGetAppState)?.();
+  return state || _appValue('APP_STATE') || {};
+}
+
+function _appTabs() {
+  const tabs = _appFn('getTabs', importedGetTabs)?.();
+  if (Array.isArray(tabs)) return tabs;
+  const state = _appState();
+  return Array.isArray(state.tabs) ? state.tabs : [];
+}
+
+function _appActiveTabId() {
+  const id = _appFn('getActiveTabId', importedGetActiveTabId)?.();
+  return id || _appState().activeTabId || null;
+}
+
+function _appAutocompleteState() {
+  const state = _appFn('getAutocompleteState', importedGetAutocompleteState)?.();
+  return state || _appState();
+}
+
+var cmdInput = _appEl('cmdInput', importedCmdInput);
+var mobileCmdInput = _appEl('mobileCmdInput', importedMobileCmdInput);
+var mobileComposerRow = _appEl('mobileComposerRow', importedMobileComposerRow);
+var optionsOverlay = _appEl('optionsOverlay', importedOptionsOverlay);
+var shellPromptText = _appEl('shellPromptText', importedShellPromptText);
+var shellPromptWrap = _appEl('shellPromptWrap', importedShellPromptWrap);
+var themeOverlay = _appEl('themeOverlay', importedThemeOverlay);
+var themeSelect = _appEl('themeSelect', importedThemeSelect);
+var tsBtn = _appEl('tsBtn', importedTsBtn);
+var _appSetAutocompleteStateAdapter = (...args) => _appFn('setAutocompleteState', importedSetAutocompleteState)?.(...args);
+var _appShowToastAdapter = (...args) => _appFn('showToast')?.(...args);
+var _appBuildPromptLabelAdapter = (...args) => _appFn('buildPromptLabel', importedBuildPromptLabel)?.(...args);
+var _appCurrentPromptWorkspacePathAdapter = (...args) => _appFn('currentPromptWorkspacePath', importedCurrentPromptWorkspacePath)?.(...args);
+var _appGetComposerInputsAdapter = (...args) => _appFn('getComposerInputs', importedGetComposerInputs)?.(...args);
+var _appSyncFocusedComposerStateAdapter = (...args) => _appFn('syncFocusedComposerState', importedSyncFocusedComposerState)?.(...args);
+var _appGetComposerStateAdapter = (...args) => _appFn('getComposerState', importedGetComposerState)?.(...args);
+var _appUseMobileViewportAdapter = (...args) => {
+  const fn = (
+    typeof importedHasMobileShellLayoutHandler === 'function'
+    && importedHasMobileShellLayoutHandler('useMobileTerminalViewportMode')
+  ) ? importedUseMobileTerminalViewportMode : _appFn('useMobileTerminalViewportMode');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var _appSetMobileKeyboardOpenStateAdapter = (...args) => _appFn('setMobileKeyboardOpenState', importedSetMobileKeyboardOpenState)?.(...args);
+var _appFocusComposerInputAdapter = (...args) => _appFn('focusComposerInput', importedFocusComposerInput)?.(...args);
+var _appFocusAnyComposerInputAdapter = (...args) => _appFn('focusAnyComposerInput', importedFocusAnyComposerInput)?.(...args);
+var _appIsAtlasOverlayOpenAdapter = (...args) => _appFn('isAtlasOverlayOpen', importedIsAtlasOverlayOpen)?.(...args);
+var _appCloseAtlasAdapter = (...args) => _appFn('closeAtlas', importedCloseAtlas)?.(...args);
+var _appIsFindingsBoardOpenAdapter = (...args) => _appFn('isFindingsBoardOpen')?.(...args);
+var _appCloseFindingsBoardAdapter = (...args) => _appFn('closeFindingsBoard')?.(...args);
+var _appIsTeamScopeSelectorOpenAdapter = (...args) => _appFn('isTeamScopeSelectorOpen', importedIsTeamScopeSelectorOpen)?.(...args);
+var _appCloseTeamScopeSelectorAdapter = (...args) => _appFn('closeTeamScopeSelector', importedCloseTeamScopeSelector)?.(...args);
+var _appIsHistoryRunOverlayOpenAdapter = (...args) => _appFn('isHistoryRunOverlayOpen', importedIsHistoryRunOverlayOpen)?.(...args);
+var _appCloseHistoryRunOverlayAdapter = (...args) => _appFn('closeHistoryRunOverlay', importedCloseHistoryRunOverlay)?.(...args);
+var _appIsHistoryPanelOpenAdapter = (...args) => _appFn('isHistoryPanelOpen', importedIsHistoryPanelOpen)?.(...args);
+var _appHideHistoryPanelAdapter = (...args) => _appFn('hideHistoryPanel', importedHideHistoryPanel)?.(...args);
+var _appIsWorkflowsOverlayOpenAdapter = (...args) => _appFn('isWorkflowsOverlayOpen', importedIsWorkflowsOverlayOpen)?.(...args);
+var _appCloseWorkflowsAdapter = (...args) => _appFn('closeWorkflows')?.(...args);
+var _appHideWorkflowsOverlayAdapter = (...args) => _appFn('hideWorkflowsOverlay')?.(...args);
+var _appIsSchedulesOverlayOpenAdapter = (...args) => _appFn('isSchedulesOverlayOpen')?.(...args);
+var _appCloseSchedulesModalAdapter = (...args) => _appFn('closeSchedulesModal')?.(...args);
+var _appIsWatchersOverlayOpenAdapter = (...args) => _appFn('isWatchersOverlayOpen')?.(...args);
+var _appCloseWatchersModalAdapter = (...args) => _appFn('closeWatchersModal')?.(...args);
+var _appIsWorkspaceOverlayOpenAdapter = (...args) => _appFn('isWorkspaceOverlayOpen', importedIsWorkspaceOverlayOpen)?.(...args);
+var _appCloseWorkspaceAdapter = (...args) => _appFn('closeWorkspace')?.(...args);
+var _appHideWorkspaceOverlayAdapter = (...args) => _appFn('hideWorkspaceOverlay', importedHideWorkspaceOverlay)?.(...args);
+var _appIsFaqOverlayOpenAdapter = (...args) => _appFn('isFaqOverlayOpen', importedIsFaqOverlayOpen)?.(...args);
+var _appHideFaqOverlayAdapter = (...args) => _appFn('hideFaqOverlay')?.(...args);
+var _appIsThemeOverlayOpenAdapter = (...args) => _appFn('isThemeOverlayOpen', importedIsThemeOverlayOpen)?.(...args);
+var _appHideThemeOverlayAdapter = (...args) => _appFn('hideThemeOverlay', importedHideThemeOverlay)?.(...args);
+var _appIsOptionsOverlayOpenAdapter = (...args) => _appFn('isOptionsOverlayOpen', importedIsOptionsOverlayOpen)?.(...args);
+var _appHideOptionsOverlayAdapter = (...args) => _appFn('hideOptionsOverlay', importedHideOptionsOverlay)?.(...args);
+var _appIsShortcutsOverlayOpenAdapter = (...args) => _appFn('isShortcutsOverlayOpen')?.(...args);
+var _appHideShortcutsOverlayAdapter = (...args) => _appFn('hideShortcutsOverlay')?.(...args);
+var _appMaskSessionTokenAdapter = (...args) => (
+  typeof importedMaskSessionToken === 'function' ? importedMaskSessionToken(...args) : undefined
+);
+var _appSyncOptionsControlsAdapter = (...args) => _appFn('syncOptionsControls', importedSyncOptionsControls)?.(...args);
+var _appUpdateOptionsSessionTokenStatusAdapter = (...args) => _appFn('_updateOptionsSessionTokenStatus', importedUpdateOptionsSessionTokenStatus)?.(...args);
+var _appShowOptionsOverlayAdapter = (...args) => _appFn('showOptionsOverlay')?.(...args);
+var _appMarkInteractionSurfaceReadyAdapter = (...args) => _appFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.(...args);
+var _appLoadOptionsPanelsAdapter = (...args) => _appFn('loadOptionsPanels')?.(...args);
+var _appRefreshOptionsSecretsAdapter = (...args) => {
+  const fn = (
+    typeof importedHasSecretsHandler === 'function'
+    && importedHasSecretsHandler('refreshOptionsSecrets')
+    && typeof importedRefreshOptionsSecrets === 'function'
+  ) ? importedRefreshOptionsSecrets : _appFn('refreshOptionsSecrets');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var _appRefreshOptionsTeamsAdapter = (...args) => _appFn('refreshOptionsTeams')?.(...args);
+var _appRefreshNotificationChannelsAdapter = (...args) => _appFn('refreshNotificationChannels')?.(...args);
+var _appLogClientErrorAdapter = (...args) => {
+  const bridge = (
+    typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('logClientError')
+    && typeof importedLogClientError === 'function'
+      ? importedLogClientError
+      : null
+  );
+  return _appFn('logClientError', bridge)?.(...args);
+};
+var _appBlurVisibleComposerMobileAdapter = (...args) => _appFn('blurVisibleComposerInputIfMobile', importedBlurVisibleComposerInputIfMobile)?.(...args);
+var _appRefocusComposerAdapter = (...args) => _appFn('refocusComposerAfterAction', importedRefocusComposerAfterAction)?.(...args);
+var _appRenderThemeSelectionOptionsAdapter = (...args) => _appFn('renderThemeSelectionOptions', importedRenderThemeSelectionOptions)?.(...args);
+var _appSyncThemeSelectionControlsAdapter = (...args) => _appFn('syncThemeSelectionControls', importedSyncThemeSelectionControls)?.(...args);
+var _appShowThemeOverlayAdapter = (...args) => _appFn('showThemeOverlay')?.(...args);
+var _appFocusElementAdapter = (...args) => _appFn('focusElement', importedFocusElement)?.(...args);
+var _appCloseTabAdapter = (...args) => _appFn('closeTab', importedCloseTab)?.(...args);
+var _appPermalinkTabAdapter = (...args) => _appFn('permalinkTab', importedPermalinkTab)?.(...args);
+var _appCopyTabAdapter = (...args) => _appFn('copyTab', importedCopyTab)?.(...args);
+var _appCancelWelcomeAdapter = (...args) => _appFn('cancelWelcome')?.(...args);
+var _appGetActiveTabAdapter = (...args) => _appFn('getActiveTab', importedGetActiveTab)?.(...args);
+var _appClearTabAdapter = (...args) => _appFn('clearTab', importedClearTab)?.(...args);
+var _appIsStatusMonitorOpenAdapter = (...args) => _appFn('isStatusMonitorOpen')?.(...args);
+var _appGetShareRedactionDefaultPreferenceAdapter = (...args) => _appFn('getShareRedactionDefaultPreference', importedGetShareRedactionDefaultPreference)?.(...args);
+var _appShowConfirmAdapter = (...args) => _appFn('showConfirm', importedShowConfirm)?.(...args);
+var _appApplyShareRedactionDefaultPreferenceAdapter = (...args) => _appFn('applyShareRedactionDefaultPreference', importedApplyShareRedactionDefaultPreference)?.(...args);
+var _appGetVisibleComposerInputAdapter = (...args) => _appFn('getVisibleComposerInput', importedGetVisibleComposerInput)?.(...args);
+var _appHideAutocompleteAdapter = (...args) => _appFn('acHide')?.(...args);
+var _appSyncComposerSelectionAdapter = (...args) => _appFn('syncComposerSelection', importedSyncComposerSelection)?.(...args);
+var _appSetComposerStateAdapter = (...args) => _appFn('setComposerState', importedSetComposerState)?.(...args);
+var _appSetComposerValueAdapter = (...args) => _appFn('setComposerValue', importedSetComposerValue)?.(...args);
+var _appSyncOutputPrefixesAdapter = (...args) => _appFn('syncOutputPrefixes', importedSyncOutputPrefixes)?.(...args);
+var _appRefreshFollowingOutputsAfterLayoutAdapter = (...args) => _appFn('_refreshFollowingOutputsAfterLayout', importedRefreshFollowingOutputsAfterLayout)?.(...args);
+var _appCreateDefaultTabLabelAdapter = (...args) => _appFn('createDefaultTabLabel', importedCreateDefaultTabLabel)?.(...args);
+var _appCreateTabAdapter = (...args) => _appFn('createTab', importedCreateTab)?.(...args);
+var _appActivateTabAdapter = (...args) => _appFn('activateTab', importedActivateTab)?.(...args);
+var _appClearFaqHashAdapter = (...args) => _appFn('clearFaqHash', importedClearFaqHash)?.(...args);
+var _appHideCommandCatalogOverlayAdapter = (...args) => _appFn('hideCommandCatalogOverlay', importedHideCommandCatalogOverlay)?.(...args);
+var _appHideCommandRegistryOverlayAdapter = (...args) => _appFn('hideCommandRegistryOverlay', importedHideCommandRegistryOverlay)?.(...args);
+var _appIsCommandCatalogOverlayOpenAdapter = (...args) => _appFn('isCommandCatalogOverlayOpen', importedIsCommandCatalogOverlayOpen)?.(...args);
+var _appIsCommandRegistryOverlayOpenAdapter = (...args) => _appFn('isCommandRegistryOverlayOpen', importedIsCommandRegistryOverlayOpen)?.(...args);
+
 const _defaultDesktopPromptLabel = (() => {
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return '';
   return String(shellPromptWrap.querySelector('.prompt-prefix')?.textContent || '');
@@ -10,14 +289,18 @@ const _defaultMobilePromptLabel = (() => {
   return String(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent || '$');
 })();
 let _composerPromptMode = null;
-let _tourOpenedRecordedThisSession = false;
+
+function _setAutocompleteSuppressInputOnce(value) {
+  if (typeof _appSetAutocompleteStateAdapter === 'function') _appSetAutocompleteStateAdapter({ suppressInputOnce: !!value });
+  if (_appAutocompleteState()) _appAutocompleteState().suppressInputOnce = !!value;
+}
 
 function hidePromptUsernameSavedIndicator() {
   return undefined;
 }
 
 function showPromptUsernameSavedIndicator() {
-  if (typeof showToast === 'function') showToast('Prompt name saved', 'success');
+  if (typeof _appShowToastAdapter === 'function') _appShowToastAdapter('Prompt name saved', 'success');
 }
 
 function _compactMobileComposerPath(path = '/') {
@@ -31,20 +314,18 @@ function _compactMobileComposerPath(path = '/') {
 
 function _mobileComposerPlaceholder() {
   if (
-    typeof APP_CONFIG !== 'undefined'
-    && APP_CONFIG
-    && APP_CONFIG.workspace_enabled === true
-    && typeof currentPromptWorkspacePath === 'function'
+    _appConfig().workspace_enabled === true
+    && typeof _appCurrentPromptWorkspacePathAdapter === 'function'
   ) {
-    return `${_compactMobileComposerPath(currentPromptWorkspacePath())} · type command`;
+    return `${_compactMobileComposerPath(_appCurrentPromptWorkspacePathAdapter())} · type command`;
   }
   return 'Type a command';
 }
 
 function _applyComposerPromptMode() {
   const isConfirm = _composerPromptMode === 'confirm';
-  const defaultPromptLabel = typeof buildPromptLabel === 'function'
-    ? buildPromptLabel()
+  const defaultPromptLabel = typeof _appBuildPromptLabelAdapter === 'function'
+    ? _appBuildPromptLabelAdapter()
     : (_defaultDesktopPromptLabel || 'anon@darklab.sh:~ $');
   const desktopLabel = isConfirm ? '[yes/no]:' : defaultPromptLabel;
   const mobileLabel = isConfirm ? '[yes/no]:' : '';
@@ -69,7 +350,7 @@ function _applyComposerPromptMode() {
 
 function setComposerPromptMode(mode = null) {
   _composerPromptMode = mode === 'confirm' ? 'confirm' : null;
-  _applyComposerPromptMode();
+  if (typeof window !== 'undefined')  _applyComposerPromptMode();
 }
 
 function syncShellPrompt() {
@@ -79,14 +360,14 @@ function syncShellPrompt() {
   if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
   if (
     typeof document !== 'undefined'
-    && typeof syncFocusedComposerState === 'function'
-    && typeof getComposerInputs === 'function'
+    && typeof _appSyncFocusedComposerStateAdapter === 'function'
+    && typeof _appGetComposerInputsAdapter === 'function'
   ) {
-    const { desktop, mobile } = getComposerInputs();
+    const { desktop, mobile } = _appGetComposerInputsAdapter();
     const active = document.activeElement;
-    if (active && (active === desktop || active === mobile)) syncFocusedComposerState(active);
+    if (active && (active === desktop || active === mobile)) _appSyncFocusedComposerStateAdapter(active);
   }
-  const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+  const composer = typeof _appGetComposerStateAdapter === 'function' ? _appGetComposerStateAdapter() : null;
   const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
   const value = composer && typeof composer.value === 'string'
     ? composer.value
@@ -139,109 +420,150 @@ function syncShellPrompt() {
 }
 
 function focusCommandInputFromGesture({ preventScroll = true } = {}) {
-  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
-    const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
-    if (mobileInput && typeof focusComposerInput === 'function') {
-      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      focusComposerInput(mobileInput, { preventScroll });
+  if (typeof _appUseMobileViewportAdapter === 'function' && _appUseMobileViewportAdapter()) {
+    const mobileInput = typeof _appGetComposerInputsAdapter === 'function' ? _appGetComposerInputsAdapter().mobile : null;
+    if (mobileInput && typeof _appFocusComposerInputAdapter === 'function') {
+      if (typeof _appSetMobileKeyboardOpenStateAdapter === 'function') _appSetMobileKeyboardOpenStateAdapter(true);
+      _appFocusComposerInputAdapter(mobileInput, { preventScroll });
     }
     return;
   }
-  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
+  if (typeof _appFocusAnyComposerInputAdapter === 'function' && _appFocusAnyComposerInputAdapter({ preventScroll: true })) return;
 }
 
 function _closeMajorOverlays() {
-  if (typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen()) {
-    hideCommandCatalogOverlay();
+  if (typeof _appIsCommandCatalogOverlayOpenAdapter === 'function' && _appIsCommandCatalogOverlayOpenAdapter()) {
+    if (typeof _appHideCommandCatalogOverlayAdapter === 'function') _appHideCommandCatalogOverlayAdapter();
   }
-  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
-    hideCommandRegistryOverlay();
+  if (typeof _appIsCommandRegistryOverlayOpenAdapter === 'function' && _appIsCommandRegistryOverlayOpenAdapter()) {
+    if (typeof _appHideCommandRegistryOverlayAdapter === 'function') _appHideCommandRegistryOverlayAdapter();
   }
-  if (globalThis.isProjectWorkspaceOpen && globalThis.isProjectWorkspaceOpen()) {
-    globalThis.closeProjectWorkspace({ refocus: false });
+  if (typeof importedIsProjectWorkspaceOpen === 'function' && importedIsProjectWorkspaceOpen()) {
+    importedCloseProjectWorkspace({ refocus: false });
   }
-  if (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen()) {
-    if (typeof closeAtlas === 'function') closeAtlas({ refocus: false });
+  if (typeof _appIsAtlasOverlayOpenAdapter === 'function' && _appIsAtlasOverlayOpenAdapter()) {
+    if (typeof _appCloseAtlasAdapter === 'function') _appCloseAtlasAdapter({ refocus: false });
   }
-  if (typeof isFindingsBoardOpen === 'function' && isFindingsBoardOpen()) {
-    if (typeof closeFindingsBoard === 'function') closeFindingsBoard({ refocus: false });
+  if (typeof _appIsFindingsBoardOpenAdapter === 'function' && _appIsFindingsBoardOpenAdapter()) {
+    if (typeof _appCloseFindingsBoardAdapter === 'function') _appCloseFindingsBoardAdapter({ refocus: false });
   }
-  if (typeof isTeamScopeSelectorOpen === 'function' && isTeamScopeSelectorOpen()) {
-    if (typeof closeTeamScopeSelector === 'function') closeTeamScopeSelector({ refocus: false });
+  if (typeof _appIsTeamScopeSelectorOpenAdapter === 'function' && _appIsTeamScopeSelectorOpenAdapter()) {
+    if (typeof _appCloseTeamScopeSelectorAdapter === 'function') _appCloseTeamScopeSelectorAdapter({ refocus: false });
   }
-  if (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen()) {
-    if (typeof closeHistoryRunOverlay === 'function') closeHistoryRunOverlay();
+  if (typeof _appIsHistoryRunOverlayOpenAdapter === 'function' && _appIsHistoryRunOverlayOpenAdapter()) {
+    if (typeof _appCloseHistoryRunOverlayAdapter === 'function') _appCloseHistoryRunOverlayAdapter();
   }
-  if (isHistoryPanelOpen()) hideHistoryPanel();
-  if (isWorkflowsOverlayOpen()) {
-    if (typeof closeWorkflows === 'function') closeWorkflows();
-    else hideWorkflowsOverlay();
+  if (_appIsHistoryPanelOpenAdapter()) _appHideHistoryPanelAdapter();
+  if (_appIsWorkflowsOverlayOpenAdapter()) {
+    if (typeof _appCloseWorkflowsAdapter === 'function') _appCloseWorkflowsAdapter();
+    else _appHideWorkflowsOverlayAdapter();
   }
-  if (typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen()) {
-    if (typeof closeSchedulesModal === 'function') closeSchedulesModal({ refocus: false });
+  if (typeof _appIsSchedulesOverlayOpenAdapter === 'function' && _appIsSchedulesOverlayOpenAdapter()) {
+    if (typeof _appCloseSchedulesModalAdapter === 'function') _appCloseSchedulesModalAdapter({ refocus: false });
   }
-  if (typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen()) {
-    if (typeof closeWatchersModal === 'function') closeWatchersModal({ refocus: false });
+  if (typeof _appIsWatchersOverlayOpenAdapter === 'function' && _appIsWatchersOverlayOpenAdapter()) {
+    if (typeof _appCloseWatchersModalAdapter === 'function') _appCloseWatchersModalAdapter({ refocus: false });
   }
-  if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
-    if (typeof closeWorkspace === 'function') closeWorkspace();
-    else hideWorkspaceOverlay();
+  if (typeof _appIsWorkspaceOverlayOpenAdapter === 'function' && _appIsWorkspaceOverlayOpenAdapter()) {
+    if (typeof _appCloseWorkspaceAdapter === 'function') _appCloseWorkspaceAdapter();
+    else _appHideWorkspaceOverlayAdapter();
   }
-  if (isFaqOverlayOpen()) {
-    if (typeof clearFaqHash === 'function') clearFaqHash();
-    hideFaqOverlay();
+  if (_appIsFaqOverlayOpenAdapter()) {
+    if (typeof _appClearFaqHashAdapter === 'function') _appClearFaqHashAdapter();
+    _appHideFaqOverlayAdapter();
   }
-  if (isThemeOverlayOpen()) hideThemeOverlay();
-  if (isOptionsOverlayOpen()) hideOptionsOverlay();
-  if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
-    if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
+  if (_appIsThemeOverlayOpenAdapter()) _appHideThemeOverlayAdapter();
+  if (_appIsOptionsOverlayOpenAdapter()) _appHideOptionsOverlayAdapter();
+  if (typeof _appIsShortcutsOverlayOpenAdapter === 'function' && _appIsShortcutsOverlayOpenAdapter()) {
+    if (typeof _appHideShortcutsOverlayAdapter === 'function') _appHideShortcutsOverlayAdapter();
   }
 }
 
-globalThis._closeMajorOverlays = _closeMajorOverlays;
+
+function _syncOptionsSessionTokenStatusFallback() {
+  const el = document.getElementById('options-session-token-status');
+  const token = localStorage.getItem('session_token');
+  const hasToken = Boolean(token);
+  if (el) {
+    el.textContent = hasToken && typeof _appMaskSessionTokenAdapter === 'function'
+      ? _appMaskSessionTokenAdapter(token)
+      : (hasToken ? token : 'No session token — anonymous session');
+    el.classList.toggle('is-active', hasToken);
+  }
+  const generateBtn = document.getElementById('options-session-token-generate-btn');
+  const rotateBtn = document.getElementById('options-session-token-rotate-btn');
+  const clearBtn = document.getElementById('options-session-token-clear-btn');
+  const copyBtn = document.getElementById('options-session-token-copy-btn');
+  if (generateBtn) generateBtn.style.display = hasToken ? 'none' : '';
+  if (rotateBtn) rotateBtn.style.display = hasToken ? '' : 'none';
+  if (clearBtn) clearBtn.style.display = hasToken ? '' : 'none';
+  if (copyBtn) copyBtn.style.display = hasToken ? '' : 'none';
+}
 
 function openOptions() {
   // Opening one major overlay should implicitly close the others so mobile and
   // desktop never stack multiple drawers/modals on top of each other.
   _closeMajorOverlays();
-  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-  syncOptionsControls();
-  if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
-  if (typeof refreshOptionsSecrets === 'function') {
-    refreshOptionsSecrets().catch((err) => logClientError('failed to load options secrets', err));
+  if (typeof _appBlurVisibleComposerMobileAdapter === 'function') _appBlurVisibleComposerMobileAdapter();
+  _appSyncOptionsControlsAdapter();
+  if (typeof _appUpdateOptionsSessionTokenStatusAdapter === 'function') _appUpdateOptionsSessionTokenStatusAdapter();
+  else _syncOptionsSessionTokenStatusFallback();
+  _appShowOptionsOverlayAdapter();
+  if (typeof _appMarkInteractionSurfaceReadyAdapter === 'function') {
+    _appMarkInteractionSurfaceReadyAdapter('options', optionsOverlay, document.getElementById('options-modal'));
   }
-  showOptionsOverlay();
-  if (typeof markInteractionSurfaceReady === 'function') {
-    markInteractionSurfaceReady('options', optionsOverlay, document.getElementById('options-modal'));
-  }
+  const panelsReady = typeof _appLoadOptionsPanelsAdapter === 'function'
+    ? Promise.resolve(_appLoadOptionsPanelsAdapter())
+    : Promise.resolve();
+  panelsReady.then((panels) => {
+    const updateSessionTokenStatus = panels?._updateOptionsSessionTokenStatus
+      || (typeof _appUpdateOptionsSessionTokenStatusAdapter === 'function' ? _appUpdateOptionsSessionTokenStatusAdapter : null);
+    const refreshSecrets = panels?.refreshOptionsSecrets
+      || (typeof _appRefreshOptionsSecretsAdapter === 'function' ? _appRefreshOptionsSecretsAdapter : null);
+    const refreshTeams = panels?.refreshOptionsTeams
+      || (typeof _appRefreshOptionsTeamsAdapter === 'function' ? _appRefreshOptionsTeamsAdapter : null);
+    const refreshNotifications = panels?.refreshNotificationChannels
+      || (typeof _appRefreshNotificationChannelsAdapter === 'function' ? _appRefreshNotificationChannelsAdapter : null);
+    if (typeof updateSessionTokenStatus === 'function') updateSessionTokenStatus();
+    if (typeof refreshSecrets === 'function') {
+      refreshSecrets().catch((err) => _appLogClientErrorAdapter('failed to load options secrets', err));
+    }
+    const activeTab = document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab;
+    if (activeTab === 'teams' && typeof refreshTeams === 'function') {
+      refreshTeams().catch((err) => _appLogClientErrorAdapter('failed to load options teams', err));
+    }
+    if (activeTab === 'notifications' && typeof refreshNotifications === 'function') {
+      refreshNotifications().catch((err) => _appLogClientErrorAdapter('failed to load notification channels', err));
+    }
+  }).catch((err) => _appLogClientErrorAdapter('failed to load options panels', err));
 }
 
 function closeOptions() {
-  hideOptionsOverlay();
-  refocusComposerAfterAction({ defer: true });
+  _appHideOptionsOverlayAdapter();
+  _appRefocusComposerAdapter({ defer: true });
 }
 
 function openThemeSelector() {
   _closeMajorOverlays();
-  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-  renderThemeSelectionOptions();
-  syncThemeSelectionControls();
-  showThemeOverlay();
+  if (typeof _appBlurVisibleComposerMobileAdapter === 'function') _appBlurVisibleComposerMobileAdapter();
+  _appRenderThemeSelectionOptionsAdapter();
+  _appSyncThemeSelectionControlsAdapter();
+  _appShowThemeOverlayAdapter();
   setTimeout(() => {
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
-    if (!focusElement(target, { preventScroll: true })) {
-      focusElement(themeSelect, { preventScroll: true });
+    if (!_appFocusElementAdapter(target, { preventScroll: true })) {
+      _appFocusElementAdapter(themeSelect, { preventScroll: true });
     }
-    if (typeof markInteractionSurfaceReady === 'function') {
-      markInteractionSurfaceReady('theme', themeOverlay, document.getElementById('theme-modal'));
+    if (typeof _appMarkInteractionSurfaceReadyAdapter === 'function') {
+      _appMarkInteractionSurfaceReadyAdapter('theme', themeOverlay, document.getElementById('theme-modal'));
     }
   }, 0);
 }
 
 function closeThemeSelector() {
-  hideThemeOverlay();
-  refocusComposerAfterAction({ defer: true });
+  _appHideThemeOverlayAdapter();
+  _appRefocusComposerAdapter({ defer: true });
 }
 
 function isEditableTarget(target) {
@@ -253,46 +575,67 @@ function shouldIgnoreGlobalShortcutTarget(target) {
 }
 
 function createNextTabLabel() {
-  if (typeof createDefaultTabLabel === 'function') return createDefaultTabLabel();
-  return 'shell ' + (tabs.length + 1);
+  if (typeof _appCreateDefaultTabLabelAdapter === 'function') {
+    const label = _appCreateDefaultTabLabelAdapter();
+    if (typeof label === 'string' && label) return label;
+  }
+  return 'shell ' + (_appTabs().length + 1);
 }
 
 function createShortcutTab() {
-  createTab(createNextTabLabel());
+  _appCreateTabAdapter(createNextTabLabel());
 }
 
 function activateRelativeTab(offset) {
+  const tabs = _appTabs();
+  const activeTabId = _appActiveTabId();
   if (!Array.isArray(tabs) || !tabs.length) return;
   const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
   const baseIndex = currentIndex >= 0 ? currentIndex : 0;
   const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;
-  activateTab(tabs[nextIndex].id);
+  _appActivateTabAdapter(tabs[nextIndex].id);
 }
 
 function closeActiveShortcutTab() {
-  if (!activeTabId || typeof closeTab !== 'function') return;
-  closeTab(activeTabId);
+  const closeActiveTab = typeof importedCloseTab === 'function'
+    ? (typeof _appCloseTabAdapter === 'function' ? _appCloseTabAdapter : importedCloseTab)
+    : (typeof _appCloseTabAdapter === 'function' ? _appCloseTabAdapter : null);
+  const activeTabId = _appActiveTabId();
+  if (!activeTabId || !closeActiveTab) return;
+  closeActiveTab(activeTabId);
 }
 
 function permalinkActiveShortcutTab() {
-  if (!activeTabId || typeof permalinkTab !== 'function') return;
-  permalinkTab(activeTabId);
+  const permalinkActiveTab = typeof importedPermalinkTab === 'function'
+    ? (typeof _appPermalinkTabAdapter === 'function' ? _appPermalinkTabAdapter : importedPermalinkTab)
+    : (typeof _appPermalinkTabAdapter === 'function' ? _appPermalinkTabAdapter : null);
+  const activeTabId = _appActiveTabId();
+  if (!activeTabId || !permalinkActiveTab) return;
+  permalinkActiveTab(activeTabId);
 }
 
 function copyActiveShortcutTab() {
-  if (!activeTabId || typeof copyTab !== 'function') return;
-  copyTab(activeTabId);
+  const copyActiveTab = typeof importedCopyTab === 'function'
+    ? (typeof _appCopyTabAdapter === 'function' ? _appCopyTabAdapter : importedCopyTab)
+    : (typeof _appCopyTabAdapter === 'function' ? _appCopyTabAdapter : null);
+  const activeTabId = _appActiveTabId();
+  if (!activeTabId || !copyActiveTab) return;
+  copyActiveTab(activeTabId);
 }
 
 function clearActiveShortcutTab() {
+  const activeTabId = _appActiveTabId();
   if (!activeTabId) return;
-  cancelWelcome(activeTabId);
-  const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
-  clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
+  const cancel = typeof importedCancelWelcome === 'function'
+    ? (typeof _appCancelWelcomeAdapter === 'function' ? _appCancelWelcomeAdapter : importedCancelWelcome)
+    : (typeof _appCancelWelcomeAdapter === 'function' ? _appCancelWelcomeAdapter : null);
+  if (typeof cancel === 'function') cancel(activeTabId);
+  const activeTab = typeof _appGetActiveTabAdapter === 'function' ? _appGetActiveTabAdapter() : null;
+  _appClearTabAdapter(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
 }
 
 function isStatusMonitorShortcutOpen() {
-  if (typeof isStatusMonitorOpen === 'function') return isStatusMonitorOpen();
+  if (typeof _appIsStatusMonitorOpenAdapter === 'function') return _appIsStatusMonitorOpenAdapter();
   const monitor = document.getElementById('status-monitor');
   return !!(monitor && !monitor.classList.contains('u-hidden'));
 }
@@ -317,16 +660,16 @@ function _buildShareRedactionRememberField() {
 }
 
 async function confirmPermalinkRedactionChoice() {
-  if (APP_CONFIG && APP_CONFIG.share_redaction_enabled === false) return 'raw';
-  const preferred = getShareRedactionDefaultPreference();
+  if (_appConfig().share_redaction_enabled === false) return 'raw';
+  const preferred = _appGetShareRedactionDefaultPreferenceAdapter();
   if (preferred === 'raw' || preferred === 'redacted') return preferred;
 
-  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  if (typeof _appBlurVisibleComposerMobileAdapter === 'function') _appBlurVisibleComposerMobileAdapter();
 
   const { field, checkbox } = _buildShareRedactionRememberField();
   let choice = null;
   try {
-    choice = await showConfirm({
+    choice = await _appShowConfirmAdapter({
       body: {
         text: 'Create permalink with redaction enabled?',
         note: 'Redaction can mask common sensitive values such as IP addresses, host names, email addresses, bearer tokens, and any operator-defined share redaction rules before the snapshot is saved.',
@@ -341,22 +684,22 @@ async function confirmPermalinkRedactionChoice() {
   } catch (_) { choice = null; }
 
   if ((choice === 'raw' || choice === 'redacted') && checkbox.checked) {
-    applyShareRedactionDefaultPreference(choice);
+    _appApplyShareRedactionDefaultPreferenceAdapter(choice);
   }
   if (choice === 'raw' || choice === 'redacted') return choice;
   return null;
 }
 
 function performMobileEditAction(action) {
-  const input = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
+  const input = (typeof _appGetVisibleComposerInputAdapter === 'function' && _appGetVisibleComposerInputAdapter()) || null;
   if (!input) return;
-  if (document.activeElement !== input && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  if (document.activeElement !== input && typeof _appFocusAnyComposerInputAdapter === 'function') _appFocusAnyComposerInputAdapter({ preventScroll: true });
 
   // Mobile edit helpers are meant to adjust the existing command in place.
   // Suppress autocomplete for this synthetic input update so the dropdown
   // does not pop back up and cover the helper row itself.
-  if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
-  if (typeof acHide === 'function') acHide();
+  _setAutocompleteSuppressInputOnce(true);
+  if (typeof _appHideAutocompleteAdapter === 'function') _appHideAutocompleteAdapter();
 
   const composer = getComposerStateSnapshot();
   const inputValue = input.value || '';
@@ -419,7 +762,7 @@ function performMobileEditAction(action) {
     || action === 'home'
     || action === 'end'
   ) {
-    if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
+    if (typeof _appSyncComposerSelectionAdapter === 'function') _appSyncComposerSelectionAdapter(nextStart, nextEnd, { input });
     else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
     setTimeout(() => {
       if (!input || typeof input.setSelectionRange !== 'function') return;
@@ -427,8 +770,8 @@ function performMobileEditAction(action) {
       if ((input.value || '') !== value) return;
       if (input.selectionStart === nextStart && input.selectionEnd === nextEnd) return;
       input.setSelectionRange(nextStart, nextEnd);
-      if (typeof setComposerState === 'function') {
-        setComposerState({
+      if (typeof _appSetComposerStateAdapter === 'function') {
+        _appSetComposerStateAdapter({
           value,
           selectionStart: nextStart,
           selectionEnd: nextEnd,
@@ -438,10 +781,10 @@ function performMobileEditAction(action) {
       syncShellPrompt();
     }, 0);
   } else {
-    setComposerValue(nextValue, nextStart, nextEnd);
+    _appSetComposerValueAdapter(nextValue, nextStart, nextEnd);
   }
 
-  if (typeof focusAnyComposerInput === 'function') setTimeout(() => focusAnyComposerInput({ preventScroll: true }), 0);
+  if (typeof _appFocusAnyComposerInputAdapter === 'function') setTimeout(() => _appFocusAnyComposerInputAdapter({ preventScroll: true }), 0);
 }
 
 // ── Timestamps ──
@@ -453,16 +796,55 @@ const _tsLabels = { off: 'timestamps', elapsed: 'timestamps: elapsed', clock: 't
 function _setTsMode(mode) {
   // Timestamp mode is expressed via body classes so both active transcript
   // rendering and exported/permalink views can share the same styling model.
-  tsMode = mode;
-  document.body.classList.remove('ts-elapsed', 'ts-clock');
-  if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
-  if (mode === 'clock')   document.body.classList.add('ts-clock');
+  const handledByOutput = typeof importedSetOutputTimestampMode === 'function' && importedSetOutputTimestampMode(mode);
+  if (!handledByOutput) {
+    document.body.classList.remove('ts-elapsed', 'ts-clock');
+    if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
+    if (mode === 'clock')   document.body.classList.add('ts-clock');
+    if (typeof _appSyncOutputPrefixesAdapter === 'function') _appSyncOutputPrefixesAdapter();
+    try { _appRefreshFollowingOutputsAfterLayoutAdapter(); } catch (_) {}
+  }
   const label = _tsLabels[mode];
   if (tsBtn) {
     tsBtn.textContent = label;
     tsBtn.classList.toggle('active', mode !== 'off');
     tsBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
   }
-  if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
-  try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
 }
+
+if (typeof window !== 'undefined') {
+  if (typeof importedSetComposerPromptHandlers === 'function') {
+    importedSetComposerPromptHandlers({
+      getComposerPromptMode: () => _composerPromptMode,
+      hidePromptUsernameSavedIndicator,
+      setComposerPromptMode,
+      showPromptUsernameSavedIndicator,
+      syncShellPrompt,
+    });
+  }
+  if (typeof importedSetShareRedactionHandlers === 'function') {
+    importedSetShareRedactionHandlers({ confirmPermalinkRedactionChoice });
+  }
+  if (typeof importedSetOverlayActionHandlers === 'function') {
+    importedSetOverlayActionHandlers({ closeMajorOverlays: _closeMajorOverlays });
+  }
+}
+
+export {
+  _tsModes,
+  activateRelativeTab,
+  clearActiveShortcutTab,
+  closeOptions,
+  closeActiveShortcutTab,
+  closeThemeSelector,
+  copyActiveShortcutTab,
+  createShortcutTab,
+  hidePromptUsernameSavedIndicator,
+  isEditableTarget,
+  isStatusMonitorShortcutOpen,
+  openOptions,
+  openThemeSelector,
+  permalinkActiveShortcutTab,
+  performMobileEditAction,
+  shouldIgnoreGlobalShortcutTarget,
+};

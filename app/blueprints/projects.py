@@ -5,13 +5,20 @@ Project workspace routes.
 import logging
 import os
 import time
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest
 
 from config import CFG
 from extensions import limiter
+from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.queries import AuditEventFilters, AuditScopeError, list_scoped_events
+from services.audit.recorder import record_event
+from services.audit.retention import audit_retention_days
 from services.download_tickets import (
     DOWNLOAD_TICKET_MAX_AGE_SECONDS,
     DownloadTicketError,
@@ -69,6 +76,11 @@ from services.projects.metadata import (
     upsert_finding_triage_details,
     upsert_entity_note,
 )
+from services.projects.monitoring import (
+    get_project_monitoring,
+    get_project_monitoring_summary,
+    update_project_monitoring_fire_ack,
+)
 from services.projects.package_archive import (
     build_evidence_package_archive,
     create_evidence_package,
@@ -102,6 +114,22 @@ from services.projects.targets import (
 )
 from services.projects.artifacts import artifact_owner_context
 from services.projects.utils import cfg_int
+from services.reports.jobs import (
+    discard_report_export_job,
+    get_report_export_job,
+    report_export_archive_for_job,
+    start_report_export_job,
+)
+from services.reports.composition import compose_report_context
+from services.reports.models import normalize_report_draft
+from services.reports.rendering import render_report_html_from_context, render_report_markdown_from_context
+from services.reports.storage import (
+    ReportDraftConflict,
+    default_report_record,
+    get_report_draft,
+    save_report_draft,
+)
+from services.reports.templates import list_report_templates
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
 from services.workspace.files import (
@@ -122,6 +150,7 @@ from services.teams.request_scope import (
     requested_team_id,
     scope_error_payload,
 )
+from services.watchers.serialization import watcher_fire_payload
 
 log = logging.getLogger("shell")
 
@@ -189,6 +218,52 @@ def _project_not_found(message="project not found"):
     return _project_json_error(message, 404)
 
 
+def _report_preview_log_extra(session_id, team_id, project_id, draft, exc):
+    draft = draft if isinstance(draft, dict) else {}
+    raw_selection = draft.get("selection")
+    raw_selection_modes = draft.get("selection_modes")
+    raw_selection_filters = draft.get("selection_filters")
+    raw_selection_exclude_ids = draft.get("selection_exclude_ids")
+    selection = raw_selection if isinstance(raw_selection, dict) else {}
+    selection_modes = raw_selection_modes if isinstance(raw_selection_modes, dict) else {}
+    selection_filters = raw_selection_filters if isinstance(raw_selection_filters, dict) else {}
+    selection_exclude_ids = raw_selection_exclude_ids if isinstance(raw_selection_exclude_ids, dict) else {}
+    filter_fields = {}
+    filter_active = {}
+    for key, value in selection_filters.items():
+        if not isinstance(value, dict):
+            continue
+        fields = sorted(str(field) for field in value.keys())
+        filter_fields[str(key)] = fields
+        filter_active[str(key)] = any(
+            bool(item) if isinstance(item, bool) else bool(str(item or "").strip())
+            for item in value.values()
+        )
+    return {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "selection_modes": {
+            str(key): str(value or "")
+            for key, value in selection_modes.items()
+        },
+        "selected_counts": {
+            str(key): len(value)
+            for key, value in selection.items()
+            if isinstance(value, list)
+        },
+        "excluded_counts": {
+            str(key): len(value)
+            for key, value in selection_exclude_ids.items()
+            if isinstance(value, list)
+        },
+        "filter_fields": filter_fields,
+        "filter_active": filter_active,
+        "exception_type": type(exc).__name__,
+    }
+
+
 def _project_json_or_404(value, *, key=None, error="project not found"):
     if value is None:
         return _project_not_found(error)
@@ -232,6 +307,53 @@ def _project_download_ticket_owner(payload, *, project_id, expected_ids):
     if not session_id:
         raise DownloadTicketError("download ticket session is invalid")
     return session_id, str(payload.get("team_id") or "").strip()
+
+
+def _project_actor_member_id(session_id, team_id):
+    if not team_id:
+        return ""
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError:
+        return ""
+    return str((scope.member or {}).get("id") or "")
+
+
+def _project_audit_fields(session_id, team_id):
+    scope = None
+    if team_id:
+        try:
+            scope = current_request_scope(session_id, request)
+        except RequestScopeError:
+            scope = None
+    return route_audit_fields(session_id, request, scope)
+
+
+def _report_request_payload():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise BadRequest("report payload must be a JSON object")
+    return data
+
+
+def _report_draft_from_payload(data, fallback):
+    draft = data.get("draft") if isinstance(data.get("draft"), dict) else fallback
+    return normalize_report_draft(draft or {})
+
+
+def _report_draft_requires_mutate(draft):
+    export = draft.get("export") if isinstance(draft, dict) else {}
+    return (
+        str((export or {}).get("redaction_mode") or "redacted") == "raw"
+        or bool((export or {}).get("include_private_notes"))
+    )
+
+
+def _report_mutation_permission_error(session_id, draft):
+    if not _report_draft_requires_mutate(draft) or not requested_team_id(request):
+        return None
+    _, _, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    return error_response
 
 
 def _set_download_content_length(response, size):
@@ -514,6 +636,181 @@ def projects_summary(project_id):
     return _project_json_or_404(summary)
 
 
+@projects_bp.route("/projects/<project_id>/activity")
+def projects_activity(project_id):
+    session_id, _team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    try:
+        owner_scope = current_request_scope(session_id, request)
+        payload = list_scoped_events(
+            session_id,
+            owner_scope,
+            AuditEventFilters(
+                event_type=str(request.args.get("event_type") or "").strip(),
+                actor=str(request.args.get("actor") or "").strip(),
+                target_type=str(request.args.get("target_type") or "").strip(),
+                target_id=str(request.args.get("target_id") or "").strip(),
+                date_from=str(request.args.get("date_from") or "").strip(),
+                date_to=str(request.args.get("date_to") or "").strip(),
+            ),
+            project_id=project_id,
+            limit=_parse_int(request.args.get("limit"), 25, minimum=1, maximum=100),
+            offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        )
+        payload["retention_days"] = audit_retention_days(CFG)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return jsonify(payload), status
+    except AuditScopeError as exc:
+        return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+    return jsonify(payload)
+
+
+@projects_bp.route("/projects/<project_id>/monitoring")
+def projects_monitoring(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    fire_limit = _parse_int(request.args.get("fire_limit"), 8, minimum=1, maximum=25)
+    payload = get_project_monitoring(
+        session_id,
+        project_id,
+        team_id=team_id,
+        fire_limit=fire_limit,
+    )
+    if payload is None:
+        log.debug("PROJECT_MONITORING_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "route": "project_monitoring",
+        })
+        return _project_not_found()
+    counts = payload.get("counts") or {}
+    summary = payload.get("summary") or {}
+    log.info("PROJECT_MONITORING_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "fire_limit": fire_limit,
+        "monitor_count": len(payload.get("monitors") or []),
+        "timeline_count": len(payload.get("timeline") or []),
+        "changed_count": int(counts.get("changed") or 0),
+        "failed_count": int(counts.get("failed") or 0),
+        "highest_severity": str(summary.get("highest_severity") or ""),
+    })
+    return _project_json_or_404(payload)
+
+
+@projects_bp.route("/projects/<project_id>/monitoring/summary")
+def projects_monitoring_summary(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    fire_limit = _parse_int(request.args.get("fire_limit"), 8, minimum=1, maximum=25)
+    payload = get_project_monitoring_summary(
+        session_id,
+        project_id,
+        team_id=team_id,
+        fire_limit=fire_limit,
+    )
+    if payload is None:
+        log.debug("PROJECT_MONITORING_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "route": "project_monitoring_summary",
+        })
+        return _project_not_found()
+    summary = payload.get("summary") or {}
+    log.info("PROJECT_MONITORING_SUMMARY_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "fire_limit": fire_limit,
+        "changed_count": int(summary.get("changed_monitor_count") or 0),
+        "failed_count": int(summary.get("failed_monitor_count") or 0),
+        "highest_severity": str(summary.get("highest_severity") or ""),
+        "top_change_count": len(summary.get("top_changes") or []),
+    })
+    return _project_json_or_404(payload)
+
+
+@projects_bp.route("/projects/<project_id>/monitoring/fires/<fire_id>", methods=["PATCH"])
+@limiter.limit(_project_write_limit)
+def projects_monitoring_fire_update(project_id, fire_id):
+    session_id, team_id, error_response = _project_owner(Capability.TRIAGE_FINDINGS)
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise BadRequest("monitoring fire payload must be a JSON object")
+    ack_note = str(data.get("ack_note") or "").strip()
+    try:
+        updated = update_project_monitoring_fire_ack(
+            session_id,
+            project_id,
+            fire_id,
+            ack_state=str(data.get("ack_state") or "").strip(),
+            ack_note=ack_note,
+            ack_by=session_id,
+            team_id=team_id,
+        )
+    except ValueError as exc:
+        log.warning("PROJECT_MONITORING_FIRE_ACK_REJECTED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "fire_id": fire_id,
+            "status": 400,
+            "reason": str(exc),
+        })
+        return jsonify({"error": "invalid_monitoring_fire_update", "message": str(exc)}), 400
+    if updated is None:
+        log.debug("PROJECT_MONITORING_FIRE_ACK_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "fire_id": fire_id,
+        })
+        return _project_not_found()
+    watcher, fire = updated
+    with db_connect() as conn:
+        record_event(
+            AuditEventType.WATCHER_ACK,
+            target_id=watcher.id,
+            project_id=project_id,
+            details={
+                "watcher_id": watcher.id,
+                "project_id": project_id,
+                "fire_id": fire.id,
+                "ack_state": fire.ack_state,
+                "note_chars": len(ack_note),
+            },
+            conn=conn,
+            **_project_audit_fields(session_id, team_id),
+        )
+        conn.commit()
+    log.info("PROJECT_MONITORING_FIRE_ACK_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "watcher_id": watcher.id,
+        "fire_id": fire.id,
+        "ack_state": fire.ack_state,
+        "note_chars": len(ack_note),
+    })
+    return jsonify({"ok": True, "fire": watcher_fire_payload(fire)})
+
+
 @projects_bp.route("/projects/package-presets")
 def projects_package_presets():
     session_id, _team_id, error_response = _project_owner()
@@ -561,9 +858,19 @@ def projects_delete(project_id):
     session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
     if error_response:
         return error_response
-    deleted = delete_project(session_id, project_id, team_id=team_id)
-    if not deleted:
-        return _project_not_found()
+    with db_connect() as conn:
+        deleted = delete_project(session_id, project_id, team_id=team_id, conn=conn)
+        if not deleted:
+            return _project_not_found()
+        record_event(
+            AuditEventType.PROJECT_DELETE,
+            target_id=project_id,
+            project_id=project_id,
+            details={"project_id": project_id, "deleted_count": 1},
+            conn=conn,
+            **_project_audit_fields(session_id, team_id),
+        )
+        conn.commit()
     log.info("PROJECT_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -591,6 +898,7 @@ def projects_runs_list(project_id):
         project_id,
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        query=request.args.get("q") or "",
         team_id=team_id,
     )
     return _project_json_or_404(runs)
@@ -604,6 +912,7 @@ def projects_entities_list(project_id):
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "q": request.args.get("q") or "",
     }
     entities = list_project_entities(
         session_id,
@@ -831,6 +1140,19 @@ def projects_links_create(project_id):
         if result is None:
             return _project_not_found()
         counts = result.get("counts", {})
+        record_event(
+            AuditEventType.PROJECT_LINK,
+            target_id=project_id,
+            project_id=project_id,
+            details={
+                "project_id": project_id,
+                "entity_type": data.get("entity_type") or "",
+                "entity_ids": [str(entity_id or "") for entity_id in data.get("entity_ids") or []],
+                "created_count": int(counts.get("added") or 0),
+                "source": data.get("source") or "manual",
+            },
+            **_project_audit_fields(session_id, team_id),
+        )
         log.info("PROJECT_LINKS_BULK_ADDED", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
@@ -856,6 +1178,19 @@ def projects_links_create(project_id):
         return _project_error_response(exc)
     if link is None:
         return _project_not_found()
+    record_event(
+        AuditEventType.PROJECT_LINK,
+        target_id=project_id,
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "entity_type": link["entity_type"],
+            "entity_id": link.get("entity_id") or "",
+            "created_count": 1,
+            "source": link["source"],
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("PROJECT_LINK_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -928,6 +1263,19 @@ def projects_links_delete(project_id):
         if result is None:
             return _project_not_found()
         counts = result.get("counts", {})
+        record_event(
+            AuditEventType.PROJECT_UNLINK,
+            target_id=project_id,
+            project_id=project_id,
+            details={
+                "project_id": project_id,
+                "entity_type": data.get("entity_type") or "",
+                "entity_ids": [str(entity_id or "") for entity_id in data.get("entity_ids") or []],
+                "deleted_count": int(counts.get("removed") or 0),
+                "source": "project_links_bulk",
+            },
+            **_project_audit_fields(session_id, team_id),
+        )
         log.info("PROJECT_LINKS_BULK_REMOVED", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
@@ -945,6 +1293,19 @@ def projects_links_delete(project_id):
         return _project_not_found()
     if not deleted:
         return _project_not_found("project link not found")
+    record_event(
+        AuditEventType.PROJECT_UNLINK,
+        target_id=project_id,
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "entity_type": data.get("entity_type") or "",
+            "entity_id": data.get("entity_id") or "",
+            "deleted_count": 1,
+            "source": "project_links",
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     body: dict[str, object] = {"ok": True}
     unlinked_entity_count = 0
     if (
@@ -1056,6 +1417,270 @@ def projects_targets_delete(project_id, target_id):
     return jsonify({"ok": True})
 
 
+@projects_bp.route("/projects/<project_id>/report")
+def projects_report_get(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    project = get_project(session_id, project_id, team_id=team_id)
+    if project is None:
+        return _project_not_found()
+    report = get_report_draft(session_id, project_id, team_id=team_id)
+    return jsonify({
+        "report": report or default_report_record(session_id, project_id, team_id=team_id),
+        "templates": list_report_templates(CFG),
+    })
+
+
+@projects_bp.route("/projects/<project_id>/report", methods=["POST"])
+@limiter.limit(_project_write_limit)
+def projects_report_save(project_id):
+    session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
+    if error_response:
+        return error_response
+    if get_project(session_id, project_id, team_id=team_id) is None:
+        return _project_not_found()
+    try:
+        data = _report_request_payload()
+        draft = normalize_report_draft(data.get("draft") if isinstance(data.get("draft"), dict) else data)
+        report = save_report_draft(
+            session_id,
+            project_id,
+            draft,
+            team_id=team_id,
+            expected_updated=str(data.get("expected_updated") or data.get("updated") or "").strip(),
+        )
+    except ReportDraftConflict as exc:
+        return _project_json_error(str(exc), 409)
+    except (BadRequest, ProjectWorkspaceError) as exc:
+        return _project_error_response(exc)
+    log.info("PROJECT_REPORT_DRAFT_SAVED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "report_id": report.get("id") or "",
+    })
+    return jsonify({"ok": True, "report": report})
+
+
+@projects_bp.route("/projects/<project_id>/report/preview", methods=["POST"])
+@limiter.limit(_project_write_limit)
+def projects_report_preview(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    project = get_project(session_id, project_id, team_id=team_id)
+    if project is None:
+        return _project_not_found()
+    try:
+        data = _report_request_payload()
+        saved = get_report_draft(session_id, project_id, team_id=team_id)
+        fallback = (saved or default_report_record(session_id, project_id, team_id=team_id))["draft"]
+        draft = _report_draft_from_payload(data, fallback)
+    except (BadRequest, ProjectWorkspaceError) as exc:
+        return _project_error_response(exc)
+    permission_error = _report_mutation_permission_error(session_id, draft)
+    if permission_error:
+        return permission_error
+    generated_at = datetime.now(timezone.utc)
+    try:
+        context = compose_report_context(
+            draft,
+            project=project,
+            session_id=session_id,
+            project_id=project_id,
+            team_id=team_id,
+            cfg=CFG,
+        )
+        markdown = render_report_markdown_from_context(context, cfg=CFG, generated_at=generated_at)
+        html = render_report_html_from_context(context, cfg=CFG, generated_at=generated_at)
+    except ProjectWorkspaceError as exc:
+        log.warning(
+            "PROJECT_REPORT_PREVIEW_FAILED",
+            exc_info=True,
+            extra=_report_preview_log_extra(session_id, team_id, project_id, draft, exc),
+        )
+        return _project_error_response(exc)
+    except Exception as exc:
+        log.error(
+            "PROJECT_REPORT_PREVIEW_FAILED",
+            exc_info=True,
+            extra=_report_preview_log_extra(session_id, team_id, project_id, draft, exc),
+        )
+        return _project_json_error("report preview failed", 500)
+    return jsonify({
+        "ok": True,
+        "preview": {
+            "markdown": markdown,
+            "html": html,
+        },
+    })
+
+
+@projects_bp.route("/projects/<project_id>/report/export", methods=["POST"])
+@limiter.limit(_project_write_limit)
+def projects_report_export_job_create(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    project = get_project(session_id, project_id, team_id=team_id)
+    if project is None:
+        return _project_not_found()
+    try:
+        data = _report_request_payload()
+        saved = get_report_draft(session_id, project_id, team_id=team_id)
+        fallback = (saved or default_report_record(session_id, project_id, team_id=team_id))["draft"]
+        draft = _report_draft_from_payload(data, fallback)
+    except (BadRequest, ProjectWorkspaceError) as exc:
+        return _project_error_response(exc)
+    permission_error = _report_mutation_permission_error(session_id, draft)
+    if permission_error:
+        return permission_error
+    actor_member_id = _project_actor_member_id(session_id, team_id)
+    job = start_report_export_job(
+        session_id,
+        project_id,
+        draft,
+        cfg=CFG,
+        team_id=team_id,
+        actor_member_id=actor_member_id,
+    )
+    job_id = str((job or {}).get("id") or "")
+    report_export = draft.get("export") if isinstance(draft, dict) else {}
+    record_event(
+        AuditEventType.REPORT_BUILD,
+        target_id=job_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "project_id": project_id,
+            "job_id": job_id,
+            "status": "queued",
+            "redaction_mode": str((report_export or {}).get("redaction_mode") or ""),
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
+    log.info("PROJECT_REPORT_EXPORT_JOB_STARTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "actor_member_id": actor_member_id,
+        "project_id": project_id,
+        "job_id": job_id,
+    })
+    return jsonify({"ok": True, "job": job}), 202
+
+
+@projects_bp.route("/projects/<project_id>/report/export-jobs/<job_id>")
+def projects_report_export_job_get(project_id, job_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    job = get_report_export_job(session_id, project_id, job_id, team_id=team_id)
+    return _project_json_or_404(job, key="job", error="report export job not found")
+
+
+@projects_bp.route("/projects/<project_id>/report/export-jobs/<job_id>/download")
+@limiter.limit(_evidence_package_download_limit)
+def projects_report_export_job_file(project_id, job_id):
+    ticket = str(request.args.get("ticket") or "").strip()
+    if ticket:
+        try:
+            payload = read_download_ticket(ticket, expected_kind="project_report_job")
+            session_id, team_id = _project_download_ticket_owner(
+                payload,
+                project_id=project_id,
+                expected_ids={"job_id": job_id},
+            )
+        except DownloadTicketError as exc:
+            return _project_ticket_error_response(exc)
+    else:
+        session_id, team_id, error_response = _project_owner()
+        if error_response:
+            return error_response
+    archive = report_export_archive_for_job(session_id, project_id, job_id, team_id=team_id)
+    if archive is None:
+        return _project_not_found("report export job not found")
+    status = archive.get("status")
+    if status != "complete":
+        status_code = 409 if status not in {"failed"} else int(archive.get("error_status") or 400)
+        return jsonify({"error": archive.get("error") or "report archive is not ready", "status": status}), status_code
+    log.info("PROJECT_REPORT_EXPORT_JOB_DOWNLOADED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "job_id": job_id,
+        "archive_bytes": int(archive.get("archive_bytes") or 0),
+    })
+    try:
+        response = send_file(
+            archive["path"],
+            mimetype=archive["mimetype"],
+            as_attachment=True,
+            download_name=archive["filename"],
+        )
+    except Exception as exc:
+        log.warning("PROJECT_ROUTE_FAILED", exc_info=True, extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "job_id": job_id,
+            "route": "projects_report_export_job_file",
+            "error": str(exc),
+        })
+        discard_report_export_job(job_id)
+        raise
+
+    @response.call_on_close
+    def _cleanup_report_export_job():
+        discard_report_export_job(job_id)
+
+    return _set_download_content_length(response, archive.get("archive_bytes"))
+
+
+@projects_bp.route("/projects/<project_id>/report/export-jobs/<job_id>/download-ticket", methods=["POST"])
+@limiter.limit(_evidence_package_download_limit)
+def projects_report_export_job_ticket(project_id, job_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    archive = report_export_archive_for_job(session_id, project_id, job_id, team_id=team_id)
+    if archive is None:
+        return _project_not_found("report export job not found")
+    status = archive.get("status")
+    if status != "complete":
+        status_code = 409 if status not in {"failed"} else int(archive.get("error_status") or 400)
+        return jsonify({"error": archive.get("error") or "report archive is not ready", "status": status}), status_code
+    ticket = create_download_ticket({
+        "kind": "project_report_job",
+        "session_id": session_id,
+        "team_id": team_id,
+        "project_id": project_id,
+        "job_id": job_id,
+    })
+    record_event(
+        AuditEventType.DOWNLOAD_TICKET_ISSUE,
+        target_id=job_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "kind": "project_report_job",
+            "project_id": project_id,
+            "job_id": job_id,
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
+    return jsonify({
+        "ok": True,
+        "url": f"/projects/{project_id}/report/export-jobs/{job_id}/download?ticket={ticket}",
+        "expires_in_seconds": DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+    })
+
+
 @projects_bp.route("/projects/<project_id>/packages")
 def projects_packages_list(project_id):
     session_id, team_id, error_response = _project_owner()
@@ -1077,6 +1702,19 @@ def projects_packages_create(project_id):
         return _project_error_response(exc)
     if package is None:
         return _project_not_found()
+    record_event(
+        AuditEventType.PACKAGE_BUILD,
+        target_id=package["id"],
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "package_id": package["id"],
+            "status": "created",
+            "redaction_mode": package["redaction_mode"],
+            "include_artifacts": bool(package["include_artifacts"]),
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("EVIDENCE_PACKAGE_CREATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1209,6 +1847,20 @@ def projects_packages_download_job_create(project_id, package_id):
         actor_member_id=actor_member_id,
     )
     job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
+    record_event(
+        AuditEventType.PACKAGE_BUILD,
+        target_id=package_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "project_id": project_id,
+            "package_id": package_id,
+            "job_id": job_id,
+            "status": "queued",
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("EVIDENCE_PACKAGE_BUILD_JOB_STARTED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1316,6 +1968,20 @@ def projects_packages_download_job_ticket(project_id, package_id, job_id):
         "package_id": package_id,
         "job_id": job_id,
     })
+    record_event(
+        AuditEventType.DOWNLOAD_TICKET_ISSUE,
+        target_id=job_id,
+        project_id=project_id,
+        job_id=job_id,
+        correlation_id=job_id,
+        details={
+            "kind": "project_package_job",
+            "project_id": project_id,
+            "package_id": package_id,
+            "job_id": job_id,
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     return jsonify({
         "ok": True,
         "url": (
@@ -1332,9 +1998,23 @@ def projects_packages_delete(project_id, package_id):
     session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
     if error_response:
         return error_response
-    deleted = delete_evidence_package(session_id, project_id, package_id, team_id=team_id)
-    if not deleted:
-        return _project_not_found("package not found")
+    with db_connect() as conn:
+        deleted = delete_evidence_package(session_id, project_id, package_id, team_id=team_id, conn=conn)
+        if not deleted:
+            return _project_not_found("package not found")
+        record_event(
+            AuditEventType.PACKAGE_DELETE,
+            target_id=package_id,
+            project_id=project_id,
+            details={
+                "project_id": project_id,
+                "package_id": package_id,
+                "deleted_count": 1,
+            },
+            conn=conn,
+            **_project_audit_fields(session_id, team_id),
+        )
+        conn.commit()
     log.info("EVIDENCE_PACKAGE_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1352,6 +2032,7 @@ def projects_artifacts_list(project_id):
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "q": request.args.get("q") or "",
     }
     artifacts = list_project_artifacts(
         session_id,
@@ -1457,6 +2138,18 @@ def projects_artifacts_download_ticket(project_id, artifact_id):
         "project_id": project_id,
         "artifact_id": artifact_id,
     })
+    record_event(
+        AuditEventType.DOWNLOAD_TICKET_ISSUE,
+        target_id=artifact_id,
+        project_id=project_id,
+        details={
+            "kind": "project_artifact",
+            "project_id": project_id,
+            "file_id": artifact_id,
+            "file_path": str(artifact.get("workspace_path") or ""),
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     return jsonify({
         "ok": True,
         "url": f"/projects/{project_id}/artifacts/{artifact_id}/download?ticket={ticket}",
@@ -1473,6 +2166,7 @@ def projects_findings_list(project_id):
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "q": request.args.get("q"),
         "review_state": request.args.getlist("review_state"),
         "scope": request.args.getlist("scope"),
         "severity": request.args.getlist("severity"),
@@ -1528,6 +2222,23 @@ def projects_findings_bulk_review_update(project_id):
         return _project_error_response(exc)
     if result is None:
         return _project_not_found()
+    updated_ids = [
+        str(item.get("finding_id") or "")
+        for item in result.get("results", [])
+        if item.get("status") == "updated"
+    ]
+    record_event(
+        AuditEventType.FINDING_REVIEW_CHANGE,
+        target_id=updated_ids[0] if len(updated_ids) == 1 else "",
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "finding_ids": updated_ids,
+            "review_state": result["review_state"],
+            "updated_count": result["counts"]["updated"],
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("PROJECT_FINDINGS_BULK_REVIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1575,6 +2286,17 @@ def findings_review_update(finding_id):
         return _project_error_response(exc)
     if finding is None:
         return _project_not_found("finding not found")
+    record_event(
+        AuditEventType.FINDING_REVIEW_CHANGE,
+        target_id=finding_id,
+        project_id=str(finding.get("project_id") or ""),
+        details={
+            "finding_id": finding_id,
+            "review_state": finding["review_state"],
+            "updated_count": 1,
+        },
+        **_project_audit_fields(session_id, team_id),
+    )
     log.info("FINDING_REVIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),

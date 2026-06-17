@@ -440,6 +440,7 @@ def list_project_targets(
     limit=50,
     offset=0,
     team_id="",
+    include_provenance=False,
 ):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     with db_connect() as conn:
@@ -491,7 +492,7 @@ def list_project_targets(
         provider_list_expr = dialect.string_agg_distinct("eis.provider")
         value_order_expr = dialect.case_insensitive_order("e.canonical_value")
         rows = conn.execute(
-            "SELECT e.id, l.project_id, e.type, e.canonical_value, "  # nosec
+            "SELECT e.id, l.id AS link_id, l.project_id, e.type, e.canonical_value, "  # nosec
             "COALESCE(("
             "SELECT erl.run_id FROM entity_run_links erl "
             "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "
@@ -530,10 +531,11 @@ def list_project_targets(
             + (extra_where + " " if extra_where else "")
             + "ORDER BY e.type ASC, "
             + value_order_expr
+            + ", e.id ASC"
             + " LIMIT ? OFFSET ?",
             (*params, *filter_params, safe_limit, safe_offset),
         ).fetchall()
-        targets = [_row_to_target(row) for row in rows]
+        targets = [_row_to_target(row, include_provenance=include_provenance) for row in rows]
         _attach_target_metadata(conn, session_id, targets, team_id=team_id)
     return _project_target_page_payload(targets, total, safe_limit, safe_offset, counts_by_type)
 

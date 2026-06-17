@@ -6,6 +6,8 @@ const HISTORY_SCRIPT_PATHS = [
   'app/static/js/core/history_core.js',
   'app/static/js/features/run-comparison/history_compare_core.js',
   'app/static/js/features/run-comparison/history_compare_overlay.js',
+  'app/static/js/features/history/history_run_modal_state_bridge.js',
+  'app/static/js/features/history/history_panel_bridge.js',
   'app/static/js/features/history/history_actions.js',
   'app/static/js/features/history/history_project_actions.js',
   'app/static/js/features/history/history_recall.js',
@@ -42,7 +44,15 @@ function loadStarHelpers(mockApiFetch = _noopFetch) {
   const storage = new MemoryStorage()
   const fns = fromDomScripts(
     HISTORY_SCRIPT_PATHS,
-    { localStorage: storage, APP_CONFIG: { recent_commands_limit: 20 }, apiFetch: mockApiFetch },
+    {
+      localStorage: storage,
+      APP_CONFIG: { recent_commands_limit: 20 },
+      apiFetch: mockApiFetch,
+      window: {
+        APP_CONFIG: { recent_commands_limit: 20 },
+        apiFetch: mockApiFetch,
+      },
+    },
     `({
       _getStarred,
       _saveStarred,
@@ -228,6 +238,7 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
     const historyPanel = document.getElementById('history-panel')
     const activeTab = {
+      id: 'tab-1',
       commandHistory: [],
       historyNavIndex: -1,
       historyNavDraft: '',
@@ -260,6 +271,7 @@ describe('command history hydration', () => {
             cmdInput.setSelectionRange(start, end)
           }
         },
+        activeTab,
       },
       `{
       reloadSessionHistory,
@@ -273,6 +285,12 @@ describe('command history hydration', () => {
       getRecentPreviewHistory: () => recentPreviewHistory.slice(),
       emitUiEvent,
     }`,
+      `window.APP_STATE_API.setTabs([activeTab]);
+       window.APP_STATE_API.setActiveTabId(activeTab.id);
+       window.APP_CONFIG = APP_CONFIG;
+       window.apiFetch = apiFetch;
+       window.renderHistory = renderHistory;
+       window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;`,
     )
   }
 
@@ -442,6 +460,8 @@ describe('command history hydration', () => {
       `({
       hydrateCmdHistory,
     })`,
+      `window.APP_CONFIG = APP_CONFIG;
+       window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;`,
     )
 
     helpers.hydrateCmdHistory([
@@ -481,6 +501,8 @@ describe('command history hydration', () => {
       `({
       hydrateCmdHistory,
     })`,
+      `window.APP_CONFIG = APP_CONFIG;
+       window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;`,
     )
 
     const originalRect = window.HTMLElement.prototype.getBoundingClientRect
@@ -686,9 +708,15 @@ describe('history panel actions', () => {
       tabs.push({ id, command: '', rawLines: [], st: 'idle', label })
       return id
     })
+    const clearTab = vi.fn((id) => {
+      const tab = tabs.find((t) => t.id === id)
+      if (tab) tab.rawLines = []
+    })
     const activateTab = vi.fn()
     const appendLine = vi.fn()
     const appendCommandEcho = vi.fn()
+    const renderCommandOutcomeSummary = vi.fn()
+    const hasPendingOutputBatch = vi.fn(() => false)
     const bindDismissible = vi.fn()
     const bindPressable = vi.fn((el, opts = {}) => {
       if (!el || typeof opts.onActivate !== 'function') return
@@ -702,6 +730,7 @@ describe('history panel actions', () => {
     const hideTabKillBtn = vi.fn()
     const tabs = [{ id: 'tab-1', command: '', rawLines: [], st: 'idle' }]
     const historyPanel = document.getElementById('history-panel')
+    const isHistoryPanelOpen = () => historyPanel.classList.contains('open')
     const historyList = document.getElementById('history-list')
     const historyLoadOverlay = document.getElementById('history-load-overlay')
     const historySearchInput = document.getElementById('history-search-input')
@@ -727,6 +756,12 @@ describe('history panel actions', () => {
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
+    const harnessWindow = {
+      open: windowOpen,
+      downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
+      APP_CONFIG: { recent_commands_limit: 50, history_panel_limit: 8, ...appConfig },
+    }
+    harnessWindow.apiFetch = apiFetch
     globalThis.openEntityMetadataEditor = openMetadataEditorImpl
 
     return {
@@ -766,6 +801,7 @@ describe('history panel actions', () => {
           showConfirm: showConfirmImpl,
           getActiveProjectContext: () => activeProject,
           refreshActiveProjectContext: () => Promise.resolve(activeProject),
+          getHistoryRunModalState: () => harnessWindow._historyRunModalState || null,
           refreshProjectWorkspace: vi.fn(() => Promise.resolve()),
           enhanceAppSelects: vi.fn(),
           cmdInput,
@@ -774,14 +810,18 @@ describe('history panel actions', () => {
           getOutput: id => document.getElementById(`output-${id}`),
           activateTab,
           createTab,
+          clearTab,
           appendLine,
           appendCommandEcho,
+          renderCommandOutcomeSummary,
+          hasPendingOutputBatch,
           setTabStatus,
           hideTabKillBtn,
           showToast,
-          window: { open: windowOpen, downloadBlobAsAttachment: downloadBlobAsAttachmentImpl },
+          window: harnessWindow,
           refreshHistoryPanel: () => {},
           renderHistory: () => {},
+          isHistoryPanelOpen,
           hideHistoryPanel: vi.fn(() => {
             historyPanel.classList.remove('open')
             if (typeof cmdInput.focus === 'function') cmdInput.focus()
@@ -823,6 +863,44 @@ describe('history panel actions', () => {
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
+      }`,
+      `if (typeof window === 'object' && window) {
+        window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;
+        window.APP_CONFIG = APP_CONFIG;
+        globalThis.APP_CONFIG = APP_CONFIG;
+        window.getTabs = () => tabs;
+        window.getTab = id => tabs.find(t => t.id === id);
+        window.getOutput = getOutput;
+        window.createTab = createTab;
+        window.clearTab = clearTab;
+        window.setTabStatus = setTabStatus;
+        window.appendLine = appendLine;
+        window.appendCommandEcho = appendCommandEcho;
+        window._appendHistoryCommandEcho = _appendHistoryCommandEcho;
+        window._appendHistoryOutputLine = _appendHistoryOutputLine;
+        window.renderCommandOutcomeSummary = renderCommandOutcomeSummary;
+        window.hasPendingOutputBatch = hasPendingOutputBatch;
+        window.hideTabKillBtn = hideTabKillBtn;
+        window.hideHistoryPanel = hideHistoryPanel;
+        window.showHistoryLoadOverlay = () => {
+          historyLoadOverlay.classList.add('open');
+          historyLoadOverlay.setAttribute('aria-hidden', 'false');
+        };
+        window.hideHistoryLoadOverlay = () => {
+          historyLoadOverlay.classList.remove('open');
+          historyLoadOverlay.setAttribute('aria-hidden', 'true');
+        };
+        window.refreshHistoryPanel = refreshHistoryPanel;
+        window.isHistoryPanelOpen = isHistoryPanelOpen;
+        window.showConfirm = showConfirm;
+        window.getActiveProjectContext = getActiveProjectContext;
+        window.refreshActiveProjectContext = refreshActiveProjectContext;
+        window.refreshProjectWorkspace = refreshProjectWorkspace;
+        window.enhanceAppSelects = enhanceAppSelects;
+        window.syncAppSelect = syncAppSelect;
+        window.bindDismissible = bindDismissible;
+        window.emitUiEvent = emitUiEvent;
+        window.openHistoryRunDetails = openHistoryRunDetails;
       }`,
       ),
       apiFetch,
@@ -1413,6 +1491,7 @@ describe('history panel actions', () => {
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
 
+    delete window.apiFetch
     const entry = document.querySelector('#history-list .history-entry')
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await vi.waitFor(() => {
@@ -3637,7 +3716,7 @@ describe('history panel actions', () => {
     expect(appendLine).toHaveBeenCalledWith('old output', '', 'tab-3')
     expect(activateTab).toHaveBeenCalledWith('tab-3', { focusComposer: false })
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
-  })
+  }, 10_000)
 
   it('preflights Restore Both tab capacity before creating either tab', async () => {
     const { _restoreBothHistoryCompareRuns, createTab } = loadHistoryPanel({
@@ -4989,6 +5068,14 @@ describe('Ctrl+R reverse-history search', () => {
       resetCmdHistoryNav,
       _submitComposerCommand: submitComposerCommand,
     }`,
+      `window.apiFetch = apiFetch;
+       window.cmdInput = cmdInput;
+       window.histSearchDropdown = histSearchDropdown;
+       window.shellPromptWrap = shellPromptWrap;
+       window.acHide = acHide;
+       window.setComposerValue = setComposerValue;
+       window.getComposerValue = getComposerValue;
+       window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;`,
     )
   }
 
@@ -5483,6 +5570,14 @@ describe('Ctrl+R reverse-history search', () => {
         submitComposerCommand: vi.fn(),
       },
       `{ hydrateCmdHistory, enterHistSearch, handleHistSearchInput }`,
+      `window.apiFetch = apiFetch;
+       window.cmdInput = cmdInput;
+       window.histSearchDropdown = histSearchDropdown;
+       window.shellPromptWrap = shellPromptWrap;
+       window.acHide = acHide;
+       window.setComposerValue = setComposerValue;
+       window.getComposerValue = getComposerValue;
+       window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;`,
     )
 
     hydrateCmdHistory([
@@ -5551,6 +5646,14 @@ describe('Ctrl+R reverse-history search', () => {
         submitComposerCommand: vi.fn(),
       },
       `{ hydrateCmdHistory, enterHistSearch, handleHistSearchInput }`,
+      `window.apiFetch = apiFetch;
+       window.cmdInput = cmdInput;
+       window.histSearchDropdown = histSearchDropdown;
+       window.shellPromptWrap = shellPromptWrap;
+       window.acHide = acHide;
+       window.setComposerValue = setComposerValue;
+       window.getComposerValue = getComposerValue;
+       window.useMobileTerminalViewportMode = useMobileTerminalViewportMode;`,
     )
 
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])

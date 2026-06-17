@@ -1,5 +1,48 @@
+import { bindMobileSheet as importedBindMobileSheet } from '../ui/mobile_sheet.js';
+import { closeMajorOverlays as importedCloseMajorOverlays } from '../ui/overlay_actions_bridge.js';
+import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from './workspace/workspace_autocomplete_cache.js';
+import { bindDismissible as importedBindDismissible } from '../ui/ui_dismissible.js';
+import {
+  blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncModalOverlayState as importedSyncModalOverlayState,
+} from '../ui/ui_helpers.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from '../ui/ui_outside_click.js';
+import { loadRecentValues as importedLoadRecentValues } from './autocomplete/suggestions.js';
+import { reloadSessionHistory as importedReloadSessionHistory } from './history/history_actions.js';
+import { refreshActiveProjectContext as importedRefreshActiveProjectContext } from './projects/project_context_bridge.js';
+import { invalidateOptionsSecrets as importedInvalidateOptionsSecrets } from './preferences/secrets_bridge.js';
+import {
+  apiFetch as importedApiFetch,
+  getSessionId as importedGetSessionId,
+  logClientError as importedLogClientError,
+  refreshStatusMonitor as importedRefreshStatusMonitor,
+} from '../runtime_bridge.js';
+
+let DarklabTeamScope = null;
+
 (function initTeamScope(global) {
   if (typeof document === 'undefined') return;
+  if (global?.DarklabTeamScope) {
+    DarklabTeamScope = global.DarklabTeamScope;
+    return;
+  }
+  const apiFetchImpl = (typeof importedApiFetch !== 'undefined' && importedApiFetch) || null;
+  const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
+  const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
+  const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
+  const logClientErrorImpl = (typeof importedLogClientError !== 'undefined' && importedLogClientError) || null;
+  const loadRecentValuesImpl = (typeof importedLoadRecentValues !== 'undefined' && importedLoadRecentValues) || null;
+  const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
+  const reloadSessionHistoryImpl = (typeof importedReloadSessionHistory !== 'undefined' && importedReloadSessionHistory) || null;
+  const refreshWorkspaceFileCacheImpl = (typeof importedRefreshWorkspaceFileCache !== 'undefined' && importedRefreshWorkspaceFileCache)
+    || null;
+  const refreshActiveProjectContextImpl = (typeof importedRefreshActiveProjectContext !== 'undefined' && importedRefreshActiveProjectContext) || null;
+  const refreshActiveRunsImpl = typeof global.refreshActiveRuns === 'function' ? global.refreshActiveRuns : null;
+  const refreshStatusMonitorImpl = (typeof importedRefreshStatusMonitor !== 'undefined' && importedRefreshStatusMonitor) || null;
+  const invalidateOptionsSecretsImpl = (typeof importedInvalidateOptionsSecrets !== 'undefined' && importedInvalidateOptionsSecrets) || null;
+  const syncModalOverlayState = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState) || null;
 
   const trigger = document.getElementById('team-scope-trigger');
   const hudLabel = document.getElementById('team-scope-label');
@@ -28,7 +71,7 @@
   let menuOutsideBound = false;
 
   function storageKey() {
-    const sessionId = typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'anonymous';
+    const sessionId = (typeof importedGetSessionId === 'function' && importedGetSessionId()) || 'anonymous';
     return `${STORAGE_PREFIX}${sessionId || 'anonymous'}`;
   }
 
@@ -44,8 +87,8 @@
   }
 
   function logTeamScopeClientEvent(event, fields = {}, level = 'debug') {
-    if (typeof apiFetch !== 'function') return;
-    apiFetch('/log', {
+    if (typeof apiFetchImpl !== 'function') return;
+    apiFetchImpl('/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -71,9 +114,9 @@
       team_id: activeTeamId || '',
       message: errorMessage(err),
     };
-    if (typeof logClientError === 'function') {
+    if (typeof logClientErrorImpl === 'function') {
       const wrapped = err instanceof Error ? err : new Error(details.message);
-      logClientError(`TEAM_SCOPE_REFRESH_FAILED ${JSON.stringify({
+      logClientErrorImpl(`TEAM_SCOPE_REFRESH_FAILED ${JSON.stringify({
         surface: details.surface,
         team_id: details.team_id,
       })}`, wrapped);
@@ -270,13 +313,13 @@
 
   function reloadScopedSurfaces() {
     [
-      ['history', () => (typeof reloadSessionHistory === 'function' ? reloadSessionHistory() : null)],
-      ['recent_values', () => (typeof loadRecentValues === 'function' ? loadRecentValues() : null)],
-      ['workspace_files', () => (typeof refreshWorkspaceFileCache === 'function' ? refreshWorkspaceFileCache() : null)],
-      ['active_project', () => (typeof window.refreshActiveProjectContext === 'function' ? window.refreshActiveProjectContext() : null)],
-      ['options_secrets', () => (typeof global.invalidateOptionsSecrets === 'function' ? global.invalidateOptionsSecrets() : null)],
-      ['active_runs', () => (typeof refreshActiveRuns === 'function' ? refreshActiveRuns() : null)],
-      ['status_monitor', () => (typeof window.refreshStatusMonitor === 'function' ? window.refreshStatusMonitor() : null)],
+      ['history', () => (typeof reloadSessionHistoryImpl === 'function' ? reloadSessionHistoryImpl() : null)],
+      ['recent_values', () => (typeof loadRecentValuesImpl === 'function' ? loadRecentValuesImpl() : null)],
+      ['workspace_files', () => (typeof refreshWorkspaceFileCacheImpl === 'function' ? refreshWorkspaceFileCacheImpl() : null)],
+      ['active_project', () => (typeof refreshActiveProjectContextImpl === 'function' ? refreshActiveProjectContextImpl() : null)],
+      ['options_secrets', () => (typeof invalidateOptionsSecretsImpl === 'function' ? invalidateOptionsSecretsImpl() : null)],
+      ['active_runs', () => (typeof refreshActiveRunsImpl === 'function' ? refreshActiveRunsImpl() : null)],
+      ['status_monitor', () => (typeof refreshStatusMonitorImpl === 'function' ? refreshStatusMonitorImpl() : null)],
     ].forEach(([surface, refresh]) => {
       try {
         const result = refresh();
@@ -395,8 +438,8 @@
     menuList = section;
     menuNote = note;
 
-    if (typeof global.bindOutsideClickClose === 'function') {
-      global.bindOutsideClickClose(menu, {
+    if (typeof bindOutsideClickClose === 'function') {
+      bindOutsideClickClose(menu, {
         capture: true,
         triggers: trigger,
         isOpen: isScopeMenuOpen,
@@ -430,9 +473,9 @@
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     showStatus('');
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
-    if (refocus && typeof global.refocusComposerAfterAction === 'function') {
-      global.refocusComposerAfterAction({ defer: true });
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
+    if (refocus && typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ defer: true });
     }
   }
 
@@ -440,14 +483,14 @@
     if (!overlay) return false;
     closeScopeMenu();
     bindModalDismissal();
-    if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
-    if (typeof global.blurVisibleComposerInputIfMobile === 'function') global.blurVisibleComposerInputIfMobile();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     setOverlayAccessible(true);
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
     showStatus('');
     render();
-    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
+    if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
     const active = listEl?.querySelector?.('.team-scope-option.is-active');
     (active || closeBtn || modal)?.focus?.({ preventScroll: true });
     return true;
@@ -460,7 +503,7 @@
       closeScopeMenu({ restoreFocus: true });
       return true;
     }
-    if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
     closeTeamScopeSelector({ refocus: false });
     ensureScopeMenu();
     render();
@@ -480,8 +523,8 @@
     if (!overlay || dismissibleBound) return;
     dismissibleBound = true;
     const closeButtons = Array.from(overlay.querySelectorAll('.team-scope-close'));
-    if (typeof global.bindDismissible === 'function') {
-      global.bindDismissible(overlay, {
+    if (typeof bindDismissible === 'function') {
+      bindDismissible(overlay, {
         level: 'modal',
         isOpen,
         onClose: closeTeamScopeSelector,
@@ -495,8 +538,8 @@
         if (event.target === overlay) closeTeamScopeSelector();
       });
     }
-    if (typeof global.bindMobileSheet === 'function' && modal) {
-      global.bindMobileSheet(modal, { onClose: closeTeamScopeSelector });
+    if (typeof bindMobileSheet === 'function' && modal) {
+      bindMobileSheet(modal, { onClose: closeTeamScopeSelector });
     } else {
       grabHandle?.addEventListener('click', () => closeTeamScopeSelector());
     }
@@ -538,13 +581,13 @@
       teamScopesResolved = false;
     }
     render();
-    if (typeof apiFetch !== 'function') {
+    if (typeof apiFetchImpl !== 'function') {
       teamScopesResolved = true;
       scopeLoadError = !!activeTeamId;
       render();
       return Promise.resolve([]);
     }
-    refreshing = apiFetch('/session/teams', { cache: 'no-store' })
+    refreshing = apiFetchImpl('/session/teams', { cache: 'no-store' })
       .then(async (resp) => {
         if (resp.status === 401) {
           teams = [];
@@ -590,22 +633,12 @@
     if (setActiveTeamId(option.dataset.teamScopeOption || '', { source: 'selector' })) closeTeamScopeSelector();
   });
 
-  global.getActiveTeamId = getActiveTeamId;
-  global.getActiveTeam = getActiveTeam;
-  global.getActiveTeamCapabilities = getActiveTeamCapabilities;
-  global.activeTeamScopeCan = activeTeamScopeCan;
-  global.teamScopeDeniedMessage = teamScopeDeniedMessage;
-  global.setActiveTeamId = setActiveTeamId;
-  global.refreshTeamScopes = refreshTeamScopes;
-  global.replaceTeamScopes = replaceTeamScopes;
-  global.isTeamScopeSelectorOpen = isOpen;
-  global.openTeamScopeSelector = () => {
+  const openTeamScopeSelector = () => {
     const opened = showTeamScopeSelector();
     refreshTeamScopes().catch(() => {});
     return opened;
   };
-  global.closeTeamScopeSelector = closeTeamScopeSelector;
-  global.DarklabTeamScope = {
+  DarklabTeamScope = {
     getActiveTeamId,
     getActiveTeam,
     getActiveTeamCapabilities,
@@ -615,9 +648,10 @@
     refreshTeamScopes,
     replaceTeamScopes,
     isOpen,
-    open: global.openTeamScopeSelector,
+    open: openTeamScopeSelector,
     close: closeTeamScopeSelector,
   };
+  global.DarklabTeamScope = DarklabTeamScope;
 
   window.addEventListener('storage', (event) => {
     if (event.key === storageKey()) {
@@ -633,3 +667,30 @@
     refreshTeamScopes().catch(() => {});
   });
 })(window);
+
+const getActiveTeamId = DarklabTeamScope ? DarklabTeamScope.getActiveTeamId : null;
+const getActiveTeam = DarklabTeamScope ? DarklabTeamScope.getActiveTeam : null;
+const getActiveTeamCapabilities = DarklabTeamScope ? DarklabTeamScope.getActiveTeamCapabilities : null;
+const activeTeamScopeCan = DarklabTeamScope ? DarklabTeamScope.activeTeamScopeCan : null;
+const teamScopeDeniedMessage = DarklabTeamScope ? DarklabTeamScope.deniedMessage : null;
+const setActiveTeamId = DarklabTeamScope ? DarklabTeamScope.setActiveTeamId : null;
+const refreshTeamScopes = DarklabTeamScope ? DarklabTeamScope.refreshTeamScopes : null;
+const replaceTeamScopes = DarklabTeamScope ? DarklabTeamScope.replaceTeamScopes : null;
+const isTeamScopeSelectorOpen = DarklabTeamScope ? DarklabTeamScope.isOpen : null;
+const openTeamScopeSelector = DarklabTeamScope ? DarklabTeamScope.open : null;
+const closeTeamScopeSelector = DarklabTeamScope ? DarklabTeamScope.close : null;
+
+export {
+  DarklabTeamScope,
+  activeTeamScopeCan,
+  closeTeamScopeSelector,
+  getActiveTeam,
+  getActiveTeamCapabilities,
+  getActiveTeamId,
+  isTeamScopeSelectorOpen,
+  openTeamScopeSelector,
+  refreshTeamScopes,
+  replaceTeamScopes,
+  setActiveTeamId,
+  teamScopeDeniedMessage,
+};

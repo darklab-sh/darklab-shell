@@ -5,16 +5,21 @@ function loadDecide() {
   return fromDomScripts(
     ['app/static/js/tabs.js'],
     { document, window },
-    '{ _decideTabbarChromeCollapsed, _TABBAR_CHROME_FIT_BUFFER }',
+    '{ _decideTabbarChromeCollapsed, _shouldShowTabbarChromeToggle, _TABBAR_CHROME_FIT_BUFFER }',
   )
 }
 
 describe('_decideTabbarChromeCollapsed', () => {
   let decide
+  let shouldShowToggle
   let BUFFER
 
   beforeEach(() => {
-    ;({ _decideTabbarChromeCollapsed: decide, _TABBAR_CHROME_FIT_BUFFER: BUFFER } = loadDecide())
+    ;({
+      _decideTabbarChromeCollapsed: decide,
+      _shouldShowTabbarChromeToggle: shouldShowToggle,
+      _TABBAR_CHROME_FIT_BUFFER: BUFFER,
+    } = loadDecide())
   })
 
   it('never collapses when the user has pinned the chrome open', () => {
@@ -50,5 +55,23 @@ describe('_decideTabbarChromeCollapsed', () => {
     const args = { pref: 'auto', tabsWidth: 700, chromeFullWidth: 400, barWidth: 1000 }
     expect(decide(args)).toBe(decide(args))
     expect(decide.length).toBe(1) // single options object, no separate state arg
+  })
+
+  it('hides the chrome toggle once pinned-open controls fit again', () => {
+    expect(shouldShowToggle({
+      pref: 'expanded',
+      collapsed: false,
+      autoWouldCollapse: true,
+    })).toBe(true)
+    expect(shouldShowToggle({
+      pref: 'expanded',
+      collapsed: false,
+      autoWouldCollapse: false,
+    })).toBe(false)
+    expect(shouldShowToggle({
+      pref: 'auto',
+      collapsed: true,
+      autoWouldCollapse: true,
+    })).toBe(true)
   })
 })

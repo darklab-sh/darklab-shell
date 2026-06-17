@@ -2,29 +2,29 @@ import { vi, describe, it, beforeEach, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
-// ui_dismissible.js composes on top of ui_pressable.js (both are IIFEs
-// that install helpers on window). Each test reloads both sources so
-// the dismissible registry starts empty and binds against a known
-// bindPressable global.
+// ui_dismissible.js composes on top of ui_pressable.js. Each test reloads both
+// sources so the dismissible registry starts empty and binds against a known
+// bindPressable helper.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const UI_PRESSABLE_SRC = readFileSync(
+const UI_PRESSABLE_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'),
   'utf8',
-)
-const UI_DISMISSIBLE_SRC = readFileSync(
+))
+const UI_DISMISSIBLE_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'),
   'utf8',
-)
+))
 
 function loadHelpers({ loadPressable = true } = {}) {
   delete window.bindPressable
   delete window.bindDismissible
   delete window.closeTopmostDismissible
-  if (loadPressable) new Function(UI_PRESSABLE_SRC)()
-  new Function(UI_DISMISSIBLE_SRC)()
-  return window
+  delete window.__darklabDismissibleRegistry
+  const src = `${loadPressable ? UI_PRESSABLE_SRC : ''}\n${UI_DISMISSIBLE_SRC}`
+  return new Function(`${src}\nreturn { ...DarklabDismissible, DarklabDismissible };`)()
 }
 
 function makeOverlay(tag = 'div') {
@@ -232,13 +232,13 @@ describe('bindDismissible', () => {
       // Reload dismissible so it captures the missing pressable
       delete window.bindDismissible
       delete window.closeTopmostDismissible
-      new Function(UI_DISMISSIBLE_SRC)()
+      const helpers = new Function(`${UI_DISMISSIBLE_SRC}\nreturn { ...DarklabDismissible, DarklabDismissible };`)()
 
       const el = makeOverlay()
       const btn = document.createElement('button')
       document.body.appendChild(btn)
       const onClose = vi.fn()
-      window.bindDismissible(el, {
+      helpers.bindDismissible(el, {
         level: 'panel',
         isOpen: () => true,
         onClose,

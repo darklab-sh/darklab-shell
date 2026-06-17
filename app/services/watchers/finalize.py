@@ -23,6 +23,11 @@ from services.watchers import service as watcher_service
 from services.watchers.models import (
     DIFF_KIND_NONE,
     WATCHER_FAILURE_DISABLE_THRESHOLD,
+    WATCHER_FIRE_KIND_BASELINE_CREATED,
+    WATCHER_FIRE_KIND_CHANGED,
+    WATCHER_FIRE_KIND_FAILED,
+    WATCHER_FIRE_KIND_NO_CHANGE,
+    WATCHER_FIRE_KIND_RECOVERED,
     WATCHER_STATE_CHANGED,
     WATCHER_STATE_ERROR,
     WATCHER_STATE_OK,
@@ -77,7 +82,12 @@ def finalize_watcher_run(run_id: str, *, conn=None) -> tuple[Watcher, WatcherFir
             return updated
 
         try:
-            diff = watcher_diff.diff_runs(baseline_run, current_run, options=watcher.options, conn=conn)
+            diff = watcher_diff.diff_runs(
+                baseline_run,
+                current_run,
+                options={**watcher.options, **watcher.policy},
+                conn=conn,
+            )
         except Exception as exc:
             log.warning(
                 "WATCHER_DIFF_FAILED",
@@ -106,13 +116,24 @@ def _apply_diff(
     run_id: str,
 ) -> tuple[Watcher, WatcherFire]:
     if diff.kind != DIFF_KIND_NONE:
-        event_ids = dispatcher.enqueue(
-            TRIGGER_WATCHER_CHANGED,
-            build_watcher_changed_payload(watcher, diff.summary),
-            watcher.session_token,
-            conn=conn,
-            run_id=run_id,
-            team_id=watcher.team_id,
+        next_changed_count = watcher.consecutive_changed + 1
+        policy_decision = _watcher_change_policy_decision(watcher, diff.summary, next_changed_count)
+        should_alert = bool(policy_decision["should_alert"])
+        log.debug(
+            "WATCHER_ALERT_POLICY_EVALUATED",
+            extra=_log_payload(watcher, run_id=run_id, **policy_decision),
+        )
+        event_ids = (
+            dispatcher.enqueue(
+                TRIGGER_WATCHER_CHANGED,
+                build_watcher_changed_payload(watcher, diff.summary),
+                watcher.session_token,
+                conn=conn,
+                run_id=run_id,
+                team_id=watcher.team_id,
+            )
+            if should_alert
+            else []
         )
         updated_watcher = watcher_service.set_watcher_state(
             watcher.id,
@@ -122,7 +143,7 @@ def _apply_diff(
             last_run_id=run_id,
             last_diff_summary=diff.summary,
             consecutive_no_change=0,
-            consecutive_changed=watcher.consecutive_changed + 1,
+            consecutive_changed=next_changed_count,
             consecutive_failures=0,
             conn=conn,
         )
@@ -136,10 +157,25 @@ def _apply_diff(
             truncated=diff.truncated,
             notification_event_ids=event_ids,
             state_at_fire=WATCHER_STATE_CHANGED,
+            state_reason="diff_detected",
+            fire_kind=WATCHER_FIRE_KIND_CHANGED,
         )
         if updated_fire is None:
             raise watcher_service.WatcherError("watcher fire disappeared during diff finalization")
-        log.info("WATCHER_CHANGED", extra=_log_payload(updated_watcher, run_id=run_id, notification_count=len(event_ids)))
+        log.info(
+            "WATCHER_CHANGED",
+            extra=_log_payload(
+                updated_watcher,
+                run_id=run_id,
+                notification_count=len(event_ids),
+                alert_suppressed=not should_alert,
+                diff_kind=diff.kind,
+                truncated=diff.truncated,
+                classifier=str(diff.summary.get("classifier") or ""),
+                consecutive_changed=next_changed_count,
+                suppression_reason=policy_decision["suppression_reason"],
+            ),
+        )
         return updated_watcher, updated_fire
 
     event_ids: list[str] = []
@@ -176,12 +212,77 @@ def _apply_diff(
         truncated=diff.truncated,
         notification_event_ids=event_ids,
         state_at_fire=WATCHER_STATE_OK,
+        state_reason=state_reason,
+        fire_kind=WATCHER_FIRE_KIND_RECOVERED if state_reason == "recovered" else WATCHER_FIRE_KIND_NO_CHANGE,
     )
     if updated_fire is None:
         raise watcher_service.WatcherError("watcher fire disappeared during no-change finalization")
     if event_ids:
         log.info("WATCHER_RECOVERED", extra=_log_payload(updated_watcher, run_id=run_id, notification_count=len(event_ids)))
+    log.debug(
+        "WATCHER_NO_CHANGE_RECORDED",
+        extra=_log_payload(
+            updated_watcher,
+            run_id=run_id,
+            state_reason=state_reason,
+            fire_kind=updated_fire.fire_kind,
+            consecutive_no_change=updated_watcher.consecutive_no_change,
+            notification_count=len(event_ids),
+        ),
+    )
     return updated_watcher, updated_fire
+
+
+def _summary_signal_classes(summary: dict[str, Any]) -> set[str]:
+    classifier = str(summary.get("classifier") or "").strip().lower()
+    classes: set[str] = set()
+    if classifier == "findings" or int(summary.get("added_finding_count") or 0):
+        classes.add("findings")
+    if classifier in {"ports", "tls"} or int(summary.get("added_port_count") or 0) or int(summary.get("changed_port_count") or 0):
+        classes.add("ports")
+    if (
+        classifier in {"hosts", "textual"}
+        or int(summary.get("entity_added_count") or 0)
+        or int(summary.get("entity_removed_count") or 0)
+    ):
+        classes.add("entities")
+    return classes or {"entities"}
+
+
+def _watcher_change_policy_decision(watcher: Watcher, summary: dict[str, Any], next_changed_count: int) -> dict[str, Any]:
+    policy = watcher.policy if isinstance(watcher.policy, dict) else {}
+    try:
+        repeated_threshold = int(policy.get("alert_after_repeated_changes") or 1)
+    except (TypeError, ValueError):
+        repeated_threshold = 1
+    detected_classes = sorted(_summary_signal_classes(summary))
+    selected_classes = sorted({
+        str(item or "").strip().lower()
+        for item in policy.get("alert_signal_classes", [])
+        if str(item or "").strip()
+    })
+    if next_changed_count < max(1, repeated_threshold):
+        should_alert = False
+        suppression_reason = "threshold_not_met"
+    elif selected_classes and not (set(detected_classes) & set(selected_classes)):
+        should_alert = False
+        suppression_reason = "signal_class_filtered"
+    else:
+        should_alert = True
+        suppression_reason = "none"
+    return {
+        "classifier": str(summary.get("classifier") or ""),
+        "detected_signal_classes": ",".join(detected_classes),
+        "selected_signal_classes": ",".join(selected_classes),
+        "next_changed_count": next_changed_count,
+        "repeated_threshold": max(1, repeated_threshold),
+        "should_alert": should_alert,
+        "suppression_reason": suppression_reason,
+    }
+
+
+def _watcher_change_should_alert(watcher: Watcher, summary: dict[str, Any], next_changed_count: int) -> bool:
+    return bool(_watcher_change_policy_decision(watcher, summary, next_changed_count)["should_alert"])
 
 
 def _capture_first_baseline(
@@ -231,10 +332,23 @@ def _capture_first_baseline(
         truncated=False,
         notification_event_ids=[],
         state_at_fire=WATCHER_STATE_OK,
+        state_reason="baseline_created",
+        fire_kind=WATCHER_FIRE_KIND_BASELINE_CREATED,
     )
     if updated_fire is None:
         raise watcher_service.WatcherError("watcher fire disappeared during first-baseline finalization")
-    log.info("WATCHER_BASELINE_CAPTURED", extra=_log_payload(updated_watcher, run_id=run_id))
+    log.info(
+        "WATCHER_BASELINE_CAPTURED",
+        extra=_log_payload(
+            updated_watcher,
+            run_id=run_id,
+            fire_id=updated_fire.id,
+            baseline_run_id=run_id,
+            fire_kind=updated_fire.fire_kind,
+            project_id=updated_watcher.project_id,
+            team_id=updated_watcher.team_id,
+        ),
+    )
     return updated_watcher, updated_fire
 
 
@@ -277,6 +391,8 @@ def _mark_error(
         truncated=False,
         notification_event_ids=event_ids,
         state_at_fire=WATCHER_STATE_ERROR,
+        state_reason=state_reason,
+        fire_kind=WATCHER_FIRE_KIND_FAILED,
     )
     if updated_fire is None:
         raise watcher_service.WatcherError("watcher fire disappeared during error finalization")
@@ -300,6 +416,8 @@ def _log_payload(watcher: Watcher, **extra: Any) -> dict[str, Any]:
         "watcher_id": watcher.id,
         "schedule_id": watcher.schedule_id,
         "session": get_log_session_id(watcher.session_token),
+        "team_id": watcher.team_id,
+        "project_id": watcher.project_id,
         "state": watcher.state,
     }
     payload.update(extra)

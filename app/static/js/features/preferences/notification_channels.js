@@ -1,4 +1,11 @@
 // Options modal outbound-notification channel management.
+import { showToast as importedShowToast } from '../../core/utils.js';
+import { apiFetch as importedApiFetch } from '../../session.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+
+let exportedRefreshNotificationChannels = null;
+let exportedOpenNotificationChannelEditor = null;
+
 (function (global) {
   let _channelKinds = [];
   let _triggers = [];
@@ -16,7 +23,8 @@
   }
 
   function _apiFetch() {
-    return typeof global.apiFetch === 'function' ? global.apiFetch.bind(global) : global.fetch.bind(global);
+    return (typeof importedApiFetch === 'function' && importedApiFetch)
+      || (typeof global.fetch === 'function' ? global.fetch.bind(global) : null);
   }
 
   function _msg(text, { error = false } = {}) {
@@ -29,8 +37,9 @@
 
   function _toast(text, tone = 'success') {
     _msg('');
-    if (typeof global.showToast === 'function') {
-      global.showToast(text, tone);
+    const toast = typeof importedShowToast === 'function' ? importedShowToast : null;
+    if (typeof toast === 'function') {
+      toast(text, tone);
       return;
     }
     _msg(text, { error: tone === 'error' });
@@ -563,7 +572,8 @@
   }
 
   async function openNotificationChannelEditor(channel = null) {
-    if (typeof global.showConfirm !== 'function') return null;
+    const confirm = typeof importedShowConfirm === 'function' ? importedShowConfirm : null;
+    if (typeof confirm !== 'function') return null;
     try {
       await _ensureKindContract();
     } catch (error) {
@@ -571,7 +581,7 @@
       return null;
     }
     const editor = _buildEditor(channel);
-    return global.showConfirm({
+    return confirm({
       body: {
         text: channel ? 'Update notification channel.' : 'Add a notification channel.',
         note: 'Secret values are sent once, stored in the vault, and never displayed again.',
@@ -648,8 +658,9 @@
   }
 
   async function deleteNotificationChannel(channel) {
-    if (typeof global.showConfirm !== 'function') return false;
-    const choice = await global.showConfirm({
+    const confirm = typeof importedShowConfirm === 'function' ? importedShowConfirm : null;
+    if (typeof confirm !== 'function') return false;
+    const choice = await confirm({
       body: {
         text: `Delete ${channel.label || _kindLabel(channel.kind)}?`,
         note: 'The channel will stop receiving outbound notifications.',
@@ -694,6 +705,11 @@
 
   bindNotificationChannelsPanel();
 
-  global.refreshNotificationChannels = refreshNotificationChannels;
-  global.openNotificationChannelEditor = openNotificationChannelEditor;
+  exportedRefreshNotificationChannels = refreshNotificationChannels;
+  exportedOpenNotificationChannelEditor = openNotificationChannelEditor;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export {
+  exportedRefreshNotificationChannels as refreshNotificationChannels,
+  exportedOpenNotificationChannelEditor as openNotificationChannelEditor,
+};

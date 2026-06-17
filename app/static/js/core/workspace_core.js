@@ -1,7 +1,7 @@
 // ── Workspace pure helpers ────────────────────────────────────────────────
 // Loaded before workspace.js. Keep DOM/API behavior in workspace.js and share
 // small path/format transforms here.
-(function (global) {
+const DarklabWorkspaceCore = (function (global) {
   function formatBytes(bytes) {
     const value = Number(bytes) || 0;
     if (value < 1024) return `${value} B`;
@@ -52,7 +52,7 @@
     return parts[parts.length - 1] || String(path || '');
   }
 
-  global.DarklabWorkspaceCore = Object.freeze({
+  const api = Object.freeze({
     formatBytes,
     normalizeDir,
     normalizeCommandPath,
@@ -60,4 +60,8 @@
     parentDir,
     basename,
   });
+  return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { basename, displayPath, formatBytes, normalizeCommandPath, normalizeDir, parentDir } = DarklabWorkspaceCore;
+export { DarklabWorkspaceCore };

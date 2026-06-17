@@ -8,6 +8,8 @@ from typing import Any
 
 from core import database
 from core.helpers import get_log_session_id
+from services.audit.automation import record_watcher_event, run_now_details
+from services.audit.models import AuditEventType
 from services.commands.builtins_format import ansi_dim, ansi_green, format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
@@ -209,16 +211,28 @@ def _create_watch(parts: list[str], session_id: str) -> list[dict[str, object]]:
         baseline = _baseline_for_session(str(payload["baseline_run_id"]), session_id)
         command_text = str(baseline.get("command") or "")
     command = validate_schedule_command(command_text, session_id)
-    watcher = create_watcher(
-        session_id,
-        command_text=command,
-        baseline_run_id=str(baseline.get("id") or ""),
-        cron_expr=payload.get("cron_expr"),
-        cadence_preset=payload.get("cadence_preset"),
-        timezone_name=payload.get("timezone_name"),
-        label=str(payload.get("label") or ""),
-    )
-    schedule = _watcher_schedule(watcher)
+    with database.db_connect() as conn:
+        watcher = create_watcher(
+            session_id,
+            command_text=command,
+            baseline_run_id=str(baseline.get("id") or ""),
+            cron_expr=payload.get("cron_expr"),
+            cadence_preset=payload.get("cadence_preset"),
+            timezone_name=payload.get("timezone_name"),
+            label=str(payload.get("label") or ""),
+            conn=conn,
+        )
+        schedule = get_schedule(watcher.schedule_id, conn=conn)
+        if schedule is None:
+            raise BuiltinWatchError(f"watcher schedule not found: {watcher.schedule_id}")
+        record_watcher_event(
+            AuditEventType.WATCHER_CREATE,
+            watcher,
+            audit_fields={"session_id": session_id, "actor_session_id": session_id},
+            source="terminal_builtin",
+            conn=conn,
+        )
+        conn.commit()
     log.info("BUILTIN_WATCH_CREATED", extra={
         "session": get_log_session_id(session_id),
         "source": "builtin",
@@ -243,6 +257,20 @@ def _run_watcher_now(watcher: Watcher) -> list[dict[str, object]]:
     with database.db_connect() as conn:
         status = fire_schedule(conn, schedule, fired_at=fired_at)
         refreshed = get_watcher(watcher.id, conn=conn)
+        active = refreshed or watcher
+        record_watcher_event(
+            AuditEventType.WATCHER_RUN_NOW,
+            active,
+            audit_fields={"session_id": watcher.session_token, "actor_session_id": watcher.session_token},
+            source="terminal_builtin",
+            details=run_now_details(
+                status,
+                fired_at=fired_at,
+                run_id=active.last_run_id,
+                last_error=active.last_error,
+            ),
+            conn=conn,
+        )
         conn.commit()
     active = refreshed or watcher
     lines = [output_line(f"watch: fired {watcher.id}", "builtin-success")]
@@ -286,7 +314,17 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
             return _info_lines(watcher)
         if subcommand == "pause":
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch pause <id>"), session_id)
-            updated = pause_watcher(watcher.id)
+            with database.db_connect() as conn:
+                updated = pause_watcher(watcher.id, conn=conn)
+                record_watcher_event(
+                    AuditEventType.WATCHER_PAUSE,
+                    updated or watcher,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"changed_fields": ["state", "enabled"]},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_WATCH_PAUSED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -296,7 +334,17 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
             return [output_line(f"watch: paused {(updated or watcher).id}", "builtin-success")]
         if subcommand == "resume":
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch resume <id>"), session_id)
-            updated = resume_watcher(watcher.id)
+            with database.db_connect() as conn:
+                updated = resume_watcher(watcher.id, conn=conn)
+                record_watcher_event(
+                    AuditEventType.WATCHER_RESUME,
+                    updated or watcher,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"changed_fields": ["state", "enabled"]},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_WATCH_RESUMED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -306,7 +354,17 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
             return [output_line(f"watch: resumed {(updated or watcher).id}", "builtin-success")]
         if subcommand in {"delete", "rm", "remove"}:
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch delete <id>"), session_id)
-            removed = delete_watcher(watcher.id)
+            with database.db_connect() as conn:
+                removed = delete_watcher(watcher.id, conn=conn)
+                record_watcher_event(
+                    AuditEventType.WATCHER_DELETE,
+                    watcher,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"deleted_count": 1 if removed else 0},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_WATCH_DELETED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
@@ -319,9 +377,19 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
             return [output_line(message, status_style)]
         if subcommand in {"accept", "accept-baseline"}:
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch accept <id>"), session_id)
-            updated = accept_baseline(watcher.id)
-            if updated is None:
-                raise BuiltinWatchError(f"watcher not found: {watcher.id}")
+            with database.db_connect() as conn:
+                updated = accept_baseline(watcher.id, conn=conn)
+                if updated is None:
+                    raise BuiltinWatchError(f"watcher not found: {watcher.id}")
+                record_watcher_event(
+                    AuditEventType.WATCHER_ACCEPT_BASELINE,
+                    updated,
+                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    source="terminal_builtin",
+                    details={"baseline_run_id": updated.baseline_run_id},
+                    conn=conn,
+                )
+                conn.commit()
             log.info("BUILTIN_WATCH_BASELINE_ACCEPTED", extra={
                 "session": get_log_session_id(session_id),
                 "source": "builtin",

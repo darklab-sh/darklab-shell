@@ -16,7 +16,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import NotRequired, TypedDict
 
@@ -37,10 +37,10 @@ from services.commands.registry import (
     split_command_argv,
     validate_command,
 )
-from config import CFG, SCANNER_PREFIX
+from config import CFG, SCANNER_PREFIX, get_share_redaction_rules
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
-from core.redaction import REDACTED_ENTITY_SENTINEL
+from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from extensions import limiter
 from services.commands.builtins import (
     execute_builtin_command,
@@ -50,6 +50,7 @@ from services.commands.builtins import (
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from core.process import (
     active_run_belongs_to_scope,
+    active_run_pid_start_matches,
     active_run_register,
     active_run_remove,
     active_run_touch_owner,
@@ -253,14 +254,15 @@ def _validate_command_for_run(
             display_command=command,
             exec_command=command,
         )
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+    effective_owner_context = _effective_owner_context(owner_context, session_id)
+    if effective_owner_context is not None:
         return validate_command(
             command,
             session_id=session_id,
             cfg=CFG,
             workspace_cwd=workspace_cwd,
             extra_allowed_prefixes=extra_allowed_prefixes,
-            owner_context=owner_context,
+            owner_context=effective_owner_context,
         )
     return validate_command(
         command,
@@ -269,6 +271,43 @@ def _validate_command_for_run(
         workspace_cwd=workspace_cwd,
         extra_allowed_prefixes=extra_allowed_prefixes,
     )
+
+
+def _validate_command_with_effective_owner(
+    command: str,
+    session_id: str,
+    workspace_cwd: str = "",
+    *,
+    extra_allowed_prefixes: list[str] | None = None,
+    owner_context: OwnerContext | None = None,
+) -> CommandValidationResult:
+    effective_owner_context = _effective_owner_context(owner_context, session_id)
+    if effective_owner_context is not None:
+        return _validate_command_for_run(
+            command,
+            session_id,
+            workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+            owner_context=effective_owner_context,
+        )
+    if extra_allowed_prefixes is not None:
+        return _validate_command_for_run(
+            command,
+            session_id,
+            workspace_cwd,
+            extra_allowed_prefixes=extra_allowed_prefixes,
+        )
+    return _validate_command_for_run(command, session_id, workspace_cwd)
+
+
+def _effective_owner_context(owner_context: OwnerContext | None, session_id: str) -> OwnerContext | None:
+    if owner_context is None:
+        return None
+    if owner_context.is_team:
+        return owner_context
+    if owner_context.owner_id != str(session_id or "").strip():
+        return owner_context
+    return None
 
 
 def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
@@ -472,6 +511,27 @@ _RUN_OUTPUT_LIVE_BATCH_MAX_LATENCY_SECONDS = 0.075
 _RUN_OUTPUT_POLL_SECONDS = 0.05
 _RUN_OUTPUT_LIVE_BATCH_COALESCED_ROLES = {LineRole.progress, LineRole.status_line}
 _KILL_PROCESS_GROUP_GONE_DELAYS = (0.0, 0.05, 0.15, 0.3, 0.5)
+_ACTIVE_RUN_OWNER_TOUCH_INTERVAL_SECONDS = 5.0
+_active_run_owner_touch_monotonic = time.monotonic
+
+
+def _maybe_touch_active_run_owner(
+    run_id: str,
+    owner_client_id: str,
+    owner_tab_id: str,
+    *,
+    last_touch_monotonic: float | None,
+) -> float | None:
+    if not owner_client_id:
+        return last_touch_monotonic
+    now = _active_run_owner_touch_monotonic()
+    if (
+        last_touch_monotonic is not None
+        and now - last_touch_monotonic < _ACTIVE_RUN_OWNER_TOUCH_INTERVAL_SECONDS
+    ):
+        return last_touch_monotonic
+    active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+    return now
 
 
 class _BrokerOutputBatcher:
@@ -602,6 +662,19 @@ def _signal_process_group(pgid: int) -> None:
     os.killpg(pgid, signal.SIGTERM)
 
 
+def _ensure_scanner_process_group_current(
+    run_id: str,
+    pid: int,
+    session_id: str,
+    team_id: str = "",
+) -> None:
+    if not SCANNER_PREFIX:
+        return
+    if active_run_pid_start_matches(run_id, pid, session_id=session_id, team_id=team_id):
+        return
+    raise ProcessLookupError("active run PID start time no longer matches")
+
+
 _SEARCH_ENTITY_MAX_BYTES = 4096
 
 
@@ -722,6 +795,362 @@ def _structured_output_summary_fields(entries):
     }
 
 
+@dataclass
+class _CompletedRunOutputState:
+    preview_lines: list
+    persisted_entries: list
+    stored_search_text: str
+
+
+@dataclass
+class _RunFinalizeRecords:
+    active_project_link: dict | None = None
+    recorded_artifacts: list = field(default_factory=list)
+    recorded_entities: list = field(default_factory=list)
+    recorded_findings: list = field(default_factory=list)
+    recorded_targets: list = field(default_factory=list)
+    auto_promote_summary: dict | None = None
+
+
+def _completed_run_output_state(run_id, session_id, capture) -> _CompletedRunOutputState:
+    preview_lines = list(capture.preview_lines)
+    persisted_entries = preview_lines
+    if capture.full_output_available and capture.artifact_rel_path:
+        try:
+            full_entries = load_full_output_entries(capture.artifact_rel_path)
+            search_text = _extract_output_search_text(full_entries)
+            persisted_entries = full_entries
+        except Exception as exc:
+            log.warning("RUN_FULL_OUTPUT_INDEX_FALLBACK", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "rel_path": capture.artifact_rel_path,
+                "error": str(exc),
+            })
+            search_text = _extract_output_search_text(preview_lines)
+    else:
+        search_text = _extract_output_search_text(preview_lines)
+    stored_search_text = maybe_store_text_body(
+        "run_search",
+        run_id,
+        search_text,
+        inline_threshold_bytes(CFG.get("runs_search_text_inline_max_bytes")),
+    )
+    return _CompletedRunOutputState(
+        preview_lines=preview_lines,
+        persisted_entries=persisted_entries,
+        stored_search_text=stored_search_text,
+    )
+
+
+def _save_run_project_link_for_finalize(
+    conn,
+    session_id,
+    team_id,
+    run_id,
+    command,
+    *,
+    link_project_id="",
+    link_active_project=True,
+):
+    if link_project_id:
+        try:
+            return _run_finalize_savepoint(
+                conn,
+                "project_link",
+                lambda: link_run_to_project_on_conn(
+                    conn,
+                    session_id,
+                    link_project_id,
+                    run_id,
+                    source="manual",
+                    team_id=team_id,
+                ),
+            )
+        except Exception:
+            log.error("PROJECT_RUN_LINK_ERROR", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "project_id": link_project_id,
+                "cmd": command,
+            })
+            return None
+    if link_active_project:
+        try:
+            return _run_finalize_savepoint(
+                conn,
+                "active_project_link",
+                lambda: link_run_to_active_project(conn, session_id, run_id, team_id=team_id),
+            )
+        except Exception:
+            log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "cmd": command,
+            })
+    return None
+
+
+def _save_run_file_artifacts_for_finalize(
+    conn,
+    session_id,
+    team_id,
+    run_id,
+    command,
+    workspace_artifacts,
+    workspace_owner,
+) -> list:
+    if not workspace_artifacts:
+        return []
+    try:
+        if team_id:
+            sized_workspace_artifacts = _workspace_artifacts_with_sizes(
+                session_id,
+                workspace_artifacts,
+                owner_context=workspace_owner,
+            )
+        else:
+            sized_workspace_artifacts = _workspace_artifacts_with_sizes(session_id, workspace_artifacts)
+        return _run_finalize_savepoint(
+            conn,
+            "run_file_artifacts",
+            lambda: record_run_file_artifacts(
+                conn,
+                session_id,
+                run_id,
+                sized_workspace_artifacts,
+                **({"owner_context": workspace_owner} if team_id else {}),
+            ),
+        )
+    except Exception:
+        log.error("PROJECT_RUN_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "cmd": command,
+        })
+    return []
+
+
+def _discover_project_targets_for_finalize(
+    conn,
+    session_id,
+    run_id,
+    command,
+    active_project_link,
+) -> list:
+    if not active_project_link:
+        return []
+    try:
+        return _run_finalize_savepoint(
+            conn,
+            "project_target_discovery",
+            lambda: record_project_target_discoveries(
+                conn,
+                session_id,
+                active_project_link["project_id"],
+                run_id,
+                command_project_target_inputs(command, cfg=CFG),
+            ),
+        )
+    except ProjectWorkspaceQuotaExceeded as exc:
+        active_project_link["target_discovery_skipped_reason"] = str(exc)
+        log.warning("PROJECT_TARGET_DISCOVERY_SKIPPED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "project_id": active_project_link["project_id"],
+            "cmd": command,
+            "reason": str(exc),
+        })
+    except Exception:
+        log.error("PROJECT_TARGET_DISCOVERY_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "cmd": command,
+        })
+    return []
+
+
+def _record_run_findings_for_finalize(conn, session_id, team_id, run_id, command, persisted_entries) -> list:
+    try:
+        return _run_finalize_savepoint(
+            conn,
+            "run_findings",
+            lambda: record_run_findings(conn, session_id, run_id, persisted_entries, team_id=team_id),
+        )
+    except Exception:
+        app_metrics.record_run_finalize_error("db_write")
+        log.error("PROJECT_RUN_FINDING_CAPTURE_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "cmd": command,
+        })
+    return []
+
+
+def _materialize_run_entities_for_finalize(conn, session_id, team_id, run_id, command, persisted_entries, finished_iso) -> list:
+    try:
+        return _run_finalize_savepoint(
+            conn,
+            "atlas_entities",
+            lambda: materialize_run_entities(
+                conn,
+                session_id,
+                run_id,
+                persisted_entries,
+                team_id=team_id,
+                seen_at=finished_iso,
+            ),
+        )
+    except Exception:
+        app_metrics.record_run_finalize_error("entity_materialize")
+        log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "cmd": command,
+        })
+    return []
+
+
+def _apply_auto_promote_for_finalize(conn, session_id, team_id, run_id, command, recorded_entities) -> dict | None:
+    if not recorded_entities:
+        return None
+    try:
+        return _run_finalize_savepoint(
+            conn,
+            "project_auto_promote_rules",
+            lambda: apply_auto_promote_rules_for_run(
+                conn,
+                session_id,
+                run_id,
+                team_id=team_id,
+            ),
+        )
+    except Exception:
+        log.error("PROJECT_AUTO_PROMOTE_RUN_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "cmd": command,
+        })
+    return None
+
+
+def _link_active_project_entities_for_finalize(
+    conn,
+    session_id,
+    team_id,
+    run_id,
+    command,
+    active_project_link,
+    recorded_entities,
+) -> None:
+    if not active_project_link or not recorded_entities:
+        return
+    try:
+        linked_entities = _link_active_project_run_entities_for_finalize(
+            conn,
+            session_id,
+            active_project_link["project_id"],
+            run_id,
+            team_id=team_id,
+        )
+        if linked_entities:
+            active_project_link["linked_entity_count"] = int(linked_entities.get("added") or 0)
+            active_project_link["available_entity_count"] = int(linked_entities.get("available") or 0)
+            active_project_link["rejected_entity_count"] = int(linked_entities.get("rejected") or 0)
+    except Exception:
+        log.error("PROJECT_ACTIVE_RUN_ENTITY_LINK_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "cmd": command,
+        })
+
+
+def _log_run_finalize_records(
+        run_id, session_id,
+        team_id,
+        run_kind,
+        records: _RunFinalizeRecords) -> tuple[list[dict], list[str]]:
+    app_metrics.record_findings_materialized(run_kind, len(records.recorded_findings))
+    if records.active_project_link:
+        log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "project_id": records.active_project_link["project_id"],
+        })
+    if records.recorded_artifacts:
+        log.info("PROJECT_RUN_ARTIFACTS_CAPTURED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "count": len(records.recorded_artifacts),
+        })
+    if records.recorded_findings:
+        log.info("PROJECT_RUN_FINDINGS_CAPTURED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "count": len(records.recorded_findings),
+        })
+    if records.recorded_targets:
+        if records.active_project_link:
+            records.active_project_link["discovered_target_count"] = len(records.recorded_targets)
+        log.info("PROJECT_TARGETS_DISCOVERED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "count": len(records.recorded_targets),
+        })
+    if records.recorded_entities:
+        log.info("ATLAS_ENTITIES_CAPTURED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "count": len(records.recorded_entities),
+        })
+    auto_promote_results = _auto_promote_summary_results(records.auto_promote_summary)
+    auto_promote_project_ids = _auto_promote_summary_ids(auto_promote_results, "project_id")
+    auto_promote_rule_ids = _auto_promote_summary_ids(auto_promote_results, "rule_id")
+    if records.auto_promote_summary and int(records.auto_promote_summary.get("rules_evaluated") or 0):
+        log.info("PROJECT_AUTO_PROMOTE_RUN_APPLIED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_ids": auto_promote_project_ids,
+            "rule_ids": auto_promote_rule_ids,
+            "rule_results": _auto_promote_summary_log_results(auto_promote_results),
+            "rule_results_truncated": len(auto_promote_results) > AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
+            "rules_evaluated": int(records.auto_promote_summary.get("rules_evaluated") or 0),
+            "projects_evaluated": int(records.auto_promote_summary.get("projects_evaluated") or 0),
+            "matched_count": int(records.auto_promote_summary.get("matched_count") or 0),
+            "linked_count": int(records.auto_promote_summary.get("linked_count") or 0),
+            "already_linked_count": int(records.auto_promote_summary.get("already_linked_count") or 0),
+            "skipped_suppressed_count": int(records.auto_promote_summary.get("skipped_suppressed_count") or 0),
+            "quota_limited_count": int(records.auto_promote_summary.get("quota_limited_count") or 0),
+            "match_cap_limited_count": int(records.auto_promote_summary.get("match_cap_limited_count") or 0),
+            "rule_cap_limited_count": int(records.auto_promote_summary.get("rule_cap_limited_count") or 0),
+        })
+    return auto_promote_results, auto_promote_project_ids
+
+
+def _update_run_finalize_summary(
+    finalize_summary,
+    records: _RunFinalizeRecords,
+    persisted_entries,
+    auto_promote_project_ids: list[str],
+) -> None:
+    if not isinstance(finalize_summary, dict):
+        return
+    finalize_summary.update({
+        "artifact_count": len(records.recorded_artifacts),
+        "finding_count": len(records.recorded_findings),
+        "atlas_entity_count": len(records.recorded_entities),
+        "project_target_count": len(records.recorded_targets),
+        "project_auto_promote_count": int(records.auto_promote_summary.get("linked_count") or 0)
+        if isinstance(records.auto_promote_summary, dict) else 0,
+        "project_auto_promote_promoted_count": int(records.auto_promote_summary.get("promoted_count") or 0)
+        if isinstance(records.auto_promote_summary, dict) else 0,
+        "project_auto_promote_project_ids": auto_promote_project_ids,
+        **_structured_output_summary_fields(persisted_entries),
+    })
+
+
 def _save_completed_run(
     run_id,
     session_id,
@@ -743,38 +1172,9 @@ def _save_completed_run(
     # readers never observe half-written run state.
     capture.finalize()
     try:
-        preview_lines = list(capture.preview_lines)
-        active_project_link = None
-        recorded_artifacts = []
-        recorded_entities = []
-        recorded_findings = []
-        recorded_targets = []
-        auto_promote_summary = None
-        persisted_entries = preview_lines
+        output_state = _completed_run_output_state(run_id, session_id, capture)
+        records = _RunFinalizeRecords()
         workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
-        # Index full output when available so early lines of long runs are searchable.
-        # Falls back to preview if the artifact can't be read.
-        if capture.full_output_available and capture.artifact_rel_path:
-            try:
-                full_entries = load_full_output_entries(capture.artifact_rel_path)
-                search_text = _extract_output_search_text(full_entries)
-                persisted_entries = full_entries
-            except Exception as exc:
-                log.warning("RUN_FULL_OUTPUT_INDEX_FALLBACK", extra={
-                    "run_id": run_id,
-                    "session": get_log_session_id(session_id),
-                    "rel_path": capture.artifact_rel_path,
-                    "error": str(exc),
-                })
-                search_text = _extract_output_search_text(preview_lines)
-        else:
-            search_text = _extract_output_search_text(preview_lines)
-        stored_search_text = maybe_store_text_body(
-            "run_search",
-            run_id,
-            search_text,
-            inline_threshold_bytes(CFG.get("runs_search_text_inline_max_bytes")),
-        )
         with db_connect() as conn:
             _insert_run_row(
                 conn,
@@ -787,12 +1187,12 @@ def _save_completed_run(
                 started=run_started,
                 finished=finished_iso,
                 exit_code=exit_code,
-                output_preview=json.dumps(preview_lines),
+                output_preview=json.dumps(output_state.preview_lines),
                 preview_truncated=capture.preview_truncated,
                 output_line_count=capture.output_line_count,
                 full_output_available=capture.full_output_available,
                 full_output_truncated=capture.full_output_truncated,
-                output_search_text=stored_search_text,
+                output_search_text=output_state.stored_search_text,
             )
             if capture.full_output_available and capture.artifact_rel_path:
                 _upsert_run_output_artifact(
@@ -805,251 +1205,81 @@ def _save_completed_run(
                     truncated=capture.full_output_truncated,
                     created=finished_iso,
                 )
-            replace_run_output_summary(conn, run_id, persisted_entries)
-            if link_project_id:
-                try:
-                    active_project_link = _run_finalize_savepoint(
-                        conn,
-                        "project_link",
-                        lambda: link_run_to_project_on_conn(
-                            conn,
-                            session_id,
-                            link_project_id,
-                            run_id,
-                            source="manual",
-                            team_id=team_id,
-                        ),
-                    )
-                except Exception:
-                    active_project_link = None
-                    log.error("PROJECT_RUN_LINK_ERROR", exc_info=True, extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "project_id": link_project_id,
-                        "cmd": command,
-                    })
-            elif link_active_project:
-                try:
-                    active_project_link = _run_finalize_savepoint(
-                        conn,
-                        "active_project_link",
-                        lambda: link_run_to_active_project(conn, session_id, run_id, team_id=team_id),
-                    )
-                except Exception:
-                    active_project_link = None
-                    log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "cmd": command,
-                    })
-            if workspace_artifacts:
-                try:
-                    if team_id:
-                        sized_workspace_artifacts = _workspace_artifacts_with_sizes(
-                            session_id,
-                            workspace_artifacts,
-                            owner_context=workspace_owner,
-                        )
-                    else:
-                        sized_workspace_artifacts = _workspace_artifacts_with_sizes(session_id, workspace_artifacts)
-                    recorded_artifacts = _run_finalize_savepoint(
-                        conn,
-                        "run_file_artifacts",
-                        lambda: record_run_file_artifacts(
-                            conn,
-                            session_id,
-                            run_id,
-                            sized_workspace_artifacts,
-                            **({"owner_context": workspace_owner} if team_id else {}),
-                        ),
-                    )
-                except Exception:
-                    recorded_artifacts = []
-                    log.error("PROJECT_RUN_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "cmd": command,
-                    })
-            if active_project_link:
-                try:
-                    recorded_targets = _run_finalize_savepoint(
-                        conn,
-                        "project_target_discovery",
-                        lambda: record_project_target_discoveries(
-                            conn,
-                            session_id,
-                            active_project_link["project_id"],
-                            run_id,
-                            command_project_target_inputs(command, cfg=CFG),
-                        ),
-                    )
-                except ProjectWorkspaceQuotaExceeded as exc:
-                    recorded_targets = []
-                    active_project_link["target_discovery_skipped_reason"] = str(exc)
-                    log.warning("PROJECT_TARGET_DISCOVERY_SKIPPED", extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "project_id": active_project_link["project_id"],
-                        "cmd": command,
-                        "reason": str(exc),
-                    })
-                except Exception:
-                    recorded_targets = []
-                    log.error("PROJECT_TARGET_DISCOVERY_ERROR", exc_info=True, extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "cmd": command,
-                    })
-            try:
-                recorded_findings = _run_finalize_savepoint(
-                    conn,
-                    "run_findings",
-                    lambda: record_run_findings(conn, session_id, run_id, persisted_entries, team_id=team_id),
-                )
-            except Exception:
-                recorded_findings = []
-                app_metrics.record_run_finalize_error("db_write")
-                log.error("PROJECT_RUN_FINDING_CAPTURE_ERROR", exc_info=True, extra={
-                    "run_id": run_id,
-                    "session": get_log_session_id(session_id),
-                    "cmd": command,
-                })
-            try:
-                recorded_entities = _run_finalize_savepoint(
-                    conn,
-                    "atlas_entities",
-                    lambda: materialize_run_entities(
-                        conn,
-                        session_id,
-                        run_id,
-                        persisted_entries,
-                        team_id=team_id,
-                        seen_at=finished_iso,
-                    ),
-                )
-            except Exception:
-                recorded_entities = []
-                app_metrics.record_run_finalize_error("entity_materialize")
-                log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
-                    "run_id": run_id,
-                    "session": get_log_session_id(session_id),
-                    "cmd": command,
-                })
-            if recorded_entities:
-                try:
-                    auto_promote_summary = _run_finalize_savepoint(
-                        conn,
-                        "project_auto_promote_rules",
-                        lambda: apply_auto_promote_rules_for_run(
-                            conn,
-                            session_id,
-                            run_id,
-                            team_id=team_id,
-                        ),
-                    )
-                except Exception:
-                    auto_promote_summary = None
-                    log.error("PROJECT_AUTO_PROMOTE_RUN_ERROR", exc_info=True, extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "team_id": team_id,
-                        "cmd": command,
-                    })
-            if active_project_link and recorded_entities:
-                try:
-                    linked_entities = _link_active_project_run_entities_for_finalize(
-                        conn,
-                        session_id,
-                        active_project_link["project_id"],
-                        run_id,
-                        team_id=team_id,
-                    )
-                    if linked_entities:
-                        active_project_link["linked_entity_count"] = int(
-                            linked_entities.get("added") or 0
-                        )
-                        active_project_link["available_entity_count"] = int(
-                            linked_entities.get("available") or 0
-                        )
-                        active_project_link["rejected_entity_count"] = int(
-                            linked_entities.get("rejected") or 0
-                        )
-                except Exception:
-                    log.error("PROJECT_ACTIVE_RUN_ENTITY_LINK_ERROR", exc_info=True, extra={
-                        "run_id": run_id,
-                        "session": get_log_session_id(session_id),
-                        "cmd": command,
-                    })
+            replace_run_output_summary(conn, run_id, output_state.persisted_entries)
+            records.active_project_link = _save_run_project_link_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                command,
+                link_project_id=link_project_id,
+                link_active_project=link_active_project,
+            )
+            records.recorded_artifacts = _save_run_file_artifacts_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                command,
+                workspace_artifacts,
+                workspace_owner,
+            )
+            records.recorded_targets = _discover_project_targets_for_finalize(
+                conn,
+                session_id,
+                run_id,
+                command,
+                records.active_project_link,
+            )
+            records.recorded_findings = _record_run_findings_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                command,
+                output_state.persisted_entries,
+            )
+            records.recorded_entities = _materialize_run_entities_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                command,
+                output_state.persisted_entries,
+                finished_iso,
+            )
+            records.auto_promote_summary = _apply_auto_promote_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                command,
+                records.recorded_entities,
+            )
+            _link_active_project_entities_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                command,
+                records.active_project_link,
+                records.recorded_entities,
+            )
             conn.commit()
-        app_metrics.record_findings_materialized(run_kind, len(recorded_findings))
-        if active_project_link:
-            log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "project_id": active_project_link["project_id"],
-            })
-        if recorded_artifacts:
-            log.info("PROJECT_RUN_ARTIFACTS_CAPTURED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "count": len(recorded_artifacts),
-            })
-        if recorded_findings:
-            log.info("PROJECT_RUN_FINDINGS_CAPTURED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "count": len(recorded_findings),
-            })
-        if recorded_targets:
-            if active_project_link:
-                active_project_link["discovered_target_count"] = len(recorded_targets)
-            log.info("PROJECT_TARGETS_DISCOVERED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "count": len(recorded_targets),
-            })
-        if recorded_entities:
-            log.info("ATLAS_ENTITIES_CAPTURED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "count": len(recorded_entities),
-            })
-        auto_promote_results = _auto_promote_summary_results(auto_promote_summary)
-        auto_promote_project_ids = _auto_promote_summary_ids(auto_promote_results, "project_id")
-        auto_promote_rule_ids = _auto_promote_summary_ids(auto_promote_results, "rule_id")
-        if auto_promote_summary and int(auto_promote_summary.get("rules_evaluated") or 0):
-            log.info("PROJECT_AUTO_PROMOTE_RUN_APPLIED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "team_id": team_id,
-                "project_ids": auto_promote_project_ids,
-                "rule_ids": auto_promote_rule_ids,
-                "rule_results": _auto_promote_summary_log_results(auto_promote_results),
-                "rule_results_truncated": len(auto_promote_results) > AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
-                "rules_evaluated": int(auto_promote_summary.get("rules_evaluated") or 0),
-                "projects_evaluated": int(auto_promote_summary.get("projects_evaluated") or 0),
-                "matched_count": int(auto_promote_summary.get("matched_count") or 0),
-                "linked_count": int(auto_promote_summary.get("linked_count") or 0),
-                "already_linked_count": int(auto_promote_summary.get("already_linked_count") or 0),
-                "skipped_suppressed_count": int(auto_promote_summary.get("skipped_suppressed_count") or 0),
-                "quota_limited_count": int(auto_promote_summary.get("quota_limited_count") or 0),
-                "match_cap_limited_count": int(auto_promote_summary.get("match_cap_limited_count") or 0),
-                "rule_cap_limited_count": int(auto_promote_summary.get("rule_cap_limited_count") or 0),
-            })
-        if isinstance(finalize_summary, dict):
-            finalize_summary.update({
-                "artifact_count": len(recorded_artifacts),
-                "finding_count": len(recorded_findings),
-                "atlas_entity_count": len(recorded_entities),
-                "project_target_count": len(recorded_targets),
-                "project_auto_promote_count": int(auto_promote_summary.get("linked_count") or 0)
-                if isinstance(auto_promote_summary, dict) else 0,
-                "project_auto_promote_promoted_count": int(auto_promote_summary.get("promoted_count") or 0)
-                if isinstance(auto_promote_summary, dict) else 0,
-                "project_auto_promote_project_ids": auto_promote_project_ids,
-                **_structured_output_summary_fields(persisted_entries),
-            })
-        return active_project_link
+        _auto_promote_results, auto_promote_project_ids = _log_run_finalize_records(
+            run_id,
+            session_id,
+            team_id,
+            run_kind,
+            records,
+        )
+        _update_run_finalize_summary(
+            finalize_summary,
+            records,
+            output_state.persisted_entries,
+            auto_promote_project_ids,
+        )
+        return records.active_project_link
     except Exception:
         app_metrics.record_run_finalize_error("db_write")
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
@@ -1179,9 +1409,10 @@ def _client_side_run_command_allowed(command: str) -> bool:
     return root in CLIENT_SIDE_RUN_ROOTS
 
 
-def _normalize_client_side_run_lines(lines):
+def _normalize_client_side_run_lines(lines, command: str):
     if not isinstance(lines, list):
         return [], False, 0
+    signal_classifier = OutputSignalClassifier(command, cmd_type="builtin")
     capture = RunOutputCapture(
         run_id="client-side-run-preview",
         preview_limit=CFG["max_output_lines"],
@@ -1196,7 +1427,17 @@ def _normalize_client_side_run_lines(lines):
         else:
             text = str(item)
             legacy_class = ""
-        capture.add_event(line_event_from_legacy(text, legacy_class))
+        _capture_event_with_signals(capture, signal_classifier, text, cls=legacy_class)
+    redaction_rules = get_share_redaction_rules(CFG)
+    if redaction_rules:
+        redacted_events = redact_line_entries(capture.preview_lines, redaction_rules)
+        redacted_entries: list[dict[str, object]] = []
+        for entry in line_entries_from_events(redacted_events):
+            if isinstance(entry, dict):
+                redacted_entries.append(entry)
+            else:
+                redacted_entries.append({"text": str(entry), "cls": ""})
+        capture.preview_lines = deque(redacted_entries)
     return list(capture.preview_lines), capture.preview_truncated, capture.output_line_count
 
 
@@ -1240,7 +1481,7 @@ def save_client_side_run():
             "cmd": command,
             "payload_type": type(raw_lines).__name__,
         })
-    lines, preview_truncated, output_line_count = _normalize_client_side_run_lines(raw_lines)
+    lines, preview_truncated, output_line_count = _normalize_client_side_run_lines(raw_lines, command)
     if isinstance(raw_lines, list) and preview_truncated:
         log.warning("CLIENT_RUN_OUTPUT_TRUNCATED", extra={
             "session": get_log_session_id(session_id),
@@ -1295,6 +1536,26 @@ def save_client_side_run():
             output_search_text=stored_output_search_text,
         )
         replace_run_output_summary(conn, run_id, lines)
+        try:
+            _run_finalize_savepoint(
+                conn,
+                "atlas_entities",
+                lambda: materialize_run_entities(
+                    conn,
+                    session_id,
+                    run_id,
+                    lines,
+                    team_id=owner_scope.team_id,
+                    seen_at=finished.isoformat(),
+                ),
+            )
+        except Exception:
+            app_metrics.record_run_finalize_error("entity_materialize")
+            log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "cmd": command,
+            })
         conn.commit()
 
     elapsed = round((finished - started).total_seconds(), 1)
@@ -1321,6 +1582,8 @@ class _SyntheticPostFilterStageProcessor:
         self._tail_buffer = deque(maxlen=int(self.spec.get("count", 0) or 0))
         self._grep_match = None
         self._line_buffer = []
+        self._line_buffer_limit = max(0, int(CFG.get("max_output_lines", 0) or 0))
+        self._line_buffer_dropped = 0
 
         if self.kind == "grep":
             pattern = self.spec["pattern"]
@@ -1368,12 +1631,24 @@ class _SyntheticPostFilterStageProcessor:
             return []
 
         if self.kind in ("sort", "uniq"):
+            if self._line_buffer_limit and len(self._line_buffer) >= self._line_buffer_limit:
+                self._line_buffer_dropped += 1
+                return []
             self._line_buffer.append(line)
             return []
 
         return [line]
 
     def finalize_output_lines(self) -> list[str]:
+        def _buffer_truncation_notice() -> list[str]:
+            if self._line_buffer_dropped <= 0:
+                return []
+            return [
+                "[post-filter] output truncated to "
+                f"{self._line_buffer_limit} lines before {self.kind}; "
+                f"{self._line_buffer_dropped} later lines were skipped.\n"
+            ]
+
         if self.kind == "tail":
             return list(self._tail_buffer)
         if self.kind == "wc_l":
@@ -1400,7 +1675,7 @@ class _SyntheticPostFilterStageProcessor:
                         seen.add(key)
                         deduped.append(ln)
                 result = deduped
-            return result
+            return [*_buffer_truncation_notice(), *result]
 
         if self.kind == "uniq":
             result = []
@@ -1419,13 +1694,13 @@ class _SyntheticPostFilterStageProcessor:
                         cnt = 1
                 if prev is not None:
                     groups.append((cnt, prev))
-                return [f"{c:7d} {ln}\n" for c, ln in groups]
+                return [*_buffer_truncation_notice(), *[f"{c:7d} {ln}\n" for c, ln in groups]]
             for ln in self._line_buffer:
                 n = ln.rstrip("\n")
                 if n != prev:
                     result.append(ln)
                     prev = n
-            return result
+            return [*_buffer_truncation_notice(), *result]
 
         return []
 
@@ -1625,21 +1900,13 @@ def _prepare_interactive_pty_command(
         raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
     execution_command = shlex.join(argv)
     extra_allowed_prefixes = [str(spec.get("root") or tokens[0].lower())]
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
-        validation = _validate_command_for_run(
-            execution_command,
-            session_id,
-            workspace_cwd,
-            extra_allowed_prefixes=extra_allowed_prefixes,
-            owner_context=owner_context,
-        )
-    else:
-        validation = _validate_command_for_run(
-            execution_command,
-            session_id,
-            workspace_cwd,
-            extra_allowed_prefixes=extra_allowed_prefixes,
-        )
+    validation = _validate_command_with_effective_owner(
+        execution_command,
+        session_id,
+        workspace_cwd,
+        extra_allowed_prefixes=extra_allowed_prefixes,
+        owner_context=owner_context,
+    )
     if not validation.allowed:
         log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
@@ -1799,26 +2066,24 @@ def _prepare_real_command(
     owner_context: OwnerContext | None = None,
 ) -> _PreparedRealCommand:
     registry_command = execution_command
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
-        validation = _validate_command_for_run(
-            execution_command,
-            session_id,
-            workspace_cwd,
-            owner_context=owner_context,
-        )
-    else:
-        validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
+    effective_owner_context = _effective_owner_context(owner_context, session_id)
+    validation = _validate_command_with_effective_owner(
+        execution_command,
+        session_id,
+        workspace_cwd,
+        owner_context=effective_owner_context,
+    )
     if not validation.allowed:
         log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
     execution_command = validation.exec_command or execution_command
 
-    if owner_context is not None and (owner_context.is_team or owner_context.owner_id != str(session_id or "").strip()):
+    if effective_owner_context is not None:
         command, notice = rewrite_command(
             execution_command,
             session_id=session_id,
             cfg=CFG,
-            owner_context=owner_context,
+            owner_context=effective_owner_context,
         )
     else:
         command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
@@ -2095,6 +2360,107 @@ def _brokered_synthetic_run(
     return run_id
 
 
+def _publish_counted_project_notice(
+    run_id: str,
+    *,
+    count: int,
+    singular: str,
+    plural: str,
+    text_template: str,
+    payload: dict[str, object],
+) -> None:
+    if count <= 0:
+        return
+    label = singular if count == 1 else plural
+    publish_run_event(run_id, "notice", {
+        **payload,
+        "text": text_template.format(count=count, label=label),
+    })
+
+
+def _publish_project_finalize_notices(run_id: str, active_project_link, finalize_summary) -> None:
+    if active_project_link:
+        project_name = str(
+            active_project_link.get("project_name")
+            or active_project_link.get("project_id")
+            or "active project"
+        )
+        project_payload = {
+            "project_id": active_project_link.get("project_id"),
+            "project_name": project_name,
+        }
+        publish_run_event(run_id, "notice", {
+            **project_payload,
+            "text": f"[project] linked run to {project_name}",
+            "project_linked": True,
+        })
+        discovered_target_count = int(active_project_link.get("discovered_target_count") or 0)
+        linked_entity_count = int(active_project_link.get("linked_entity_count") or 0)
+        rejected_entity_count = int(active_project_link.get("rejected_entity_count") or 0)
+        for spec in (
+            {
+                "count": discovered_target_count,
+                "singular": "target",
+                "plural": "targets",
+                "text_template": f"[project] discovered {{count}} {{label}} for {project_name}",
+                "payload": {
+                    **project_payload,
+                    "project_targets_discovered": True,
+                    "target_count": discovered_target_count,
+                },
+            },
+            {
+                "count": linked_entity_count,
+                "singular": "Atlas entity",
+                "plural": "Atlas entities",
+                "text_template": f"[project] linked {{count}} {{label}} to {project_name}",
+                "payload": {
+                    **project_payload,
+                    "project_entities_linked": True,
+                    "entity_count": linked_entity_count,
+                },
+            },
+            {
+                "count": rejected_entity_count,
+                "singular": "Atlas entity",
+                "plural": "Atlas entities",
+                "text_template": (
+                    f"[project] skipped {{count}} {{label}} for {project_name} "
+                    "because the project link limit was reached"
+                ),
+                "payload": {
+                    **project_payload,
+                    "project_entities_rejected": True,
+                    "entity_count": rejected_entity_count,
+                    "reason": "project_link_limit",
+                },
+            },
+        ):
+            _publish_counted_project_notice(run_id, **spec)
+    if isinstance(finalize_summary, dict):
+        auto_promote_count = int(finalize_summary.get("project_auto_promote_count") or 0)
+        promoted_count = int(finalize_summary.get("project_auto_promote_promoted_count") or 0)
+        project_ids = [
+            str(project_id)
+            for project_id in (finalize_summary.get("project_auto_promote_project_ids") or [])
+            if str(project_id or "")
+        ]
+        _publish_counted_project_notice(
+            run_id,
+            count=auto_promote_count,
+            singular="Atlas entity",
+            plural="Atlas entities",
+            text_template="[project] auto-promoted {count} {label}",
+            payload={
+                "project_id": project_ids[0] if len(project_ids) == 1 else "",
+                "project_ids": project_ids,
+                "project_auto_promoted": True,
+                "entity_count": auto_promote_count,
+                "promoted_count": promoted_count,
+            },
+        )
+
+
 def _brokered_real_run_worker(
     *,
     run_id,
@@ -2231,70 +2597,7 @@ def _brokered_real_run_worker(
         elapsed = finalize_info["elapsed"]
         active_project_link = finalize_info.get("active_project_link")
         finalize_summary = finalize_info.get("finalize_summary") if isinstance(finalize_info, dict) else {}
-        if active_project_link:
-            project_name = str(
-                active_project_link.get("project_name")
-                or active_project_link.get("project_id")
-                or "active project"
-            )
-            publish_run_event(run_id, "notice", {
-                "text": f"[project] linked run to {project_name}",
-                "project_id": active_project_link.get("project_id"),
-                "project_name": project_name,
-                "project_linked": True,
-            })
-            discovered_target_count = int(active_project_link.get("discovered_target_count") or 0)
-            if discovered_target_count:
-                target_label = "target" if discovered_target_count == 1 else "targets"
-                publish_run_event(run_id, "notice", {
-                    "text": f"[project] discovered {discovered_target_count} {target_label} for {project_name}",
-                    "project_id": active_project_link.get("project_id"),
-                    "project_name": project_name,
-                    "project_targets_discovered": True,
-                    "target_count": discovered_target_count,
-                })
-            linked_entity_count = int(active_project_link.get("linked_entity_count") or 0)
-            if linked_entity_count:
-                entity_label = "Atlas entity" if linked_entity_count == 1 else "Atlas entities"
-                publish_run_event(run_id, "notice", {
-                    "text": f"[project] linked {linked_entity_count} {entity_label} to {project_name}",
-                    "project_id": active_project_link.get("project_id"),
-                    "project_name": project_name,
-                    "project_entities_linked": True,
-                    "entity_count": linked_entity_count,
-                })
-            rejected_entity_count = int(active_project_link.get("rejected_entity_count") or 0)
-            if rejected_entity_count:
-                entity_label = "Atlas entity" if rejected_entity_count == 1 else "Atlas entities"
-                publish_run_event(run_id, "notice", {
-                    "text": (
-                        f"[project] skipped {rejected_entity_count} {entity_label} for {project_name} "
-                        "because the project link limit was reached"
-                    ),
-                    "project_id": active_project_link.get("project_id"),
-                    "project_name": project_name,
-                    "project_entities_rejected": True,
-                    "entity_count": rejected_entity_count,
-                    "reason": "project_link_limit",
-                })
-        if isinstance(finalize_summary, dict):
-            auto_promote_count = int(finalize_summary.get("project_auto_promote_count") or 0)
-            if auto_promote_count:
-                promoted_count = int(finalize_summary.get("project_auto_promote_promoted_count") or 0)
-                project_ids = [
-                    str(project_id)
-                    for project_id in (finalize_summary.get("project_auto_promote_project_ids") or [])
-                    if str(project_id or "")
-                ]
-                entity_label = "Atlas entity" if auto_promote_count == 1 else "Atlas entities"
-                publish_run_event(run_id, "notice", {
-                    "text": f"[project] auto-promoted {auto_promote_count} {entity_label}",
-                    "project_id": project_ids[0] if len(project_ids) == 1 else "",
-                    "project_ids": project_ids,
-                    "project_auto_promoted": True,
-                    "entity_count": auto_promote_count,
-                    "promoted_count": promoted_count,
-                })
+        _publish_project_finalize_notices(run_id, active_project_link, finalize_summary)
         publish_run_event(run_id, "exit", {
             "code": exit_code,
             "elapsed": elapsed,
@@ -2561,9 +2864,15 @@ def stream_interactive_pty_run(run_id):
             claim_pty_stream_owner(run_id, session_id, owner_client_id, owner_tab_id)
 
     def generate():
+        last_touch_monotonic = None
         for item in stream_pty_events(run_id, session_id, after=after_id, team_id=owner_scope.team_id):
             if owner_client_id and can_control:
-                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+                last_touch_monotonic = _maybe_touch_active_run_owner(
+                    run_id,
+                    owner_client_id,
+                    owner_tab_id,
+                    last_touch_monotonic=last_touch_monotonic,
+                )
             yield item
 
     return Response(
@@ -2771,9 +3080,15 @@ def stream_brokered_run(run_id):
     owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
 
     def generate():
+        last_touch_monotonic = None
         for item in stream_run_events(run_id, after_id=after_id):
             if owner_client_id:
-                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+                last_touch_monotonic = _maybe_touch_active_run_owner(
+                    run_id,
+                    owner_client_id,
+                    owner_tab_id,
+                    last_touch_monotonic=last_touch_monotonic,
+                )
             yield item
 
     return Response(generate(), mimetype="text/event-stream",
@@ -2840,6 +3155,12 @@ def kill_command():
         # Using the original PID as the PGID is safe: if the process group
         # no longer exists the signal fails with ESRCH instead of hitting
         # an unrelated process.
+        _ensure_scanner_process_group_current(
+            run_id,
+            pgid,
+            session_id,
+            team_id=owner_scope.team_id if owner_scope.is_team else "",
+        )
         _signal_process_group(pgid)
         if run_type == "pty":
             if owner_scope.is_team:

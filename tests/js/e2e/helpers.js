@@ -17,9 +17,12 @@ function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
   if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')
   const slot = testInfo.project.name.match(/w\d+$/)?.[0]
-  if (!slot) throw new Error(`Cannot determine e2e server slot from ${testInfo.project.name}`)
-  const logName = readdirSync(logDir).find((name) => name.startsWith(`${slot}-`) && name.endsWith('.log'))
-  if (!logName) throw new Error(`Cannot find e2e server log for ${slot}`)
+  const logNames = readdirSync(logDir).filter((name) => name.endsWith('.log'))
+  const logName = slot
+    ? logNames.find((name) => name.startsWith(`${slot}-`))
+    : logNames.find((name) => name.startsWith(`${testInfo.project.name}-`))
+      || (logNames.length === 1 ? logNames[0] : '')
+  if (!logName) throw new Error(`Cannot find e2e server log for ${slot || testInfo.project.name}`)
   const log = readFileSync(join(logDir, logName), 'utf8')
   const dataDir = log.match(/^\[e2e-server\] data_dir=(.+)$/m)?.[1]
   if (!dataDir) throw new Error(`Cannot find data_dir in ${logName}`)
@@ -114,6 +117,207 @@ print(json.dumps(created))
   return JSON.parse(result.stdout)
 }
 
+export function seedProjectMonitoringFixture(testInfo, { sessionId, projectId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id = sys.argv[1:4]
+suffix = uuid.uuid4().hex[:16]
+baseline_run_id = "run_mon_base_" + suffix
+current_run_id = "run_mon_current_" + suffix
+deleted_run_id = "run_mon_deleted_" + suffix
+changed_watcher_id = "wtr_mon_changed_" + suffix
+deleted_watcher_id = "wtr_mon_deleted_" + suffix
+changed_fire_id = "wtf_mon_changed_" + suffix
+deleted_fire_id = "wtf_mon_deleted_" + suffix
+now = "2026-06-15T12:00:00+00:00"
+
+def output_preview(command, lines):
+    return json.dumps([
+        {"text": "$ " + command, "cls": "prompt-echo", "line_index": 0},
+        *[
+            {"text": text, "cls": "", "line_index": index + 1}
+            for index, text in enumerate(lines)
+        ],
+        {"text": "[process exited with code 0]", "cls": "exit-ok", "line_index": len(lines) + 1},
+    ])
+
+def insert_run(conn, run_id, command, lines, started):
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, ?, 0, 0)",
+        (run_id, session_id, command, started, started, output_preview(command, lines), len(lines) + 2),
+    )
+
+def insert_schedule(conn, schedule_id, watcher_id, command, cadence, enabled):
+    conn.execute(
+        "INSERT INTO schedules "
+        "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, timezone, "
+        "enabled, next_run_at, label, created, updated) "
+        "VALUES (?, ?, 'watcher', ?, 'command', ?, '0 * * * *', ?, 'UTC', ?, ?, ?, ?, ?)",
+        (schedule_id, session_id, watcher_id, command, cadence, enabled, "2026-06-15T13:00:00+00:00", command, now, now),
+    )
+
+def insert_watcher(conn, watcher_id, schedule_id, label, command, baseline_run_id, last_run_id, summary, cadence):
+    conn.execute(
+        "INSERT INTO watchers "
+        "(id, session_token, project_id, label, command_text, schedule_id, baseline_run_id, last_run_id, "
+        "last_diff_summary_json, state, state_reason, options_json, policy_json, consecutive_changed, created, updated) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'changed', 'diff_detected', ?, ?, 1, ?, ?)",
+        (
+            watcher_id,
+            session_id,
+            project_id,
+            label,
+            command,
+            schedule_id,
+            baseline_run_id,
+            last_run_id,
+            json.dumps(summary),
+            json.dumps({"suppress_removals": False, "notify_metadata_changes": False}),
+            json.dumps({"ignore_line_patterns": [], "alert_after_repeated_changes": 1, "alert_signal_classes": []}),
+            now,
+            now,
+        ),
+    )
+
+def insert_fire(conn, fire_id, watcher_id, run_id, baseline_run_id, summary, created):
+    conn.execute(
+        "INSERT INTO watcher_fires "
+        "(id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind, truncated, "
+        "notification_event_ids_json, state_at_fire, state_reason, fire_kind, ack_state, created) "
+        "VALUES (?, ?, ?, ?, ?, 'signal', 0, '[]', 'changed', 'diff_detected', 'changed', 'new', ?)",
+        (fire_id, watcher_id, baseline_run_id, run_id, json.dumps(summary), created),
+    )
+
+changed_summary = {
+    "classifier": "ports",
+    "added_port_count": 1,
+    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+}
+deleted_summary = {
+    "classifier": "ports",
+    "changed_port_count": 1,
+    "changed_ports": [{
+        "before": {"key": "443/tcp", "state": "closed", "service": "https"},
+        "after": {"key": "443/tcp", "state": "open", "service": "https"},
+    }],
+}
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    insert_run(conn, baseline_run_id, "nmap -sV darklab.sh --baseline", ["80/tcp open http"], "2026-06-15T11:00:00+00:00")
+    insert_run(conn, current_run_id, "nmap -sV darklab.sh", ["80/tcp open http", "443/tcp open https"], now)
+    insert_schedule(conn, "sch_" + changed_watcher_id, changed_watcher_id, "nmap -sV darklab.sh", "hourly", 1)
+    insert_schedule(conn, "sch_" + deleted_watcher_id, deleted_watcher_id, "nmap -sV deleted.darklab.sh", "daily", 1)
+    insert_watcher(
+        conn,
+        changed_watcher_id,
+        "sch_" + changed_watcher_id,
+        "Ports Browser Watch",
+        "nmap -sV darklab.sh",
+        baseline_run_id,
+        current_run_id,
+        changed_summary,
+        "hourly",
+    )
+    insert_watcher(
+        conn,
+        deleted_watcher_id,
+        "sch_" + deleted_watcher_id,
+        "Deleted Current Watch",
+        "nmap -sV deleted.darklab.sh",
+        baseline_run_id,
+        deleted_run_id,
+        deleted_summary,
+        "daily",
+    )
+    insert_fire(conn, changed_fire_id, changed_watcher_id, current_run_id, baseline_run_id, changed_summary, now)
+    insert_fire(conn, deleted_fire_id, deleted_watcher_id, deleted_run_id, baseline_run_id, deleted_summary, "2026-06-15T11:55:00+00:00")
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "baselineRunId": baseline_run_id,
+    "currentRunId": current_run_id,
+    "deletedRunId": deleted_run_id,
+    "changedWatcherId": changed_watcher_id,
+    "deletedWatcherId": deleted_watcher_id,
+    "changedFireId": changed_fire_id,
+    "deletedFireId": deleted_fire_id,
+}))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, projectId],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed project monitoring fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
+export function seedProjectActivityFixture(testInfo, { sessionId, projectId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+import hashlib
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id = sys.argv[1:4]
+event_id = "aud_capture_" + uuid.uuid4().hex[:16]
+session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+details = {"source": "capture", "review_state": "confirmed", "target": "capture.darklab.sh"}
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    conn.execute(
+        "INSERT INTO audit_events "
+        "(id, owner_session_hash, actor_session_hash, actor_session_label, actor_role, actor_display_name, "
+        "event_type, target_type, target_id, project_id, correlation_id, details_version, created, details) "
+        "VALUES (?, ?, ?, 'capture session', 'owner', 'Capture Reviewer', "
+        "'finding.review_change', 'finding', ?, ?, ?, 1, '2026-06-06T12:00:00+00:00', ?)",
+        (
+            event_id,
+            session_hash,
+            session_hash,
+            "finding_capture_" + uuid.uuid4().hex[:8],
+            project_id,
+            "corr_capture_" + uuid.uuid4().hex[:12],
+            json.dumps(details),
+        ),
+    )
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({"eventId": event_id}))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, projectId],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed project activity fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 /**
  * Return a per-test-run deterministic test-network address for specs that
  * explicitly exercise per-IP behavior.
@@ -136,7 +340,9 @@ export async function ensurePromptReady(
 ) {
   await page.waitForFunction(
     () => {
-      const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const activeTab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+        ? window.APP_STATE_API.getActiveTab()
+        : null
       const input = document.getElementById('cmd')
       return !!activeTab && input instanceof HTMLInputElement
     },
@@ -146,7 +352,9 @@ export async function ensurePromptReady(
 
   await page.evaluate(
     ({ cancel }) => {
-      const tabId = typeof activeTabId !== 'undefined' ? activeTabId : null
+      const tabId = typeof window.APP_STATE_API?.getActiveTabId === 'function'
+        ? window.APP_STATE_API.getActiveTabId()
+        : null
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
       if (cancel) {
         if (typeof cancelWelcome === 'function') cancelWelcome(tabId)
@@ -169,7 +377,9 @@ export async function ensurePromptReady(
       const active = typeof _welcomeActive !== 'undefined' ? _welcomeActive : false
       const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
-      const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
+      const activeTab = typeof window.APP_STATE_API?.getActiveTabId === 'function'
+        ? window.APP_STATE_API.getActiveTabId()
+        : null
       return !bootPending || (active && welcomeTabId !== activeTab)
     },
     undefined,
@@ -186,6 +396,16 @@ export async function ensurePromptReady(
       const style = window.getComputedStyle(target)
       return style.display !== 'none' && style.visibility !== 'hidden'
     },
+    undefined,
+    { timeout },
+  )
+
+  await page.waitForFunction(
+    () => (
+      typeof window.DarklabRunner?.submitVisibleComposerCommand === 'function' &&
+      typeof window.DarklabRunner?.hasRunnerHandler === 'function' &&
+      window.DarklabRunner.hasRunnerHandler('submitVisibleComposerCommand')
+    ),
     undefined,
     { timeout },
   )
@@ -254,7 +474,9 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
   const input = page.locator('#cmd')
   await input.waitFor({ state: 'visible', timeout })
   const beforeLineCount = await page.evaluate(() => {
-    const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+    const tab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+      ? window.APP_STATE_API.getActiveTab()
+      : null
     return Array.isArray(tab?.rawLines) ? tab.rawLines.length : 0
   })
   await input.focus()
@@ -262,7 +484,9 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
   await input.press('Enter')
   await page.waitForFunction(
     ({ expectedCmd, previousLineCount }) => {
-      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const tab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+        ? window.APP_STATE_API.getActiveTab()
+        : null
       if (!tab || tab.st === 'running') return false
       const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : []
       const output = document.querySelector('.tab-panel.active .output')
@@ -288,7 +512,9 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
 export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}) {
   await page.waitForFunction(
     () => {
-      const tabId = typeof activeTabId !== 'undefined' ? activeTabId : null
+      const tabId = typeof window.APP_STATE_API?.getActiveTabId === 'function'
+        ? window.APP_STATE_API.getActiveTabId()
+        : null
       if (!tabId) return false
       const pending =
         typeof _pendingOutputBatches !== 'undefined' ? _pendingOutputBatches.get(tabId) : null
@@ -328,7 +554,10 @@ export async function setComposerValueForTest(
         input.dispatchEvent(new Event('input', { bubbles: true }))
       }
       if (typeof getAutocompleteMatches === 'function') {
-        const matches = getAutocompleteMatches(nextValue, nextValue.length).slice(0, 12)
+        const rawMatches = getAutocompleteMatches(nextValue, nextValue.length)
+        const matches = typeof limitAutocompleteMatchesForDisplay === 'function'
+          ? limitAutocompleteMatchesForDisplay(rawMatches, 12)
+          : rawMatches.slice(0, 12)
         if (matches.length && typeof acShow === 'function') acShow(matches)
         else if (typeof acHide === 'function') acHide()
       }

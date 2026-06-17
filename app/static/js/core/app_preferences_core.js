@@ -1,7 +1,9 @@
 // ── App preference pure helpers ───────────────────────────────────────────
 // Loaded before app.js. Storage, cookies, and DOM sync stay in app.js; the
 // supported values and snapshot normalization live here.
-(function (global) {
+let DarklabPreferenceCore = null;
+
+(function () {
   const SESSION_PREFERENCE_KEYS = Object.freeze([
     'pref_active_project_id',
     'pref_theme_name',
@@ -142,29 +144,82 @@
     return `session_pref_cache:${sessionId || ''}`;
   }
 
-  global.DarklabPreferenceCore = Object.freeze({
-    SESSION_PREFERENCE_KEYS,
-    WELCOME_INTRO_MODES,
-    SHARE_REDACTION_DEFAULT_MODES,
-    HUD_CLOCK_MODES,
-    COMPARE_VIEW_MODES,
+  DarklabPreferenceCore = Object.freeze({
     COMPARE_CONTEXT_MODES,
+    COMPARE_VIEW_MODES,
+    HUD_CLOCK_MODES,
     OPTIONS_MODAL_TABS,
-    coerceTimestampMode,
-    coerceLineNumberMode,
-    coerceWelcomeIntroMode,
-    coerceShareRedactionDefaultMode,
-    coerceRunNotifyMode,
+    SESSION_PREFERENCE_KEYS,
+    SHARE_REDACTION_DEFAULT_MODES,
+    WELCOME_INTRO_MODES,
     coerceCommandOutcomeSummariesMode,
+    coerceCompareContextMode,
+    coerceCompareViewMode,
     coerceConstellationFullDayMode,
     coerceHudClockMode,
-    coerceCompareViewMode,
-    coerceCompareContextMode,
+    coerceLineNumberMode,
     coerceOptionsModalTab,
-    normalizePromptUsername,
+    coerceRunNotifyMode,
+    coerceShareRedactionDefaultMode,
+    coerceTimestampMode,
     coerceTourSeenVersion,
+    coerceWelcomeIntroMode,
     defaultSessionPreferences,
+    normalizePromptUsername,
     normalizeSessionPreferences,
     sessionPreferenceCacheKey,
   });
-})(typeof window !== 'undefined' ? window : globalThis);
+})();
+
+const {
+  COMPARE_CONTEXT_MODES,
+  COMPARE_VIEW_MODES,
+  HUD_CLOCK_MODES,
+  OPTIONS_MODAL_TABS,
+  SESSION_PREFERENCE_KEYS,
+  SHARE_REDACTION_DEFAULT_MODES,
+  WELCOME_INTRO_MODES,
+  coerceCommandOutcomeSummariesMode,
+  coerceCompareContextMode,
+  coerceCompareViewMode,
+  coerceConstellationFullDayMode,
+  coerceHudClockMode,
+  coerceLineNumberMode,
+  coerceOptionsModalTab,
+  coerceRunNotifyMode,
+  coerceShareRedactionDefaultMode,
+  coerceTimestampMode,
+  coerceTourSeenVersion,
+  coerceWelcomeIntroMode,
+  defaultSessionPreferences,
+  normalizePromptUsername,
+  normalizeSessionPreferences,
+  sessionPreferenceCacheKey,
+} = DarklabPreferenceCore;
+
+export {
+  COMPARE_CONTEXT_MODES,
+  COMPARE_VIEW_MODES,
+  DarklabPreferenceCore,
+  HUD_CLOCK_MODES,
+  OPTIONS_MODAL_TABS,
+  SESSION_PREFERENCE_KEYS,
+  SHARE_REDACTION_DEFAULT_MODES,
+  WELCOME_INTRO_MODES,
+  coerceCommandOutcomeSummariesMode,
+  coerceCompareContextMode,
+  coerceCompareViewMode,
+  coerceConstellationFullDayMode,
+  coerceHudClockMode,
+  coerceLineNumberMode,
+  coerceOptionsModalTab,
+  coerceRunNotifyMode,
+  coerceShareRedactionDefaultMode,
+  coerceTimestampMode,
+  coerceTourSeenVersion,
+  coerceWelcomeIntroMode,
+  defaultSessionPreferences,
+  normalizePromptUsername,
+  normalizeSessionPreferences,
+  sessionPreferenceCacheKey,
+};

@@ -3,29 +3,23 @@ import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
-// ui_pressable.js is an IIFE that installs `bindPressable` on its argument
-// (window in the browser). Evaluate it with a scoped `global` param so each
-// test can hand in a fresh stub and inspect the installed function without
-// polluting window between tests.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const UI_PRESSABLE_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'),
   'utf8',
 )
+  .replace(/^\s*import\s+\{\s*isConfirmOpen\s+as\s+importedIsConfirmOpen\s*\}\s+from\s+['"].\/ui_confirm\.js['"];\s*/m, 'const importedIsConfirmOpen = __isConfirmOpen;\n')
+  .replace(/^\s*import\s+\{\s*refocusComposerAfterAction\s+as\s+importedRefocusComposerAfterAction\s*\}\s+from\s+['"].\/ui_helpers\.js['"];\s*/m, 'const importedRefocusComposerAfterAction = __refocusComposerAfterAction;\n')
+  .replace(/export\s*\{\s*bindPressable\s*\};?\s*$/m, '')
 
-function loadPressable({ refocusComposerAfterAction = null } = {}) {
-  // ui_pressable.js is an IIFE that installs bindPressable on its argument,
-  // which resolves to `window` under jsdom. Set/clear the helper hook on
-  // window and execute the source in the page context; return a reference to
-  // window so tests can read bindPressable off it.
-  if (refocusComposerAfterAction) {
-    window.refocusComposerAfterAction = refocusComposerAfterAction
-  } else {
-    delete window.refocusComposerAfterAction
-  }
-  new Function(UI_PRESSABLE_SRC)()
-  return window
+function loadPressable({ refocusComposerAfterAction = null, isConfirmOpen = null } = {}) {
+  const bindPressable = new Function(
+    '__refocusComposerAfterAction',
+    '__isConfirmOpen',
+    `${UI_PRESSABLE_SRC}\nreturn bindPressable;`,
+  )(refocusComposerAfterAction || undefined, isConfirmOpen || undefined)
+  return { bindPressable }
 }
 
 // A minimal element helper — jsdom provides real DOM semantics.
@@ -153,14 +147,10 @@ describe('bindPressable', () => {
     // _afterActivate then yanked focus back to the composer, breaking the
     // modal's default focus and leaving its focus trap with no target.
     const btn = makeEl('button')
-    window.isConfirmOpen = () => true
-    try {
-      g.bindPressable(btn, { onActivate: () => {} })
-      btn.click()
-      expect(refocus).not.toHaveBeenCalled()
-    } finally {
-      delete window.isConfirmOpen
-    }
+    g = loadPressable({ refocusComposerAfterAction: refocus, isConfirmOpen: () => true })
+    g.bindPressable(btn, { onActivate: () => {} })
+    btn.click()
+    expect(refocus).not.toHaveBeenCalled()
   })
 
   it('runs refocus even if onActivate throws', () => {

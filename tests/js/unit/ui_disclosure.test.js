@@ -2,21 +2,21 @@ import { vi, describe, it, beforeEach, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { stripEsmExports } from './helpers/extract.js'
 
-// ui_disclosure.js composes on top of ui_pressable.js (both are IIFEs that
-// install helpers on window). Each test fresh-loads both sources into jsdom
-// so bindDisclosure is evaluated against the same global the pressable
-// helper writes to.
+// ui_disclosure.js composes on top of ui_pressable.js. Each test fresh-loads
+// both sources in the same stripped scope so bindDisclosure captures the
+// expected pressable helper.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const UI_PRESSABLE_SRC = readFileSync(
+const UI_PRESSABLE_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'),
   'utf8',
-)
-const UI_DISCLOSURE_SRC = readFileSync(
+))
+const UI_DISCLOSURE_SRC = stripEsmExports(readFileSync(
   resolve(REPO_ROOT, 'app/static/js/ui/ui_disclosure.js'),
   'utf8',
-)
+))
 
 function loadHelpers({ refocusComposerAfterAction = null, loadPressable = true } = {}) {
   if (refocusComposerAfterAction) {
@@ -26,9 +26,8 @@ function loadHelpers({ refocusComposerAfterAction = null, loadPressable = true }
   }
   delete window.bindPressable
   delete window.bindDisclosure
-  if (loadPressable) new Function(UI_PRESSABLE_SRC)()
-  new Function(UI_DISCLOSURE_SRC)()
-  return window
+  const src = `${loadPressable ? UI_PRESSABLE_SRC : ''}\n${UI_DISCLOSURE_SRC}`
+  return new Function(`${src}\nreturn { bindDisclosure };`)()
 }
 
 function makeTrigger(tagName = 'button') {
@@ -229,8 +228,8 @@ describe('bindDisclosure', () => {
     const trigger = makeTrigger()
     // Reload with bindPressable missing
     delete window.bindPressable
-    new Function(UI_DISCLOSURE_SRC)()
-    expect(window.bindDisclosure(trigger, {})).toBeNull()
+    const helpers = new Function(`${UI_DISCLOSURE_SRC}\nreturn { bindDisclosure };`)()
+    expect(helpers.bindDisclosure(trigger, {})).toBeNull()
   })
 
   it('does not refocus the composer by default (disclosures keep focus on trigger)', () => {

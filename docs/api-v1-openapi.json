@@ -3083,6 +3083,12 @@
           "options": {
             "$ref": "#/components/schemas/WatcherOptions"
           },
+          "policy": {
+            "$ref": "#/components/schemas/WatcherPolicy"
+          },
+          "project_id": {
+            "type": "string"
+          },
           "schedule": {
             "$ref": "#/components/schemas/Schedule"
           },
@@ -3113,6 +3119,7 @@
         "required": [
           "id",
           "team_id",
+          "project_id",
           "label",
           "command_text",
           "schedule_id",
@@ -3123,6 +3130,7 @@
           "state_reason",
           "last_error",
           "options",
+          "policy",
           "consecutive_no_change",
           "consecutive_changed",
           "consecutive_failures",
@@ -3177,6 +3185,12 @@
           "options": {
             "$ref": "#/components/schemas/WatcherOptions"
           },
+          "policy": {
+            "$ref": "#/components/schemas/WatcherPolicy"
+          },
+          "project_id": {
+            "type": "string"
+          },
           "timezone": {
             "type": "string"
           },
@@ -3196,6 +3210,25 @@
       },
       "WatcherFire": {
         "properties": {
+          "ack_at": {
+            "type": "string"
+          },
+          "ack_by": {
+            "type": "string"
+          },
+          "ack_note": {
+            "type": "string"
+          },
+          "ack_state": {
+            "enum": [
+              "acknowledged",
+              "expected",
+              "needs_action",
+              "new",
+              "resolved"
+            ],
+            "type": "string"
+          },
           "baseline_run_id": {
             "type": "string"
           },
@@ -3213,6 +3246,19 @@
           },
           "diff_summary": {
             "$ref": "#/components/schemas/WatcherDiffSummary"
+          },
+          "fire_kind": {
+            "enum": [
+              "baseline_accepted",
+              "baseline_created",
+              "changed",
+              "failed",
+              "no_change",
+              "paused",
+              "recovered",
+              "unclassified"
+            ],
+            "type": "string"
           },
           "id": {
             "type": "string"
@@ -3236,6 +3282,9 @@
             ],
             "type": "string"
           },
+          "state_reason": {
+            "type": "string"
+          },
           "team_id": {
             "type": "string"
           },
@@ -3257,6 +3306,12 @@
           "truncated",
           "notification_event_ids",
           "state_at_fire",
+          "state_reason",
+          "fire_kind",
+          "ack_state",
+          "ack_note",
+          "ack_by",
+          "ack_at",
           "created"
         ],
         "type": "object"
@@ -3333,6 +3388,37 @@
         ],
         "type": "object"
       },
+      "WatcherPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_after_repeated_changes": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "alert_signal_classes": {
+            "items": {
+              "enum": [
+                "entities",
+                "findings",
+                "ports"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "ignore_line_patterns": {
+            "items": {
+              "maxLength": 120,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "WatcherResponse": {
         "properties": {
           "watcher": {
@@ -3394,6 +3480,12 @@
           "pause": {
             "type": "boolean"
           },
+          "policy": {
+            "$ref": "#/components/schemas/WatcherPolicy"
+          },
+          "project_id": {
+            "type": "string"
+          },
           "reason": {
             "type": "string"
           },
@@ -3449,7 +3541,7 @@
   },
   "info": {
     "title": "darklab_shell API",
-    "version": "2.1"
+    "version": "2.2"
   },
   "openapi": "3.0.3",
   "paths": {

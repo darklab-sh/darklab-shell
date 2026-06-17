@@ -1,3 +1,10 @@
+let exportedBoardColumnLimit = null;
+let exportedBoardWorkflowStates = null;
+let exportedBoardCardFromFinding = null;
+let exportedBoardColumnsFromFindings = null;
+let exportedBoardWorkflowState = null;
+let exportedDarklabProjectFindingsData = null;
+
 (function projectFindingsDataModule(global) {
   'use strict';
 
@@ -347,6 +354,7 @@
     async function load(projectId, options = {}) {
       const normalized = String(projectId || '');
       if (!normalized) return;
+      if (options.allPages) return loadAll(normalized, options);
       const currentPage = findingsPagination.get(normalized) || { limit: pageLimit, offset: 0, total: 0, has_more: false };
       const offset = Math.max(0, Number(
         Object.prototype.hasOwnProperty.call(options, 'offset') ? options.offset : currentPage.offset,
@@ -428,16 +436,65 @@
             findingsLoadingId = '';
             findingsLoadingPromise = null;
           }
-          ctx.renderProjectExplorer();
-          if (ctx.mobileView?.() === 'detail' && normalizedProjectId() === normalized) {
-            ctx.renderProjectMobileDetail();
-          }
-          if (ctx.projectPackageWizardActive?.(normalized)) {
-            ctx.renderProjectPackageWizardModal();
+          if (!options.skipFinalRender) {
+            ctx.renderProjectExplorer();
+            if (ctx.mobileView?.() === 'detail' && normalizedProjectId() === normalized) {
+              ctx.renderProjectMobileDetail();
+            }
+            if (ctx.projectPackageWizardActive?.(normalized)) {
+              ctx.renderProjectPackageWizardModal();
+            }
           }
         }
       });
       return findingsLoadingPromise;
+    }
+
+    async function loadAll(projectId, options = {}) {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return [];
+      const currentItems = items(normalized);
+      const currentPage = findingsPagination.get(normalized) || { total: 0, loaded: false };
+      const knownTotal = Number(currentPage.total || 0);
+      if (currentPage.loaded && currentItems.length && (!knownTotal || currentItems.length >= knownTotal)) {
+        return currentItems;
+      }
+      const collected = [];
+      let offset = 0;
+      let total = 0;
+      do {
+        const params = new URLSearchParams({ limit: '200', offset: String(offset) });
+        const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalized)}/findings?${params.toString()}`, {
+          cache: 'no-store',
+        });
+        if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project findings.');
+        const data = await resp.json();
+        const rows = Array.isArray(data.findings) ? data.findings : [];
+        collected.push(...rows);
+        total = Number(data.total || collected.length);
+        offset += rows.length;
+        if (!rows.length) break;
+      } while (collected.length < total);
+      findings.set(normalized, collected);
+      findingsPagination.set(normalized, {
+        limit: pageLimit,
+        offset: 0,
+        total: total || collected.length,
+        has_more: false,
+        loaded: true,
+        loading: false,
+        group_counts: {},
+        collapsed_group_counts: {},
+        group_order: [],
+        collapsed_signature: collapsedGroupSignature(normalized),
+      });
+      if (!options.skipFinalRender) {
+        ctx.renderProjectExplorer?.();
+        if (ctx.mobileView?.() === 'detail' && normalizedProjectId() === normalized) {
+          ctx.renderProjectMobileDetail?.();
+        }
+      }
+      return collected;
     }
 
     async function loadFiltered(projectId, summary = ctx.projectSummary?.(projectId), options = {}) {
@@ -541,6 +598,7 @@
       invalidateFiltered,
       items,
       load,
+      loadAll,
       loaded,
       loadingId,
       page,
@@ -551,7 +609,7 @@
     };
   }
 
-  global.DarklabProjectFindingsData = {
+  const DarklabProjectFindingsData = {
     BOARD_COLUMN_LIMIT,
     BOARD_WORKFLOW_STATES,
     boardCardFromFinding,
@@ -559,4 +617,18 @@
     boardWorkflowState,
     createProjectFindingsDataController,
   };
+  exportedBoardColumnLimit = BOARD_COLUMN_LIMIT;
+  exportedBoardWorkflowStates = BOARD_WORKFLOW_STATES;
+  exportedBoardCardFromFinding = boardCardFromFinding;
+  exportedBoardColumnsFromFindings = boardColumnsFromFindings;
+  exportedBoardWorkflowState = boardWorkflowState;
+  exportedDarklabProjectFindingsData = DarklabProjectFindingsData;
 })(globalThis);
+
+export {
+  exportedBoardColumnLimit as BOARD_COLUMN_LIMIT,
+  exportedBoardWorkflowStates as BOARD_WORKFLOW_STATES,
+  exportedDarklabProjectFindingsData as DarklabProjectFindingsData,
+  exportedBoardCardFromFinding as boardCardFromFinding,
+  exportedBoardColumnsFromFindings as boardColumnsFromFindings,
+  exportedBoardWorkflowState as boardWorkflowState,};

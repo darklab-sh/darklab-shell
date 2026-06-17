@@ -1,12 +1,26 @@
 // Project workspace navigation controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import {
+  bindTabStripEdgeListener as importedBindTabStripEdgeListener,
+  syncActiveTabStripScroll as importedSyncActiveTabStripScroll,
+  syncTabStripEdges as importedSyncTabStripEdges,
+} from '../../ui/ui_tab_strip_edges.js';
+
+let exportedDarklabProjectNavigation = null;
+
 (function projectNavigationModule(global) {
   'use strict';
 
   function createProjectNavigationController(context) {
     const ctx = context || {};
     const mobileTabEdgeOptions = { wrapSelector: '.project-mobile-tabs-wrap' };
+    const desktopTabEdgeOptions = {
+      wrapSelector: '.project-explorer-tabs-wrap',
+      scrollOnlyIfNeeded: true,
+    };
+    let desktopTabsResizeObserver = null;
 
     function formatCompactCount(value) {
       const count = Number(value || 0);
@@ -92,10 +106,13 @@
           ? { id: 'artifacts', label: 'Artifacts', count: clamp(counts.artifacts) }
           : null,
         { id: 'packages', label: 'Packages', count: clamp(counts.packages) },
+        { id: 'report', label: 'Report' },
+        { id: 'monitoring', label: 'Monitoring' },
+        { id: 'activity', label: 'Activity' },
       ].filter(Boolean);
     }
 
-    function renderProjectHeader(project, summary) {
+    function renderProjectHeader(project, summary, options = {}) {
       const header = document.createElement('div');
       header.className = 'project-explorer-header';
       const titleWrap = document.createElement('div');
@@ -130,7 +147,8 @@
       } else {
         actions.appendChild(ctx.makeProjectButton('Unarchive', 'unarchive', String(project.id || '')));
       }
-      if (typeof global.openAtlas === 'function') {
+      const openAtlas = typeof importedOpenAtlas === 'function' ? importedOpenAtlas : null;
+      if (typeof openAtlas === 'function') {
         actions.appendChild(ctx.makeProjectButton('Open in Atlas', 'open-atlas', String(project.id || '')));
       }
       actions.appendChild(ctx.makeProjectButton('Delete', 'delete', String(project.id || ''), 'destructive'));
@@ -140,6 +158,10 @@
       tabs.className = 'project-explorer-tabs tab-strip';
       tabs.setAttribute('role', 'tablist');
       tabs.setAttribute('aria-label', 'Project sections');
+      const tabsWrap = document.createElement('div');
+      tabsWrap.className = 'tab-strip-wrap project-explorer-tabs-wrap';
+      const scrollLeft = createDesktopTabScrollButton('left');
+      const scrollRight = createDesktopTabScrollButton('right');
       const tabCounts = ctx.projectCounts(summary);
       const projectId = String(project.id || '');
       const tabItems = [
@@ -151,6 +173,9 @@
           ? { id: 'artifacts', label: 'Artifacts', count: tabCountText(projectId, summary, 'artifacts', tabCounts.artifacts) }
           : null,
         { id: 'packages', label: 'Packages', count: tabCounts.packages },
+        { id: 'report', label: 'Report' },
+        { id: 'monitoring', label: 'Monitoring' },
+        { id: 'activity', label: 'Activity' },
       ].filter(Boolean);
       tabItems.forEach(({ id, label, count }) => {
         const btn = document.createElement('button');
@@ -164,7 +189,26 @@
         ctx.bindProjectRuntimePressable(btn);
         tabs.appendChild(btn);
       });
-      return [header, tabs];
+      tabsWrap.append(scrollLeft, tabs, scrollRight);
+      const initialTabsScrollLeft = Math.max(0, Number(options.initialTabsScrollLeft || 0));
+      if (initialTabsScrollLeft > 0) tabs.scrollLeft = initialTabsScrollLeft;
+      bindDesktopTabControls(tabs);
+      syncDesktopActiveTabScroll(tabs);
+      return [header, tabsWrap];
+    }
+
+    function createDesktopTabScrollButton(direction) {
+      const isLeft = direction === 'left';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact project-explorer-tabs-scroll-btn u-hidden';
+      btn.dataset.projectTabsScroll = direction;
+      btn.setAttribute('aria-label', isLeft ? 'Scroll project tabs left' : 'Scroll project tabs right');
+      btn.setAttribute('aria-hidden', 'true');
+      btn.title = isLeft ? 'Scroll project tabs left' : 'Scroll project tabs right';
+      btn.disabled = true;
+      ctx.bindProjectRuntimePressable(btn);
+      return btn;
     }
 
     function renderMobileDetailTopbar(project, activeId) {
@@ -229,14 +273,77 @@
     }
 
     function syncMobileActiveTabScroll() {
-      if (typeof global.syncActiveTabStripScroll === 'function') {
-        global.syncActiveTabStripScroll(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      if (typeof importedSyncActiveTabStripScroll === 'function') {
+        importedSyncActiveTabStripScroll(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      }
+    }
+
+    function syncDesktopActiveTabScroll(strip) {
+      if (typeof importedSyncActiveTabStripScroll === 'function') {
+        importedSyncActiveTabStripScroll(strip, desktopTabEdgeOptions);
+      }
+      scheduleDesktopTabScrollSync(strip);
+    }
+
+    function bindDesktopTabControls(strip) {
+      if (typeof importedBindTabStripEdgeListener === 'function') {
+        importedBindTabStripEdgeListener(strip, desktopTabEdgeOptions);
+      }
+      if (!strip || typeof strip.closest !== 'function') return;
+      const wrap = strip.closest('.project-explorer-tabs-wrap');
+      if (!wrap) return;
+      wrap.querySelector('[data-project-tabs-scroll="left"]')?.addEventListener('click', () => scrollDesktopTabs(strip, -1));
+      wrap.querySelector('[data-project-tabs-scroll="right"]')?.addEventListener('click', () => scrollDesktopTabs(strip, 1));
+      strip.addEventListener('scroll', () => syncDesktopTabScrollControls(strip), { passive: true });
+      if (desktopTabsResizeObserver) desktopTabsResizeObserver.disconnect();
+      if (typeof ResizeObserver === 'function') {
+        desktopTabsResizeObserver = new ResizeObserver(() => syncDesktopTabScrollControls(strip));
+        desktopTabsResizeObserver.observe(wrap);
+        desktopTabsResizeObserver.observe(strip);
+      }
+      scheduleDesktopTabScrollSync(strip);
+    }
+
+    function scheduleDesktopTabScrollSync(strip) {
+      if (!strip) return;
+      window.setTimeout(() => syncDesktopTabScrollControls(strip), 0);
+    }
+
+    function scrollDesktopTabs(strip, direction) {
+      if (!strip) return;
+      const distance = Math.max(180, Math.floor(Number(strip.clientWidth || 0) * 0.7) || 220);
+      if (typeof strip.scrollBy === 'function') {
+        strip.scrollBy({ left: direction * distance, behavior: 'smooth' });
+      } else {
+        strip.scrollLeft += direction * distance;
+      }
+      window.setTimeout(() => syncDesktopTabScrollControls(strip), 180);
+    }
+
+    function syncDesktopTabScrollControls(strip) {
+      if (!strip || typeof strip.closest !== 'function') return;
+      const wrap = strip.closest('.project-explorer-tabs-wrap');
+      if (!wrap) return;
+      const leftBtn = wrap.querySelector('[data-project-tabs-scroll="left"]');
+      const rightBtn = wrap.querySelector('[data-project-tabs-scroll="right"]');
+      if (!leftBtn || !rightBtn) return;
+      const maxScroll = Math.max(0, strip.scrollWidth - strip.clientWidth);
+      const scrollLeft = Math.max(0, strip.scrollLeft || 0);
+      const hasOverflow = maxScroll > 1;
+      [leftBtn, rightBtn].forEach((btn) => {
+        btn.classList.toggle('u-hidden', !hasOverflow);
+        btn.setAttribute('aria-hidden', hasOverflow ? 'false' : 'true');
+      });
+      leftBtn.disabled = !hasOverflow || scrollLeft <= 1;
+      rightBtn.disabled = !hasOverflow || scrollLeft >= maxScroll - 1;
+      if (typeof importedSyncTabStripEdges === 'function') {
+        importedSyncTabStripEdges(strip, desktopTabEdgeOptions);
       }
     }
 
     function syncMobileTabEdges() {
-      if (typeof global.syncTabStripEdges === 'function') {
-        global.syncTabStripEdges(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      if (typeof importedSyncTabStripEdges === 'function') {
+        importedSyncTabStripEdges(ctx.projectMobileTabs, mobileTabEdgeOptions);
       }
     }
 
@@ -248,6 +355,8 @@
           String(button.dataset.projectTab || button.dataset.projectMobileDetailTab || '') === nextTab
         ));
         target?.focus({ preventScroll: true });
+        const desktopStrip = target?.closest?.('.project-explorer-tabs');
+        if (desktopStrip) syncDesktopActiveTabScroll(desktopStrip);
         syncMobileActiveTabScroll();
       }, 0);
     }
@@ -264,7 +373,11 @@
     };
   }
 
-  global.DarklabProjectNavigation = {
+  const DarklabProjectNavigation = {
     createProjectNavigationController,
   };
+  exportedDarklabProjectNavigation = DarklabProjectNavigation;
 })(globalThis);
+
+export {
+  exportedDarklabProjectNavigation as DarklabProjectNavigation,};

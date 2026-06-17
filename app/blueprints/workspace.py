@@ -12,6 +12,9 @@ from flask import Blueprint, Response, jsonify, request, send_file
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.audit.context import route_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.download_tickets import (
     DownloadTicketError,
     DOWNLOAD_TICKET_MAX_AGE_SECONDS,
@@ -389,6 +392,22 @@ def _workspace_download_response(handle, path: str) -> Response:
     return response
 
 
+def _record_workspace_file_event(
+    event_type: AuditEventType,
+    *,
+    session_id: str,
+    scope: RequestScope,
+    target_id: str,
+    details: dict[str, Any],
+) -> None:
+    record_event(
+        event_type,
+        target_id=target_id,
+        details={"source": "workspace", **details},
+        **route_audit_fields(session_id, request, scope),
+    )
+
+
 def _path_from_request() -> str:
     return str(request.args.get("path") or "").strip()
 
@@ -428,6 +447,19 @@ def workspace_files_write():
             "path": file_info["path"],
             "size": file_info["size"],
         })
+        _record_workspace_file_event(
+            AuditEventType.FILE_WRITE,
+            session_id=session_id,
+            scope=scope,
+            target_id=str(file_info["path"]),
+            details={
+                "action": "write",
+                "file_path": str(file_info["path"]),
+                "byte_size": int(file_info["size"] or 0),
+                "file_count": 1,
+                "status": "file",
+            },
+        )
         return jsonify({"ok": True, "file": file_info, "workspace": _workspace_payload(scope)})
     except Exception as exc:
         return _workspace_error_response(exc)
@@ -452,6 +484,18 @@ def workspace_directories_create():
             "team_id": scope.team_id,
             "path": directory_info["path"],
         })
+        _record_workspace_file_event(
+            AuditEventType.FILE_WRITE,
+            session_id=session_id,
+            scope=scope,
+            target_id=str(directory_info["path"]),
+            details={
+                "action": "create_directory",
+                "file_path": str(directory_info["path"]),
+                "file_count": 0,
+                "status": "directory",
+            },
+        )
         return jsonify({"ok": True, "directory": directory_info, "workspace": _workspace_payload(scope)})
     except Exception as exc:
         return _workspace_error_response(exc)
@@ -498,6 +542,18 @@ def workspace_files_delete():
     path = _path_from_request()
     try:
         metadata_paths = _workspace_file_metadata_paths(scope, path)
+        delete_info = owner_workspace_path_info(scope.context, path)
+        record_event(
+            AuditEventType.FILE_DELETE,
+            target_id=str(delete_info["path"]),
+            details={
+                "file_path": str(delete_info["path"]),
+                "file_count": int(delete_info["file_count"]),
+                "source": "workspace",
+                "status": str(delete_info["kind"]),
+            },
+            **route_audit_fields(session_id, request, scope),
+        )
         deleted = delete_owner_workspace_path(scope.context, path)
         _delete_workspace_file_metadata(scope, metadata_paths)
         log.info("WORKSPACE_FILE_DELETE", extra={
@@ -539,6 +595,20 @@ def workspace_files_move():
         _move_workspace_file_metadata(
             scope,
             _workspace_moved_metadata_path_map(moved.source, moved.destination, metadata_paths),
+        )
+        _record_workspace_file_event(
+            AuditEventType.FILE_MOVE,
+            session_id=session_id,
+            scope=scope,
+            target_id=moved.destination,
+            details={
+                "action": "move",
+                "source_path": moved.source,
+                "destination_path": moved.destination,
+                "file_path": moved.destination,
+                "file_count": moved.file_count,
+                "status": moved.kind,
+            },
         )
         log.info("WORKSPACE_FILE_MOVE", extra={
             "ip": get_client_ip(),

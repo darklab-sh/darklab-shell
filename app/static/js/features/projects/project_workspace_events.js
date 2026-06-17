@@ -1,3 +1,14 @@
+import {
+  activeTeamScopeCan as importedActiveTeamScopeCan,
+  teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
+} from '../team_scope.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from '../history/history_restore.js';
+
+let exportedDarklabProjectWorkspaceEvents = null;
+
 (function projectWorkspaceEventsModule(global) {
   'use strict';
 
@@ -30,14 +41,16 @@
     }
 
     function activeTeamScopeCan(capability) {
-      return typeof global.activeTeamScopeCan === 'function'
-        ? global.activeTeamScopeCan(capability)
-        : true;
+      const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+        || null;
+      return typeof can === 'function' ? can(capability) : true;
     }
 
     function teamScopeDeniedMessage(action) {
-      return typeof global.teamScopeDeniedMessage === 'function'
-        ? global.teamScopeDeniedMessage(action)
+      const denied = (typeof importedTeamScopeDeniedMessage !== 'undefined' && importedTeamScopeDeniedMessage)
+        || null;
+      return typeof denied === 'function'
+        ? denied(action)
         : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
     }
 
@@ -69,9 +82,11 @@
     }
 
     function restoreHistoryRun() {
-      return typeof global.restoreHistoryRunIntoTab === 'function'
-        ? global.restoreHistoryRunIntoTab
-        : (typeof global.restoreHistoryRun === 'function' ? global.restoreHistoryRun : null);
+      if (typeof ctx.restoreHistoryRunIntoTab === 'function') return ctx.restoreHistoryRunIntoTab;
+      if (typeof ctx.restoreHistoryRun === 'function') return ctx.restoreHistoryRun;
+      return typeof importedRestoreHistoryRunIntoTab === 'function'
+        ? importedRestoreHistoryRunIntoTab
+        : null;
     }
 
     function pagerDescriptor(button) {
@@ -155,12 +170,20 @@
 
     async function handleInput(event) {
       if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
-      ctx.packagesController?.().handleInput(event);
+      const reportController = ctx.reportController?.();
+      if (reportController && reportController.handleInput(event)) return;
+      const packagesController = ctx.packagesController?.();
+      packagesController?.handleInput(event);
     }
 
     async function handleChange(event) {
       if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
-      if (ctx.packagesController?.().handleChange(event)) return;
+      const monitoringController = ctx.monitoringController?.();
+      if (monitoringController && monitoringController.handleChange(event)) return;
+      const reportController = ctx.reportController?.();
+      if (reportController && reportController.handleChange(event)) return;
+      const packagesController = ctx.packagesController?.();
+      if (packagesController && packagesController.handleChange(event)) return;
       const findingViewModeControl = event.target.closest?.('[data-project-finding-view-mode]');
       if (findingViewModeControl) {
         event.preventDefault();
@@ -321,6 +344,8 @@
               .map(item => String(item.finding_id || ''))
             : findingIds;
           updatedIds.forEach(findingId => ctx.setCachedFindingReviewState(projectId, findingId, reviewState));
+          const activityController = ctx.activityController?.();
+          activityController?.invalidate?.(projectId);
           selectedFindingIds().clear();
           ctx.setFindingSelectMode(false);
           ctx.renderProjectExplorer();
@@ -354,10 +379,15 @@
         ctx.renderProjectMobileDetail();
       }
       try {
-        await ctx.projectWorkspaceRequest(`/findings/${encodeURIComponent(findingId)}/review`, {
-          method: 'PUT',
-          body: JSON.stringify({ review_state: reviewState }),
+        const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/findings/review`, {
+          method: 'POST',
+          body: JSON.stringify({ finding_ids: [findingId], review_state: reviewState }),
         });
+        const result = await resp.json();
+        const updated = Number(result?.counts?.updated || 0);
+        if (!updated) throw new Error('Finding was no longer available in this project.');
+        const activityController = ctx.activityController?.();
+        activityController?.invalidate?.(projectId);
         control.dataset.previousReviewState = reviewState;
       } catch (err) {
         ctx.setCachedFindingReviewState(projectId, findingId, previousReviewState);
@@ -391,9 +421,13 @@
       ctx.closeProjectFilterMenus();
     }
 
+    function handlePointerDown(event) {
+      const tabBtn = event.target.closest?.('[data-project-tab]');
+      if (!tabBtn) return;
+      event.preventDefault();
+    }
+
     async function handleClick(event) {
-      if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
-      if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
       if (mobileDetailTab) {
         event.preventDefault();
@@ -476,6 +510,33 @@
           return;
         }
       }
+      const artifactGroupToggle = event.target.closest?.('[data-project-artifact-group-toggle]');
+      if (artifactGroupToggle) {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = String(artifactGroupToggle.dataset.projectId || selectedProjectId() || '');
+        const runId = String(artifactGroupToggle.dataset.projectArtifactGroup || '');
+        ctx.toggleArtifactGroup(projectId, runId);
+        if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        else ctx.renderProjectExplorer();
+        return;
+      }
+      if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
+      const activityController = ctx.activityController?.();
+      if (
+        event.target.closest?.('[data-project-activity-action]')
+        && activityController
+        && await activityController.handleClick(event)
+      ) return;
+      const monitoringController = ctx.monitoringController?.();
+      if (
+        event.target.closest?.('[data-project-monitoring-action]')
+        && monitoringController
+        && await monitoringController.handleClick(event)
+      ) return;
+      const reportController = ctx.reportController?.();
+      if (reportController && await reportController.handleClick(event)) return;
+      if (event.target.closest?.('[data-project-review-state]')) return;
       const mobileProjectRow = event.target.closest?.('.project-mobile-row[data-project-id]');
       if (
         mobileProjectRow
@@ -499,17 +560,6 @@
         event.preventDefault();
         event.stopPropagation();
         ctx.setProjectWorkspaceMessage('');
-        return;
-      }
-      const artifactGroupToggle = event.target.closest?.('[data-project-artifact-group-toggle]');
-      if (artifactGroupToggle) {
-        event.preventDefault();
-        event.stopPropagation();
-        const projectId = String(artifactGroupToggle.dataset.projectId || selectedProjectId() || '');
-        const runId = String(artifactGroupToggle.dataset.projectArtifactGroup || '');
-        ctx.toggleArtifactGroup(projectId, runId);
-        if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        else ctx.renderProjectExplorer();
         return;
       }
       const artifactPageBtn = event.target.closest?.('[data-project-artifacts-page]');
@@ -665,6 +715,10 @@
         event.preventDefault();
         await ctx.flushProjectNotesAutosave();
         const nextTab = tabBtn.dataset.projectTab || 'details';
+        if (nextTab === workspaceTab()) {
+          ctx.focusProjectWorkspaceTab?.(nextTab);
+          return;
+        }
         ctx.setWorkspaceTab(nextTab);
         if (nextTab !== 'details') ctx.closeProjectTargetEditor();
         ctx.closeProjectEntityEditor();
@@ -847,8 +901,10 @@
         } else if (action === 'open-atlas') {
           const project = projectFromRowsOrSummary(projectId);
           ctx.closeProjectWorkspace({ refocus: false });
-          if (typeof global.openAtlas === 'function') {
-            void global.openAtlas({
+          const openAtlas = (typeof importedOpenAtlas !== 'undefined' && importedOpenAtlas)
+            || null;
+          if (typeof openAtlas === 'function') {
+            void openAtlas({
               source: 'project-workspace',
               projectId,
               projectName: project ? ctx.projectDisplayName(project) : '',
@@ -857,9 +913,12 @@
           return;
         } else if (action === 'open-findings-board') {
           const project = projectFromRowsOrSummary(projectId);
-          if (typeof global.openFindingsBoard === 'function') {
+          const openFindingsBoard = typeof ctx.openFindingsBoard === 'function'
+            ? ctx.openFindingsBoard
+            : importedOpenFindingsBoard;
+          if (typeof openFindingsBoard === 'function') {
             ctx.closeProjectWorkspace({ refocus: false });
-            void global.openFindingsBoard({
+            void openFindingsBoard({
               source: 'project-workspace',
               projectId,
               projectName: project ? ctx.projectDisplayName(project) : '',
@@ -1003,9 +1062,10 @@
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectTargetEditor(projectId);
           return;
-        } else if (await ctx.packagesController?.().handleAction(btn)) {
-          return;
-        } else if (action === 'edit-target') {
+        }
+        const packagesController = ctx.packagesController?.();
+        if (packagesController && await packagesController.handleAction(btn)) return;
+        if (action === 'edit-target') {
           const targetId = String(btn.dataset.targetId || '');
           const target = ctx.projectTargetById?.(projectId, targetId)
             || ctx.projectTargetItems(ctx.projectSummary?.(projectId)).find(item => String(item.id || '') === targetId);
@@ -1025,13 +1085,14 @@
           const finding = projectFindingById(projectId, findingId);
           if (!finding) throw new Error('Finding is missing its details.');
           ctx.setProjectWorkspaceMessage('');
-          if (!global.DarklabFindingTriageEditor || typeof global.DarklabFindingTriageEditor.open !== 'function') {
+          const findingTriageEditor = ctx.findingTriageEditor || importedFindingTriageEditor;
+          if (!findingTriageEditor || typeof findingTriageEditor.open !== 'function') {
             throw new Error('Finding triage editor is not available.');
           }
-          await global.DarklabFindingTriageEditor.open(finding, {
+          await findingTriageEditor.open(finding, {
             canEdit: activeTeamScopeCan('triage_findings'),
             onSaved: async (triage) => {
-              const compact = global.DarklabFindingTriageEditor.compactTriage(triage);
+              const compact = findingTriageEditor.compactTriage(triage);
               ctx.updateCachedProjectFinding?.(projectId, findingId, {
                 triage: compact,
                 verification_status: compact.verification_status,
@@ -1237,6 +1298,8 @@
         void handleDocumentPickerClick(event);
       });
       document.addEventListener('click', handleDocumentFilterMenuClick, true);
+      ctx.projectWorkspaceModal?.addEventListener('pointerdown', handlePointerDown);
+      ctx.projectWorkspaceModal?.addEventListener('mousedown', handlePointerDown);
       ctx.projectWorkspaceModal?.addEventListener('click', (event) => {
         void handleClick(event);
       });
@@ -1248,10 +1311,15 @@
       handleChange,
       handleClick,
       handleInput,
+      handlePointerDown,
     };
   }
 
-  global.DarklabProjectWorkspaceEvents = {
+  const DarklabProjectWorkspaceEvents = {
     createProjectWorkspaceEventsController,
   };
+  exportedDarklabProjectWorkspaceEvents = DarklabProjectWorkspaceEvents;
 })(globalThis);
+
+export {
+  exportedDarklabProjectWorkspaceEvents as DarklabProjectWorkspaceEvents,};

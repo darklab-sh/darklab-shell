@@ -4,16 +4,36 @@
 //
 // Server-rendered data is provided via window.PermData, set by the inline
 // <script> block in the template before this module loads.
-// Shared helpers come from ExportHtmlUtils (export_html.js), ExportPdfUtils
-// (export_pdf.js), copyTextToClipboard and showToast (utils.js) — all loaded
-// in permalink_base.html before this file.
+// Shared helpers come from ExportHtmlUtils (export_html.js), copyTextToClipboard,
+// showToast (utils.js), and the lazy PDF loader loaded before this file.
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  showToast as importedShowToast,
+} from './core/utils.js';
+import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
+
 (function () {
+  var exportHtmlUtils = (typeof window !== 'undefined' && window.ExportHtmlUtils)
+    || {};
+  var AnsiUpCtor = window.AnsiUp || null;
+  var bindOutsideClickCloseFn = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose)
+    || null;
+  var copyTextToClipboardFn = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard)
+    || null;
+  var downloadBlobAsAttachmentFn = (
+      typeof importedDownloadBlobAsAttachment !== 'undefined'
+      && importedDownloadBlobAsAttachment
+    )
+    || null;
+  var showToastFn = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || null;
   var pd = window.PermData || {};
   var transcriptModel = pd.transcript || {};
   var exportModel = pd.export || {};
   var headerModel = pd.header || {};
-  var rawLines = window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function'
-    ? ExportHtmlUtils.normalizeExportTranscriptLines(transcriptModel.lines || pd.lines || [])
+  var rawLines = typeof exportHtmlUtils.normalizeExportTranscriptLines === 'function'
+    ? exportHtmlUtils.normalizeExportTranscriptLines(transcriptModel.lines || pd.lines || [])
     : (transcriptModel.lines || pd.lines || []);
   var hasTimestampMetadata = transcriptModel.hasTimestampMetadata || pd.hasTimestampMetadata || false;
   var appName = exportModel.appName || pd.appName || headerModel.appName || '';
@@ -22,11 +42,11 @@
   var created = exportModel.created || pd.created || '';
   var createdDisplay = exportModel.createdDisplay || pd.createdDisplay || headerModel.createdDisplay || '';
   var fontFacesCss = exportModel.fontFacesCss || pd.fontFacesCss || '';
-  var permalinkMeta = window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportRunMeta === 'function'
-    ? ExportHtmlUtils.normalizeExportRunMeta(exportModel.runMeta || pd.permalinkMeta || null)
+  var permalinkMeta = typeof exportHtmlUtils.normalizeExportRunMeta === 'function'
+    ? exportHtmlUtils.normalizeExportRunMeta(exportModel.runMeta || pd.permalinkMeta || null)
     : (exportModel.runMeta || pd.permalinkMeta || null);
 
-  var ansiUp = new AnsiUp();
+  var ansiUp = new AnsiUpCtor();
   ansiUp.use_classes = false;
 
   var out = document.getElementById('output');
@@ -43,8 +63,8 @@
   var tsMode = tsModes.includes(getCookie('pref_timestamps')) ? getCookie('pref_timestamps') : 'off';
   var highlightMode = getCookie('pref_structured_highlights') === 'off' ? 'off' : 'on';
   var commandOutcomeSummariesEnabled = getCookie('pref_command_outcome_summaries') !== 'off';
-  var lines = window.ExportHtmlUtils && typeof ExportHtmlUtils.appendCommandOutcomeSummaryLines === 'function'
-    ? ExportHtmlUtils.appendCommandOutcomeSummaryLines(rawLines, { command: command, enabled: commandOutcomeSummariesEnabled })
+  var lines = typeof exportHtmlUtils.appendCommandOutcomeSummaryLines === 'function'
+    ? exportHtmlUtils.appendCommandOutcomeSummaryLines(rawLines, { command: command, enabled: commandOutcomeSummariesEnabled })
     : rawLines;
   if (!hasTimestampMetadata) tsMode = 'off';
 
@@ -69,9 +89,8 @@
   }
 
   function formatPrefix(index, entry) {
-    if (window.ExportHtmlUtils
-        && typeof ExportHtmlUtils.isCommandOutcomeSummaryLine === 'function'
-        && ExportHtmlUtils.isCommandOutcomeSummaryLine(entry)) {
+    if (typeof exportHtmlUtils.isCommandOutcomeSummaryLine === 'function'
+        && exportHtmlUtils.isCommandOutcomeSummaryLine(entry)) {
       return '';
     }
     var parts = [];
@@ -94,9 +113,9 @@
     out.style.setProperty('--perm-prefix-width', prefixWidth + 'ch');
 
     lines.forEach(function (entry, index) {
-      var lineEvent = ExportHtmlUtils.lineEventFromWire(entry);
+      var lineEvent = exportHtmlUtils.lineEventFromWire(entry);
       var span = document.createElement('span');
-      var cls = ExportHtmlUtils.lineLegacyClass(lineEvent);
+      var cls = exportHtmlUtils.lineLegacyClass(lineEvent);
       span.className = 'line' + (cls ? ' ' + cls : '');
 
       var prefix = prefixes[index];
@@ -109,13 +128,13 @@
 
       var contentEl = document.createElement('span');
       contentEl.className = 'perm-content';
-      if (typeof ExportHtmlUtils.renderExportLineContent === 'function') {
-        contentEl.innerHTML = ExportHtmlUtils.renderExportLineContent(lineEvent, function (text) {
+      if (typeof exportHtmlUtils.renderExportLineContent === 'function') {
+        contentEl.innerHTML = exportHtmlUtils.renderExportLineContent(lineEvent, function (text) {
           return ansiUp.ansi_to_html(text);
         });
-      } else if (ExportHtmlUtils.isPromptEchoEvent(lineEvent)) {
-        contentEl.innerHTML = ExportHtmlUtils.renderExportPromptEcho(lineEvent.text);
-      } else if (ExportHtmlUtils.isPlainEvent(lineEvent)) {
+      } else if (exportHtmlUtils.isPromptEchoEvent(lineEvent)) {
+        contentEl.innerHTML = exportHtmlUtils.renderExportPromptEcho(lineEvent.text);
+      } else if (exportHtmlUtils.isPlainEvent(lineEvent)) {
         contentEl.textContent = lineEvent.text;
       } else {
         contentEl.innerHTML = ansiUp.ansi_to_html(lineEvent.text);
@@ -199,8 +218,8 @@
       window.addEventListener('resize', positionSaveMenu);
       window.addEventListener('scroll', positionSaveMenu, true);
     }
-    if (typeof bindOutsideClickClose === 'function') {
-      bindOutsideClickClose(wrap, {
+    if (typeof bindOutsideClickCloseFn === 'function') {
+      bindOutsideClickCloseFn(wrap, {
         triggers: btn,
         isOpen: function () { return wrap.classList.contains('open'); },
         onClose: closeSaveMenu,
@@ -210,22 +229,22 @@
 
   // ── Filename helper ────────────────────────────────────────────────────────
   function downloadName(ext) {
-    return appName + '-' + ExportHtmlUtils.exportTimestamp() + '.' + ext;
+    return appName + '-' + exportHtmlUtils.exportTimestamp() + '.' + ext;
   }
 
   // ── Export actions ─────────────────────────────────────────────────────────
   function copyTxt() {
     var text = lines.map(function (entry, index) { return displayText(entry, index); }).join('\n');
-    copyTextToClipboard(text).then(function () { showToast('Copied to clipboard'); }).catch(function () {});
+    copyTextToClipboardFn(text).then(function () { showToastFn('Copied to clipboard'); }).catch(function () {});
   }
 
   function saveTxt() {
     var text = lines.map(function (entry, index) { return displayText(entry, index); }).join('\n');
-    downloadBlobAsAttachment(new Blob([text], {type: 'text/plain'}), downloadName('txt'));
+    downloadBlobAsAttachmentFn(new Blob([text], {type: 'text/plain'}), downloadName('txt'));
   }
 
   function saveHtml() {
-    var exportModel = ExportHtmlUtils.buildExportDocumentModel({
+    var exportModel = exportHtmlUtils.buildExportDocumentModel({
       appName: appName,
       title: label,
       label: label,
@@ -235,7 +254,7 @@
       command: command,
       includeCommandOutcomeSummary: commandOutcomeSummariesEnabled,
     });
-    var result = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+    var result = exportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: function (entry, i) { return formatPrefix(i + 1, entry); },
       ansiToHtml: function (text) { return ansiUp.ansi_to_html(text); },
     });
@@ -243,8 +262,8 @@
     var summaryHtml = result.summaryHtml;
     var prefixWidth = result.prefixWidth;
 
-    ExportHtmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
-      var html = ExportHtmlUtils.buildTerminalExportHtml({
+    exportHtmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
+      var html = exportHtmlUtils.buildTerminalExportHtml({
         appName: exportModel.appName,
         title: exportModel.title,
         metaLine: exportModel.metaLine,
@@ -256,14 +275,28 @@
         exportCss: exportCss,
         highlights: highlightMode,
       });
-      downloadBlobAsAttachment(new Blob([html], {type: 'text/html'}), downloadName('html'));
+      downloadBlobAsAttachmentFn(new Blob([html], {type: 'text/html'}), downloadName('html'));
     });
   }
 
   async function savePdf() {
-    if (!window.jspdf) { alert('PDF library not loaded'); return; }
-    var jsPDF = window.jspdf.jsPDF;
-    var exportModel = ExportHtmlUtils.buildExportDocumentModel({
+    var existingPdfUtils = window.ExportPdfUtils || null;
+    if (!existingPdfUtils && typeof window.loadExportPdfUtils !== 'function') {
+      alert('PDF library not loaded');
+      return;
+    }
+    var pdfUtils;
+    var jsPDF;
+    try {
+      pdfUtils = existingPdfUtils || await window.loadExportPdfUtils();
+      jsPDF = typeof window.loadJsPdf === 'function'
+        ? await window.loadJsPdf()
+        : await pdfUtils.loadJsPdf();
+    } catch (_) {
+      alert('PDF library not loaded');
+      return;
+    }
+    var exportModel = exportHtmlUtils.buildExportDocumentModel({
       appName: appName,
       title: label,
       label: label,
@@ -273,9 +306,9 @@
       command: command,
       includeCommandOutcomeSummary: commandOutcomeSummariesEnabled,
     });
-    var ansiUpPdf = new AnsiUp();
+    var ansiUpPdf = new AnsiUpCtor();
     ansiUpPdf.use_classes = false;
-    var doc = await ExportPdfUtils.buildTerminalExportPdf({
+    var doc = await pdfUtils.buildTerminalExportPdf({
       jsPDF: jsPDF,
       appName: exportModel.appName,
       metaLine: exportModel.metaLine,

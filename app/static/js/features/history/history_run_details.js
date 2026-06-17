@@ -1,6 +1,390 @@
 // darklab_shell History Run Details modal.
 // Loaded after history.js so it can reuse History drawer, restore, metadata,
 // project-link, and compare helpers without keeping the modal in the drawer file.
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  escapeHtml as importedEscapeHtml,
+  omitRawOnlyLineEntries as importedOmitRawOnlyLineEntries,
+  showToast as importedShowToast,
+} from '../../core/utils.js';
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { DarklabOutputCore as importedOutputCore } from '../../core/output_core.js';
+import {
+  apiFetch as importedApiFetch,
+} from '../../session.js';
+import {
+  _renderAnsiWithEntityTokens as importedRenderAnsiWithEntityTokens,
+  createAnsiUpRenderer as importedCreateAnsiUpRenderer,
+} from '../../output.js';
+import { activateTab as importedActivateTab } from '../../tabs.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
+import { DarklabAtlasEntityRow as importedAtlasEntityRow } from '../atlas/atlas_entity_row.js';
+import { DarklabAtlasTabs as importedAtlasTabs } from '../atlas/atlas_tabs.js';
+import { setHistoryRunModalStateHandlers as importedSetHistoryRunModalStateHandlers } from './history_run_modal_state_bridge.js';
+import { activeTeamScopeCan as importedActiveTeamScopeCan } from '../team_scope.js';
+import { getCommandOutcomeSummariesPreference as importedGetCommandOutcomeSummariesPreference } from '../preferences/preferences.js';
+import { submitComposerCommand as importedSubmitComposerCommand } from '../../runner.js';
+import { submitComposerCommand as importedBridgeSubmitComposerCommand } from '../../runner_bridge.js';
+import {
+  hideHistoryPanel as importedHideHistoryPanel,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
+  syncModalOverlayState as importedSyncModalOverlayState,
+} from '../../ui/ui_helpers.js';
+import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
+import { _closeHistoryRunActionMenus } from './history_actions.js';
+import { copyHistoryRunPermalink as importedCopyHistoryRunPermalink } from './history_links.js';
+import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './history_recall.js';
+import {
+  _historyCanManageHistory as importedHistoryCanManageHistory,
+  _historyScopeDeniedMessage as importedHistoryScopeDeniedMessage,
+  _setHistoryLoadState as importedSetHistoryLoadState,
+  confirmHistAction as importedConfirmHistAction,
+} from './history_mutations.js';
+import {
+  _historyConfirmAddRunToProject as importedHistoryConfirmAddRunToProject,
+  _historyLinkRunToProject as importedHistoryLinkRunToProject,
+  _historyLoadActiveProject as importedHistoryLoadActiveProject,
+  _historyProjectDisplayName as importedHistoryProjectDisplayName,
+  _historyRemoveRunFromProject as importedHistoryRemoveRunFromProject,
+  _historyRunProjectLinks as importedHistoryRunProjectLinks,
+  _historyAddRunToProject as importedHistoryAddRunToProject,
+} from './history_project_actions.js';
+import {
+  _tabForHistoryRun as importedTabForHistoryRun,
+  restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab,
+} from './history_restore.js';
+import {
+  _historyEditEntityMetadata as importedHistoryEditEntityMetadata,
+  _historyElapsedLabel as importedHistoryElapsedLabel,
+  _historyEntityLabelValues as importedHistoryEntityLabelValues,
+  _historyEntityNoteBody as importedHistoryEntityNoteBody,
+  _historyExitLabel as importedHistoryExitLabel,
+} from './history_rows.js';
+
+const HISTORY_RUN_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _historyRunGlobalFunction(name) {
+  const fn = HISTORY_RUN_GLOBAL && HISTORY_RUN_GLOBAL[name];
+  return typeof fn === 'function' ? fn : null;
+}
+
+function _historyRunGlobalValue(name) {
+  return HISTORY_RUN_GLOBAL ? HISTORY_RUN_GLOBAL[name] : undefined;
+}
+
+const DarklabAtlasEntityRow = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow)
+  || _historyRunGlobalValue('DarklabAtlasEntityRow');
+const DarklabAtlasTabs = (typeof importedAtlasTabs !== 'undefined' && importedAtlasTabs)
+  || _historyRunGlobalValue('DarklabAtlasTabs');
+const ExportHtmlUtils = _historyRunGlobalValue('ExportHtmlUtils');
+
+function _historyRunAppConfig() {
+  if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
+  return _historyRunGlobalValue('APP_CONFIG') || {};
+}
+
+function _historyRunShowToast(message, tone = 'success', options) {
+  const toast = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || _historyRunGlobalFunction('showToast')
+    || null;
+  if (typeof toast === 'function') toast(message, tone, options);
+}
+
+function _historyRunCopyTextToClipboard(value) {
+  const copy = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard)
+    || _historyRunGlobalFunction('copyTextToClipboard')
+    || null;
+  return typeof copy === 'function'
+    ? copy(value)
+    : Promise.reject(new Error('Clipboard is not available.'));
+}
+
+function _historyRunDownloadBlobAsAttachment(blob, filename) {
+  const download = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment)
+    || _historyRunGlobalFunction('downloadBlobAsAttachment');
+  if (typeof download !== 'function') return false;
+  download(blob, filename);
+  return true;
+}
+
+function _historyRunActiveTeamScopeCan(capability) {
+  const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
+    || null;
+  return typeof can === 'function' ? can(capability) : true;
+}
+
+function _historyRunCanManageHistory() {
+  const canManage = (typeof importedHistoryCanManageHistory !== 'undefined' && importedHistoryCanManageHistory)
+    || _historyRunGlobalFunction('_historyCanManageHistory');
+  return typeof canManage === 'function' ? canManage() : _historyRunActiveTeamScopeCan('manage_history');
+}
+
+function _historyRunScopeDeniedMessage(action) {
+  const denied = (typeof importedHistoryScopeDeniedMessage !== 'undefined' && importedHistoryScopeDeniedMessage)
+    || _historyRunGlobalFunction('_historyScopeDeniedMessage');
+  return typeof denied === 'function'
+    ? denied(action)
+    : `View-only team members can't ${action}. Switch to Personal or ask for operator access.`;
+}
+
+function _historyRunSetComposerValue(value, start = null, end = null, options) {
+  const setValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue)
+    || _historyRunGlobalFunction('setComposerValue');
+  if (typeof setValue === 'function') setValue(value, start, end, options);
+}
+
+function _historyRunHideHistoryPanel() {
+  const hide = (typeof importedHideHistoryPanel !== 'undefined' && importedHideHistoryPanel)
+    || _historyRunGlobalFunction('hideHistoryPanel');
+  if (typeof hide === 'function') hide();
+}
+
+function _historyRunRefocusComposerAfterAction(options = { preventScroll: true }) {
+  const refocus = (
+    typeof importedRefocusComposerAfterAction !== 'undefined'
+    && importedRefocusComposerAfterAction
+  )
+    || _historyRunGlobalFunction('refocusComposerAfterAction');
+  if (typeof refocus === 'function') refocus(options);
+}
+
+function _historyRunTabForRun(run) {
+  const tabForRun = (typeof importedTabForHistoryRun !== 'undefined' && importedTabForHistoryRun)
+    || _historyRunGlobalFunction('_tabForHistoryRun');
+  return typeof tabForRun === 'function' ? tabForRun(run) : null;
+}
+
+function _historyRunActivateTab(tabId) {
+  const activate = (typeof importedActivateTab !== 'undefined' && importedActivateTab)
+    || _historyRunGlobalFunction('activateTab');
+  if (typeof activate === 'function') activate(tabId);
+}
+
+function _historyRunSetLoadState(loading) {
+  const setState = (typeof importedSetHistoryLoadState !== 'undefined' && importedSetHistoryLoadState)
+    || _historyRunGlobalFunction('_setHistoryLoadState');
+  if (typeof setState === 'function') setState(loading);
+}
+
+function _historyRunRestoreIntoTab(run, options) {
+  const restore = (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab)
+    || _historyRunGlobalFunction('restoreHistoryRunIntoTab');
+  return typeof restore === 'function'
+    ? restore(run, options)
+    : Promise.reject(new Error('history restore unavailable'));
+}
+
+function _historyRunCopyPermalink(run) {
+  const copy = (typeof importedCopyHistoryRunPermalink !== 'undefined' && importedCopyHistoryRunPermalink)
+    || _historyRunGlobalFunction('copyHistoryRunPermalink');
+  return typeof copy === 'function' ? copy(run) : Promise.reject(new Error('permalink unavailable'));
+}
+
+function _historyRunOpenCompare(run) {
+  const open = (typeof importedOpenHistoryCompareLauncher !== 'undefined' && importedOpenHistoryCompareLauncher)
+    || _historyRunGlobalFunction('openHistoryCompareLauncher');
+  if (typeof open === 'function') open(run);
+}
+
+function _historyRunConfirmDelete(run) {
+  const confirm = (typeof importedConfirmHistAction !== 'undefined' && importedConfirmHistAction)
+    || _historyRunGlobalFunction('confirmHistAction');
+  if (typeof confirm === 'function') confirm('delete', run.id, run.command);
+}
+
+function _historyRunEditMetadata(entityType, entity) {
+  const edit = (typeof importedHistoryEditEntityMetadata !== 'undefined' && importedHistoryEditEntityMetadata)
+    || _historyRunGlobalFunction('_historyEditEntityMetadata');
+  if (typeof edit === 'function') edit(entityType, entity);
+}
+
+function _historyRunProjectDisplayName(project) {
+  const display = (typeof importedHistoryProjectDisplayName !== 'undefined' && importedHistoryProjectDisplayName)
+    || _historyRunGlobalFunction('_historyProjectDisplayName');
+  return typeof display === 'function' ? display(project) : '';
+}
+
+function _historyRunProjectLinksForRun(run) {
+  const links = (typeof importedHistoryRunProjectLinks !== 'undefined' && importedHistoryRunProjectLinks)
+    || _historyRunGlobalFunction('_historyRunProjectLinks');
+  return typeof links === 'function' ? links(run) : [];
+}
+
+function _historyRunLoadActiveProject() {
+  const load = (typeof importedHistoryLoadActiveProject !== 'undefined' && importedHistoryLoadActiveProject)
+    || _historyRunGlobalFunction('_historyLoadActiveProject');
+  return typeof load === 'function' ? load() : Promise.resolve(null);
+}
+
+function _historyRunConfirmAddRunToProject(run, project) {
+  const confirm = (
+    typeof importedHistoryConfirmAddRunToProject !== 'undefined'
+    && importedHistoryConfirmAddRunToProject
+  )
+    || _historyRunGlobalFunction('_historyConfirmAddRunToProject');
+  return typeof confirm === 'function' ? confirm(run, project) : Promise.resolve(false);
+}
+
+function _historyRunLinkRunToProject(run, project, options) {
+  const link = (typeof importedHistoryLinkRunToProject !== 'undefined' && importedHistoryLinkRunToProject)
+    || _historyRunGlobalFunction('_historyLinkRunToProject');
+  return typeof link === 'function' ? link(run, project, options) : Promise.reject(new Error('project link unavailable'));
+}
+
+function _historyRunAddRunToProject(run) {
+  const add = (typeof importedHistoryAddRunToProject !== 'undefined' && importedHistoryAddRunToProject)
+    || _historyRunGlobalFunction('_historyAddRunToProject');
+  return typeof add === 'function' ? add(run) : Promise.reject(new Error('project add unavailable'));
+}
+
+function _historyRunRemoveRunFromProject(run) {
+  const remove = (typeof importedHistoryRemoveRunFromProject !== 'undefined' && importedHistoryRemoveRunFromProject)
+    || _historyRunGlobalFunction('_historyRemoveRunFromProject');
+  return typeof remove === 'function' ? remove(run) : Promise.reject(new Error('project remove unavailable'));
+}
+
+function _historyRunExitLabel(exitCode) {
+  const label = (typeof importedHistoryExitLabel !== 'undefined' && importedHistoryExitLabel)
+    || _historyRunGlobalFunction('_historyExitLabel');
+  return typeof label === 'function' ? label(exitCode) : `exit ${exitCode ?? 'unknown'}`;
+}
+
+function _historyRunElapsedLabel(run) {
+  const label = (typeof importedHistoryElapsedLabel !== 'undefined' && importedHistoryElapsedLabel)
+    || _historyRunGlobalFunction('_historyElapsedLabel');
+  return typeof label === 'function' ? label(run) : '';
+}
+
+function _historyRunEntityLabelValues(entity) {
+  const labels = (typeof importedHistoryEntityLabelValues !== 'undefined' && importedHistoryEntityLabelValues)
+    || _historyRunGlobalFunction('_historyEntityLabelValues');
+  return typeof labels === 'function' ? labels(entity) : [];
+}
+
+function _historyRunEntityNoteBody(entity) {
+  const note = (typeof importedHistoryEntityNoteBody !== 'undefined' && importedHistoryEntityNoteBody)
+    || _historyRunGlobalFunction('_historyEntityNoteBody');
+  return typeof note === 'function' ? note(entity) : '';
+}
+
+function _historyRunApiFetch(...args) {
+  const fetcher = (typeof importedApiFetch === 'function' && importedApiFetch)
+    || _historyRunGlobalFunction('apiFetch');
+  if (!fetcher) throw new Error('apiFetch is unavailable');
+  return fetcher(...args);
+}
+
+function _historyRunSyncModalOverlayState() {
+  const sync = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState)
+    || _historyRunGlobalFunction('syncModalOverlayState');
+  if (typeof sync === 'function') sync();
+}
+
+function _historyRunBindDismissible(el, opts) {
+  const bind = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible)
+    || _historyRunGlobalFunction('bindDismissible');
+  return typeof bind === 'function' ? bind(el, opts) : null;
+}
+
+function _historyRunCommandOutcomePreference() {
+  const read = (
+    typeof importedGetCommandOutcomeSummariesPreference !== 'undefined'
+    && importedGetCommandOutcomeSummariesPreference
+  )
+    || _historyRunGlobalFunction('getCommandOutcomeSummariesPreference');
+  return typeof read === 'function' ? read() : null;
+}
+
+function _historyRunOutputCore() {
+  return (typeof importedOutputCore !== 'undefined' && importedOutputCore)
+    || _historyRunGlobalValue('DarklabOutputCore')
+    || null;
+}
+
+function _historyRunRenderAnsiWithEntityTokens(content, text, entities, tabId) {
+  const render = (
+    typeof importedRenderAnsiWithEntityTokens !== 'undefined'
+    && importedRenderAnsiWithEntityTokens
+  )
+    || _historyRunGlobalFunction('_renderAnsiWithEntityTokens');
+  if (typeof render !== 'function') return false;
+  render(content, text, entities, tabId);
+  return true;
+}
+
+function _historyRunSubmitComposerCommand(command, options) {
+  const submit = _historyRunGlobalFunction('submitComposerCommand')
+    || (typeof importedBridgeSubmitComposerCommand !== 'undefined' && importedBridgeSubmitComposerCommand)
+    || (typeof importedSubmitComposerCommand !== 'undefined' && importedSubmitComposerCommand);
+  return typeof submit === 'function' ? submit(command, options) : null;
+}
+
+function _historyRunCreateAnsiUpRenderer() {
+  const create = (typeof importedCreateAnsiUpRenderer !== 'undefined' && importedCreateAnsiUpRenderer)
+    || _historyRunGlobalFunction('createAnsiUpRenderer');
+  return typeof create === 'function' ? create() : null;
+}
+
+function _historyRunEscapeHtml(value) {
+  const escape = (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml)
+    || _historyRunGlobalFunction('escapeHtml');
+  return typeof escape === 'function'
+    ? escape(value)
+    : String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch] || ch));
+}
+
+function _historyRunOmitRawOnlyLineEntries(lines) {
+  const omit = (typeof importedOmitRawOnlyLineEntries !== 'undefined' && importedOmitRawOnlyLineEntries)
+    || _historyRunGlobalFunction('omitRawOnlyLineEntries');
+  return typeof omit === 'function' ? omit(lines) : lines;
+}
+
+function _historyRunLoadExportPdfUtils() {
+  const load = _historyRunGlobalFunction('loadExportPdfUtils');
+  return typeof load === 'function' ? load() : null;
+}
+
+function _historyRunLoadJsPdf(pdfUtils) {
+  const load = _historyRunGlobalFunction('loadJsPdf');
+  if (typeof load === 'function') return load();
+  return pdfUtils && typeof pdfUtils.loadJsPdf === 'function' ? pdfUtils.loadJsPdf() : null;
+}
+
+function _historyRunOpenAtlas(options) {
+  const open = (typeof importedOpenAtlas === 'function' && importedOpenAtlas)
+    || _historyRunGlobalFunction('openAtlas');
+  return typeof open === 'function' ? open(options) : false;
+}
+
+function _historyRunOpenSchedulesModal(options) {
+  const open = _historyRunGlobalFunction('openSchedulesModal');
+  return typeof open === 'function' ? open(options) : false;
+}
+
+function _historyRunOpenWatchersModal(options) {
+  const open = _historyRunGlobalFunction('openWatchersModal');
+  return typeof open === 'function' ? open(options) : false;
+}
+
+function _historyRunRefreshHistoryPanel() {
+  const refresh = _historyRunGlobalFunction('refreshHistoryPanel');
+  if (typeof refresh === 'function') refresh();
+}
+
+function _historyRunResetCmdHistoryNav() {
+  const reset = (typeof importedResetCmdHistoryNav !== 'undefined' && importedResetCmdHistoryNav)
+    || _historyRunGlobalFunction('resetCmdHistoryNav');
+  if (typeof reset === 'function') reset();
+}
 
 let _historyRunModalState = {
   run: null,
@@ -162,9 +546,9 @@ function _ensureHistoryRunOverlay() {
       if (suggestionCopy.disabled) return;
       const command = String(suggestionCopy.dataset.historyRunCopySuggestion || '');
       if (!command) return;
-      copyTextToClipboard(command)
-        .then(() => showToast('Suggested command copied'))
-        .catch(() => showToast('Failed to copy suggestion', 'error'));
+      _historyRunCopyTextToClipboard(command)
+        .then(() => _historyRunShowToast('Suggested command copied'))
+        .catch(() => _historyRunShowToast('Failed to copy suggestion', 'error'));
       return;
     }
     const suggestionRun = e.target.closest?.('[data-history-run-run-suggestion]');
@@ -192,14 +576,12 @@ function _ensureHistoryRunOverlay() {
       }
     });
   });
-  if (typeof bindDismissible === 'function') {
-    bindDismissible(overlay, {
-      level: 'modal',
-      isOpen: () => overlay.classList.contains('open'),
-      onClose: closeHistoryRunOverlay,
-      closeButtons: overlay.querySelectorAll('.history-run-close, .sheet-grab'),
-    });
-  }
+  _historyRunBindDismissible(overlay, {
+    level: 'modal',
+    isOpen: () => overlay.classList.contains('open'),
+    onClose: closeHistoryRunOverlay,
+    closeButtons: overlay.querySelectorAll('.history-run-close, .sheet-grab'),
+  });
   return overlay;
 }
 
@@ -209,7 +591,7 @@ function closeHistoryRunOverlay() {
   overlay.classList.remove('open');
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
-  window.syncModalOverlayState?.();
+  _historyRunSyncModalOverlayState();
   _historyRunModalToken += 1;
   _stopHistoryRunAiAssistPolling();
   _closeHistoryRunActionMenus();
@@ -220,7 +602,7 @@ function _openHistoryRunOverlay() {
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
-  window.syncModalOverlayState?.();
+  _historyRunSyncModalOverlayState();
   setTimeout(() => {
     overlay.querySelector('#history-run-modal')?.focus({ preventScroll: true });
   }, 0);
@@ -291,16 +673,14 @@ function _historyRunOutputEntries(run) {
 }
 
 function _historyCommandOutcomeSummariesEnabled() {
-  if (typeof getCommandOutcomeSummariesPreference === 'function') {
-    return getCommandOutcomeSummariesPreference() !== 'off';
-  }
-  return true;
+  const preference = _historyRunCommandOutcomePreference();
+  return preference == null ? true : preference !== 'off';
 }
 
 function _historyNormalizeCommandOutcomeSummary(raw) {
-  const normalizer = typeof window !== 'undefined' && window.DarklabOutputCore
-    && typeof window.DarklabOutputCore.normalizeCommandOutcomeSummary === 'function'
-    ? window.DarklabOutputCore.normalizeCommandOutcomeSummary
+  const outputCore = _historyRunOutputCore();
+  const normalizer = outputCore && typeof outputCore.normalizeCommandOutcomeSummary === 'function'
+    ? outputCore.normalizeCommandOutcomeSummary
     : null;
   if (normalizer) return normalizer(raw);
   if (!raw || typeof raw !== 'object') return null;
@@ -324,16 +704,16 @@ function _historyRunCommandOutcomeSummary(run) {
     run && (run.command_outcome_summary || run.output_outcome_summary || run.commandOutcomeSummary),
   );
   if (explicit) return explicit;
-  const builder = typeof window !== 'undefined' && window.DarklabOutputCore
-    && typeof window.DarklabOutputCore.buildCommandOutcomeSummary === 'function'
-    ? window.DarklabOutputCore.buildCommandOutcomeSummary
+  const outputCore = _historyRunOutputCore();
+  const builder = outputCore && typeof outputCore.buildCommandOutcomeSummary === 'function'
+    ? outputCore.buildCommandOutcomeSummary
     : null;
   if (!builder) return null;
   return builder(run && run.command || '', _historyRunOutputEntries(run));
 }
 
 function _historyCommandOutcomeSummaryToLines(summary) {
-  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.commandOutcomeSummaryToLines === 'function') {
+  if (ExportHtmlUtils && typeof ExportHtmlUtils.commandOutcomeSummaryToLines === 'function') {
     return ExportHtmlUtils.commandOutcomeSummaryToLines(summary);
   }
   if (!summary || !Array.isArray(summary.items) || !summary.items.length) return [];
@@ -411,32 +791,34 @@ function _historyRunActionButton(label, action, { disabled = false, tone = 'seco
 }
 
 function _historyRunCanEditMetadata() {
-  if (typeof _historyCanManageHistory === 'function') return _historyCanManageHistory();
-  return typeof activeTeamScopeCan === 'function' ? activeTeamScopeCan('manage_history') : true;
+  return _historyRunCanManageHistory();
 }
 
 function _historyRunAiSummaryEnabled() {
+  const config = _historyRunAppConfig();
   return !!(
-    APP_CONFIG
-    && APP_CONFIG.ai_enabled
-    && APP_CONFIG.ai_feature_summary
+    config
+    && config.ai_enabled
+    && config.ai_feature_summary
   );
 }
 
 function _historyRunAiNextCommandsEnabled() {
+  const config = _historyRunAppConfig();
   return !!(
-    APP_CONFIG
-    && APP_CONFIG.ai_enabled
-    && APP_CONFIG.ai_feature_next_commands
+    config
+    && config.ai_enabled
+    && config.ai_feature_next_commands
   );
 }
 
 function _historyRunAiRunSuggestionsEnabled() {
+  const config = _historyRunAppConfig();
   return !!(
-    APP_CONFIG
-    && APP_CONFIG.ai_enabled
-    && APP_CONFIG.ai_feature_next_commands
-    && APP_CONFIG.ai_feature_run_suggestions
+    config
+    && config.ai_enabled
+    && config.ai_feature_next_commands
+    && config.ai_feature_run_suggestions
   );
 }
 
@@ -526,8 +908,8 @@ function _historyRunCanUseAi(run = _historyRunPrimary()) {
 }
 
 function _historyRunEntityTabs() {
-  const atlasTabs = window.DarklabAtlasTabs && Array.isArray(window.DarklabAtlasTabs.tabs)
-    ? window.DarklabAtlasTabs.tabs
+  const atlasTabs = DarklabAtlasTabs && Array.isArray(DarklabAtlasTabs.tabs)
+    ? DarklabAtlasTabs.tabs
     : [
         { id: 'ip', label: 'Hosts/IPs', type: 'ip', countKey: 'ip' },
         { id: 'domain', label: 'Domains', type: 'domain', countKey: 'domain' },
@@ -557,8 +939,8 @@ function _historyRunEntityTotal(run = _historyRunPrimary()) {
 }
 
 function _historyRunEntityLabel(type) {
-  if (window.DarklabAtlasTabs && typeof window.DarklabAtlasTabs.labelForType === 'function') {
-    return window.DarklabAtlasTabs.labelForType(type);
+  if (DarklabAtlasTabs && typeof DarklabAtlasTabs.labelForType === 'function') {
+    return DarklabAtlasTabs.labelForType(type);
   }
   const found = _historyRunEntityTabs().find(tab => tab.type === String(type || ''));
   return found ? found.label : 'Entities';
@@ -575,7 +957,7 @@ function _historyRunEntityPage() {
 }
 
 function _historyRunEntityRow(entity) {
-  const rowApi = window.DarklabAtlasEntityRow || {};
+  const rowApi = DarklabAtlasEntityRow || {};
   const tab = _historyRunActiveEntityTab();
   if (typeof rowApi.renderAtlasEntityRow === 'function') {
     const row = rowApi.renderAtlasEntityRow({
@@ -620,9 +1002,7 @@ function _historyRunActionMenu() {
   ];
   if (_historyRunCanEditMetadata()) items.push(['edit-metadata', 'Edit metadata']);
   if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
-  const projectLinks = typeof _historyRunProjectLinks === 'function'
-    ? _historyRunProjectLinks(_historyRunPrimary())
-    : [];
+  const projectLinks = _historyRunProjectLinksForRun(_historyRunPrimary());
   if (projectLinks.length) {
     items.push(['remove-project', 'Remove from project']);
   } else {
@@ -932,19 +1312,19 @@ function _historyRunAiSuggestionCard(suggestion) {
 function _runHistoryRunSuggestedCommand(command) {
   const cmd = String(command || '').trim();
   if (!cmd) return;
-  if (typeof submitComposerCommand !== 'function') {
-    if (typeof setComposerValue === 'function') setComposerValue(cmd, cmd.length, cmd.length);
-    showToast('Suggested command loaded');
+  const result = _historyRunSubmitComposerCommand(cmd, { dismissKeyboard: true, focusAfterSubmit: true });
+  if (result == null) {
+    _historyRunSetComposerValue(cmd, cmd.length, cmd.length);
+    _historyRunShowToast('Suggested command loaded');
     closeHistoryRunOverlay();
-    if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+    _historyRunHideHistoryPanel();
     return;
   }
-  const result = submitComposerCommand(cmd, { dismissKeyboard: true, focusAfterSubmit: true });
   if (result === true || result === 'settle') {
     closeHistoryRunOverlay();
-    if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+    _historyRunHideHistoryPanel();
   } else {
-    showToast('Could not run suggested command', 'error');
+    _historyRunShowToast('Could not run suggested command', 'error');
   }
 }
 
@@ -964,10 +1344,10 @@ function _renderHistoryRunSummary(body, run) {
   const summary = document.createElement('div');
   summary.className = 'history-run-summary-grid';
   const summaryRows = [
-    _historyRunMetaRow('Status', _historyExitLabel(run.exit_code)),
+    _historyRunMetaRow('Status', _historyRunExitLabel(run.exit_code)),
     _historyRunMetaRow('Started', run.started ? new Date(run.started).toLocaleString() : ''),
     _historyRunMetaRow('Finished', run.finished ? new Date(run.finished).toLocaleString() : ''),
-    _historyRunMetaRow('Duration', _historyElapsedLabel(run)),
+    _historyRunMetaRow('Duration', _historyRunElapsedLabel(run)),
     _historyRunMetaRow('Lines', run.output_line_count ? Number(run.output_line_count).toLocaleString() : ''),
     _historyRunMetaRow('Findings / Occurrences', `${uniqueFindingLabel} / ${occurrenceLabel}`),
     _historyRunMetaRow('Entities', _historyRunEntityTotal(run).toLocaleString()),
@@ -998,7 +1378,7 @@ function _renderHistoryRunSummary(body, run) {
   metadataFields.className = 'history-run-field-list';
   const chips = document.createElement('div');
   chips.className = 'history-run-chip-row';
-  _historyEntityLabelValues(run).forEach((label) => {
+  _historyRunEntityLabelValues(run).forEach((label) => {
     const chip = document.createElement('span');
     chip.className = 'badge badge-tone-muted';
     chip.textContent = label;
@@ -1013,7 +1393,7 @@ function _renderHistoryRunSummary(body, run) {
   metadataFields.appendChild(_historyRunField('Labels', chips));
   const noteText = document.createElement('p');
   noteText.className = 'history-run-muted history-run-note-preview';
-  noteText.textContent = _historyEntityNoteBody(run) || 'No notes saved.';
+  noteText.textContent = _historyRunEntityNoteBody(run) || 'No notes saved.';
   metadataFields.appendChild(_historyRunField('Notes', noteText));
   metadata.appendChild(metadataFields);
   context.appendChild(metadata);
@@ -1043,10 +1423,10 @@ function _renderHistoryRunSummary(body, run) {
   } else if (projectState.attached) {
     projectStatus.className = 'badge badge-tone-cyan';
     projectStatus.textContent = 'Attached';
-    projectName = _historyProjectDisplayName(projectState.project);
+    projectName = _historyRunProjectDisplayName(projectState.project);
   } else {
     projectStatus.textContent = 'Not attached';
-    projectName = _historyProjectDisplayName(projectState.project);
+    projectName = _historyRunProjectDisplayName(projectState.project);
   }
   projectFields.appendChild(_historyRunField('Status', projectStatus));
   projectFields.appendChild(_historyRunField('Project', projectName));
@@ -1056,12 +1436,10 @@ function _renderHistoryRunSummary(body, run) {
 
   const actions = document.createElement('div');
   actions.className = 'history-run-actions history-run-primary-actions';
-  const deleteDisabled = typeof _historyCanManageHistory === 'function' && !_historyCanManageHistory();
+  const deleteDisabled = !_historyRunCanManageHistory();
   const deleteButton = _historyRunActionButton('Delete', 'delete', { disabled: deleteDisabled });
   if (deleteDisabled) {
-    deleteButton.title = typeof _historyScopeDeniedMessage === 'function'
-      ? _historyScopeDeniedMessage('delete team history')
-      : 'View-only team members cannot delete team history.';
+    deleteButton.title = _historyRunScopeDeniedMessage('delete team history');
   }
   actions.append(
     _historyRunActionButton('Restore', 'restore'),
@@ -1186,9 +1564,7 @@ function _renderHistoryRunOutput(body, run) {
     const line = document.createElement('span');
     line.className = 'history-run-output-line';
     const text = String(entry.text || '');
-    if (typeof _renderAnsiWithEntityTokens === 'function') {
-      _renderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '');
-    } else {
+    if (!_historyRunRenderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '')) {
       line.textContent = text;
     }
     pre.appendChild(line);
@@ -1494,7 +1870,7 @@ async function _loadHistoryRunDetails(runId, token) {
   _historyRunModalState.loadingDetails = true;
   _renderHistoryRunModal();
   try {
-    const resp = await apiFetch(`/history/${encodeURIComponent(runId)}?json&preview=1`, { cache: 'no-store' });
+    const resp = await _historyRunApiFetch(`/history/${encodeURIComponent(runId)}?json&preview=1`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (token !== _historyRunModalToken) return;
@@ -1518,7 +1894,7 @@ async function _loadHistoryRunFindings(runId, token, { offset = 0 } = {}) {
     offset: String(Math.max(0, Number(offset || 0))),
   });
   try {
-    const resp = await apiFetch(`/entities/run/${encodeURIComponent(runId)}/findings?${query}`, { cache: 'no-store' });
+    const resp = await _historyRunApiFetch(`/entities/run/${encodeURIComponent(runId)}/findings?${query}`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (token !== _historyRunModalToken) return;
@@ -1578,7 +1954,7 @@ async function _loadHistoryRunEntitySummary(runId, token) {
     suppression_filter: 'hide',
   });
   try {
-    const resp = await apiFetch(`/atlas?${query}`, { cache: 'no-store' });
+    const resp = await _historyRunApiFetch(`/atlas?${query}`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json();
     if (token !== _historyRunModalToken) return;
@@ -1612,7 +1988,7 @@ async function _loadHistoryRunEntities(runId, token, { offset = 0 } = {}) {
     suppression_filter: 'hide',
   });
   try {
-    const resp = await apiFetch(`/atlas/entities?${query}`, { cache: 'no-store' });
+    const resp = await _historyRunApiFetch(`/atlas/entities?${query}`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json();
     if (token !== _historyRunModalToken) return;
@@ -1680,14 +2056,14 @@ function _setHistoryRunEntitiesPage(direction) {
 }
 
 function _historyRunExportTimestamp() {
-  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.exportTimestamp === 'function') {
+  if (ExportHtmlUtils && typeof ExportHtmlUtils.exportTimestamp === 'function') {
     return ExportHtmlUtils.exportTimestamp();
   }
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
 function _historyRunExportFilename(format) {
-  const appName = String(APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell');
+  const appName = String(_historyRunAppConfig().app_name || 'darklab_shell');
   return `${appName}-${_historyRunExportTimestamp()}.${format}`;
 }
 
@@ -1721,7 +2097,7 @@ function _historyRunExportLinesWithOutcome(run) {
 async function _historyRunLoadExportRun() {
   const run = _historyRunPrimary();
   if (!run || !run.id) return run || {};
-  const resp = await apiFetch(`/history/${encodeURIComponent(run.id)}?json`, { cache: 'no-store' });
+  const resp = await _historyRunApiFetch(`/history/${encodeURIComponent(run.id)}?json`, { cache: 'no-store' });
   if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return { ...run, ...(data || {}) };
@@ -1729,17 +2105,16 @@ async function _historyRunLoadExportRun() {
 
 function _historyRunBuildExportModel(run) {
   const exportLines = _historyRunExportLines(run);
-  const rawLines = typeof omitRawOnlyLineEntries === 'function'
-    ? omitRawOnlyLineEntries(exportLines)
-    : exportLines;
+  const rawLines = _historyRunOmitRawOnlyLineEntries(exportLines);
   const visibleLines = _historyRunExportLinesWithOutcome({
     ...(run || {}),
     output_entries: rawLines,
     preview_notice: null,
   });
-  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
+  const config = _historyRunAppConfig();
+  if (ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
     return ExportHtmlUtils.buildExportDocumentModel({
-      appName: APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell',
+      appName: config.app_name || 'darklab_shell',
       title: String(run && (run.command || run.label || run.id) || ''),
       label: run && (run.command || run.label || run.id),
       createdText: _historyRunExportCreatedText(run),
@@ -1747,20 +2122,20 @@ function _historyRunBuildExportModel(run) {
         exitCode: run ? run.exit_code : null,
         duration: null,
         lines: `${rawLines.length.toLocaleString()} lines`,
-        version: APP_CONFIG && APP_CONFIG.version || null,
+        version: config.version || null,
       },
       rawLines: visibleLines,
     });
   }
   return {
-    appName: APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell',
+    appName: config.app_name || 'darklab_shell',
     title: String(run && (run.command || run.label || run.id) || ''),
     metaLine: `${run && (run.command || run.label || run.id) || ''} · ${_historyRunExportCreatedText(run)}`,
     runMeta: {
       exitCode: run ? run.exit_code : null,
       duration: null,
       lines: `${rawLines.length.toLocaleString()} lines`,
-      version: APP_CONFIG && APP_CONFIG.version || null,
+      version: config.version || null,
     },
     rawLines: visibleLines,
   };
@@ -1773,35 +2148,31 @@ function _historyRunPlainExportText(run) {
 }
 
 function _historyRunDownloadBlob(blob, filename) {
-  const downloader = typeof downloadBlobAsAttachment === 'function'
-    ? downloadBlobAsAttachment
-    : window.downloadBlobAsAttachment;
-  if (typeof downloader !== 'function') throw new Error('download unavailable');
-  downloader(blob, filename);
+  if (!_historyRunDownloadBlobAsAttachment(blob, filename)) throw new Error('download unavailable');
 }
 
 async function _exportHistoryRunTxt() {
   const run = await _historyRunLoadExportRun();
   const text = _historyRunPlainExportText(run);
   if (!text.trim()) {
-    showToast('No output to export');
+    _historyRunShowToast('No output to export');
     return;
   }
   _historyRunDownloadBlob(new Blob([text], { type: 'text/plain' }), _historyRunExportFilename('txt'));
 }
 
 async function _exportHistoryRunHtml() {
-  if (!window.ExportHtmlUtils) throw new Error('ExportHtmlUtils unavailable');
+  if (!ExportHtmlUtils) throw new Error('ExportHtmlUtils unavailable');
   const run = await _historyRunLoadExportRun();
   const exportModel = _historyRunBuildExportModel(run);
   if (!exportModel.rawLines.length) {
-    showToast('No output to export');
+    _historyRunShowToast('No output to export');
     return;
   }
-  const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
+  const ansiRenderer = _historyRunCreateAnsiUpRenderer();
   const { linesHtml, prefixWidth, summaryHtml } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
     getPrefix: () => '',
-    ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
+    ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : _historyRunEscapeHtml(String(text ?? '')),
   });
   const [fontFacesCss, exportCss] = await Promise.all([
     ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
@@ -1822,22 +2193,27 @@ async function _exportHistoryRunHtml() {
 }
 
 async function _exportHistoryRunPdf() {
-  if (!window.jspdf || !window.ExportPdfUtils) throw new Error('PDF library not loaded');
+  const loadPdfUtils = _historyRunLoadExportPdfUtils();
+  if (!loadPdfUtils) {
+    throw new Error('PDF library not loaded');
+  }
+  const pdfUtils = await loadPdfUtils;
   const run = await _historyRunLoadExportRun();
   const exportModel = _historyRunBuildExportModel(run);
   if (!exportModel.rawLines.length) {
-    showToast('No output to export');
+    _historyRunShowToast('No output to export');
     return;
   }
-  const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
-  const doc = await ExportPdfUtils.buildTerminalExportPdf({
-    jsPDF: window.jspdf.jsPDF,
+  const ansiRenderer = _historyRunCreateAnsiUpRenderer();
+  const jsPDF = await _historyRunLoadJsPdf(pdfUtils);
+  const doc = await pdfUtils.buildTerminalExportPdf({
+    jsPDF,
     appName: exportModel.appName,
     metaLine: exportModel.metaLine,
     runMeta: exportModel.runMeta,
     rawLines: exportModel.rawLines,
     getPrefix: () => '',
-    ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
+    ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : _historyRunEscapeHtml(String(text ?? '')),
   });
   doc.save(_historyRunExportFilename('pdf'));
 }
@@ -1849,7 +2225,7 @@ async function _handleHistoryRunExport(format) {
     else if (format === 'pdf') await _exportHistoryRunPdf();
   } catch (_) {
     const label = format === 'pdf' ? 'pdf' : format === 'html' ? 'html' : 'text';
-    showToast(`Failed to export ${label}`, 'error');
+    _historyRunShowToast(`Failed to export ${label}`, 'error');
   }
 }
 
@@ -1857,9 +2233,9 @@ function _openHistoryRunEntityInAtlas(entityId) {
   const run = _historyRunPrimary();
   const entity = (Array.isArray(_historyRunModalState.entities) ? _historyRunModalState.entities : [])
     .find(item => String(item && item.id || '') === String(entityId || ''));
-  if (!run || !run.id || !entity || typeof openAtlas !== 'function') return;
+  if (!run || !run.id || !entity) return;
   closeHistoryRunOverlay();
-  void openAtlas({
+  void _historyRunOpenAtlas({
     source: 'run-details',
     tab: _historyRunActiveEntityTab().id,
     runId: run.id,
@@ -1873,13 +2249,13 @@ async function _loadHistoryRunProjectState(runId, token) {
   _historyRunModalState.loadingProject = true;
   _renderHistoryRunModal();
   try {
-    const project = await _historyLoadActiveProject();
+    const project = await _historyRunLoadActiveProject();
     if (token !== _historyRunModalToken) return;
     if (!project || !project.id) {
       _historyRunModalState.projectState = { project: null, attached: false };
       return;
     }
-    const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/summary`, { cache: 'no-store' });
+    const resp = await _historyRunApiFetch(`/projects/${encodeURIComponent(project.id)}/summary`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const summary = await resp.json();
     const runs = Array.isArray(summary.runs) ? summary.runs : [];
@@ -1904,7 +2280,7 @@ async function _loadHistoryRunAIAssists(runId, token, { showLoading = true } = {
   _historyRunModalState.aiNextError = '';
   if (showLoading) _renderHistoryRunModal();
   try {
-    const resp = await apiFetch(`/runs/${encodeURIComponent(runId)}/ai-assists`, { cache: 'no-store' });
+    const resp = await _historyRunApiFetch(`/runs/${encodeURIComponent(runId)}/ai-assists`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (token !== _historyRunModalToken) return;
@@ -1944,7 +2320,7 @@ async function _requestHistoryRunAiSummary() {
   _renderHistoryRunModal();
   document.getElementById('history-run-modal')?.focus({ preventScroll: true });
   try {
-    const resp = await apiFetch(`/runs/${encodeURIComponent(run.id)}/ai-summary`, {
+    const resp = await _historyRunApiFetch(`/runs/${encodeURIComponent(run.id)}/ai-summary`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(force ? { force: true } : {}),
@@ -1995,7 +2371,7 @@ async function _requestHistoryRunAiNextCommands() {
   _renderHistoryRunModal();
   document.getElementById('history-run-modal')?.focus({ preventScroll: true });
   try {
-    const resp = await apiFetch(`/runs/${encodeURIComponent(run.id)}/ai-next-commands`, {
+    const resp = await _historyRunApiFetch(`/runs/${encodeURIComponent(run.id)}/ai-next-commands`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(force ? { force: true } : {}),
@@ -2103,70 +2479,64 @@ async function _handleHistoryRunModalAction(action) {
   if (!run || !run.id) return;
   if (action === 'use-command') {
     const cmd = run.command || '';
-    if (typeof setComposerValue === 'function') setComposerValue(cmd, cmd.length, cmd.length);
+    _historyRunSetComposerValue(cmd, cmd.length, cmd.length);
     closeHistoryRunOverlay();
-    if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
-    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
-    resetCmdHistoryNav();
+    _historyRunHideHistoryPanel();
+    _historyRunRefocusComposerAfterAction({ preventScroll: true });
+    _historyRunResetCmdHistoryNav();
   } else if (action === 'restore') {
     closeHistoryRunOverlay();
-    const existing = _tabForHistoryRun(run);
+    const existing = _historyRunTabForRun(run);
     const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
     if (existing && !canUpgradeExisting) {
-      activateTab(existing.id);
-      if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+      _historyRunActivateTab(existing.id);
+      _historyRunHideHistoryPanel();
       return;
     }
-    _setHistoryLoadState(true);
-    restoreHistoryRunIntoTab(run, {
+    _historyRunSetLoadState(true);
+    _historyRunRestoreIntoTab(run, {
       targetTabId: canUpgradeExisting ? existing.id : null,
       hidePanelOnSuccess: true,
     })
-      .catch(() => showToast('Failed to load run'))
-      .finally(() => _setHistoryLoadState(false));
+      .catch(() => _historyRunShowToast('Failed to load run'))
+      .finally(() => _historyRunSetLoadState(false));
   } else if (action === 'copy-command') {
-    copyTextToClipboard(run.command || '')
-      .then(() => showToast('Command copied'))
-      .catch(() => showToast('Failed to copy command', 'error'));
+    _historyRunCopyTextToClipboard(run.command || '')
+      .then(() => _historyRunShowToast('Command copied'))
+      .catch(() => _historyRunShowToast('Failed to copy command', 'error'));
   } else if (action === 'schedule-command') {
     closeHistoryRunOverlay();
-    if (typeof openSchedulesModal === 'function') {
-      void openSchedulesModal({ command: run.command || '' });
-    }
+    void _historyRunOpenSchedulesModal({ command: run.command || '' });
   } else if (action === 'watch-command') {
     closeHistoryRunOverlay();
-    if (typeof openWatchersModal === 'function') {
-      void openWatchersModal({ baselineRun: run });
-    }
+    void _historyRunOpenWatchersModal({ baselineRun: run });
   } else if (action === 'open-schedule') {
     closeHistoryRunOverlay();
     const ownerKind = String(run.schedule_owner_kind || '');
     const watcherId = String(run.schedule_owner_id || run.watcher_id || '');
-    if (ownerKind === 'watcher' && watcherId && typeof openWatchersModal === 'function') {
-      void openWatchersModal({ watcherId });
-    } else if (run.schedule_id && typeof openSchedulesModal === 'function') {
-      void openSchedulesModal({ scheduleId: run.schedule_id });
+    if (ownerKind === 'watcher' && watcherId) {
+      void _historyRunOpenWatchersModal({ watcherId });
+    } else if (run.schedule_id) {
+      void _historyRunOpenSchedulesModal({ scheduleId: run.schedule_id });
     }
   } else if (action === 'permalink') {
-    copyHistoryRunPermalink(run).catch(() => showToast('Failed to copy link', 'error'));
+    _historyRunCopyPermalink(run).catch(() => _historyRunShowToast('Failed to copy link', 'error'));
   } else if (action === 'compare') {
     closeHistoryRunOverlay();
-    openHistoryCompareLauncher(run);
+    _historyRunOpenCompare(run);
   } else if (action === 'delete') {
     closeHistoryRunOverlay();
-    confirmHistAction('delete', run.id, run.command);
+    _historyRunConfirmDelete(run);
   } else if (action === 'edit-metadata') {
-    _historyEditEntityMetadata('run', run);
+    _historyRunEditMetadata('run', run);
   } else if (action === 'open-atlas') {
     closeHistoryRunOverlay();
-    if (typeof openAtlas === 'function') {
-      void openAtlas({
-        source: 'run-details',
-        tab: 'findings',
-        runId: run.id,
-        runLabel: run.command || run.label || run.id,
-      });
-    }
+    void _historyRunOpenAtlas({
+      source: 'run-details',
+      tab: 'findings',
+      runId: run.id,
+      runLabel: run.command || run.label || run.id,
+    });
   } else if (action === 'ai-summary') {
     await _requestHistoryRunAiSummary();
   } else if (action === 'ai-next-commands') {
@@ -2176,18 +2546,18 @@ async function _handleHistoryRunModalAction(action) {
     const project = projectState && projectState.project;
     if (!project || projectState.attached) return;
     try {
-      const confirmed = await _historyConfirmAddRunToProject(run, project);
+      const confirmed = await _historyRunConfirmAddRunToProject(run, project);
       if (!confirmed) return;
-      await _historyLinkRunToProject(run, project, confirmed);
+      await _historyRunLinkRunToProject(run, project, confirmed);
       _historyRunModalState.projectState = { project, attached: true };
       _renderHistoryRunModal();
-      refreshHistoryPanel();
+      _historyRunRefreshHistoryPanel();
     } catch (_) {
-      showToast('Failed to add run to active project', 'error');
+      _historyRunShowToast('Failed to add run to active project', 'error');
     }
   } else if (action === 'add-project') {
     try {
-      await _historyAddRunToProject(run);
+      await _historyRunAddRunToProject(run);
       const projectState = _historyRunModalState.projectState;
       if (projectState && projectState.project) {
         const activeProjectId = String(projectState.project.id || '');
@@ -2196,13 +2566,13 @@ async function _handleHistoryRunModalAction(action) {
         _historyRunModalState.projectState = { ...projectState, attached };
       }
       _renderHistoryRunModal();
-      refreshHistoryPanel();
+      _historyRunRefreshHistoryPanel();
     } catch (_) {
-      showToast('Failed to add run to project', 'error');
+      _historyRunShowToast('Failed to add run to project', 'error');
     }
   } else if (action === 'remove-project') {
     try {
-      await _historyRemoveRunFromProject(run);
+      await _historyRunRemoveRunFromProject(run);
       const projectState = _historyRunModalState.projectState;
       if (projectState && projectState.project) {
         const activeProjectId = String(projectState.project.id || '');
@@ -2211,18 +2581,32 @@ async function _handleHistoryRunModalAction(action) {
         _historyRunModalState.projectState = { ...projectState, attached };
       }
       _renderHistoryRunModal();
-      refreshHistoryPanel();
+      _historyRunRefreshHistoryPanel();
     } catch (_) {
-      showToast('Failed to remove run from project', 'error');
+      _historyRunShowToast('Failed to remove run from project', 'error');
     }
   } else if (action === 'copy-run-id') {
-    copyTextToClipboard(run.id)
-      .then(() => showToast('Run ID copied'))
-      .catch(() => showToast('Failed to copy run ID', 'error'));
+    _historyRunCopyTextToClipboard(run.id)
+      .then(() => _historyRunShowToast('Run ID copied'))
+      .catch(() => _historyRunShowToast('Failed to copy run ID', 'error'));
   }
 }
 
-window.openHistoryRunDetails = openHistoryRunDetails;
-window.closeHistoryRunOverlay = closeHistoryRunOverlay;
-window.isHistoryRunOverlayOpen = isHistoryRunOverlayOpen;
-window.cycleHistoryRunOverlayTab = cycleHistoryRunOverlayTab;
+if (typeof window !== 'undefined') {
+  if (typeof importedSetHistoryRunModalStateHandlers === 'function') {
+    importedSetHistoryRunModalStateHandlers({
+      getHistoryRunModalState: () => _historyRunModalState,
+      closeHistoryRunOverlay,
+      cycleHistoryRunOverlayTab,
+      isHistoryRunOverlayOpen,
+      openHistoryRunDetails,
+    });
+  }
+}
+
+export {
+  closeHistoryRunOverlay,
+  cycleHistoryRunOverlayTab,
+  isHistoryRunOverlayOpen,
+  openHistoryRunDetails,
+};

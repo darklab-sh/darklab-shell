@@ -3,7 +3,15 @@
 // One singleton sheet is reused for every caller. It composes the app's
 // bottom-sheet, dismissible, mobile-sheet, and pressable primitives while
 // keeping caller-specific action logic in the caller.
-(function initActionSheet(global) {
+import { bindDismissible as importedBindDismissible } from './ui_dismissible.js';
+import { bindMobileSheet as importedBindMobileSheet } from './mobile_sheet.js';
+import { bindPressable as importedBindPressable } from './ui_pressable.js';
+import { enhanceAppSelects as importedEnhanceAppSelects } from './ui_helpers.js';
+
+const {
+  closeActionSheet,
+  openActionSheet,
+} = (function initActionSheet() {
   let overlay = null;
   let sheet = null;
   let titleEl = null;
@@ -49,16 +57,22 @@
       if (event.target === overlay) closeActionSheet();
     });
 
-    if (typeof global.bindDismissible === 'function') {
-      global.bindDismissible(overlay, {
+    const dismissible = typeof importedBindDismissible === 'function'
+      ? importedBindDismissible
+      : null;
+    if (dismissible) {
+      dismissible(overlay, {
         level: 'sheet',
         isOpen: () => !!(overlay && overlay.classList.contains('open')),
         onClose: () => closeActionSheet(),
         backdropEl: overlay,
       });
     }
-    if (typeof global.bindMobileSheet === 'function') {
-      global.bindMobileSheet(sheet, { onClose: () => closeActionSheet() });
+    const mobileSheet = typeof importedBindMobileSheet === 'function'
+      ? importedBindMobileSheet
+      : null;
+    if (mobileSheet) {
+      mobileSheet(sheet, { onClose: () => closeActionSheet() });
     }
     return overlay;
   }
@@ -94,8 +108,11 @@
         await item.action(item);
       }
     });
-    if (typeof global.bindPressable === 'function') {
-      global.bindPressable(btn, { refocusComposer: false });
+    const pressable = typeof importedBindPressable === 'function'
+      ? importedBindPressable
+      : null;
+    if (pressable) {
+      pressable(btn, { refocusComposer: false });
     }
     return btn;
   }
@@ -137,11 +154,12 @@
       const node = _renderItem(item);
       if (node) itemsEl.appendChild(node);
     });
-    if (typeof global.enhanceAppSelects === 'function') {
+    const enhanceAppSelects = typeof importedEnhanceAppSelects === 'function' ? importedEnhanceAppSelects : null;
+    if (typeof enhanceAppSelects === 'function') {
       itemsEl.querySelectorAll('select.form-select').forEach((select) => {
         select.dataset.portalMenu = 'true';
       });
-      global.enhanceAppSelects(itemsEl);
+      enhanceAppSelects(itemsEl);
     }
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
@@ -174,6 +192,10 @@
     }
   }
 
-  global.openActionSheet = openActionSheet;
-  global.closeActionSheet = closeActionSheet;
-})(typeof window !== 'undefined' ? window : globalThis);
+  return {
+    closeActionSheet,
+    openActionSheet,
+  };
+})();
+
+export { openActionSheet, closeActionSheet };

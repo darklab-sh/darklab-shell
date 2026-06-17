@@ -32,15 +32,40 @@ function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
     rememberRecentValuesFromCommand,
     _readRecentValues,
     _getAutocompleteSharedPrefix: autocompleteCore.sharedPrefix,
-    _setAcIndex: (value) => { acIndex = value; },
-    _setAcFiltered: (value) => { acFiltered = value; },
-    _getAcFiltered: () => acFiltered,
+    _setAcIndex: (value) => {
+      acIndex = value;
+      if (typeof setAutocompleteState === 'function') setAutocompleteState({ index: value });
+    },
+    _setAcFiltered: (value) => {
+      acFiltered = value;
+      if (typeof setAutocompleteState === 'function') setAutocompleteState({ filtered: value });
+    },
+    _getAcFiltered: () => (typeof getAutocompleteState === 'function' ? getAutocompleteState().filtered : acFiltered),
   }`,
   )
 }
 
 describe('autocomplete helpers', () => {
   beforeEach(() => {
+    ;[
+      '_runtimeHint',
+      '_runtimePlaceholderHint',
+      '_runtimeContextSpec',
+      'isWorkspaceFeatureEnabled',
+      'isTourFeatureEnabled',
+      'getWorkspaceAutocompletePathHints',
+      'getRuntimeAutocompleteContext',
+      'getRuntimeAutocompleteItems',
+      'extractGrepOutputTokens',
+      'getGrepOutputSuggestions',
+      'loadSessionVariables',
+      'openAutocompleteForVisibleComposer',
+      'allowedCommandsFaqData',
+      'getWorkspaceAutocompleteFlagFileHints',
+      '_runtimeWorkflowContext',
+    ].forEach((name) => {
+      delete window[name]
+    })
     document.body.innerHTML = `
       <input id="cmd" />
       <div id="ac"></div>
@@ -301,6 +326,7 @@ describe('autocomplete helpers', () => {
     vi.useFakeTimers()
     try {
       const openAutocompleteForVisibleComposer = vi.fn(() => true)
+      window.openAutocompleteForVisibleComposer = openAutocompleteForVisibleComposer
       const { acAccept } = fromDomScripts(
         ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
         {
@@ -316,7 +342,6 @@ describe('autocomplete helpers', () => {
             input.selectionStart = start
             input.selectionEnd = end == null ? start : end
           },
-          openAutocompleteForVisibleComposer,
           acSuggestions: [],
           acContextRegistry: {},
           acFiltered: [],
@@ -358,7 +383,7 @@ describe('autocomplete helpers', () => {
           input.selectionEnd = end == null ? start : end
           if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
             acSuppressInputOnce = false
-            acHide()
+            document.getElementById('ac').style.display = 'none'
           }
         },
         acSuggestions: [],
@@ -553,6 +578,42 @@ describe('autocomplete helpers', () => {
               subs: { flags: [{ value: '-names', description: 'Print names' }] },
             },
           },
+          shodan: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'scan', insertValue: 'scan ', description: 'Manage on-demand scans' },
+              ],
+            },
+            subcommands: {
+              scan: {
+                flags: [],
+                expects_value: [],
+                arg_hints: {
+                  __positional__: [
+                    { value: 'internet', insertValue: 'internet ', description: 'Scan internet by port/protocol' },
+                    { value: 'list', insertValue: 'list ', description: 'Show scans' },
+                    { value: 'protocols', insertValue: 'protocols ', description: 'List protocols' },
+                    { value: 'status', insertValue: 'status ', description: 'Check scan status' },
+                    { value: 'submit', insertValue: 'submit ', description: 'Submit a scan' },
+                  ],
+                },
+                subcommands: {
+                  submit: {
+                    flags: [],
+                    expects_value: [],
+                    arg_hints: {
+                      __positional__: [
+                        { value: '<ip-or-cidr>', hintOnly: true, value_type: 'target', description: 'Public IP or CIDR' },
+                      ],
+                    },
+                    subcommands: {},
+                  },
+                },
+              },
+            },
+          },
         },
         acFiltered: [],
         acIndex: -1,
@@ -565,6 +626,14 @@ describe('autocomplete helpers', () => {
 
     expect(getAutocompleteMatches('amass ', 6).map(item => item.value)).toEqual(['-h', 'enum', 'subs'])
     expect(getAutocompleteMatches('amass nm', 8).map(item => item.value)).toEqual(['enum'])
+    expect(getAutocompleteMatches('shodan scan ', 12).map(item => item.value)).toEqual([
+      'internet',
+      'list',
+      'protocols',
+      'status',
+      'submit',
+    ])
+    expect(getAutocompleteMatches('shodan scan submit ', 19).map(item => item.value)).toEqual(['<ip-or-cidr>'])
   })
 
   it('shows root and subcommand examples while a unique command root is being typed', () => {
@@ -1404,7 +1473,10 @@ describe('autocomplete helpers', () => {
       loadRecentValues,
       rememberRecentValuesFromCommand,
       _readRecentValues,
-      _setContextRegistry: (value) => { acContextRegistry = value; },
+      _setContextRegistry: (value) => {
+        acContextRegistry = value;
+        if (typeof APP_STATE_API !== 'undefined') APP_STATE_API.getState().acContextRegistry = value;
+      },
     }`,
     )
 
@@ -2695,6 +2767,14 @@ describe('autocomplete helpers', () => {
   })
 
   it('uses cwd-relative workspace file hints for external workspace read flags', () => {
+    window.getWorkspaceAutocompleteFlagFileHints = token => (
+      String(token || '').includes('/')
+        ? [{ value: 'nested/targets.txt', description: 'session file · 24 B' }]
+        : [
+            { value: 'targets.txt', description: 'session file · 42 B' },
+            { value: 'nested/', description: 'session folder' },
+          ]
+    )
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
@@ -2715,14 +2795,6 @@ describe('autocomplete helpers', () => {
             },
           },
         },
-        getWorkspaceAutocompleteFlagFileHints: token => (
-          String(token || '').includes('/')
-            ? [{ value: 'nested/targets.txt', description: 'session file · 24 B' }]
-            : [
-                { value: 'targets.txt', description: 'session file · 42 B' },
-                { value: 'nested/', description: 'session folder' },
-              ]
-        ),
         acFiltered: [],
         acIndex: -1,
         acSuppressInputOnce: false,

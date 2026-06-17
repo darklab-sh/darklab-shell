@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
 function setupCatalogDom() {
@@ -51,6 +51,18 @@ function loadPipeFns() {
     ['app/static/js/features/command-registry/command_registry.js'],
     registryGlobals({ commandCatalogBody: null }),
     '{ makeCommandRegistryPipeSection }',
+  )
+}
+
+function loadRowFns(extra = {}) {
+  setupCatalogDom()
+  return fromDomScripts(
+    ['app/static/js/features/command-registry/command_registry.js'],
+    registryGlobals({
+      commandCatalogBody: document.getElementById('command-catalog-body'),
+      ...extra,
+    }),
+    '{ makeCommandRegistryRow }',
   )
 }
 
@@ -174,5 +186,29 @@ describe('makeCommandRegistryPipeSection', () => {
   it('returns null when pipe_helpers is absent', () => {
     expect(makeCommandRegistryPipeSection(null)).toBeNull()
     expect(makeCommandRegistryPipeSection(undefined)).toBeNull()
+  })
+})
+
+describe('makeCommandRegistryRow', () => {
+  it('binds generated command rows through the shared pressable primitive', () => {
+    const bindPressable = vi.fn((el, options) => {
+      el.dataset.boundByPressable = '1'
+      el.addEventListener('click', options.onActivate)
+    })
+    const { makeCommandRegistryRow } = loadRowFns({ bindPressable })
+
+    const row = makeCommandRegistryRow({
+      root: 'nmap',
+      category: 'Scanning',
+      description: 'Scan hosts',
+    })
+
+    expect(row).not.toBeNull()
+    expect(bindPressable).toHaveBeenCalledTimes(1)
+    expect(bindPressable).toHaveBeenCalledWith(row, {
+      onActivate: expect.any(Function),
+      clearPressStyle: true,
+    })
+    expect(row.dataset.boundByPressable).toBe('1')
   })
 })

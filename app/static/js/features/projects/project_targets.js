@@ -1,3 +1,7 @@
+import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
+
+let exportedDarklabProjectTargets = null;
+
 (function projectTargetsModule(global) {
   'use strict';
 
@@ -15,8 +19,8 @@
         select.appendChild(option);
       }
       select.value = normalized;
-      if (typeof global.syncAppSelect === 'function') {
-        global.syncAppSelect(select);
+      if (typeof importedSyncAppSelect === 'function') {
+        importedSyncAppSelect(select);
       }
       syncValueHelp(normalized);
     }
@@ -275,7 +279,11 @@
     };
   }
 
-  global.DarklabProjectTargets = {
+  const DarklabProjectTargets = {
     createProjectTargetsController,
   };
+  exportedDarklabProjectTargets = DarklabProjectTargets;
 })(globalThis);
+
+export {
+  exportedDarklabProjectTargets as DarklabProjectTargets,};

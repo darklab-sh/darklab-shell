@@ -1,6 +1,10 @@
 // Project Artifacts tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
+import { showWorkspaceViewer as importedShowWorkspaceViewer } from '../../workspace.js';
+
+let exportedDarklabProjectArtifacts = null;
+
 (function projectArtifactsModule(global) {
   'use strict';
 
@@ -338,11 +342,7 @@
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || 'Unable to preview artifact.');
       const artifact = data.artifact || {};
-      const showViewer = global && typeof global.showWorkspaceViewer === 'function'
-        ? global.showWorkspaceViewer
-        : (typeof window !== 'undefined' && typeof window.showWorkspaceViewer === 'function'
-            ? window.showWorkspaceViewer
-            : null);
+      const showViewer = typeof importedShowWorkspaceViewer === 'function' ? importedShowWorkspaceViewer : null;
       if (!showViewer) throw new Error('File preview is not available.');
       showViewer(
         artifact.workspace_path || 'artifact',
@@ -477,7 +477,11 @@
     };
   }
 
-  global.DarklabProjectArtifacts = {
+  const DarklabProjectArtifacts = {
     createProjectArtifactsController,
   };
+  exportedDarklabProjectArtifacts = DarklabProjectArtifacts;
 })(globalThis);
+
+export {
+  exportedDarklabProjectArtifacts as DarklabProjectArtifacts,};

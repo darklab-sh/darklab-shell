@@ -1,3 +1,5 @@
+let exportedDarklabProjectFilters = null;
+
 (function projectFiltersModule(global) {
   'use strict';
 
@@ -967,7 +969,11 @@
     };
   }
 
-  global.DarklabProjectFilters = {
+  const DarklabProjectFilters = {
     createProjectFiltersController,
   };
+  exportedDarklabProjectFilters = DarklabProjectFilters;
 })(globalThis);
+
+export {
+  exportedDarklabProjectFilters as DarklabProjectFilters,};

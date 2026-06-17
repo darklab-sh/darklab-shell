@@ -50,6 +50,24 @@ function loadSearchFns({
     _renderCompactSignalSummary,
     _setRegexMode: (value) => { searchRegexMode = value; },
   }`,
+    `window.APP_STATE.activeTabId = activeTabId;
+     window.APP_STATE.searchScope = searchScope;
+     window.APP_STATE.searchDiscoverabilityPrompted = searchDiscoverabilityPrompted;
+     window.APP_STATE.acBuiltinCommandRoots = acBuiltinCommandRoots;
+     window.searchInput = searchInput;
+     window.searchCount = searchCount;
+     window.searchToggleBtn = searchToggleBtn;
+     window.searchSignalSummary = searchSignalSummary;
+     window.searchSummaryBtn = searchSummaryBtn;
+     window.searchCaseBtn = searchCaseBtn;
+     window.searchRegexBtn = searchRegexBtn;
+     window.searchScopeButtons = searchScopeButtons;
+     window.getOutput = getOutput;
+     window.getTab = getTab;
+     window.isSearchBarOpen = isSearchBarOpen;
+     window.__darklabOpenSearchFromSignalOverride = __darklabExtractGlobals.openSearchFromSignal;
+     window.openSearchFromSignal = __darklabExtractGlobals.openSearchFromSignal;
+     window.appendLine = appendLine;`,
   )
 }
 

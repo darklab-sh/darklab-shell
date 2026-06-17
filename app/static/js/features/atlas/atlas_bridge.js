@@ -1,0 +1,60 @@
+// Neutral Atlas overlay boundary for lazy placeholders and direct consumers.
+
+const atlasHandlers = {
+  DarklabAtlasOverlay: null,
+  openAtlas: null,
+  closeAtlas: null,
+  isAtlasOverlayOpen: null,
+  refreshAtlasOverlay: null,
+  cycleAtlasTab: null,
+};
+
+function setAtlasHandlers(handlers = {}) {
+  Object.keys(atlasHandlers).forEach((name) => {
+    if (handlers[name]) atlasHandlers[name] = handlers[name];
+  });
+}
+
+function getAtlasOverlayController() {
+  return atlasHandlers.DarklabAtlasOverlay || null;
+}
+
+function openAtlas(...args) {
+  return typeof atlasHandlers.openAtlas === 'function'
+    ? atlasHandlers.openAtlas(...args)
+    : undefined;
+}
+
+function closeAtlas(...args) {
+  return typeof atlasHandlers.closeAtlas === 'function'
+    ? atlasHandlers.closeAtlas(...args)
+    : false;
+}
+
+function isAtlasOverlayOpen(...args) {
+  return typeof atlasHandlers.isAtlasOverlayOpen === 'function'
+    ? !!atlasHandlers.isAtlasOverlayOpen(...args)
+    : false;
+}
+
+function refreshAtlasOverlay(...args) {
+  return typeof atlasHandlers.refreshAtlasOverlay === 'function'
+    ? atlasHandlers.refreshAtlasOverlay(...args)
+    : false;
+}
+
+function cycleAtlasTab(...args) {
+  return typeof atlasHandlers.cycleAtlasTab === 'function'
+    ? atlasHandlers.cycleAtlasTab(...args)
+    : false;
+}
+
+export {
+  closeAtlas,
+  cycleAtlasTab,
+  getAtlasOverlayController,
+  isAtlasOverlayOpen,
+  openAtlas,
+  refreshAtlasOverlay,
+  setAtlasHandlers,
+};

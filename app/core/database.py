@@ -159,6 +159,17 @@ def _create_schema(conn):
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS run_output_summary_status (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            attempted_at TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 1,
+            error TEXT NOT NULL DEFAULT '',
+            CHECK (status IN ('complete', 'empty', 'failed'))
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS snapshots (
             id         TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -225,6 +236,7 @@ def _create_schema(conn):
     """)
     _create_secrets_schema(conn)
     _create_notification_schema(conn)
+    _create_audit_schema(conn)
     _create_schedule_schema(conn)
     _create_watcher_schema(conn)
     _create_ai_assist_schema(conn)
@@ -367,6 +379,34 @@ def _create_notification_schema(conn):
     """)
 
 
+def _create_audit_schema(conn):
+    """Create operational audit-event storage."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id                  TEXT PRIMARY KEY,
+            owner_session_hash  TEXT NOT NULL DEFAULT '',
+            team_id             TEXT NOT NULL DEFAULT '',
+            actor_session_hash  TEXT NOT NULL DEFAULT '',
+            actor_session_label TEXT NOT NULL DEFAULT '',
+            actor_member_id     TEXT NOT NULL DEFAULT '',
+            actor_role          TEXT NOT NULL DEFAULT '',
+            actor_display_name  TEXT NOT NULL DEFAULT '',
+            event_type          TEXT NOT NULL,
+            target_type         TEXT NOT NULL,
+            target_id           TEXT NOT NULL DEFAULT '',
+            project_id          TEXT NOT NULL DEFAULT '',
+            request_id          TEXT NOT NULL DEFAULT '',
+            correlation_id      TEXT NOT NULL DEFAULT '',
+            job_id              TEXT NOT NULL DEFAULT '',
+            details_version     INTEGER NOT NULL DEFAULT 1,
+            created             TEXT NOT NULL,
+            client_ip           TEXT NOT NULL DEFAULT '',
+            user_agent          TEXT NOT NULL DEFAULT '',
+            details             {_json_column_sql("{}")}
+        )
+    """)
+
+
 def _create_ai_assist_schema(conn):
     """Create AI assist queue/cache and suggestion validation audit storage."""
     conn.execute(f"""
@@ -477,6 +517,7 @@ def _create_watcher_schema(conn):
             id                      TEXT PRIMARY KEY,
             session_token           TEXT NOT NULL,
             team_id                 TEXT NOT NULL DEFAULT '',
+            project_id              TEXT NOT NULL DEFAULT '',
             label                   TEXT NOT NULL DEFAULT '',
             command_text            TEXT NOT NULL,
             schedule_id             TEXT NOT NULL UNIQUE,
@@ -487,6 +528,7 @@ def _create_watcher_schema(conn):
             state_reason            TEXT NOT NULL DEFAULT '',
             last_error              TEXT NOT NULL DEFAULT '',
             options_json            {_json_column_sql("{}")},
+            policy_json             {_json_column_sql("{}")},
             consecutive_no_change   INTEGER NOT NULL DEFAULT 0,
             consecutive_changed     INTEGER NOT NULL DEFAULT 0,
             consecutive_failures    INTEGER NOT NULL DEFAULT 0,
@@ -507,9 +549,20 @@ def _create_watcher_schema(conn):
             truncated                   INTEGER NOT NULL DEFAULT 0,
             notification_event_ids_json {_json_column_sql("[]")},
             state_at_fire               TEXT NOT NULL DEFAULT '',
+            state_reason                TEXT NOT NULL DEFAULT '',
+            fire_kind                   TEXT NOT NULL DEFAULT 'unclassified',
+            ack_state                   TEXT NOT NULL DEFAULT 'new',
+            ack_note                    TEXT NOT NULL DEFAULT '',
+            ack_by                      TEXT NOT NULL DEFAULT '',
+            ack_at                      TEXT NOT NULL DEFAULT '',
             created                     TEXT NOT NULL,
             UNIQUE (watcher_id, run_id),
-            CHECK (diff_kind IN ('signal', 'textual', 'none'))
+            CHECK (diff_kind IN ('signal', 'textual', 'none')),
+            CHECK (fire_kind IN (
+                'changed', 'recovered', 'failed', 'no_change',
+                'baseline_created', 'baseline_accepted', 'paused', 'unclassified'
+            )),
+            CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))
         )
     """)
 
@@ -793,6 +846,18 @@ def _create_project_workspace_schema(conn):
             updated           TEXT NOT NULL
         )
     """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS project_reports (
+            id                    TEXT PRIMARY KEY,
+            session_id            TEXT NOT NULL,
+            team_id               TEXT NOT NULL DEFAULT '',
+            project_id            TEXT NOT NULL,
+            draft                 {_json_column_sql("{}")},
+            report_format_version INTEGER NOT NULL DEFAULT 1,
+            created               TEXT NOT NULL,
+            updated               TEXT NOT NULL
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -818,6 +883,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_run_output_summary_lookup "
         "ON run_output_summary (family, value, run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_output_summary_status_status "
+        "ON run_output_summary_status (status, attempted_at)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
     conn.execute(
@@ -905,6 +974,40 @@ def _create_indexes(conn):
         "ON notification_events (run_id)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_personal_created "
+        "ON audit_events (owner_session_hash, created DESC) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_team_created "
+        "ON audit_events (team_id, created DESC) "
+        "WHERE team_id != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_actor_member_created "
+        "ON audit_events (actor_member_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_actor_session_created "
+        "ON audit_events (actor_session_hash, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_type_created "
+        "ON audit_events (event_type, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_project_created "
+        "ON audit_events (project_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_target_created "
+        "ON audit_events (target_type, target_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_events_correlation "
+        "ON audit_events (correlation_id)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_session_run_variant "
         "ON ai_run_assists (session_id, run_id, variant, created_at DESC)"
     )
@@ -955,6 +1058,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watchers_team_updated "
         "ON watchers (team_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchers_project_updated "
+        "ON watchers (project_id, updated DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_watchers_schedule "
@@ -1238,6 +1345,20 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_session_project "
         "ON evidence_packages (session_id, project_id)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_reports_project_updated "
+        "ON project_reports (project_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_reports_personal_unique "
+        "ON project_reports (session_id, project_id) "
+        "WHERE team_id IS NULL OR team_id = ''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_reports_team_unique "
+        "ON project_reports (team_id, project_id) "
+        "WHERE team_id != ''"
+    )
 
 
 def _extract_search_text_from_preview_json(raw_preview):
@@ -1298,13 +1419,18 @@ def _populate_run_output_summary(conn):
         return
     if DB_BACKEND == DatabaseBackend.SQLITE and not sqlite_table_exists(conn, "run_output_summary"):
         return
+    if DB_BACKEND == DatabaseBackend.SQLITE and not sqlite_table_exists(conn, "run_output_summary_status"):
+        return
     try:
         rows = conn.execute(
             "SELECT r.id, r.output_preview, art.rel_path "
             "FROM runs r "
             "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
             "WHERE NOT EXISTS ("
-            "SELECT 1 FROM run_output_summary s WHERE s.run_id = r.id)"
+            "SELECT 1 FROM run_output_summary s WHERE s.run_id = r.id) "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM run_output_summary_status st "
+            "WHERE st.run_id = r.id AND st.status IN ('complete', 'empty', 'failed'))"
         ).fetchall()
     except SQLiteOperationalError:
         return
@@ -1313,23 +1439,69 @@ def _populate_run_output_summary(conn):
     for row in rows:
         run_id = str(row["id"] or "")
         entries = None
+        source = ""
+        error = ""
         rel_path = str(row["rel_path"] or "").strip()
         if rel_path:
             try:
                 entries = load_full_output_entries(rel_path)
+                source = "artifact"
             except Exception:  # noqa: BLE001
-                failed += 1
+                source = "artifact"
+                error = "artifact_unreadable"
         if entries is None:
             try:
                 parsed = json.loads(str(row["output_preview"] or "[]"))
                 entries = parsed if isinstance(parsed, list) else []
+                source = "preview"
             except (TypeError, ValueError, json.JSONDecodeError):
                 failed += 1
+                _record_run_output_summary_status(
+                    conn,
+                    run_id,
+                    status="failed",
+                    source=source or "preview",
+                    error=error or "preview_unreadable",
+                )
                 entries = []
+                continue
         replace_run_output_summary(conn, run_id, entries)
+        _record_run_output_summary_status(
+            conn,
+            run_id,
+            status="complete" if entries else "empty",
+            source=source,
+            error=error,
+        )
         populated += 1
     if populated or failed:
         log.info("RUN_OUTPUT_SUMMARY_BACKFILLED", extra={"runs": populated, "failed": failed})
+
+
+def _record_run_output_summary_status(conn, run_id: str, *, status: str, source: str, error: str = "") -> None:
+    if not run_id:
+        return
+    attempted_at = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO run_output_summary_status "
+        "(run_id, status, source, attempted_at, attempts, error) "
+        "VALUES (?, ?, ?, ?, 1, ?) "
+        "ON CONFLICT(run_id) DO UPDATE SET "
+        "status = excluded.status, "
+        "source = excluded.source, "
+        "attempted_at = excluded.attempted_at, "
+        "attempts = CASE "
+        "WHEN run_output_summary_status.attempts >= 2147483647 "
+        "THEN run_output_summary_status.attempts "
+        "ELSE run_output_summary_status.attempts + 1 END, "
+        "error = excluded.error",
+        (run_id, status, source, attempted_at, _bounded_backfill_error(error)),
+    )
+
+
+def _bounded_backfill_error(error: str) -> str:
+    text = str(error or "").replace("\r", " ").replace("\n", " ").strip()
+    return text[:160]
 
 
 def _create_fts_schema(conn):
@@ -1855,6 +2027,24 @@ def _migrate_schema(conn):
         _create_notification_schema(conn)
     except SQLiteOperationalError:
         pass
+    try:
+        _create_audit_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_output_summary_status (
+                run_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                attempted_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 1,
+                error TEXT NOT NULL DEFAULT '',
+                CHECK (status IN ('complete', 'empty', 'failed'))
+            )
+        """)
+    except SQLiteOperationalError:
+        pass
     for stmt in (
         "ALTER TABLE notification_channels ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE notification_events ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
@@ -1888,12 +2078,95 @@ def _migrate_schema(conn):
         "ALTER TABLE schedules ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE schedule_fires ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE watchers ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watchers ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
+        f"ALTER TABLE watchers ADD COLUMN policy_json {_json_column_sql('{}')}",
         "ALTER TABLE watcher_fires ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN state_reason TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN fire_kind TEXT NOT NULL DEFAULT 'unclassified'",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_state TEXT NOT NULL DEFAULT 'new'",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_note TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_by TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE watcher_fires ADD COLUMN ack_at TEXT NOT NULL DEFAULT ''",
     ):
         try:
             conn.execute(stmt)
         except SQLiteOperationalError:
             pass
+    try:
+        result = conn.execute(
+            """
+            UPDATE watcher_fires
+            SET state_reason = CASE
+                    WHEN json_extract(diff_summary_json, '$.baseline_created') = 1 THEN 'baseline_created'
+                    WHEN state_at_fire = 'changed' THEN 'diff_detected'
+                    WHEN state_at_fire = 'error' THEN 'run_failed'
+                    WHEN state_at_fire = 'paused' THEN 'paused'
+                    WHEN state_at_fire = 'ok' THEN 'no_change'
+                    ELSE ''
+                END,
+                fire_kind = CASE
+                    WHEN json_extract(diff_summary_json, '$.baseline_created') = 1 THEN 'baseline_created'
+                    WHEN state_at_fire = 'changed' THEN 'changed'
+                    WHEN state_at_fire = 'error' THEN 'failed'
+                    WHEN state_at_fire = 'paused' THEN 'paused'
+                    WHEN state_at_fire = 'ok' THEN 'no_change'
+                    ELSE 'unclassified'
+                END
+            WHERE fire_kind = 'unclassified'
+            """
+        )
+        log.debug("WATCHER_MONITORING_FIRE_BACKFILL_COMPLETED", extra={
+            "database_backend": "sqlite",
+            "affected_rows": int(getattr(result, "rowcount", 0) or 0),
+        })
+    except SQLiteOperationalError as exc:
+        log.warning("WATCHER_MONITORING_FIRE_BACKFILL_FAILED", extra={
+            "database_backend": "sqlite",
+            "error": str(exc),
+        })
+    try:
+        result = conn.execute(
+            """
+            UPDATE watchers
+            SET project_id = (
+                SELECT MIN(p.id)
+                FROM project_links pl
+                JOIN projects p ON p.id = pl.project_id
+                WHERE pl.entity_type = 'run'
+                  AND pl.entity_id = watchers.baseline_run_id
+                  AND (
+                    (watchers.team_id != '' AND p.team_id = watchers.team_id)
+                    OR ((watchers.team_id IS NULL OR watchers.team_id = '')
+                        AND (p.team_id IS NULL OR p.team_id = '')
+                        AND p.session_id = watchers.session_token)
+                  )
+            )
+            WHERE (project_id IS NULL OR project_id = '')
+              AND baseline_run_id != ''
+              AND (
+                SELECT COUNT(DISTINCT p.id)
+                FROM project_links pl
+                JOIN projects p ON p.id = pl.project_id
+                WHERE pl.entity_type = 'run'
+                  AND pl.entity_id = watchers.baseline_run_id
+                  AND (
+                    (watchers.team_id != '' AND p.team_id = watchers.team_id)
+                    OR ((watchers.team_id IS NULL OR watchers.team_id = '')
+                        AND (p.team_id IS NULL OR p.team_id = '')
+                        AND p.session_id = watchers.session_token)
+                  )
+              ) = 1
+            """
+        )
+        log.debug("WATCHER_PROJECT_INFERENCE_BACKFILL_COMPLETED", extra={
+            "database_backend": "sqlite",
+            "affected_rows": int(getattr(result, "rowcount", 0) or 0),
+        })
+    except SQLiteOperationalError as exc:
+        log.warning("WATCHER_PROJECT_INFERENCE_BACKFILL_FAILED", extra={
+            "database_backend": "sqlite",
+            "error": str(exc),
+        })
 
     _drop_legacy_project_entity_tables(conn)
     try:
@@ -2044,6 +2317,13 @@ def delete_run_artifacts(conn, run_ids):
     except SQLiteOperationalError:
         pass
     try:
+        conn.execute(
+            f"DELETE FROM run_output_summary_status WHERE run_id IN ({placeholders})",  # nosec
+            ids,
+        )
+    except SQLiteOperationalError:
+        pass
+    try:
         assist_rows = conn.execute(
             f"SELECT id FROM ai_run_assists WHERE run_id IN ({placeholders})",  # nosec
             ids,
@@ -2096,9 +2376,11 @@ def delete_snapshot_metadata(conn, snapshot_ids):
     )
 
 
-def _prune_retention(conn):
+def _prune_retention(conn, *, cfg=None) -> dict[str, int]:
     """Delete runs and snapshots older than permalink_retention_days."""
-    days = CFG.get("permalink_retention_days", 0)
+    counts = {"runs": 0, "snapshots": 0}
+    active_cfg = CFG if cfg is None else cfg
+    days = active_cfg.get("permalink_retention_days", 0)
     if days and days > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
         if DB_BACKEND == DatabaseBackend.POSTGRES:
@@ -2147,12 +2429,22 @@ def _prune_retention(conn):
             f"DELETE FROM snapshots WHERE {created_older_sql}",  # nosec B608
             (cutoff,)
         )
+        counts = {
+            "runs": int(cur_runs.rowcount or 0),
+            "snapshots": int(cur_snaps.rowcount or 0),
+        }
         if cur_runs.rowcount or cur_snaps.rowcount:
             log.info("DB_PRUNED", extra={
                 "runs": cur_runs.rowcount,
                 "snapshots": cur_snaps.rowcount,
                 "retention_days": days,
             })
+    return counts
+
+
+def prune_retention(conn, *, cfg=None) -> dict[str, int]:
+    """Delete expired run and snapshot data using the normal retention policy."""
+    return _prune_retention(conn, cfg=cfg)
 
 
 def db_init():
@@ -2168,6 +2460,10 @@ def db_init():
             )
             _populate_run_output_summary(conn)
             _prune_retention(conn)
+            from services.audit.retention import prune_events, warn_if_disabled  # noqa: PLC0415
+
+            warn_if_disabled()
+            prune_events(conn=conn)
             conn.commit()
         return
     with _db_init_lock():
@@ -2180,6 +2476,10 @@ def db_init():
                 conn.execute("INSERT INTO runs_fts(runs_fts) VALUES ('rebuild')")
             _populate_run_output_summary(conn)
             _prune_retention(conn)
+            from services.audit.retention import prune_events, warn_if_disabled  # noqa: PLC0415
+
+            warn_if_disabled()
+            prune_events(conn=conn)
             conn.commit()
 
 

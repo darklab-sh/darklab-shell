@@ -1,8 +1,57 @@
+import {
+  acDropdown,
+  cmdInput,
+  commandRegistryOverlay,
+  faqOverlay,
+  hamburgerBtn,
+  headerTitle,
+  histRow,
+  historyPanel,
+  mobileComposerHost,
+  mobileComposerRow,
+  mobileHeaderActions,
+  mobileMenu,
+  mobileShell,
+  mobileShellChrome,
+  mobileShellOverlays,
+  mobileShellTranscript,
+  optionsOverlay,
+  permalinkToast,
+  runBtn,
+  runTimer,
+  searchBar,
+  shellInputRow,
+  shellPromptWrap,
+  status,
+  tabPanels,
+  terminalBar,
+  terminalWrap,
+  themeOverlay,
+  workflowsOverlay,
+  workspaceEditorOverlay,
+  workspaceOverlay,
+  workspaceViewerOverlay,
+} from '../../core/dom.js';
+import {
+  blurVisibleComposerInputIfMobile,
+  getMobileKeyboardOffsetBaseline,
+  getMobileViewportClosedHeight,
+  getVisibleComposerInput,
+  hideHistoryPanel,
+  isHistoryPanelOpen,
+  setVisibilityState,
+  syncMobileComposerKeyboardState,
+} from '../../ui/ui_helpers.js';
+import { setMobileShellLayoutHandlers as importedSetMobileShellLayoutHandlers } from './mobile_shell_layout_bridge.js';
+
+const MOBILE_SHELL_LAYOUT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
 function useMobileTerminalViewportMode() {
   // Mobile mode depends on both width and input modality. A narrow desktop
   // browser window should not automatically switch into the mobile shell.
   if (typeof window === 'undefined') return false;
-  const touchPoints = typeof navigator !== 'undefined' ? (navigator.maxTouchPoints || 0) : 0;
+  const nav = window.navigator || (typeof navigator !== 'undefined' ? navigator : null);
+  const touchPoints = nav ? (nav.maxTouchPoints || 0) : 0;
   const hasTouch = touchPoints > 0
     || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
   if (!hasTouch) return false;
@@ -203,7 +252,10 @@ function isChromeIOS() {
 }
 
 function getMobileKeyboardOffset() {
-  if (!useMobileTerminalViewportMode() || !window.visualViewport) return 0;
+  const isMobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
+  if (!isMobileMode || !window.visualViewport) return 0;
   const liveInnerHeight = Math.round(window.innerHeight || 0);
   const visualHeight = Math.round(window.visualViewport.height || 0);
   const offsetTop = Math.round(window.visualViewport.offsetTop || 0);
@@ -217,7 +269,10 @@ function getMobileKeyboardOffset() {
 }
 
 function isMobileKeyboardOpen(offset = null) {
-  if (!useMobileTerminalViewportMode()) return false;
+  const isMobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
+  if (!isMobileMode) return false;
   const mobileInputEl = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
   const mobileInputFocused = !!(mobileInputEl && typeof document !== 'undefined' && document.activeElement === mobileInputEl);
   if (!mobileInputFocused) return false;
@@ -238,14 +293,26 @@ function isMobileKeyboardOpen(offset = null) {
 
 function syncMobileViewportState() {
   if (typeof document === 'undefined') return;
-  const mobileMode = useMobileTerminalViewportMode();
+  const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
   const hasMobileShell = !!(_mobileUiLayoutRefs && _mobileUiLayoutRefs.shell);
   const activeMobileMode = mobileMode && hasMobileShell;
-  const keyboardOffset = getMobileKeyboardOffset();
-  const keyboardOpen = isMobileKeyboardOpen(keyboardOffset);
+  const keyboardOffset = typeof window.getMobileKeyboardOffset === 'function'
+    ? window.getMobileKeyboardOffset()
+    : getMobileKeyboardOffset();
+  const keyboardOpen = typeof window.isMobileKeyboardOpen === 'function'
+    ? window.isMobileKeyboardOpen(keyboardOffset)
+    : isMobileKeyboardOpen(keyboardOffset);
   const wasMobileKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
+  const wasMobileTerminalMode = document.body.classList.contains('mobile-terminal-mode');
   if (!hasMobileShell) return;
   document.body.classList.toggle('mobile-terminal-mode', activeMobileMode);
+  if (wasMobileTerminalMode !== activeMobileMode && typeof document.dispatchEvent === 'function') {
+    document.dispatchEvent(new CustomEvent('app:mobile-terminal-mode-changed', {
+      detail: { active: activeMobileMode },
+    }));
+  }
   document.body.classList.toggle('mobile-chrome-ios', activeMobileMode && isChromeIOS());
   if (typeof syncMobileComposerKeyboardState === 'function') {
     syncMobileComposerKeyboardState(keyboardOffset, {
@@ -256,23 +323,55 @@ function syncMobileViewportState() {
   else document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
-  if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
+  if (activeMobileMode) MOBILE_SHELL_LAYOUT_GLOBAL.syncMobileViewportHeight?.({ keyboardOpen });
   if (activeMobileMode && keyboardOpen) {
-    queueMobileOutputTailRefresh({ keyboardOpen: true, delays: [0] });
+    MOBILE_SHELL_LAYOUT_GLOBAL.queueMobileOutputTailRefresh?.({ keyboardOpen: true, delays: [0] });
   } else if (activeMobileMode && wasMobileKeyboardOpen) {
-    queueMobileOutputTailRefresh({ keyboardOpen: false });
+    MOBILE_SHELL_LAYOUT_GLOBAL.queueMobileOutputTailRefresh?.({ keyboardOpen: false });
   }
   if (activeMobileMode && keyboardOpen) {
-    hideMobileMenu();
+    MOBILE_SHELL_LAYOUT_GLOBAL.hideMobileMenu?.();
     if (isHistoryPanelOpen()) hideHistoryPanel();
     // Hide autocomplete only when the mobile keyboard becomes active.
-    if (!wasMobileKeyboardOpen && typeof acHide === 'function') acHide();
+    if (!wasMobileKeyboardOpen) MOBILE_SHELL_LAYOUT_GLOBAL.acHide?.();
   }
 }
 
 function dismissMobileKeyboardAfterSubmit() {
-  if (!useMobileTerminalViewportMode()) return;
+  const isMobileMode = typeof window.useMobileTerminalViewportMode === 'function'
+    ? window.useMobileTerminalViewportMode()
+    : useMobileTerminalViewportMode();
+  if (!isMobileMode) return;
   if (typeof blurVisibleComposerInputIfMobile === 'function') {
     setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
   }
 }
+
+if (typeof window !== 'undefined') {
+  if (typeof importedSetMobileShellLayoutHandlers === 'function') {
+    importedSetMobileShellLayoutHandlers({
+    dismissMobileKeyboardAfterSubmit,
+    getMobileKeyboardOffset,
+    isMobileKeyboardOpen,
+    syncMobileViewportState,
+    useMobileTerminalViewportMode,
+    });
+  }
+}
+
+export {
+  _bindMobileComposerInteractions,
+  _mobileUiLayoutRefs,
+  _uiOverlayRefs,
+  dismissMobileKeyboardAfterSubmit,
+  getMobileKeyboardOffset,
+  isChromeIOS,
+  isMobileKeyboardOpen,
+  syncMobileComposerLayout,
+  syncMobileShellChromeLayout,
+  syncMobileShellLayout,
+  syncMobileShellOverlayLayout,
+  syncMobileShellTranscriptLayout,
+  syncMobileViewportState,
+  useMobileTerminalViewportMode,
+};

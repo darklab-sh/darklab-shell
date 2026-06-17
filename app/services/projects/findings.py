@@ -448,6 +448,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             not in {"0", "false", "no", "off"}
         )
         known_total = max(0, int(filters.get("known_total") or 0)) if str(filters.get("known_total") or "").isdigit() else 0
+        query = _trim_text(filters.get("q"), 128).lower()
         command_filters = _metadata_filter_values(filters, "command_root", 128, lower=True)
         source_exists_sql = _project_finding_source_exists_sql()
         source_run_expr = (
@@ -525,6 +526,22 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             placeholders = ",".join("?" for _ in severities)
             where_clauses.append(f"LOWER(f.severity) IN ({placeholders})")  # nosec
             params.extend(severities)
+        if query:
+            finding_query_fields = (
+                "f.id",
+                "f.title",
+                "f.raw_line",
+                "f.fingerprint",
+                "f.subject_key",
+                "f.severity",
+                "f.status",
+                "f.kind",
+                "f.tool_root",
+            )
+            where_clauses.append(
+                "(" + " OR ".join(f"LOWER(COALESCE({field}, '')) LIKE ?" for field in finding_query_fields) + ")"
+            )
+            params.extend([f"%{query}%"] * len(finding_query_fields))
         if command_filters:
             command_clauses = []
             for _command_filter in command_filters:

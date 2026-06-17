@@ -26,11 +26,14 @@
 // Composes bindPressable for close buttons so "dismiss me" controls go
 // through the same activation path (click + Enter/Space + blur) as every
 // other pressable in the shell.
-(function (global) {
+import { bindPressable as importedBindPressable } from './ui_pressable.js';
+
+const DarklabDismissible = (function (global) {
   'use strict';
 
   const LEVEL_PRIORITY = { modal: 3, sheet: 2, panel: 1 };
-  const _registry = [];
+  const _registry = global.__darklabDismissibleRegistry || [];
+  global.__darklabDismissibleRegistry = _registry;
 
   function _normalizeCloseButtons(input) {
     if (!input) return [];
@@ -54,6 +57,9 @@
     if (el.dataset) el.dataset.dismissibleBound = '1';
 
     const teardowns = [];
+    const pressable = typeof importedBindPressable === 'function'
+      ? importedBindPressable
+      : null;
 
     if (closeOnBackdrop && backdropEl && typeof backdropEl.addEventListener === 'function') {
       const backdropHandler = (e) => {
@@ -68,8 +74,8 @@
     closeButtons.forEach((btn) => {
       if (!btn || typeof btn.addEventListener !== 'function') return;
       const alreadyPressable = btn.dataset && btn.dataset.pressableBound === '1';
-      if (!alreadyPressable && typeof global.bindPressable === 'function') {
-        const handle = global.bindPressable(btn, {
+      if (!alreadyPressable && pressable) {
+        const handle = pressable(btn, {
           refocusComposer: false,
           onActivate: () => { if (isOpenFn()) onCloseFn(); },
         });
@@ -122,6 +128,12 @@
     return true;
   }
 
-  global.bindDismissible = bindDismissible;
-  global.closeTopmostDismissible = closeTopmostDismissible;
+  const api = Object.freeze({
+    bindDismissible,
+    closeTopmostDismissible,
+  });
+  return api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const { bindDismissible, closeTopmostDismissible } = DarklabDismissible;
+export { DarklabDismissible };
