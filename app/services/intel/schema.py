@@ -11,6 +11,7 @@ ENTITY_TYPES = {"ip", "domain", "hash", "cve", "url"}
 EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
     "ip": {
         "shodan": {"ports": [], "banners": [], "cves": [], "last_update": ""},
+        "shodan_internetdb": {"ports": [], "cpes": [], "hostnames": [], "tags": [], "cves": []},
         "censys": {
             "ports": [],
             "protocols": [],
@@ -48,6 +49,8 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
         "urlhaus": {"query_status": "", "url_count": 0, "payload_count": 0, "urls": [], "payloads": []},
         "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
         "routeviews": {"prefix": "", "origins": [], "rpki": "", "collector_count": 0},
+        "fofa": {"result_count": 0, "results": [], "has_more": False},
+        "zoomeye": {"result_count": 0, "results": [], "has_more": False},
     },
     "domain": {
         "virustotal": {"reputation": None, "last_analysis_stats": {}, "recent_urls": [], "whois": ""},
@@ -57,6 +60,8 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
         "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
         "urlscan": {"result_count": 0, "results": [], "has_more": False},
         "securitytrails": {"subdomain_count": 0, "subdomains": [], "whois": {}, "dns": {}},
+        "fofa": {"result_count": 0, "results": [], "has_more": False},
+        "zoomeye": {"result_count": 0, "results": [], "has_more": False},
     },
     "hash": {
         "virustotal": {"verdict": "", "last_analysis_stats": {}, "type_description": "", "tags": [], "names": []},
@@ -89,6 +94,8 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
         "urlhaus": {"query_status": "", "status": "", "threat": "", "host": "", "payloads": [], "tags": []},
         "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
         "urlscan": {"result_count": 0, "results": [], "has_more": False},
+        "fofa": {"result_count": 0, "results": [], "has_more": False},
+        "zoomeye": {"result_count": 0, "results": [], "has_more": False},
     },
 }
 

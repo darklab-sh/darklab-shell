@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import threading
 import time
 from typing import Any
 
 from config import CFG
 from core import process
+from core.helpers import get_log_session_id
 from services.intel.registry import cache_ttl_setting
 
 
+log = logging.getLogger("shell")
 _MEMORY_LOCK = threading.Lock()
 _MEMORY_CACHE: dict[str, tuple[float, str]] = {}
 
@@ -51,6 +55,10 @@ def cache_key(provider: str, entity_type: str, canonical_value: str) -> str:
     ])
 
 
+def _safe_cache_key_hash(key: str) -> str:
+    return hashlib.sha256(str(key or "").encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
 def _store(redis_client=None):
     return redis_client if redis_client is not None else process.redis_client
 
@@ -75,6 +83,11 @@ def get_cached_response(provider: str, entity_type: str, canonical_value: str, *
     try:
         loaded = json.loads(str(raw))
     except json.JSONDecodeError:
+        log.warning("INTEL_CACHE_DECODE_FAILED", extra={
+            "provider": str(provider or "").strip().lower(),
+            "entity_type": str(entity_type or "").strip().lower(),
+            "cache_key_hash": _safe_cache_key_hash(key),
+        })
         return None
     return loaded if isinstance(loaded, dict) else None
 
@@ -112,6 +125,8 @@ def quota_negative_cache_ttl(provider: str, cfg: dict[str, Any] | None = None) -
         "urlscan": "intel_negative_cache_urlscan_quota_seconds",
         "threatfox": "intel_negative_cache_threatfox_quota_seconds",
         "securitytrails": "intel_negative_cache_securitytrails_quota_seconds",
+        "fofa": "intel_negative_cache_fofa_quota_seconds",
+        "zoomeye": "intel_negative_cache_zoomeye_quota_seconds",
     }
     if normalized_provider in provider_keys:
         return _coerce_positive_int((cfg or CFG).get(provider_keys[normalized_provider]), 21600)
@@ -176,5 +191,10 @@ def get_quota_exhausted(session_token: str, provider: str, *, redis_client=None)
     try:
         loaded = json.loads(str(raw))
     except json.JSONDecodeError:
+        log.warning("INTEL_QUOTA_CACHE_DECODE_FAILED", extra={
+            "provider": str(provider or "").strip().lower(),
+            "session": get_log_session_id(session_token),
+            "cache_key_hash": _safe_cache_key_hash(key),
+        })
         return None
     return loaded if isinstance(loaded, dict) else None

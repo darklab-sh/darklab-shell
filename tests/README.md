@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,759
+- behavior tests: 3,785
 - docs/inventory meta-tests: 40
-- `pytest`: 2120 (2085 behavior + 35 meta)
-- `vitest`: 1413
+- `pytest`: 2146 (2111 behavior + 35 meta)
+- `vitest`: 1419
 - `playwright`: 266
-- total: 3,799
+- total: 3,831
 
 This document is organized in two parts:
 
@@ -618,15 +618,18 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_cache_round_trips_normalized_payload_with_provider_ttl` | Verifies normalized intel cache storage, provider TTL overrides, and quota-exhausted backoff state. |
 | `TestIntelServices.test_rate_limiter_consumes_bucket_and_reports_retry` | Verifies per-session provider token buckets consume quota and report retry timing. |
 | `TestIntelServices.test_audit_event_omits_sensitive_provider_fields` | Verifies intel audit events include lookup metadata without API keys or raw provider bodies. |
+| `TestIntelServices.test_intel_cache_and_rate_decode_failures_log_safe_warnings` | Verifies corrupt intel cache, quota, and rate-limit state emits safe warnings without raw targets or session ids. |
 | `TestIntelServices.test_json_api_client_uses_system_ca_bundle_for_https` | Verifies app-native intel HTTPS clients prefer the system CA bundle when no explicit CA env is set. |
 | `TestIntelServices.test_json_api_client_rejects_cross_origin_redirects_before_forwarding_secrets` | Verifies app-native intel HTTPS clients stop cross-origin redirects before provider API-key headers can be forwarded. |
 | `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
 | `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
 | `TestIntelServices.test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized` | Verifies Team Cymru DNS origin and ASN-description records normalize into rendered ownership fields. |
+| `TestIntelServices.test_fofa_accepts_api_key_alias_and_zoomeye_uses_regional_api_key_auth` | Verifies FOFA accepts the `FOFA_API_KEY` alias and ZoomEye uses regional API-key authentication. |
 | `TestIntelServices.test_new_intel_provider_modules_normalize_payloads` | Verifies URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews provider modules normalize representative payloads and request contracts. |
 | `TestIntelServices.test_teamcymru_dns_client_fetches_origin_and_asn_description_records` | Verifies the Team Cymru DNS client fetches origin records and matching ASN-description records. |
 | `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestIntelServices.test_lookup_entity_requires_secret_before_cache_hit` | Verifies cached provider data is not returned when the active scope lacks the required provider secret. |
+| `TestIntelServices.test_lookup_entity_preflights_fofa_email_before_rate_limit_and_client_call` | Verifies FOFA email is checked as a missing secret before rate-limit tokens or provider calls are used. |
 | `TestIntelServices.test_lookup_entity_skips_cached_provider_response_when_ttl_is_zero` | Verifies a zero provider TTL disables cached response reuse and fetches fresh provider data. |
 | `TestIntelServices.test_lookup_entity_includes_no_secret_provider_and_caches_result` | Verifies no-key providers run through the same lookup and cache path as keyed providers. |
 | `TestIntelServices.test_default_hash_providers_only_include_hibp_for_sha1` | Verifies HIBP Pwned Passwords is included only for SHA1 hash lookups. |
@@ -894,7 +897,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, gobuster, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
 | `TestOutputSignals.test_classifies_web_scanner_findings_by_command` | Verifies that Nikto and WPScan classify useful scanner findings while skipping progress and footer lines. |
 | `TestOutputSignals.test_classifies_tls_scanner_findings_by_command` | Verifies that TLS scanner posture, certificate, cipher, and compliance lines classify into findings or errors. |
-| `TestOutputSignals.test_classifies_projectdiscovery_and_port_scanner_findings` | Verifies that ProjectDiscovery and port scanner outputs classify command-scoped findings and summaries. |
+| `TestOutputSignals.test_classifies_projectdiscovery_and_port_scanner_findings` | Verifies that ProjectDiscovery, puredns, TruffleHog, and port scanner outputs classify command-scoped findings, warnings, summaries, entities, and Nuclei template provenance. |
+| `TestOutputSignals.test_structured_output_parse_misses_log_safe_diagnostics` | Verifies malformed structured tool rows emit safe parse-miss diagnostics without raw target values. |
+| `TestOutputSignals.test_nuclei_provenance_logs_safe_fallback_and_classification` | Verifies Nuclei provenance logs safe fallback and classification breadcrumbs without raw commands or template paths. |
 | `TestOutputSignals.test_classifies_scanner_progress_lines_as_progress_role` | Verifies that regular scanner progress updates carry the progress role without becoming findings, warnings, errors, or summaries. |
 | `TestOutputSignals.test_live_output_batcher_coalesces_progress_without_dropping_saved_lines` | Verifies that live progress rows coalesce for display while saved output still captures each original line. |
 | `TestOutputSignals.test_live_output_batcher_flushes_sparse_output_by_age` | Verifies that sparse live output flushes promptly instead of waiting for a large batch. |
@@ -917,6 +922,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_artifact_rel_path_uses_two_level_hash_shards` | Verifies new full-output artifact paths use the hash-based two-level shard layout. |
 | `TestRunOutputCapture.test_delete_artifact_file_removes_sharded_artifact` | Verifies sharded full-output artifacts are removed through the shared artifact delete helper. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
+| `TestRunOutputCapture.test_nuclei_source_detail_round_trips_through_run_output_and_package_entries` | Verifies Nuclei template provenance survives saved output, full-output artifacts, and package transcript assembly. |
 | `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
 | `TestRunOutputCapture.test_replace_run_output_summary_tolerates_concurrent_backfill_insert` | Verifies structured output summary backfills tolerate another worker inserting the same summary key first. |
 | `TestRunOutputCapture.test_legacy_event_factory_matches_typed_add_event_bytes` | Verifies legacy line-event factory output and typed `add_event` output write matching event rows after the artifact header. |
@@ -936,6 +942,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped mobile welcome hints are hidden when Files are disabled and restored when Files are enabled. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_registry_examples_and_workflows` | Verifies that the shared container smoke corpus includes both registry examples and workflow commands while deduplicating overlaps in stable order. |
+| `TestAutocompleteContextLoading.test_external_tool_docker_pins_have_container_smoke_expectations` | Verifies the staged external-tool Docker ARG pins have matching container smoke expectations. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only examples stay out of the generic smoke corpus, while required-secret roots can still include registry-declared unauthenticated help smoke examples. |
@@ -1000,7 +1007,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows` | Verifies generic JSONL imports keep valid rows while returning bounded row warnings for malformed JSON and invalid entity kinds. |
 | `TestDatabaseInit.test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity` | Verifies generic JSONL imports normalize URL, host/IP, CVE, hash, and unlinked finding rows while dropping invalid severities. |
 | `TestDatabaseInit.test_atlas_import_parser_keeps_duplicate_generic_rows_stable_for_later_dedupe` | Verifies duplicate generic finding rows keep stable canonical subjects and signatures for later idempotent apply. |
-| `TestDatabaseInit.test_atlas_import_parser_normalizes_nuclei_jsonl` | Verifies Nuclei JSONL imports map template metadata, matched targets, severities, and references into canonical findings. |
+| `TestDatabaseInit.test_atlas_import_parser_normalizes_nuclei_jsonl` | Verifies Nuclei JSONL imports map template metadata, matched targets, severities, references, and template-source provenance into canonical findings. |
 | `TestDatabaseInit.test_atlas_import_parser_streams_nessus_xml_and_extracts_cves` | Verifies Nessus XML imports use the parent report host, detect domain/IP host types, stream report items, and extract CVE entities. |
 | `TestDatabaseInit.test_atlas_import_parser_normalizes_zap_json_and_xml_reports` | Verifies OWASP ZAP JSON and XML reports map alerts, worded risks, numeric risk codes, URLs, and references into canonical findings. |
 | `TestDatabaseInit.test_atlas_import_parser_normalizes_burp_xml_report` | Verifies Burp Suite XML issues map host/path, severity, confidence, and issue ids into canonical findings. |
@@ -1009,9 +1016,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_atlas_import_parser_enforces_upload_and_warning_limits` | Verifies import parsing enforces upload byte limits and caps returned row warnings. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
 | `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
+| `TestDatabaseInit.test_materializes_new_external_tool_entities_from_classifier_metadata` | Verifies tlsx, cdncheck, and puredns classifier metadata materializes into Atlas entities. |
 | `TestDatabaseInit.test_materializer_deduplicates_team_entities_across_members` | Verifies team-owned Atlas entity materialization deduplicates the same canonical entity across team members. |
 | `TestDatabaseInit.test_record_run_findings_deduplicates_team_findings_across_members` | Verifies team-owned findings deduplicate the same signature across team members while retaining both source-run occurrences. |
 | `TestDatabaseInit.test_record_run_findings_maps_nmap_vulners_scores_to_severity` | Verifies Nmap Vulners finding persistence maps numeric scores to severity and groups exploit references by affected service. |
+| `TestDatabaseInit.test_record_run_findings_redacts_trufflehog_secret_values` | Verifies TruffleHog findings persist detector, verification, source, and redacted secret context without storing raw secret values in finding rows. |
+| `TestDatabaseInit.test_record_run_findings_uses_generic_trufflehog_redaction_hint` | Verifies TruffleHog provider redaction hints are stored only as generic markers, not literal secret-shaped strings. |
+| `TestDatabaseInit.test_trufflehog_safe_finding_text_does_not_trust_redacted_equal_to_raw` | Verifies TruffleHog finding text falls back when vendor redaction equals the raw secret value. |
+| `TestDatabaseInit.test_trufflehog_redaction_fallback_logs_without_raw_line` | Verifies TruffleHog redaction fallback warnings do not include raw secret-scanner output. |
 | `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
 | `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
@@ -1209,10 +1221,11 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestShareCreatedEvent.test_share_created_emits_info` | Checks that share created emits info. |
 | `TestShareCreatedEvent.test_share_created_extra_has_label` | Checks that share created extra has label. |
 | `TestShareCreatedEvent.test_share_created_extra_has_share_id` | Checks that share created extra has share id. |
-| `TestCmdRewriteEvent.test_nmap_rewrite_emits_info` | Checks that nmap rewrite emits info. |
-| `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_original` | Checks that nmap rewrite extra has original. |
-| `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_connect_scan_flag` | Checks that nmap rewrite extra has connect scan flag. |
-| `TestCmdRewriteEvent.test_unrewritten_command_does_not_emit_cmd_rewrite` | Checks that unrewritten command does not emit command rewrite. |
+| `TestCmdRewriteEvent.test_nmap_rewrite_emits_debug` | Verifies rewritten commands emit the safe `CMD_REWRITE_APPLIED` DEBUG event. |
+| `TestCmdRewriteEvent.test_nmap_rewrite_extra_omits_raw_commands` | Verifies rewrite diagnostics omit raw original and rewritten command strings. |
+| `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_structured_fields` | Verifies rewrite diagnostics include safe correlation and workspace/runtime counts. |
+| `TestCmdRewriteEvent.test_unrewritten_command_does_not_emit_cmd_rewrite` | Verifies unchanged commands do not emit a rewrite diagnostic. |
+| `TestSecretEnvironmentLogging.test_secret_vault_resolution_failure_logs_error` | Verifies secret vault/decrypt failures log a scoped ERROR before returning setup guidance. |
 | `TestRunLifecycleEvents.test_run_start_emits_info` | Checks that run start emits info. |
 | `TestRunLifecycleEvents.test_run_start_masks_token_session_id` | Checks that run lifecycle logs mask token-backed session identifiers. |
 | `TestRunLifecycleEvents.test_run_end_emits_info_with_exit_code` | Checks that run end emits info with exit code. |
@@ -1960,6 +1973,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunPermalinkRoute.test_json_view_returns_full_output_when_artifact_exists` | Checks that JSON view returns full output when artifact exists. |
 | `TestRunPermalinkRoute.test_json_view_falls_back_to_preview_when_full_output_artifact_is_missing` | Verifies JSON run views fall back to preview output when a referenced full-output artifact is unavailable. |
 | `TestRunPermalinkRoute.test_json_preview_view_returns_preview_when_requested` | Checks that JSON preview view returns preview when requested. |
+| `TestRunPermalinkRoute.test_json_view_preserves_nuclei_template_provenance_metadata` | Verifies Run Details JSON keeps Nuclei template provenance metadata on saved output entries. |
 | `TestRunPermalinkRoute.test_html_content_type` | Checks HTML content type handling. |
 | `TestRunPermalinkRoute.test_permalink_uses_full_output_when_available` | Checks that permalink uses full output when available. |
 | `TestRunPermalinkRoute.test_preview_page_appends_truncation_notice_when_no_full_output_exists` | Checks that preview page appends truncation notice when no full output exists. |
@@ -2319,6 +2333,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSyntheticPostFilterParsing.test_parses_uniq_count` | Checks that `uniq -c` sets `count` true. |
 | `TestSyntheticPostFilterParsing.test_rejects_invalid_uniq_flags` | Checks that unsupported uniq flags (e.g. `-d`) are rejected. |
 | `TestSyntheticPostFilterParsing.test_parses_chained_synthetic_helpers` | Checks that multiple synthetic helper stages are parsed into one ordered pipeline spec sharing the same base command. |
+| `TestSyntheticPostFilterParsing.test_parses_jq_field_selector` | Checks that synthetic jq field selectors and `-r` parse into a safe selector spec. |
+| `TestSyntheticPostFilterParsing.test_parses_jq_jsonl_filters` | Checks synthetic jq key-existence, equality, and contains filters. |
+| `TestSyntheticPostFilterParsing.test_parses_jq_selector_fixture_parity` | Checks that the server-side jq selector parser accepts and rejects the shared parity fixture set. |
+| `TestSyntheticPostFilterParsing.test_applies_jq_selector_to_json_scalars` | Checks synthetic jq filters compare JSON boolean and null values consistently. |
+| `TestSyntheticPostFilterParsing.test_rejects_unsupported_jq_selectors` | Checks unsupported jq programs are rejected before execution. |
+| `TestSyntheticPostFilterParsing.test_applies_jq_selector_to_jsonl_without_leaking_malformed_input` | Checks malformed JSON/JSONL errors do not echo source data. |
+| `TestSyntheticPostFilterParsing.test_applies_jq_selector_and_output_caps` | Checks jq selection output and the output row cap. |
 | `TestDenyPrefix.test_deny_takes_priority` | Checks deny takes priority handling. |
 | `TestDenyPrefix.test_allow_still_works_without_denied_flag` | Checks that allow still works without denied flag. |
 | `TestDenyPrefix.test_deny_exact_match` | Checks deny exact match handling. |
@@ -2348,6 +2369,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRewrites.test_nmap_no_double_connect_scan` | Checks that nmap no double connect scan. |
 | `TestRewrites.test_nuclei_adds_template_dir` | Checks that nuclei adds template dir. |
 | `TestRewrites.test_nuclei_no_rewrite_if_ud_present` | Checks that nuclei no rewrite if ud present. |
+| `TestRewrites.test_trufflehog_scans_default_to_json_output` | Verifies managed TruffleHog scans receive JSON output by default without changing help commands. |
 | `TestRewrites.test_no_rewrite_for_other_commands` | Checks that no rewrite for other commands. |
 | `TestRuntimeCommandHelpers.test_split_command_argv_uses_shell_like_tokenization` | Checks that split command argv uses shell like tokenization. |
 | `TestRuntimeCommandHelpers.test_command_root_returns_lowercased_first_token` | Checks that command root returns lowercased first token. |
@@ -2374,6 +2396,12 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 
 | Test | Description |
 | --- | --- |
+| `selects JSON object fields and array values with the app-native jq pipe helper` | Verifies that the app-native jq pipe helper selects object fields, pretty-prints identity output, iterates arrays, and supports raw scalar output. |
+| `filters JSONL rows by key existence, equality, and contains selectors` | Verifies that JSONL rows can be filtered by key existence, equality, and substring matches. |
+| `parses the same jq selector fixture set as the server-side parser` | Verifies that the browser-side jq selector parser accepts and rejects the same parity fixture set as pytest. |
+| `rejects malformed jq input and disallowed selector expressions without leaking source data` | Verifies unsupported jq expressions are rejected and malformed JSON errors do not echo source data. |
+| `caps jq output lines and byte size` | Verifies jq helper output stops at the row and byte safety caps. |
+| `caps jq input lines with the same buffered safety message as the server path` | Verifies browser-side jq helper input line caps match the server-side safety error. |
 | `binds focus traps for persistent app modal surfaces at startup` | Verifies that persistent app modal surfaces bind focus traps during startup. |
 | `uses the shared confirmation action contract before deleting schedules` | Verifies that the Schedules modal delete action uses the shared confirmation action contract before deleting. |
 | `opens schedule fire runs without using the run id as the command title` | Verifies that Schedule fire rows open Run Details with only the run id so the run id is not shown as a temporary command title. |

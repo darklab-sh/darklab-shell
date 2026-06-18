@@ -61,6 +61,42 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "tlsx -h",
+      "expected_text": [
+        "TLSX is a tls data gathering",
+        "Usage:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "cdncheck -h",
+      "expected_text": [
+        "cdncheck is a tool",
+        "Usage:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "trufflehog --help",
+      "expected_text": [
+        "TruffleHog is a tool for finding credentials",
+        "Commands:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "puredns -h",
+      "expected_text": [
+        "A subdomain bruteforce tool",
+        "Available Commands:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "host -t MX darklab.sh",
       "expected_text": [
         "darklab.sh mail"

@@ -575,6 +575,7 @@
 # Server defaults if unset:
 #   Shodan IP: 86400 (24h)
 #   Shodan search: 21600 (6h)
+#   Shodan InternetDB IP: 86400 (24h)
 #   Censys host: 21600 (6h)
 #   VirusTotal domain: 21600 (6h)
 #   VirusTotal file/hash: 86400 (24h)
@@ -596,8 +597,11 @@
 #   ThreatFox hash: 86400 (24h)
 #   SecurityTrails domain: 86400 (24h)
 #   RouteViews prefix: 21600 (6h)
+#   FOFA search: 21600 (6h)
+#   ZoomEye search: 21600 (6h)
 # intel_cache_ttl_shodan_ip_seconds: 86400
 # intel_cache_ttl_shodan_search_seconds: 21600
+# intel_cache_ttl_shodan_internetdb_ip_seconds: 86400
 # intel_cache_ttl_censys_host_seconds: 21600
 # intel_cache_ttl_virustotal_domain_seconds: 21600
 # intel_cache_ttl_virustotal_file_seconds: 86400
@@ -619,11 +623,14 @@
 # intel_cache_ttl_threatfox_hash_seconds: 86400
 # intel_cache_ttl_securitytrails_domain_seconds: 86400
 # intel_cache_ttl_routeviews_prefix_seconds: 21600
+# intel_cache_ttl_fofa_search_seconds: 21600
+# intel_cache_ttl_zoomeye_search_seconds: 21600
 
 # Redis token-bucket defaults for provider calls. Buckets are per session and
 # provider so one user's lookups don't spend another user's quota.
 # Server defaults if unset:
 #   Shodan: bucket 5, refill 1 token every 1s
+#   Shodan InternetDB: bucket 30, refill 1 token every 2s
 #   Censys: bucket 10, refill 1 token every 6s
 #   VirusTotal Public: bucket 4, refill 1 token every 15s
 #   GreyNoise Community: bucket 50, refill 1 token every 12096s
@@ -641,8 +648,12 @@
 #   ThreatFox: bucket 20, refill 1 token every 3s
 #   SecurityTrails: bucket 10, refill 1 token every 6s
 #   RouteViews: bucket 20, refill 1 token every 3s
+#   FOFA: bucket 10, refill 1 token every 6s
+#   ZoomEye: bucket 10, refill 1 token every 6s
 # intel_rate_limit_shodan_bucket: 5
 # intel_rate_limit_shodan_refill_seconds: 1
+# intel_rate_limit_shodan_internetdb_bucket: 30
+# intel_rate_limit_shodan_internetdb_refill_seconds: 2
 # intel_rate_limit_censys_bucket: 10
 # intel_rate_limit_censys_refill_seconds: 6
 # intel_rate_limit_virustotal_public_bucket: 4
@@ -677,6 +688,10 @@
 # intel_rate_limit_securitytrails_refill_seconds: 6
 # intel_rate_limit_routeviews_bucket: 20
 # intel_rate_limit_routeviews_refill_seconds: 3
+# intel_rate_limit_fofa_bucket: 10
+# intel_rate_limit_fofa_refill_seconds: 6
+# intel_rate_limit_zoomeye_bucket: 10
+# intel_rate_limit_zoomeye_refill_seconds: 6
 
 # Fallback negative-cache windows for quota-exhausted responses when the
 # provider response does not include a reset time.
@@ -691,6 +706,8 @@
 # intel_negative_cache_urlscan_quota_seconds: 21600
 # intel_negative_cache_threatfox_quota_seconds: 21600
 # intel_negative_cache_securitytrails_quota_seconds: 21600
+# intel_negative_cache_fofa_quota_seconds: 21600
+# intel_negative_cache_zoomeye_quota_seconds: 21600
 
 # Maximum number of interactive PTY input requests per minute per IP. This is
 # intentionally higher than /runs because normal typing can produce many small

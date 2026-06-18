@@ -8,6 +8,7 @@ Run with: pytest tests/ (from the repo root)
 
 import unittest.mock as mock
 
+from blueprints.run import _SyntheticPostFilterProcessor
 import services.commands.registry as commands
 from services.commands.registry import (
     command_root,
@@ -395,6 +396,136 @@ class TestSyntheticPostFilterParsing:
             {"kind": "wc_l"},
         ]
 
+    def test_parses_jq_field_selector(self):
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.json | jq -r .host")
+        assert err is None
+        assert spec is not None
+        assert spec["base_command"] == "curl https://example.test/data.json"
+        assert spec["kind"] == "jq"
+        assert spec["stages"] == [{
+            "kind": "jq",
+            "selector": {"op": "field", "path": ["host"]},
+            "raw": True,
+            "compact": False,
+        }]
+
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.json | jq -c .host")
+        assert err is None
+        assert spec is not None
+        assert spec["stages"][0]["compact"] is True
+
+    def test_parses_jq_jsonl_filters(self):
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.jsonl | jq 'select(.status == \"ok\")'")
+        assert err is None
+        assert spec is not None
+        assert spec["stages"][0]["selector"] == {"op": "filter_eq", "path": ["status"], "value": "ok"}
+
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.jsonl | jq 'select(has(\"ip\"))'")
+        assert err is None
+        assert spec is not None
+        assert spec["stages"][0]["selector"] == {"op": "filter_has", "path": ["ip"]}
+
+        spec, err = parse_synthetic_postfilter(
+            "curl https://example.test/data.jsonl | jq 'select(.title contains \"login\")'"
+        )
+        assert err is None
+        assert spec is not None
+        assert spec["stages"][0]["selector"] == {"op": "filter_contains", "path": ["title"], "value": "login"}
+
+    def test_parses_jq_selector_fixture_parity(self):
+        accepted = [
+            ".",
+            ".[]",
+            ".host",
+            ".results[]",
+            ".nested.host-name",
+            'select(has("ip"))',
+            'select(.status == "ok")',
+            'select(.status=="ok")',
+            'select(.title contains "login")',
+        ]
+        rejected = [
+            'select(.title contains"login")',
+            'select(.titlecontains "login")',
+            'select(.status = "ok")',
+            'select(.title | contains("login"))',
+            ".[0]",
+            ".secret; cat /etc/passwd",
+        ]
+
+        for expression in accepted:
+            spec, err = parse_synthetic_postfilter(f"curl https://example.test/data.jsonl | jq '{expression}'")
+            assert err is None, expression
+            assert spec is not None, expression
+
+        for expression in rejected:
+            spec, err = parse_synthetic_postfilter(f"curl https://example.test/data.jsonl | jq '{expression}'")
+            assert spec is None, expression
+            assert err == "Synthetic jq supports only field selectors, array iteration, and simple select filters."
+
+    def test_applies_jq_selector_to_json_scalars(self):
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.jsonl | jq -c 'select(.verified == \"true\")'")
+        assert err is None
+        processor = _SyntheticPostFilterProcessor(spec)
+
+        assert processor.process_output_line('{"host":"one.test","verified":true}\n') == []
+        assert processor.process_output_line('{"host":"two.test","verified":false}\n') == []
+        assert processor.finalize_output_lines() == ['{"host":"one.test","verified":true}\n']
+
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.jsonl | jq -c 'select(.note == \"null\")'")
+        assert err is None
+        processor = _SyntheticPostFilterProcessor(spec)
+
+        assert processor.process_output_line('{"host":"one.test","note":null}\n') == []
+        assert processor.process_output_line('{"host":"two.test"}\n') == []
+        assert processor.finalize_output_lines() == ['{"host":"one.test","note":null}\n']
+
+    def test_rejects_unsupported_jq_selectors(self):
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.json | jq '.[0] | .secret'")
+        assert spec is None
+        assert err == "Synthetic jq supports only field selectors, array iteration, and simple select filters."
+
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.json | jq '.secret; cat /etc/passwd'")
+        assert spec is None
+        assert err == "Synthetic jq supports only field selectors, array iteration, and simple select filters."
+
+    def test_applies_jq_selector_to_jsonl_without_leaking_malformed_input(self):
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.jsonl | jq -r .host")
+        assert err is None
+        processor = _SyntheticPostFilterProcessor(spec)
+
+        assert processor.process_output_line('{"host":"one.test","secret":"SHOULD_NOT_LEAK"}\n') == []
+        assert processor.process_output_line("not-json SHOULD_NOT_LEAK\n") == []
+        result = processor.finalize_output_lines()
+
+        assert result == ["[error] jq expected JSON or JSONL input\n"]
+        assert "SHOULD_NOT_LEAK" not in "".join(result)
+
+    def test_applies_jq_selector_and_output_caps(self):
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.json | jq .")
+        assert err is None
+        processor = _SyntheticPostFilterProcessor(spec)
+        assert processor.process_output_line('{"host":"one.test","ports":[80,443]}\n') == []
+        assert processor.finalize_output_lines() == [
+            "{\n",
+            '  "host": "one.test",\n',
+            '  "ports": [\n',
+            "    80,\n",
+            "    443\n",
+            "  ]\n",
+            "}\n",
+        ]
+
+        spec, err = parse_synthetic_postfilter("curl https://example.test/data.json | jq -c .items[]")
+        assert err is None
+        processor = _SyntheticPostFilterProcessor(spec)
+        assert processor.process_output_line('{"items":[{"host":"one.test"},{"host":"two.test"}]}\n') == []
+        assert processor.finalize_output_lines() == ['{"host":"one.test"}\n', '{"host":"two.test"}\n']
+
+        capped = _SyntheticPostFilterProcessor(spec)
+        capped.process_output_line('{"items":[' + ",".join(str(index) for index in range(1001)) + "]}\n")
+        assert capped.finalize_output_lines() == ["[error] jq output exceeded the 1000-line safety cap\n"]
+
 
 # ── Deny prefix (!) ───────────────────────────────────────────────────────────
 
@@ -554,6 +685,17 @@ class TestRewrites:
     def test_nuclei_no_rewrite_if_ud_present(self):
         cmd, _ = rewrite_command("nuclei -ud /tmp/my-templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
+
+    def test_trufflehog_scans_default_to_json_output(self):
+        cmd, notice = rewrite_command("trufflehog git https://github.com/trufflesecurity/test_keys")
+        assert cmd == "trufflehog git https://github.com/trufflesecurity/test_keys --json"
+        assert notice is None
+
+        cmd, _ = rewrite_command("trufflehog filesystem --directory secrets --json")
+        assert cmd.count("--json") == 1
+
+        cmd, _ = rewrite_command("trufflehog --help")
+        assert cmd == "trufflehog --help"
 
     def test_no_rewrite_for_other_commands(self):
         cmd, notice = rewrite_command("dig google.com")

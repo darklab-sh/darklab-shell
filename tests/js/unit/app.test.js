@@ -4,6 +4,11 @@ import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
 import { loadAppFns } from './helpers/app_harness.js'
 import { fromDomScripts } from './helpers/extract.js'
+import {
+  applySyntheticPostFilterLines,
+  isSyntheticJqCommand,
+  parseSyntheticPostFilterCommand,
+} from '../../../app/static/js/core/runner_core.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -344,6 +349,143 @@ function shippedThemeRegistry() {
 }
 
 describe('app helpers', () => {
+  it('selects JSON object fields and array values with the app-native jq pipe helper', () => {
+    const fieldSpec = parseSyntheticPostFilterCommand('cat ffuf.json | jq -r .host')
+    expect(fieldSpec.kind).toBe('jq')
+    expect(isSyntheticJqCommand('cat ffuf.json | jq -r .host')).toBe(true)
+    expect(applySyntheticPostFilterLines([{ text: '{"host":"example.test","port":443}' }], fieldSpec)).toEqual([
+      { text: 'example.test', cls: '' },
+    ])
+
+    const identitySpec = parseSyntheticPostFilterCommand('cat ffuf.json | jq .')
+    expect(applySyntheticPostFilterLines([
+      { text: '{"host":"example.test","ports":[80,443]}' },
+    ], identitySpec)).toEqual([
+      { text: '{', cls: '' },
+      { text: '  "host": "example.test",', cls: '' },
+      { text: '  "ports": [', cls: '' },
+      { text: '    80,', cls: '' },
+      { text: '    443', cls: '' },
+      { text: '  ]', cls: '' },
+      { text: '}', cls: '' },
+    ])
+
+    const arraySpec = parseSyntheticPostFilterCommand('cat ffuf.json | jq -c .results[]')
+    expect(applySyntheticPostFilterLines([
+      { text: '{"results":[{"url":"https://example.test/"},{"url":"https://api.example.test/"}]}' },
+    ], arraySpec)).toEqual([
+      { text: '{"url":"https://example.test/"}', cls: '' },
+      { text: '{"url":"https://api.example.test/"}', cls: '' },
+    ])
+  })
+
+  it('filters JSONL rows by key existence, equality, and contains selectors', () => {
+    const rows = [
+      { text: '{"host":"one.test","status":"ok","title":"admin login"}' },
+      { text: '{"host":"two.test","status":"blocked","title":"landing"}' },
+      { text: '{"status":"ok","title":"login panel"}' },
+    ]
+
+    const hasSpec = parseSyntheticPostFilterCommand('cat ffuf.jsonl | jq -c \'select(has("host"))\'')
+    expect(applySyntheticPostFilterLines(rows, hasSpec).map(item => item.text)).toEqual([
+      '{"host":"one.test","status":"ok","title":"admin login"}',
+      '{"host":"two.test","status":"blocked","title":"landing"}',
+    ])
+
+    const eqSpec = parseSyntheticPostFilterCommand('cat ffuf.jsonl | jq -c \'select(.status == "ok")\'')
+    expect(applySyntheticPostFilterLines(rows, eqSpec).map(item => item.text)).toEqual([
+      '{"host":"one.test","status":"ok","title":"admin login"}',
+      '{"status":"ok","title":"login panel"}',
+    ])
+
+    const containsSpec = parseSyntheticPostFilterCommand('cat ffuf.jsonl | jq -c \'select(.title contains "login")\'')
+    expect(applySyntheticPostFilterLines(rows, containsSpec).map(item => item.text)).toEqual([
+      '{"host":"one.test","status":"ok","title":"admin login"}',
+      '{"status":"ok","title":"login panel"}',
+    ])
+
+    const boolRows = [
+      { text: '{"host":"one.test","verified":true,"note":null}' },
+      { text: '{"host":"two.test","verified":false}' },
+    ]
+    const boolSpec = parseSyntheticPostFilterCommand('cat trufflehog.jsonl | jq -c \'select(.verified == "true")\'')
+    expect(applySyntheticPostFilterLines(boolRows, boolSpec).map(item => item.text)).toEqual([
+      '{"host":"one.test","verified":true,"note":null}',
+    ])
+    const nullSpec = parseSyntheticPostFilterCommand('cat trufflehog.jsonl | jq -c \'select(.note == "null")\'')
+    expect(applySyntheticPostFilterLines(boolRows, nullSpec).map(item => item.text)).toEqual([
+      '{"host":"one.test","verified":true,"note":null}',
+    ])
+  })
+
+  it('parses the same jq selector fixture set as the server-side parser', () => {
+    const accepted = [
+      '.',
+      '.[]',
+      '.host',
+      '.results[]',
+      '.nested.host-name',
+      'select(has("ip"))',
+      'select(.status == "ok")',
+      'select(.status=="ok")',
+      'select(.title contains "login")',
+    ]
+    const rejected = [
+      'select(.title contains"login")',
+      'select(.titlecontains "login")',
+      'select(.status = "ok")',
+      'select(.title | contains("login"))',
+      '.[0]',
+      '.secret; cat /etc/passwd',
+    ]
+
+    for (const expression of accepted) {
+      expect(parseSyntheticPostFilterCommand(`cat ffuf.jsonl | jq '${expression}'`)).not.toBeNull()
+    }
+    for (const expression of rejected) {
+      expect(parseSyntheticPostFilterCommand(`cat ffuf.jsonl | jq '${expression}'`)).toBeNull()
+    }
+  })
+
+  it('rejects malformed jq input and disallowed selector expressions without leaking source data', () => {
+    expect(parseSyntheticPostFilterCommand('cat ffuf.json | jq ".[0] | .secret"')).toBeNull()
+    expect(parseSyntheticPostFilterCommand('cat ffuf.json | jq ".secret; cat /etc/passwd"')).toBeNull()
+
+    const spec = parseSyntheticPostFilterCommand('cat ffuf.json | jq .secret')
+    const result = applySyntheticPostFilterLines([
+      { text: '{"secret":"SHOULD_NOT_LEAK"}' },
+      { text: 'not-json SHOULD_NOT_LEAK' },
+    ], spec)
+
+    expect(result).toEqual([{ text: '[error] jq expected JSON or JSONL input', cls: 'exit-fail' }])
+    expect(result[0].text).not.toContain('SHOULD_NOT_LEAK')
+  })
+
+  it('caps jq output lines and byte size', () => {
+    const lineCapSpec = parseSyntheticPostFilterCommand('cat big.json | jq .items[]')
+    const manyItems = JSON.stringify({ items: Array.from({ length: 1001 }, (_, index) => index) })
+    expect(applySyntheticPostFilterLines([{ text: manyItems }], lineCapSpec)).toEqual([
+      { text: '[error] jq output exceeded the 1000-line safety cap', cls: 'exit-fail' },
+    ])
+
+    const byteCapSpec = parseSyntheticPostFilterCommand('cat big.json | jq .items[]')
+    const largeItems = JSON.stringify({ items: ['x'.repeat(200001)] })
+    expect(applySyntheticPostFilterLines([{ text: largeItems }], byteCapSpec)).toEqual([
+      { text: '[error] jq output exceeded the 200 KB safety cap', cls: 'exit-fail' },
+    ])
+  })
+
+  it('caps jq input lines with the same buffered safety message as the server path', () => {
+    const spec = parseSyntheticPostFilterCommand('cat big.jsonl | jq .')
+    const rows = [
+      { text: '{"host":"one.test"}' },
+      { text: '{"host":"two.test"}' },
+    ]
+    expect(applySyntheticPostFilterLines(rows, spec, { maxOutputLines: 1 })).toEqual([
+      { text: '[error] jq input exceeded the buffered line safety cap', cls: 'exit-fail' },
+    ])
+  })
+
   beforeEach(() => {
     ;[
       '_runtimeHint',

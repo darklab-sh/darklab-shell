@@ -27,6 +27,7 @@ class IntelProviderDefinition:
     entity_types: tuple[str, ...]
     secret_env: str = ""
     secret_env_aliases: tuple[str, ...] = ()
+    required_secret_envs: tuple[str, ...] = ()
     optional_secret: bool = False
     cache_scopes: dict[str, str] = field(default_factory=dict)
     cache_ttls: dict[str, CacheTtlSetting] = field(default_factory=dict)
@@ -39,7 +40,7 @@ class IntelProviderDefinition:
 
     @property
     def secret_env_names(self) -> tuple[str, ...]:
-        names = [self.secret_env, *self.secret_env_aliases]
+        names = [self.secret_env, *self.secret_env_aliases, *self.required_secret_envs]
         return tuple(name for name in names if name)
 
 
@@ -72,6 +73,24 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
             "": RateLimitSetting("intel_rate_limit_censys_bucket", "intel_rate_limit_censys_refill_seconds", 10, 6),
         },
         access_note="Account-backed; paid tiers",
+    ),
+    "shodan_internetdb": IntelProviderDefinition(
+        id="shodan_internetdb",
+        label="Shodan InternetDB",
+        entity_types=("ip",),
+        cache_scopes={"ip": "ip"},
+        cache_ttls={
+            "ip": CacheTtlSetting("intel_cache_ttl_shodan_internetdb_ip_seconds", 86400),
+        },
+        rate_limits={
+            "": RateLimitSetting(
+                "intel_rate_limit_shodan_internetdb_bucket",
+                "intel_rate_limit_shodan_internetdb_refill_seconds",
+                30,
+                2,
+            ),
+        },
+        access_note="Free public lookup",
     ),
     "virustotal": IntelProviderDefinition(
         id="virustotal",
@@ -324,6 +343,36 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
         },
         access_note="Paid account required",
     ),
+    "fofa": IntelProviderDefinition(
+        id="fofa",
+        label="FOFA",
+        entity_types=("ip", "domain", "url"),
+        secret_env="FOFA_KEY",
+        secret_env_aliases=("FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN"),
+        required_secret_envs=("FOFA_EMAIL",),
+        cache_scopes={"ip": "search", "domain": "search", "url": "search"},
+        cache_ttls={
+            "search": CacheTtlSetting("intel_cache_ttl_fofa_search_seconds", 21600),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_fofa_bucket", "intel_rate_limit_fofa_refill_seconds", 10, 6),
+        },
+        access_note="Paid account or F-point balance required",
+    ),
+    "zoomeye": IntelProviderDefinition(
+        id="zoomeye",
+        label="ZoomEye",
+        entity_types=("ip", "domain", "url"),
+        secret_env="ZOOMEYE_API_KEY",
+        cache_scopes={"ip": "search", "domain": "search", "url": "search"},
+        cache_ttls={
+            "search": CacheTtlSetting("intel_cache_ttl_zoomeye_search_seconds", 21600),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_zoomeye_bucket", "intel_rate_limit_zoomeye_refill_seconds", 10, 6),
+        },
+        access_note="Paid account or resource credits required",
+    ),
     "routeviews": IntelProviderDefinition(
         id="routeviews",
         label="RouteViews",
@@ -405,6 +454,15 @@ def app_native_secret_consumers() -> list[dict[str, Any]]:
             "fallback_envs": list(definition.secret_env_aliases),
             "optional": definition.optional_secret,
         })
+        for env_name in definition.required_secret_envs:
+            consumers.append({
+                "source": "app_native_intel",
+                "consumer": f"intel {definition.label}",
+                "provider": definition.id,
+                "env": env_name,
+                "fallback_envs": [],
+                "optional": definition.optional_secret,
+            })
         if definition.id == "censys":
             consumers.append({
                 "source": "app_native_intel",
@@ -426,6 +484,7 @@ def provider_status_catalog() -> list[dict[str, Any]]:
             "entity_types": list(definition.entity_types),
             "secret_env": definition.secret_env,
             "secret_env_aliases": list(definition.secret_env_aliases),
+            "required_secret_envs": list(definition.required_secret_envs),
             "secret_env_names": list(definition.secret_env_names),
             "requires_secret": bool(definition.secret_env),
             "optional_secret": bool(definition.optional_secret),

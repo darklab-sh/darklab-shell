@@ -113,7 +113,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - After a known command root plus a trailing space, the dropdown switches to grammar-style suggestions for that tool: root/global flags, subcommands, and positional hints.
 - While typing a subcommand token, examples narrow to the matching subcommand once the prefix is unique. For example, `amass s` can show `amass subs ...` examples, while an ambiguous prefix such as `gobuster d` keeps showing `dir` and `dns` token choices.
 - After a known subcommand plus a trailing space, the dropdown switches to that subcommand's scoped flags and value hints.
-- After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
+- After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`).
 - Inside a `| grep` stage, the dropdown also suggests tokens already visible in the active tab's output — IPv4/IPv6 addresses, hostnames, CVE identifiers, HTTP status codes, and frequently repeated words — ranked by token kind then frequency and offered as grep patterns alongside grep's own flags. Suggestions are drawn only from the active tab and never widen the allowed command surface.
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
@@ -306,21 +306,22 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 ## Built-In Pipe Support
 
-**Purpose:** narrow app-native pipe helpers (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`) that keep common post-filter use cases available without enabling general shell piping or redirection.
+**Purpose:** narrow app-native pipe helpers (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) that keep common post-filter use cases available without enabling general shell piping or redirection.
 
 **Behavior:**
 
 - One or more supported helper stages can be chained in a single command; the final filtered view is what appears in the terminal, history, permalinks, and exports for that run.
 - Server-side `sort` and `uniq` stages cap their buffered input with `max_output_lines` when that setting is nonzero and add a `[post-filter]` notice if later lines are skipped before the final result.
-- Autocomplete understands the narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` after `command |`.
+- `jq` is an app-owned JSON/JSONL selector, not the host binary. It supports object fields such as `.host`, array iteration such as `.results[]`, key-existence filters such as `select(has("ip"))`, equality filters such as `select(.status == "ok")`, contains filters such as `select(.title contains "login")`, pretty JSON output by default, `-c` for compact JSON, and `-r` for scalar text output.
+- Autocomplete understands the narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, and `uniq` after `command |`.
 - Workspace `ls` / `file list` keep their compact one-line display when run directly, but pipe helpers receive short listings as one logical entry per line so common forms like `ls | grep txt` behave like a normal terminal.
 - Arbitrary pipes, chaining, and redirection remain blocked at the command-validation layer.
 
-**Limits:** only the six helper stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`).
+**Limits:** only the seven helper stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`). The `jq` helper intentionally rejects arbitrary jq programs, shell escapes, joins, transforms, arithmetic, recursion, and file access. Malformed JSON produces a generic error without echoing the input line.
 
-**Configuration:** none — the supported stage set is hard-coded in `app/services/commands/registry.py`.
+**Configuration:** pipe helper metadata lives in `app/conf/commands.yaml`; parser and execution limits live in `app/services/commands/postfilters.py`, `app/blueprints/run.py`, and `app/static/js/core/runner_core.js`.
 
-**Related files:** `app/services/commands/registry.py` (pipe-stage parser + validator), `app/blueprints/run.py` (applies the pipe filter to streamed output).
+**Related files:** `app/conf/commands.yaml`, `app/services/commands/postfilters.py`, `app/blueprints/run.py`, `app/static/js/core/runner_core.js`.
 
 **Supported pipe forms:**
 
@@ -333,6 +334,13 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - `command | tail`
 - `command | tail -n 20`
 - `command | wc -l`
+- `command | jq .host`
+- `command | jq -r .host`
+- `command | jq -c .host`
+- `command | jq .results[]`
+- `command | jq 'select(has("ip"))'`
+- `command | jq 'select(.status == "ok")'`
+- `command | jq 'select(.title contains "login")'`
 - `command | sort`
 - `command | sort -r`
 - `command | sort -n`
@@ -391,8 +399,15 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
   - hit rows from `ffuf`, `gobuster`, and related directory fuzzers, with `ffuf` hits tied back to the full URL produced from the command's `FUZZ` template
   - passive domain and IP rows from `assetfinder`
   - severity-tagged result rows from `nuclei`
+  - JSON rows from `tlsx`, `cdncheck`, TruffleHog, and `puredns`
   - DNS answers and query outcomes from `dig`, `host`, and `nslookup`
   - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`, including `s_client` certificate subjects, issuers, key details, validity windows, negotiated TLS details, and verification status without treating PEM bodies as findings
+- Structured output from the staged external tools feeds Atlas and saved run metadata directly:
+  - `tlsx -json` rows create TLS findings, domain/IP/certificate-hash entities, and warnings for certificate or probe problems.
+  - `cdncheck -jsonl` rows create host/IP entities and summary context; CDN, cloud, and WAF matches are not treated as vulnerabilities.
+  - TruffleHog JSON rows create redacted findings from detector, verification, source, repository, file, commit, and line metadata without storing raw secret values as titles or snippets.
+  - `puredns` valid-domain rows create domain entities and findings, while wildcard rows are warnings and workspace output files stay tied to run-file artifact records.
+  - Nuclei output and Nuclei JSONL imports keep template-source provenance so later review can tell whether findings came from the managed template cache, a workspace template path, a pinned-looking clone, or an operator-updated template set.
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
 - The same server pass also attaches structured entity metadata to external command output lines when it sees public IPs, hostnames, hashes, or CVE IDs. That metadata is kept with live streams, restored history, saved full-output artifacts, and the Session Entity Atlas without re-parsing transcripts.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
@@ -440,6 +455,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Importing external reports:** Atlas imports are for bringing third-party triage results into the entity and finding view without pretending those results came from a shell command.
 
 - Supported formats are Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL.
+- Nuclei JSONL imports preserve template-source provenance when the source data includes it, matching the provenance shown on saved Nuclei output.
 - Preview always runs before apply. It shows parsed row counts, new/duplicate/update counts, sample entities and findings, row warnings, and which apply options are available for the current personal or team scope.
 - Invalid rows stay out of the apply step and appear as preview warnings. Imported severity values are normalized into Atlas severities when possible; unsupported severity text is kept from becoming a misleading review signal.
 - Dedicated report adapters preserve clear remediation fields as finding triage guidance. Nessus `solution`, ZAP `solution`, and Burp Suite `remediationDetail` text become finding remediation when the imported finding is applied, while existing operator-edited remediation is kept if a later import disagrees.
@@ -889,18 +905,17 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, and RouteViews, then shows ports, CVEs, banner summaries, Censys services and ownership context, GreyNoise classification, OTX pulse context, AbuseIPDB report confidence, IPinfo geolocation and ASN details, malware-distribution context, IOC matches, and IP-to-ASN/BGP ownership context when those providers return data.
-- `intel domain <domain>` queries VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and paid-only SecurityTrails when configured, then shows reputation, analysis stats, recent URLs, WHOIS summary data, OTX pulse context, certificate counts, names, issuers, first/last certificate sightings, URLhaus host context, ThreatFox IOC matches, urlscan.io search hits, and SecurityTrails DNS/WHOIS/subdomain pivots.
-- `intel url <url>` queries URLhaus, ThreatFox, and urlscan.io, then shows malware-distribution status, IOC context, and matching urlscan.io search results without submitting a new scan.
+- `intel ip <ip>` queries Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews, then shows ports, CVEs, banner summaries, InternetDB hostnames/CPEs/tags, Censys services and ownership context, GreyNoise classification, OTX pulse context, AbuseIPDB report confidence, IPinfo geolocation and ASN details, malware-distribution context, IOC matches, FOFA/ZoomEye search matches, and IP-to-ASN/BGP ownership context when those providers return data.
+- `intel domain <domain>` queries VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye when configured, then shows reputation, analysis stats, recent URLs, WHOIS summary data, OTX pulse context, certificate counts, names, issuers, first/last certificate sightings, URLhaus host context, ThreatFox IOC matches, urlscan.io search hits, SecurityTrails DNS/WHOIS/subdomain pivots, and bounded FOFA/ZoomEye search matches.
+- `intel url <url>` queries URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye, then shows malware-distribution status, IOC context, matching urlscan.io search results, and bounded provider search matches without submitting a new scan.
 - `intel hash <md5|sha1|sha256>` autodetects the hash type by length, queries VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
 - `intel cve <CVE-ID>` queries NVD and Vulners, then shows severity, score, publish/modified dates, summary, references, exploit counts, and exploitability context when provider data is available.
 - Each provider pane reports whether it came from cache, was rate-limited, hit quota backoff, or is missing a required encrypted secret.
 - Private, loopback, and other non-public IPs are blocked by default because vendor intel on those addresses is not useful. `--include-private` allows an explicit override.
 - The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan-cli`, and `chaos` CLI wrappers remain available for users who want provider-native output. `shodan domain` and `shodan host` output also feeds structured findings for DNS records, host IPs, hostnames, open ports, and HTTP titles, with weak mail policy rows and private DNS addresses flagged as warnings. `ipinfo <ip>` highlights IP, hostname, and organization rows while keeping geography and timezone rows as context.
+**Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, FOFA, and ZoomEye require user-provided provider keys. FOFA also requires the account email as `FOFA_EMAIL`, accepts `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN` for the API key, and needs an F-point balance for search calls. ZoomEye uses `ZOOMEYE_API_KEY` with the regional `api.zoomeye.ai` API and needs available resource credits. SecurityTrails currently requires a paid account. Shodan InternetDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
-**Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and SecurityTrails require user-provided provider keys. SecurityTrails currently requires a paid account. Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
-
-**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, optional `IPINFO_TOKEN`, `URLHAUS_AUTH_KEY`, `THREATFOX_AUTH_KEY`, `VULNERS_API_KEY`, `URLSCAN_API_KEY`, `SECURITYTRAILS_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, optional `IPINFO_TOKEN`, `URLHAUS_AUTH_KEY`, `THREATFOX_AUTH_KEY`, `VULNERS_API_KEY`, `URLSCAN_API_KEY`, `SECURITYTRAILS_API_KEY`, `FOFA_KEY` or a FOFA alias, `FOFA_EMAIL`, `ZOOMEYE_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
 
 **Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 
@@ -1041,7 +1056,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags.
 - Command-specific runtime adaptations are also declared in the registry. `inject_flags` handles safe default flags such as `nmap -sT`, `nuclei -ud /tmp/nuclei-templates`, `naabu -scan-type c`, and `mtr --report-wide`; managed workspace directories and environment wrappers handle Amass' active personal/team database path.
 - The same registry feeds terminal discovery commands that share the modal's catalog data and hide entries whose `feature_required` is disabled:
-  - `commands` lists built-in and allowed external roots, followed by an app-native pipe-helpers section (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`) labeled as app-managed filters rather than arbitrary shell pipelines.
+  - `commands` lists built-in and allowed external roots, followed by an app-native pipe-helpers section (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) labeled as app-managed filters rather than arbitrary shell pipelines.
   - `commands info <root> [subcommand]` shows the description, examples, flags, subcommands, and any authored knowledge guidance; `commands info <root> --json` prints the same entry as one deterministic JSON line for copy or debugging.
   - `commands search <term>` matches across root, category, description, example values, and knowledge notes/gotchas, ranks root-prefix hits first, and groups results by category.
 - Each command entry can carry an optional `knowledge` block — `notes`, `gotchas`, `safe_defaults`, `common_flags`, and an `artifact_behavior` scalar — surfaced in `commands info`, `commands search`, and the registry modal. The fields are descriptive guidance only and never affect allow/deny policy; they ship seeded for high-traffic tools such as `nmap`, `nuclei`, `httpx`, `ffuf`, and `gobuster`.

@@ -11,6 +11,8 @@ import re
 from typing import Any, BinaryIO, IO, cast
 from urllib.parse import urlsplit
 
+from services.nuclei.provenance import nuclei_source_detail
+
 from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
 
@@ -463,7 +465,8 @@ def _parse_nuclei_jsonl(
         raw_info = row_data.get("info")
         info = cast(dict[str, Any], raw_info) if isinstance(raw_info, dict) else {}
         matched = row_data.get("matched-at") or row_data.get("host") or row_data.get("url") or row_data.get("ip")
-        entity = _entity_from_target(matched, row_number, state, {"adapter": "nuclei"})
+        source_detail = nuclei_source_detail("", row=row_data)
+        entity = _entity_from_target(matched, row_number, state, source_detail)
         if entity:
             entities.append(entity)
         references = info.get("reference") or info.get("references") or []
@@ -480,7 +483,7 @@ def _parse_nuclei_jsonl(
             evidence=row_data.get("matcher-name") or row_data.get("extracted-results") or row_data.get("curl-command"),
             external_id=row_data.get("template-id"),
             references=[_safe_text(ref) for ref in references if _safe_text(ref)],
-            source_detail={"template_id": row_data.get("template-id"), "adapter": "nuclei"},
+            source_detail=source_detail,
         )
         if finding:
             findings.append(finding)

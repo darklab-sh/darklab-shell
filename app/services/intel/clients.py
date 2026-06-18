@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import http.client
+import base64
 import json
+import logging
 import os
 import ssl
 import subprocess
+import time
 from typing import Any
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from services.intel.base import ProviderApiError
 
 
+log = logging.getLogger("shell")
 SYSTEM_CA_BUNDLE_PATHS = (
     "/etc/ssl/certs/ca-certificates.crt",
     "/etc/pki/tls/certs/ca-bundle.crt",
@@ -41,6 +45,14 @@ class JsonApiClient:
         path = parsed.path or "/"
         if parsed.query:
             path = f"{path}?{parsed.query}"
+        safe_path = parsed.path or "/"
+        started = time.perf_counter()
+        log.debug("INTEL_HTTP_REQUEST", extra={
+            "provider_host": parsed.hostname or "",
+            "method": method.upper(),
+            "path": safe_path,
+            "has_query": bool(parsed.query),
+        })
         conn: http.client.HTTPSConnection | None = None
         try:
             conn = http.client.HTTPSConnection(
@@ -59,6 +71,11 @@ class JsonApiClient:
                 response.read()
                 redirect_url = urljoin(url, location)
                 if _url_origin(redirect_url) != _url_origin(url):
+                    log.warning("INTEL_HTTP_REDIRECT_BLOCKED", extra={
+                        "provider_host": parsed.hostname or "",
+                        "status": int(response.status),
+                        "redirect_host": urlsplit(redirect_url).hostname or "",
+                    })
                     raise ProviderApiError(
                         "provider redirected to an untrusted host",
                         status=int(response.status),
@@ -73,6 +90,14 @@ class JsonApiClient:
                     _redirects_remaining=_redirects_remaining - 1,
                 )
             raw_bytes = response.read()
+            log.debug("INTEL_HTTP_RESPONSE", extra={
+                "provider_host": parsed.hostname or "",
+                "method": method.upper(),
+                "path": safe_path,
+                "status": int(response.status),
+                "response_bytes": len(raw_bytes),
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            })
             raw = raw_bytes.decode("utf-8", errors="replace")
             reset_at = _header_float(response.getheader("x-ratelimit-reset"))
             if response.status >= 400:
@@ -97,12 +122,27 @@ class JsonApiClient:
         try:
             loaded = json.loads(raw or "{}")
         except json.JSONDecodeError as exc:
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_DECODE_FAILED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": method.upper(),
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+            })
             raise ProviderApiError("provider returned invalid JSON", status=self.last_status) from exc
         return loaded
 
     def _json_request(self, url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
         loaded = self._json_request_any(url, headers=headers)
         if not isinstance(loaded, dict):
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_SHAPE_UNEXPECTED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": "GET",
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+                "shape": type(loaded).__name__,
+            })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
 
@@ -121,6 +161,14 @@ class JsonApiClient:
             body=json.dumps(payload, separators=(",", ":")),
         )
         if not isinstance(loaded, dict):
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_SHAPE_UNEXPECTED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": "POST",
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+                "shape": type(loaded).__name__,
+            })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
 
@@ -142,6 +190,14 @@ class JsonApiClient:
             body=urlencode(payload),
         )
         if not isinstance(loaded, dict):
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_SHAPE_UNEXPECTED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": "POST",
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+                "shape": type(loaded).__name__,
+            })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
 
@@ -176,6 +232,14 @@ class ShodanApiClient(JsonApiClient):
         path = quote(value, safe="")
         query = urlencode({"key": api_key})
         return self._json_request(f"{self.base_url}/shodan/host/{path}?{query}")
+
+
+class ShodanInternetDbClient(JsonApiClient):
+    base_url = "https://internetdb.shodan.io"
+
+    def lookup_ip(self, value: str) -> dict[str, Any]:
+        path = quote(value, safe="")
+        return self._json_request(f"{self.base_url}/{path}")
 
 
 class VirusTotalApiClient(JsonApiClient):
@@ -374,6 +438,58 @@ class SecurityTrailsApiClient(JsonApiClient):
         whois = self._json_request(f"{self.base_url}/domain/{path}/whois", headers=self._headers(api_key))
         subdomains = self._json_request(f"{self.base_url}/domain/{path}/subdomains", headers=self._headers(api_key))
         return {"domain": domain, "whois": whois, "subdomains": subdomains}
+
+
+class FofaApiClient(JsonApiClient):
+    base_url = "https://fofa.info/api/v1"
+    fields = "host,ip,port,protocol,title,server,country_name"
+
+    def search(self, query: str, *, email: str, api_key: str, size: int = 10, page: int = 1) -> dict[str, Any]:
+        bounded_size = max(1, min(int(size), 10))
+        bounded_page = max(1, int(page))
+        encoded_query = base64.b64encode(str(query or "").encode("utf-8")).decode("ascii")
+        params = urlencode({
+            "email": email,
+            "key": api_key,
+            "qbase64": encoded_query,
+            "fields": self.fields,
+            "size": bounded_size,
+            "page": bounded_page,
+        })
+        return self._json_request(f"{self.base_url}/search/all?{params}")
+
+
+class ZoomEyeApiClient(JsonApiClient):
+    base_url = "https://api.zoomeye.ai/v2"
+    fields = "ip,port,service,app,os,device,city,country,asn,organization"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"API-KEY": api_key, "Accept": "application/json"}
+
+    def search_hosts(
+        self,
+        query: str,
+        *,
+        api_key: str,
+        page: int = 1,
+        size: int = 10,
+        sub_type: str = "all",
+    ) -> dict[str, Any]:
+        bounded_size = max(1, min(int(size), 10))
+        bounded_page = max(1, int(page))
+        encoded_query = base64.b64encode(str(query or "").encode("utf-8")).decode("ascii")
+        return self._json_post(
+            f"{self.base_url}/search",
+            {
+                "qbase64": encoded_query,
+                "sub_type": sub_type,
+                "page": bounded_page,
+                "facets": "",
+                "fields": self.fields,
+                "pagesize": bounded_size,
+            },
+            headers=self._headers(api_key),
+        )
 
 
 class RouteViewsApiClient(JsonApiClient):

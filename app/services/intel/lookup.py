@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import time
 from typing import Any, Callable
 
 from config import CFG
 from core import process
+from core.helpers import get_log_session_id
 from services import metrics as app_metrics
 from services.intel import audit, cache
 from services.intel.base import (
@@ -23,6 +25,7 @@ from services.intel.clients import (
     AbuseIpdbApiClient,
     CensysApiClient,
     CrtshApiClient,
+    FofaApiClient,
     GreyNoiseApiClient,
     HibpPwnedPasswordsClient,
     IpinfoApiClient,
@@ -31,16 +34,19 @@ from services.intel.clients import (
     RouteViewsApiClient,
     SecurityTrailsApiClient,
     ShodanApiClient,
+    ShodanInternetDbClient,
     TeamCymruDnsClient,
     ThreatFoxApiClient,
     UrlhausApiClient,
     UrlscanApiClient,
     VirusTotalApiClient,
     VulnersApiClient,
+    ZoomEyeApiClient,
 )
 from services.intel.abuseipdb import AbuseIpdbProvider
 from services.intel.censys import CensysProvider
 from services.intel.crtsh import CrtshProvider
+from services.intel.fofa import FofaProvider
 from services.intel.greynoise import GreyNoiseProvider
 from services.intel.hibp import HibpPwnedPasswordsProvider
 from services.intel.ipinfo import IpinfoProvider
@@ -50,15 +56,18 @@ from services.intel.routeviews import RouteViewsProvider
 from services.intel.securitytrails import SecurityTrailsProvider
 from services.intel.registry import provider_label, providers_for_entity_type
 from services.intel.shodan import ShodanProvider
+from services.intel.shodan_internetdb import ShodanInternetDbProvider
 from services.intel.teamcymru import TeamCymruProvider
 from services.intel.threatfox import ThreatFoxProvider
 from services.intel.urlhaus import UrlhausProvider
 from services.intel.urlscan import UrlscanProvider
 from services.intel.virustotal import VirusTotalProvider
 from services.intel.vulners import VulnersProvider
+from services.intel.zoomeye import ZoomEyeProvider
 
 
 ProviderFactory = Callable[[], Provider]
+log = logging.getLogger("shell")
 
 
 @dataclass(frozen=True)
@@ -102,6 +111,8 @@ def _provider_factory(provider_id: str) -> ProviderFactory | None:
         return lambda: ShodanProvider(client=ShodanApiClient())
     if provider_id == "censys":
         return lambda: CensysProvider(client=CensysApiClient())
+    if provider_id == "shodan_internetdb":
+        return lambda: ShodanInternetDbProvider(client=ShodanInternetDbClient())
     if provider_id == "greynoise":
         return lambda: GreyNoiseProvider(client=GreyNoiseApiClient())
     if provider_id == "virustotal":
@@ -130,6 +141,10 @@ def _provider_factory(provider_id: str) -> ProviderFactory | None:
         return lambda: ThreatFoxProvider(client=ThreatFoxApiClient())
     if provider_id == "securitytrails":
         return lambda: SecurityTrailsProvider(client=SecurityTrailsApiClient())
+    if provider_id == "fofa":
+        return lambda: FofaProvider(client=FofaApiClient())
+    if provider_id == "zoomeye":
+        return lambda: ZoomEyeProvider(client=ZoomEyeApiClient())
     if provider_id == "routeviews":
         return lambda: RouteViewsProvider(client=RouteViewsApiClient())
     return None
@@ -180,9 +195,22 @@ def _lookup_provider(
     redis_client,
 ) -> ProviderLookup:
     started = time.perf_counter()
+    log.debug("INTEL_LOOKUP_STARTED", extra={
+        "session": get_log_session_id(session_id),
+        "run_id": run_id,
+        "provider": provider.name,
+        "entity_type": entity_type,
+    })
     try:
-        provider.secret_value(session_id)
+        provider.require_secrets(session_id)
     except ProviderMissingSecret as exc:
+        log.debug("INTEL_PROVIDER_MISSING_SECRET", extra={
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "provider": provider.name,
+            "entity_type": entity_type,
+            "message": str(exc),
+        })
         app_metrics.record_intel_lookup(provider.name, "missing_secret", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="missing_secret", message=str(exc))
 
@@ -203,6 +231,13 @@ def _lookup_provider(
 
     quota = cache.get_quota_exhausted(session_id, provider.name, redis_client=redis_client)
     if quota:
+        log.warning("INTEL_PROVIDER_QUOTA_EXHAUSTED", extra={
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "provider": provider.name,
+            "entity_type": entity_type,
+            "reset_at": _float_or_none(quota.get("reset_at")),
+        })
         app_metrics.record_intel_lookup(provider.name, "rate_limited", time.perf_counter() - started)
         return ProviderLookup(
             provider.name,
@@ -213,6 +248,13 @@ def _lookup_provider(
 
     rate_limit = provider.rate_limit(session_id, cfg=cfg, redis_client=redis_client)
     if not rate_limit.allowed:
+        log.warning("INTEL_PROVIDER_RATE_LIMITED", extra={
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "provider": provider.name,
+            "entity_type": entity_type,
+            "retry_after_seconds": rate_limit.retry_after_seconds,
+        })
         app_metrics.record_intel_lookup(
             provider.name,
             "rate_limited",
@@ -237,6 +279,14 @@ def _lookup_provider(
                 cfg=cfg,
                 redis_client=redis_client,
             )
+            log.warning("INTEL_PROVIDER_QUOTA_EXHAUSTED", extra={
+                "session": get_log_session_id(session_id),
+                "run_id": run_id,
+                "provider": provider.name,
+                "entity_type": entity_type,
+                "http_status": exc.status or "",
+                "reset_at": _float_or_none(quota.get("reset_at")),
+            })
             app_metrics.record_intel_lookup(provider.name, "rate_limited", time.perf_counter() - started)
             return ProviderLookup(
                 provider.name,
@@ -244,12 +294,34 @@ def _lookup_provider(
                 message=_quota_message(provider.name, quota),
                 reset_at=_float_or_none(quota.get("reset_at")),
             )
+        log.warning("INTEL_PROVIDER_LOOKUP_FAILED", extra={
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "provider": provider.name,
+            "entity_type": entity_type,
+            "http_status": exc.status or "",
+            "error_type": type(exc).__name__,
+        })
         app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="error", message=str(exc))
     except ProviderClientUnavailable as exc:
+        log.error("INTEL_PROVIDER_LOOKUP_FAILED", exc_info=True, extra={
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "provider": provider.name,
+            "entity_type": entity_type,
+            "error_type": type(exc).__name__,
+        })
         app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="error", message=str(exc))
     except IntelProviderError as exc:
+        log.error("INTEL_PROVIDER_LOOKUP_FAILED", exc_info=True, extra={
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "provider": provider.name,
+            "entity_type": entity_type,
+            "error_type": type(exc).__name__,
+        })
         app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="error", message=str(exc))
 

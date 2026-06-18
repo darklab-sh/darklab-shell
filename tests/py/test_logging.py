@@ -581,8 +581,7 @@ class TestShareCreatedEvent:
 
 
 class TestCmdRewriteEvent:
-    """CMD_REWRITE is emitted at INFO when a command is silently rewritten.
-    """
+    """CMD_REWRITE_APPLIED is emitted at DEBUG when a command is silently rewritten."""
 
     # RFC 5737 TEST-NET-3 — never routed, guaranteed unique from real traffic
     _IP = "203.0.113.42"
@@ -593,44 +592,72 @@ class TestCmdRewriteEvent:
             headers={"X-Forwarded-For": self._IP},
         )
 
-    def test_nmap_rewrite_emits_info(self):
+    def test_nmap_rewrite_emits_debug(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
-                # Popen raises so we don't actually spawn — CMD_REWRITE fires before Popen
+                # Popen raises so we don't actually spawn — rewrite logging fires before Popen
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
-        rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
+        rewrite_calls = [c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE_APPLIED"]
         assert len(rewrite_calls) == 1
 
-    def test_nmap_rewrite_extra_has_original(self):
+    def test_nmap_rewrite_extra_omits_raw_commands(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
-        call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
-        assert call.kwargs["extra"]["original"] == "nmap 8.8.8.8"
+        call = next(c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE_APPLIED")
+        extra = call.kwargs["extra"]
+        assert "original" not in extra
+        assert "rewritten" not in extra
+        assert extra["command_root"] == "nmap"
 
-    def test_nmap_rewrite_extra_has_connect_scan_flag(self):
+    def test_nmap_rewrite_extra_has_structured_fields(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
-        call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
-        assert "-sT" in call.kwargs["extra"]["rewritten"]
-        assert "--privileged" not in call.kwargs["extra"]["rewritten"]
+        call = next(c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE_APPLIED")
+        extra = call.kwargs["extra"]
+        assert extra["ip"] == self._IP
+        assert extra["workspace_read_count"] == 0
+        assert extra["workspace_write_count"] == 0
+        assert extra["workspace_exec_path_count"] == 0
+        assert extra["runtime_env_names"] == []
 
     def test_unrewritten_command_does_not_emit_cmd_rewrite(self):
-        # A plain allowed command (ping) is not rewritten — no CMD_REWRITE log
+        # A plain allowed command (ping) is not rewritten — no rewrite log
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "ping google.com")
-        rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
+        rewrite_calls = [c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE_APPLIED"]
         assert len(rewrite_calls) == 0
+
+
+class TestSecretEnvironmentLogging:
+    def test_secret_vault_resolution_failure_logs_error(self):
+        from blueprints import run as run_routes
+        from services.secrets.vault import MasterKeyError
+
+        with mock.patch("blueprints.run.get_secret_value_for_env", side_effect=MasterKeyError("locked")), \
+                mock.patch.object(run_routes.log, "error") as error_log:
+            with pytest.raises(run_routes._RunPreparationError, match="Secrets vault unavailable"):
+                run_routes._resolve_secret_environment("shodan host 8.8.8.8", "tok_secret_failure")
+
+        error_log.assert_called_once()
+        assert error_log.call_args.args == ("SECRET_ENV_RESOLVE_FAILED",)
+        assert error_log.call_args.kwargs["exc_info"] is True
+        extra = error_log.call_args.kwargs["extra"]
+        assert extra["session"] == "tok_secr********"
+        assert extra["command_root"] == "shodan"
+        assert extra["secret_name"] == "SHODAN_API_KEY"
+        assert extra["lookup_env_names"] == ["SHODAN_API_KEY"]
+        assert extra["error_type"] == "MasterKeyError"
 
 
 class TestRunLifecycleEvents:

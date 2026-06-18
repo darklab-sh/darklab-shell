@@ -39,6 +39,7 @@ import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
 from services.commands.builtins import execute_builtin_command
+from core.output_signals import OutputSignalClassifier
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import DatabaseBackend, quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
@@ -13072,6 +13073,9 @@ class TestCommandCatalogRoute:
             ("intel urlscan.io", "URLSCAN_API_KEY", ()),
             ("intel ThreatFox", "THREATFOX_AUTH_KEY", ()),
             ("intel SecurityTrails", "SECURITYTRAILS_API_KEY", ()),
+            ("intel FOFA", "FOFA_KEY", ("FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN")),
+            ("intel FOFA", "FOFA_EMAIL", ()),
+            ("intel ZoomEye", "ZOOMEYE_API_KEY", ()),
         }
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -20462,6 +20466,24 @@ class TestRunPermalinkRoute:
                 "after another command, use this command's history permalink"
                 in data["preview_notice"]
             )
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_view_preserves_nuclei_template_provenance_metadata(self):
+        run_id = "permalink-json-nuclei-provenance-run"
+        command = "nuclei -u https://darklab.sh -t custom/nuclei/http.yaml -update-templates"
+        line = "[custom-check] [http] [medium] https://darklab.sh"
+        metadata = OutputSignalClassifier(command).classify_line(line)
+        self._insert_run(run_id, command, [{"text": line, **metadata}])
+        try:
+            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": "test-session"})
+            data = json.loads(resp.data)
+            assert resp.status_code == 200
+            source_detail = data["output_entries"][0]["source_detail"]
+            assert source_detail["adapter"] == "nuclei"
+            assert source_detail["template_id"] == "custom-check"
+            assert source_detail["template_provenance"]["source_kind"] == "workspace_templates"
+            assert source_detail["template_provenance"]["operator_updated"] is True
         finally:
             self._delete_run(run_id)
 

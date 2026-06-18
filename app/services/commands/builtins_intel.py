@@ -103,6 +103,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         return [*lines, output_line("  no provider data returned", "builtin-note")]
     if entity_type == "ip" and provider.provider == "shodan":
         lines.extend(_format_shodan(provider_payload))
+    elif entity_type == "ip" and provider.provider == "shodan_internetdb":
+        lines.extend(_format_shodan_internetdb(provider_payload))
     elif entity_type == "ip" and provider.provider == "censys":
         lines.extend(_format_censys(provider_payload))
     elif entity_type == "ip" and provider.provider == "greynoise":
@@ -121,6 +123,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_threatfox(provider_payload))
     elif entity_type == "ip" and provider.provider == "routeviews":
         lines.extend(_format_routeviews(provider_payload))
+    elif entity_type == "ip" and provider.provider in {"fofa", "zoomeye"}:
+        lines.extend(_format_search_rows(provider_payload))
     elif entity_type == "domain" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_domain(provider_payload))
     elif entity_type == "domain" and provider.provider == "otx":
@@ -135,6 +139,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_urlscan(provider_payload))
     elif entity_type == "domain" and provider.provider == "securitytrails":
         lines.extend(_format_securitytrails(provider_payload))
+    elif entity_type == "domain" and provider.provider in {"fofa", "zoomeye"}:
+        lines.extend(_format_search_rows(provider_payload))
     elif entity_type == "hash" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_hash(provider_payload))
     elif entity_type == "hash" and provider.provider == "otx":
@@ -155,6 +161,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_threatfox(provider_payload))
     elif entity_type == "url" and provider.provider == "urlscan":
         lines.extend(_format_urlscan(provider_payload))
+    elif entity_type == "url" and provider.provider in {"fofa", "zoomeye"}:
+        lines.extend(_format_search_rows(provider_payload))
     else:
         lines.append(output_line("  no formatter for provider data", "builtin-note"))
     return lines
@@ -195,6 +203,38 @@ def _format_shodan(payload: dict[str, Any]) -> list[dict[str, object]]:
             data = _truncate(str(row.get("data") or "").strip().replace("\n", " "), 96)
             summary = " - ".join(part for part in (product, data) if part)
             lines.append(output_line(f"  {port}/{transport} {summary}".rstrip(), "builtin-kv"))
+    return lines
+
+
+def _format_shodan_internetdb(payload: dict[str, Any]) -> list[dict[str, object]]:
+    return [
+        output_line(format_native_record("ports", _join_values(payload.get("ports")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("cves", _join_values(payload.get("cves")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("hostnames", _join_values(payload.get("hostnames")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("cpes", _join_values(payload.get("cpes")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("tags", _join_values(payload.get("tags")) or "none", 14), "builtin-kv"),
+    ]
+
+
+def _format_search_rows(payload: dict[str, Any]) -> list[dict[str, object]]:
+    lines = [
+        output_line(format_native_record("results", str(payload.get("result_count") or 0), 14), "builtin-kv"),
+    ]
+    rows = payload.get("results")
+    if isinstance(rows, list) and rows:
+        lines.append(output_line("matches:", "builtin-subsection"))
+        for row in rows[:5]:
+            if not isinstance(row, dict):
+                continue
+            host = str(row.get("host") or row.get("ip") or "-")
+            port = str(row.get("port") or "").strip()
+            protocol = str(row.get("protocol") or "").strip()
+            title = _truncate(str(row.get("title") or row.get("app") or row.get("server") or "").strip(), 72)
+            endpoint = f"{host}:{port}" if port else host
+            suffix = " - ".join(part for part in (protocol, title) if part)
+            lines.append(output_line(f"  {endpoint} {suffix}".rstrip(), "builtin-kv"))
+    if payload.get("has_more"):
+        lines.append(output_line("more results available from provider", "builtin-note"))
     return lines
 
 

@@ -664,6 +664,12 @@ function _historyOutputLineMetadata(entry) {
   if (Number.isInteger(entry.line_number)) metadata.line_number = entry.line_number;
   if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;
   if (typeof entry.target === 'string' && entry.target) metadata.target = entry.target;
+  if (entry.template_provenance && typeof entry.template_provenance === 'object') {
+    metadata.template_provenance = entry.template_provenance;
+  }
+  if (entry.source_detail && typeof entry.source_detail === 'object') {
+    metadata.source_detail = entry.source_detail;
+  }
   return Object.keys(metadata).length ? metadata : null;
 }
 

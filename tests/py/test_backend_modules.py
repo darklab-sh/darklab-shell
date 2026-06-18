@@ -7393,6 +7393,7 @@ class TestIntelServices:
         assert [item.id for item in registry.providers_for_entity_type("ip")] == [
             "shodan",
             "censys",
+            "shodan_internetdb",
             "greynoise",
             "otx",
             "abuseipdb",
@@ -7400,6 +7401,8 @@ class TestIntelServices:
             "teamcymru",
             "urlhaus",
             "threatfox",
+            "fofa",
+            "zoomeye",
             "routeviews",
         ]
         assert [item.id for item in registry.providers_for_entity_type("domain")] == [
@@ -7410,6 +7413,8 @@ class TestIntelServices:
             "urlhaus",
             "threatfox",
             "securitytrails",
+            "fofa",
+            "zoomeye",
         ]
         assert [item.id for item in registry.providers_for_entity_type("hash")] == [
             "virustotal",
@@ -7419,7 +7424,13 @@ class TestIntelServices:
             "threatfox",
         ]
         assert [item.id for item in registry.providers_for_entity_type("cve")] == ["nvd", "vulners"]
-        assert [item.id for item in registry.providers_for_entity_type("url")] == ["urlscan", "urlhaus", "threatfox"]
+        assert [item.id for item in registry.providers_for_entity_type("url")] == [
+            "urlscan",
+            "urlhaus",
+            "threatfox",
+            "fofa",
+            "zoomeye",
+        ]
         assert registry.provider_label("GREYNOISE") == "GreyNoise"
         assert registry.cache_scope("virustotal", "hash") == "file"
         vt = registry.provider_definition("virustotal")
@@ -7435,7 +7446,20 @@ class TestIntelServices:
             ("nvd", ("cve",), (), "Free public lookup"),
             ("urlhaus", ("ip", "domain", "hash", "url"), ("URLHAUS_AUTH_KEY",), "Free abuse.ch Auth-Key"),
             ("ipinfo", ("ip",), ("IPINFO_TOKEN",), "Free public basics; optional account token"),
+            ("shodan_internetdb", ("ip",), (), "Free public lookup"),
             ("securitytrails", ("domain",), ("SECURITYTRAILS_API_KEY",), "Paid account required"),
+            (
+                "fofa",
+                ("ip", "domain", "url"),
+                ("FOFA_KEY", "FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN", "FOFA_EMAIL"),
+                "Paid account or F-point balance required",
+            ),
+            (
+                "zoomeye",
+                ("ip", "domain", "url"),
+                ("ZOOMEYE_API_KEY",),
+                "Paid account or resource credits required",
+            ),
             ("vulners", ("cve",), ("VULNERS_API_KEY",), "Free signup; paid tiers"),
             ("chaos", ("domain",), ("PDCP_API_KEY",), "ProjectDiscovery Cloud account key"),
         }
@@ -7457,6 +7481,9 @@ class TestIntelServices:
             ("intel urlscan.io", "URLSCAN_API_KEY", ()),
             ("intel ThreatFox", "THREATFOX_AUTH_KEY", ()),
             ("intel SecurityTrails", "SECURITYTRAILS_API_KEY", ()),
+            ("intel FOFA", "FOFA_KEY", ("FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN")),
+            ("intel FOFA", "FOFA_EMAIL", ()),
+            ("intel ZoomEye", "ZOOMEYE_API_KEY", ()),
         }
 
     def test_canonical_entity_normalizes_supported_values(self):
@@ -7514,6 +7541,9 @@ class TestIntelServices:
         assert enriched["providers"]["otx"]["pulse_count"] == 0
         assert enriched["providers"]["abuseipdb"]["total_reports"] == 0
         assert enriched["providers"]["teamcymru"]["asn"] == ""
+        assert enriched["providers"]["shodan_internetdb"]["ports"] == []
+        assert enriched["providers"]["fofa"]["result_count"] == 0
+        assert enriched["providers"]["zoomeye"]["result_count"] == 0
         assert enriched["summary"]["has_intel"] is True
         assert enriched["summary"]["providers_with_data"] == ["shodan"]
         assert enriched["summary"]["cache_status"] == {"shodan": "hit"}
@@ -7548,6 +7578,8 @@ class TestIntelServices:
         assert url["providers"]["urlhaus"]["threat"] == "malware_download"
         assert url["providers"]["threatfox"]["ioc_count"] == 0
         assert url["providers"]["urlscan"]["result_count"] == 0
+        assert url["providers"]["fofa"]["results"] == []
+        assert url["providers"]["zoomeye"]["results"] == []
         assert url["summary"]["providers_with_data"] == ["urlhaus"]
 
     def test_cache_round_trips_normalized_payload_with_provider_ttl(self):
@@ -7566,6 +7598,8 @@ class TestIntelServices:
         assert cache.get_cached_response("shodan", "ip", "1.1.1.1", redis_client=redis) is None
         assert cache.quota_negative_cache_ttl("virustotal", cfg={"intel_negative_cache_virustotal_quota_seconds": 44}) == 44
         assert cache.quota_negative_cache_ttl("otx", cfg={"intel_negative_cache_otx_quota_seconds": 45}) == 45
+        assert cache.quota_negative_cache_ttl("fofa", cfg={"intel_negative_cache_fofa_quota_seconds": 46}) == 46
+        assert cache.quota_negative_cache_ttl("zoomeye", cfg={"intel_negative_cache_zoomeye_quota_seconds": 47}) == 47
         assert cache.quota_negative_cache_ttl(
             "abuseipdb",
             cfg={"intel_negative_cache_abuseipdb_quota_seconds": 46},
@@ -7642,6 +7676,38 @@ class TestIntelServices:
         assert payload["entity_count"] == 1
         assert "api_key" not in payload
         assert "response_body" not in payload
+
+    def test_intel_cache_and_rate_decode_failures_log_safe_warnings(self):
+        from services.intel import cache, rate_limiter
+
+        redis = process._FakeRedisClient()
+        redis.set(cache.cache_key("fofa", "domain", "secret.example"), "{not-json")
+        redis.set(cache.quota_cache_key("tok_cache_decode", "fofa"), "{not-json")
+        redis.set("intel:rate:tok_cache_decode:fofa", "{not-json")
+
+        with mock.patch.object(cache.log, "warning") as cache_warning:
+            assert cache.get_cached_response("fofa", "domain", "secret.example", redis_client=redis) is None
+            assert cache.get_quota_exhausted("tok_cache_decode", "fofa", redis_client=redis) is None
+
+        cache_events = {call.args[0]: call.kwargs["extra"] for call in cache_warning.call_args_list}
+        assert cache_events["INTEL_CACHE_DECODE_FAILED"]["provider"] == "fofa"
+        assert cache_events["INTEL_CACHE_DECODE_FAILED"]["entity_type"] == "domain"
+        assert "secret.example" not in json.dumps(cache_events)
+        assert cache_events["INTEL_QUOTA_CACHE_DECODE_FAILED"]["session"] == "tok_cach********"
+
+        with mock.patch.object(rate_limiter.log, "warning") as rate_warning:
+            assert rate_limiter.check_rate_limit(
+                "tok_cache_decode",
+                "fofa",
+                cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 10},
+                redis_client=redis,
+                now=100.0,
+            ).allowed is True
+
+        rate_warning.assert_called_once()
+        assert rate_warning.call_args.args == ("INTEL_RATE_BUCKET_DECODE_FAILED",)
+        assert rate_warning.call_args.kwargs["extra"]["provider"] == "fofa"
+        assert rate_warning.call_args.kwargs["extra"]["session"] == "tok_cach********"
 
     def test_json_api_client_uses_system_ca_bundle_for_https(self, monkeypatch):
         from services.intel import clients
@@ -7758,14 +7824,17 @@ class TestIntelServices:
         from services.intel.base import ProviderApiError
         from services.intel.censys import CensysProvider
         from services.intel.crtsh import CrtshProvider
+        from services.intel.fofa import FofaProvider
         from services.intel.greynoise import GreyNoiseProvider
         from services.intel.hibp import HibpPwnedPasswordsProvider
         from services.intel.ipinfo import IpinfoProvider
         from services.intel.nvd import NvdProvider
         from services.intel.otx import OtxProvider
         from services.intel.shodan import ShodanProvider
+        from services.intel.shodan_internetdb import ShodanInternetDbProvider
         from services.intel.teamcymru import TeamCymruProvider
         from services.intel.virustotal import VirusTotalProvider
+        from services.intel.zoomeye import ZoomEyeProvider
 
         class FakeIntelClient:
             last_status = 200
@@ -7804,6 +7873,16 @@ class TestIntelServices:
                     "data": [{"port": 443, "transport": "tcp", "product": "nginx", "data": "HTTP"}],
                     "vulns": {"cve-2024-12345": {}},
                     "last_update": "2026-05-14T00:00:00Z",
+                }
+
+            def lookup_internetdb_ip(self, value):
+                self.calls.append(("internetdb-ip", value))
+                return {
+                    "ports": [443, "80", "bad"],
+                    "cpes": ["cpe:/a:openbsd:openssh:9.0"],
+                    "hostnames": ["dns.google"],
+                    "tags": ["cdn"],
+                    "vulns": ["cve-2024-12345"],
                 }
 
             def lookup_host(self, value, *, api_key, organization_id=""):
@@ -7915,6 +7994,37 @@ class TestIntelServices:
                     },
                 }
 
+            def search(self, query, *, email, api_key, size=10):
+                self.calls.append(("fofa", query, email, api_key, size))
+                return {
+                    "size": 1,
+                    "results": [[
+                        "https://example.test",
+                        "8.8.8.8",
+                        "443",
+                        "https",
+                        "Example",
+                        "nginx",
+                        "United States",
+                        "Google LLC",
+                    ]],
+                }
+
+            def search_hosts(self, query, *, api_key, size=10):
+                self.calls.append(("zoomeye", query, api_key, size))
+                return {
+                    "total": 1,
+                    "matches": [{
+                        "hostname": "example.test",
+                        "ip": "8.8.8.8",
+                        "port": 443,
+                        "service": {"name": "https", "app": "nginx"},
+                        "title": "Example",
+                        "geoinfo": {"country": "United States", "city": "Mountain View"},
+                        "asn": {"organization": "Google LLC"},
+                    }],
+                }
+
         secrets = {
             ("session-1", "SHODAN_API_KEY"): "shodan-key",
             ("session-1", "CENSYS_PAT"): "censys-token",
@@ -7926,6 +8036,9 @@ class TestIntelServices:
             ("session-1", "OTX_API_KEY"): "otx-key",
             ("session-1", "ABUSEIPDB_API_KEY"): "abuse-key",
             ("session-1", "IPINFO_TOKEN"): "ipinfo-token",
+            ("session-1", "FOFA_KEY"): "fofa-key",
+            ("session-1", "FOFA_EMAIL"): "ops@example.test",
+            ("session-1", "ZOOMEYE_API_KEY"): "zoomeye-key",
         }
 
         def getter(session, env):
@@ -7933,6 +8046,7 @@ class TestIntelServices:
 
         client = FakeIntelClient()
         shodan_provider = ShodanProvider(secret_getter=getter, client=client)
+        internetdb_client = mock.Mock(last_status=200, lookup_ip=mock.Mock(side_effect=client.lookup_internetdb_ip))
 
         assert shodan_provider.cache_ttl("ip", cfg={"intel_cache_ttl_shodan_ip_seconds": 9}) == 9
         assert shodan_provider.rate_limit(
@@ -7941,6 +8055,10 @@ class TestIntelServices:
             redis_client=process._FakeRedisClient(),
         ).allowed is True
         shodan_result = shodan_provider.lookup_ip(
+            "8.8.8.8",
+            session_token="session-1",
+        )
+        internetdb_result = ShodanInternetDbProvider(client=internetdb_client).lookup_ip(
             "8.8.8.8",
             session_token="session-1",
         )
@@ -8007,9 +8125,19 @@ class TestIntelServices:
             "8.8.8.8",
             session_token="session-1",
         )
+        fofa_result = FofaProvider(secret_getter=getter, client=client).lookup_domain(
+            "Example.TEST.",
+            session_token="session-1",
+        )
+        zoomeye_result = ZoomEyeProvider(secret_getter=getter, client=client).lookup_url(
+            "https://Example.TEST/",
+            session_token="session-1",
+        )
 
         assert shodan_result.payload["providers"]["shodan"]["ports"] == [443]
         assert shodan_result.payload["providers"]["shodan"]["cves"] == ["CVE-2024-12345"]
+        assert internetdb_result.payload["providers"]["shodan_internetdb"]["ports"] == [80, 443]
+        assert internetdb_result.payload["providers"]["shodan_internetdb"]["hostnames"] == ["dns.google"]
         assert censys_result.payload["providers"]["censys"]["ports"] == [53, 443]
         assert censys_result.payload["providers"]["censys"]["protocols"] == ["dns", "https"]
         assert censys_result.payload["providers"]["censys"]["services"][0]["software"] == "Example nginx 1.2.3"
@@ -8041,7 +8169,13 @@ class TestIntelServices:
         assert ipinfo_result.payload["providers"]["ipinfo"]["asn"] == "AS15169"
         assert ipinfo_result.payload["providers"]["ipinfo"]["org"] == "Google LLC"
         assert ipinfo_result.payload["providers"]["ipinfo"]["domain"] == "google.com"
+        assert fofa_result.payload["providers"]["fofa"]["results"][0]["host"] == "https://example.test"
+        assert fofa_result.payload["providers"]["fofa"]["results"][0]["port"] == 443
+        assert "organization" not in fofa_result.payload["providers"]["fofa"]["results"][0]
+        assert zoomeye_result.payload["providers"]["zoomeye"]["results"][0]["protocol"] == "https"
+        assert zoomeye_result.payload["providers"]["zoomeye"]["results"][0]["organization"] == "Google LLC"
         assert ("ip", "8.8.8.8", "shodan-key") in client.calls
+        assert ("internetdb-ip", "8.8.8.8") in client.calls
         assert ("censys-host", "8.8.8.8", "censys-token", "censys-org") in client.calls
         assert ("domain", "example.test", "vt-key") in client.calls
         assert ("hash", "a" * 64, "vt-key") in client.calls
@@ -8054,6 +8188,8 @@ class TestIntelServices:
         assert ("ip", "8.8.4.4", "greynoise-key") in client.calls
         assert ("ip", "8.8.4.5", "greynoise-empty-key") in client.calls
         assert ("ip", "8.8.8.8", "ipinfo-token") in client.calls
+        assert ("fofa", 'domain="example.test"', "ops@example.test", "fofa-key", 10) in client.calls
+        assert ("zoomeye", 'site:"example.test"', "zoomeye-key", 10) in client.calls
 
     def test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized(self):
         from services.intel.teamcymru import TeamCymruProvider
@@ -8076,15 +8212,67 @@ class TestIntelServices:
             "name": "GOOGLE, US",
         }
 
+    def test_fofa_accepts_api_key_alias_and_zoomeye_uses_regional_api_key_auth(self):
+        from services.intel.fofa import FofaProvider
+        from services.intel.zoomeye import ZoomEyeProvider
+
+        secrets = {
+            ("session-1", "FOFA_API_KEY"): "fofa-key",
+            ("session-1", "FOFA_EMAIL"): "ops@example.test",
+            ("session-1", "ZOOMEYE_API_KEY"): "plain-api-key",
+        }
+
+        def getter(session, env):
+            return secrets.get((session, env))
+
+        fofa_client = mock.Mock(
+            last_status=200,
+            search=mock.Mock(return_value={
+                "size": 1,
+                "results": [["https://example.test", "8.8.8.8", "443", "https"]],
+            }),
+        )
+        fofa = FofaProvider(secret_getter=getter, client=fofa_client).lookup_domain(
+            "example.test",
+            session_token="session-1",
+        )
+
+        assert fofa.payload["providers"]["fofa"]["results"][0]["port"] == 443
+        fofa_client.search.assert_called_once_with(
+            'domain="example.test"',
+            email="ops@example.test",
+            api_key="fofa-key",
+            size=10,
+        )
+
+        zoomeye_client = mock.Mock(
+            last_status=200,
+            search_hosts=mock.Mock(return_value={
+                "code": 60000,
+                "total": 1,
+                "matches": [{"ip": "8.8.8.8", "port": 443, "service": {"name": "https"}}],
+            }),
+        )
+        zoomeye = ZoomEyeProvider(secret_getter=getter, client=zoomeye_client).lookup_domain(
+            "example.test",
+            session_token="session-1",
+        )
+
+        assert zoomeye.payload["providers"]["zoomeye"]["results"][0]["protocol"] == "https"
+        zoomeye_client.search_hosts.assert_called_once_with('site:"example.test"', api_key="plain-api-key", size=10)
+
     def test_new_intel_provider_modules_normalize_payloads(self):
         from services.intel.clients import (
             CensysApiClient,
+            FofaApiClient,
             RouteViewsApiClient,
             SecurityTrailsApiClient,
+            ShodanInternetDbClient,
             ThreatFoxApiClient,
             UrlhausApiClient,
             UrlscanApiClient,
             VulnersApiClient,
+            ZoomEyeApiClient,
         )
         from services.intel.routeviews import RouteViewsProvider
         from services.intel.securitytrails import SecurityTrailsProvider
@@ -8215,6 +8403,39 @@ class TestIntelServices:
                 "prefixes": [{"prefix": "8.8.8.0/24"}],
             }
         routeviews_request.assert_called_once_with("https://api.routeviews.org/prefix/8.8.8.8/32")
+
+        internetdb_client = ShodanInternetDbClient()
+        with mock.patch.object(internetdb_client, "_json_request", return_value={}) as internetdb_request:
+            internetdb_client.lookup_ip("8.8.8.8")
+        internetdb_request.assert_called_once_with("https://internetdb.shodan.io/8.8.8.8")
+
+        fofa_client = FofaApiClient()
+        with mock.patch.object(fofa_client, "_json_request", return_value={}) as fofa_request:
+            fofa_client.search('domain="example.test"', email="ops@example.test", api_key="fofa-key", size=50)
+        fofa_url = fofa_request.call_args.args[0]
+        assert fofa_url.startswith("https://fofa.info/api/v1/search/all?")
+        assert "email=ops%40example.test" in fofa_url
+        assert "key=fofa-key" in fofa_url
+        assert "fields=host%2Cip%2Cport%2Cprotocol%2Ctitle%2Cserver%2Ccountry_name" in fofa_url
+        assert "as_organization" not in fofa_url
+        assert "size=10" in fofa_url
+        assert "qbase64=ZG9tYWluPSJleGFtcGxlLnRlc3Qi" in fofa_url
+
+        zoomeye_client = ZoomEyeApiClient()
+        with mock.patch.object(zoomeye_client, "_json_post", return_value={}) as zoomeye_post:
+            zoomeye_client.search_hosts('site:"example.test"', api_key="zoomeye-key", size=50)
+        zoomeye_post.assert_called_once_with(
+            "https://api.zoomeye.ai/v2/search",
+            {
+                "qbase64": "c2l0ZToiZXhhbXBsZS50ZXN0Ig==",
+                "sub_type": "all",
+                "page": 1,
+                "facets": "",
+                "fields": "ip,port,service,app,os,device,city,country,asn,organization",
+                "pagesize": 10,
+            },
+            headers={"API-KEY": "zoomeye-key", "Accept": "application/json"},
+        )
 
         secrets = {
             ("session-1", "URLHAUS_AUTH_KEY"): "urlhaus-key",
@@ -8381,6 +8602,51 @@ class TestIntelServices:
         assert result.providers[0].result is None
         provider.client.lookup_ip.assert_not_called()
 
+    def test_lookup_entity_preflights_fofa_email_before_rate_limit_and_client_call(self):
+        from services.intel.fofa import FofaProvider
+        from services.intel.lookup import lookup_entity
+
+        redis = process._FakeRedisClient()
+        secrets = {("session-1", "FOFA_KEY"): "fofa-key"}
+
+        def getter(session, env):
+            return secrets.get((session, env))
+
+        client = mock.Mock()
+        client.last_status = 200
+        client.search.return_value = {
+            "size": 1,
+            "results": [["https://example.test", "8.8.8.8", "443", "https", "Example", "nginx", "US"]],
+        }
+
+        missing = lookup_entity(
+            "domain",
+            "example.test",
+            session_id="session-1",
+            provider_factories=[lambda: FofaProvider(secret_getter=getter, client=client)],
+            cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 600},
+            redis_client=redis,
+        )
+
+        assert missing.providers[0].status == "missing_secret"
+        assert missing.providers[0].message == "FOFA_EMAIL is not configured"
+        client.search.assert_not_called()
+
+        secrets[("session-1", "FOFA_EMAIL")] = "ops@example.test"
+        found = lookup_entity(
+            "domain",
+            "example.test",
+            session_id="session-1",
+            provider_factories=[lambda: FofaProvider(secret_getter=getter, client=client)],
+            cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 600},
+            redis_client=redis,
+        )
+
+        assert found.providers[0].status == "ok"
+        assert found.providers[0].result is not None
+        assert found.providers[0].result.payload["providers"]["fofa"]["result_count"] == 1
+        client.search.assert_called_once()
+
     def test_lookup_entity_skips_cached_provider_response_when_ttl_is_zero(self):
         from services.intel import cache
         from services.intel.lookup import lookup_entity
@@ -8497,6 +8763,23 @@ class TestIntelServices:
                     "hostname": "dns.google",
                     "timezone": "America/Los_Angeles",
                 },
+                "shodan_internetdb": {
+                    "ports": [80, 443],
+                    "cpes": ["cpe:/a:openbsd:openssh:9.0"],
+                    "hostnames": ["dns.google"],
+                    "tags": ["cdn"],
+                    "cves": ["CVE-2024-12345"],
+                },
+                "fofa": {
+                    "result_count": 1,
+                    "results": [{"host": "https://example.test", "port": 443, "protocol": "https", "title": "Example"}],
+                    "has_more": False,
+                },
+                "zoomeye": {
+                    "result_count": 1,
+                    "results": [{"host": "example.test", "port": 443, "protocol": "https", "app": "nginx"}],
+                    "has_more": False,
+                },
             },
             "summary": {"has_intel": True},
         }
@@ -8512,6 +8795,18 @@ class TestIntelServices:
                 ProviderLookup(
                     "ipinfo",
                     result=IntelResult("ipinfo", "ip", "8.8.8.8", payload),
+                ),
+                ProviderLookup(
+                    "shodan_internetdb",
+                    result=IntelResult("shodan_internetdb", "ip", "8.8.8.8", payload),
+                ),
+                ProviderLookup(
+                    "fofa",
+                    result=IntelResult("fofa", "ip", "8.8.8.8", payload),
+                ),
+                ProviderLookup(
+                    "zoomeye",
+                    result=IntelResult("zoomeye", "ip", "8.8.8.8", payload),
                 ),
             ],
         )
@@ -8534,6 +8829,12 @@ class TestIntelServices:
         assert "AS15169" in text
         assert "Google LLC" in text
         assert "Mountain View, California" in text
+        assert "Shodan InternetDB results - retrieved and cached:" in text
+        assert "cpe:/a:openbsd:openssh:9.0" in text
+        assert "FOFA results - retrieved and cached:" in text
+        assert "ZoomEye results - retrieved and cached:" in text
+        assert "https://example.test:443 https - Example" in text
+        assert "example.test:443 https - nginx" in text
         assert any(line.get("cls") == "builtin-spacer" for line in lines)
 
     def test_builtin_intel_ip_formats_censys_provider_results(self):
@@ -9824,6 +10125,17 @@ class TestDerivedCommandRegistry:
                 "requires_secret": True,
             },
             {
+                "id": "fofa",
+                "label": "FOFA",
+                "entity_types": ["domain"],
+                "uses": ["intel domain"],
+                "secret_env": "FOFA_KEY",
+                "secret_env_aliases": ["FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN"],
+                "required_secret_envs": ["FOFA_EMAIL"],
+                "secret_env_names": ["FOFA_KEY", "FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN", "FOFA_EMAIL"],
+                "requires_secret": True,
+            },
+            {
                 "id": "chaos",
                 "label": "ProjectDiscovery Chaos",
                 "entity_types": ["domain"],
@@ -9836,6 +10148,8 @@ class TestDerivedCommandRegistry:
         stored_secrets = [
             {"name": "SHODAN_API_KEY", "consumer_envs": ["SHODAN_API_KEY"]},
             {"name": "VTCLI_APIKEY", "consumer_envs": ["VTCLI_APIKEY"]},
+            {"name": "FOFA_API_KEY", "consumer_envs": ["FOFA_API_KEY"]},
+            {"name": "FOFA_EMAIL", "consumer_envs": ["FOFA_EMAIL"]},
         ]
 
         with (
@@ -9849,7 +10163,7 @@ class TestDerivedCommandRegistry:
         assert exit_code == 0
         assert alias_exit_code == 0
         assert "Provider status:" in text
-        assert "4 usable · 2 not configured" in text
+        assert "5 usable · 2 not configured" in text
         assert "Usable providers:" in text
         assert "Shodan" in text
         assert "configured · intel ip · SHODAN_API_KEY" in text
@@ -9859,6 +10173,8 @@ class TestDerivedCommandRegistry:
         assert "available · intel ip, ipinfo CLI · IPINFO_TOKEN" in text
         assert "VirusTotal" in text
         assert "configured · intel domain, intel hash · VT_API_KEY" in text
+        assert "FOFA" in text
+        assert "configured · intel domain · FOFA_KEY + FOFA_EMAIL" in text
         assert "Not configured:" in text
         assert "Censys" in text
         assert "not configured · intel ip · CENSYS_PAT" in text
@@ -10173,6 +10489,39 @@ class TestDerivedCommandRegistry:
         assert is_command_allowed("shodan stats apache")[0]
         assert is_command_allowed("shodan scan submit 8.8.8.8")[0]
         assert not is_command_allowed("shodan scan submit 127.0.0.1")[0]
+        tlsx = by_root["tlsx"]
+        assert "tlsx -update" in tlsx["policy"]["deny"]
+        assert "tlsx -dashboard-upload" in tlsx["policy"]["deny"]
+        assert is_command_allowed("tlsx -u ip.darklab.sh -json -silent")[0]
+        assert not is_command_allowed("tlsx -u ip.darklab.sh -update")[0]
+        cdncheck = by_root["cdncheck"]
+        assert "cdncheck -update" in cdncheck["policy"]["deny"]
+        assert is_command_allowed("cdncheck -i ip.darklab.sh -jsonl -silent")[0]
+        assert not is_command_allowed("cdncheck -i ip.darklab.sh -update")[0]
+        trufflehog = by_root["trufflehog"]
+        assert "trufflehog filesystem --directory" in trufflehog["policy"]["allow"]
+        assert "trufflehog git" in trufflehog["policy"]["allow"]
+        assert "trufflehog git file://" in trufflehog["policy"]["deny"]
+        assert trufflehog["runtime_adaptations"]["inject_flags"][0]["flags"] == ["--json"]
+        assert is_command_allowed("trufflehog --help")[0]
+        assert is_command_allowed("trufflehog git https://github.com/trufflesecurity/test_keys --json")[0]
+        assert not is_command_allowed("trufflehog filesystem secrets --json")[0]
+        assert not is_command_allowed("trufflehog git file:///tmp/repo --json")[0]
+        assert not is_command_allowed("trufflehog git ssh://git@example.com/repo.git --json")[0]
+        assert not is_command_allowed("trufflehog git local-repo --json")[0]
+        assert not is_command_allowed("trufflehog github --repo darklab/shell")[0]
+        puredns = by_root["puredns"]
+        assert "puredns resolve" in puredns["policy"]["deny"]
+        assert "puredns --bin" in puredns["policy"]["deny"]
+        assert is_command_allowed("puredns -h")[0]
+        allowed, reason = is_command_allowed(
+            "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+            "darklab.sh"
+        )
+        assert not allowed
+        assert reason == "puredns bruteforce requires --resolvers with a session resolver file."
+        assert not is_command_allowed("puredns resolve domains.txt")[0]
+        assert not is_command_allowed("puredns bruteforce domains.txt darklab.sh")[0]
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -10182,7 +10531,7 @@ class TestDerivedCommandRegistry:
                 "workspace_root": tmp,
                 "workspace_quota_mb": 50,
                 "workspace_max_file_mb": 1,
-                "workspace_max_files": 40,
+                "workspace_max_files": 80,
                 "workspace_inactivity_ttl_hours": 1,
             }
             session_id = "registry-workspace-flags"
@@ -10206,6 +10555,12 @@ class TestDerivedCommandRegistry:
                 "subfinder-provider-config.yaml": "github: []\n",
                 "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
                 "nmap-script-args.txt": "http.useragent=darklab\n",
+                "trufflehog-include.txt": ".*\n",
+                "trufflehog-exclude.txt": "node_modules\n",
+                "puredns-resolvers.txt": "1.1.1.1\n",
+                "puredns-trusted-resolvers.txt": "8.8.8.8\n",
+                "puredns-domains.txt": "darklab.sh\n",
+                "secrets/readme.txt": "no secrets here\n",
             }.items():
                 write_workspace_text_file(session_id, path, text, cfg)
 
@@ -10235,6 +10590,15 @@ class TestDerivedCommandRegistry:
                 "amass track -d darklab.sh": ([], ["tools/amass"]),
                 "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "tools/amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
+                "tlsx -l tls-targets.txt -json -silent -o tlsx-results.json": (
+                    ["tls-targets.txt"], ["tlsx-results.json"],
+                ),
+                "tlsx -u ip.darklab.sh -config subfinder-config.yaml -r resolvers.txt -cc ca.pem": (
+                    ["subfinder-config.yaml", "resolvers.txt", "ca.pem"], [],
+                ),
+                "cdncheck -i ip.darklab.sh -jsonl -silent -r resolvers.txt -o cdncheck-results.jsonl": (
+                    ["resolvers.txt"], ["cdncheck-results.jsonl"],
+                ),
                 "httpx -rr request.txt -status-code -o httpx-raw.txt": (
                     ["request.txt"], ["httpx-raw.txt"],
                 ),
@@ -10287,6 +10651,33 @@ class TestDerivedCommandRegistry:
                 "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh": (
                     ["nmap-script-args.txt"], [],
                 ),
+                (
+                    "trufflehog filesystem --directory secrets --include-paths trufflehog-include.txt "
+                    "--exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "trufflehog git https://github.com/trufflesecurity/test_keys "
+                    "--include-paths trufflehog-include.txt --exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+                    "darklab.sh --resolvers puredns-resolvers.txt "
+                    "--resolvers-trusted puredns-trusted-resolvers.txt --write puredns-results.txt "
+                    "--write-massdns puredns.massdns --write-wildcards puredns-wildcards.txt"
+                ): (
+                    ["puredns-resolvers.txt", "puredns-trusted-resolvers.txt"],
+                    ["puredns-results.txt", "puredns.massdns", "puredns-wildcards.txt"],
+                ),
+                (
+                    "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+                    "-d puredns-domains.txt --resolvers puredns-resolvers.txt --write puredns-results.txt"
+                ): (
+                    ["puredns-domains.txt", "puredns-resolvers.txt"], ["puredns-results.txt"],
+                ),
                 "shodan download shodan-apache apache": ([], ["shodan-apache"]),
                 "wget --server-response https://ip.darklab.sh": ([], []),
                 "wget -P downloads https://ip.darklab.sh": ([], ["downloads"]),
@@ -10331,6 +10722,17 @@ class TestDerivedCommandRegistry:
                         if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
                             continue
                         assert original not in exec_tokens
+
+                for command in (
+                    "tlsx -u ip.darklab.sh -json -silent",
+                    "cdncheck -i ip.darklab.sh -jsonl -silent",
+                ):
+                    rewritten, notice = commands.rewrite_command(command, session_id=session_id, cfg=cfg)
+                    assert notice is None
+                    exec_tokens = commands.split_command_argv(rewritten)
+                    assert exec_tokens[0] == "env"
+                    assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
+                    assert exec_tokens[2] == command.split()[0]
 
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",
@@ -11057,6 +11459,12 @@ class TestCommandKnowledgeNormalization:
         assert "grep" in roots
         assert "head" in roots
         assert "tail" in roots
+        jq = next(pipe for pipe in pipes if pipe["root"] == "jq")
+        assert jq["description"] == "Select fields from JSON or JSONL"
+        flags = cast(list, jq["flags"])
+        assert {"value": "-r", "description": "Print scalar values as text"} in flags
+        arguments = cast(list, jq["arguments"])
+        assert arguments[0]["value"] == "<selector>"
 
     def test_pipe_catalog_entry_has_no_feature_required_when_absent(self):
         pipes = pipe_catalog_from_registry()
@@ -13999,6 +14407,13 @@ class TestOutputSignals:
         assert extract_target("ipinfo 107.178.109.44") == "107.178.109.44"
         assert extract_target("openssl s_client -connect ip.darklab.sh:443 -showcerts") == "ip.darklab.sh:443"
         assert extract_target("ffuf -u https://tor-stats.darklab.sh/FUZZ -w common.txt") == "tor-stats.darklab.sh"
+        assert extract_target("tlsx -u ip.darklab.sh -json -silent") == "ip.darklab.sh"
+        assert extract_target("cdncheck -i ip.darklab.sh -jsonl -silent") == "ip.darklab.sh"
+        assert extract_target(
+            "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+            "darklab.sh --resolvers resolvers.txt"
+        ) == "darklab.sh"
+        assert extract_target("trufflehog git https://github.com/trufflesecurity/test_keys --json") == "github.com"
         assert extract_target("nikto -h ip.darklab.sh -p 80") == "ip.darklab.sh"
         assert extract_target("nmap -script http-title,http-headers,http-enum -p 80 churchint.org") == "churchint.org"
 
@@ -14449,6 +14864,173 @@ class TestOutputSignals:
         assert nuclei_status["noise_reason"] == "nuclei:status"
         assert "signals" not in nuclei_status
         assert "noise_kind" not in nuclei_result
+        assert nuclei_result["source_detail"] == {
+            "adapter": "nuclei",
+            "template_id": "tls-version",
+            "template_provenance": {
+                "schema_version": 1,
+                "tool": "nuclei",
+                "source_kind": "managed_cache",
+                "source_label": "Managed /tmp/nuclei-templates cache",
+                "update_directory": "/tmp/nuclei-templates",
+            },
+        }
+
+        workspace_template = OutputSignalClassifier(
+            "nuclei -u https://ip.darklab.sh -t custom/nuclei/http.yaml"
+        ).classify_line("[custom-check] [http] [medium] https://ip.darklab.sh")
+        workspace_provenance = cast("dict[str, object]", workspace_template["template_provenance"])
+        assert workspace_provenance["source_kind"] == "workspace_templates"
+        assert workspace_provenance["template_paths"] == ["custom/nuclei/http.yaml"]
+
+        managed_relative_template = OutputSignalClassifier(
+            "nuclei -u https://ip.darklab.sh -t http/"
+        ).classify_line("[http-check] [http] [medium] https://ip.darklab.sh")
+        managed_relative_provenance = cast("dict[str, object]", managed_relative_template["template_provenance"])
+        assert managed_relative_provenance["source_kind"] == "managed_cache"
+        assert managed_relative_provenance["template_paths"] == ["http/"]
+
+        pinned_template = OutputSignalClassifier(
+            "nuclei -u https://ip.darklab.sh -t /opt/nuclei-templates/v10.2.0/http"
+        ).classify_line("[pinned-check] [http] [medium] https://ip.darklab.sh")
+        pinned_provenance = cast("dict[str, object]", pinned_template["template_provenance"])
+        assert pinned_provenance["source_kind"] == "pinned_clone"
+
+        updated_templates = OutputSignalClassifier(
+            "nuclei -update-templates -u https://ip.darklab.sh"
+        ).classify_line("[updated-check] [http] [medium] https://ip.darklab.sh")
+        updated_provenance = cast("dict[str, object]", updated_templates["template_provenance"])
+        assert updated_provenance["source_kind"] == "operator_updated"
+
+        tlsx_line = json.dumps({
+            "host": "ip.darklab.sh",
+            "ip": "107.178.109.44",
+            "tls_version": "tls13",
+            "cipher": "TLS_AES_128_GCM_SHA256",
+            "subject_an": ["ip.darklab.sh"],
+            "fingerprint_hash": {
+                "sha1": "c60e09aff9a4570d8d4efd455d552ea051818950",
+                "sha256": "115c2f245eedd44a93182adcfe5a2c7200910e7db057e36697c084e5b6d23089",
+            },
+        })
+        tlsx_metadata = OutputSignalClassifier("tlsx -u ip.darklab.sh -json -silent").classify_line(tlsx_line)
+        assert tlsx_metadata["signals"] == ["findings"]
+        tlsx_entities = cast("list[dict[str, object]]", tlsx_metadata["entities"])
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in tlsx_entities
+        } == {
+            ("domain", "ip.darklab.sh"),
+            ("ip", "107.178.109.44"),
+            ("hash", "sha1:c60e09aff9a4570d8d4efd455d552ea051818950"),
+            ("hash", "sha256:115c2f245eedd44a93182adcfe5a2c7200910e7db057e36697c084e5b6d23089"),
+        }
+        assert classify_line(
+            json.dumps({"host": "expired.darklab.sh", "probe_status": False, "expired": True}),
+            command="tlsx -u expired.darklab.sh -json -silent",
+        ) == ["findings", "warnings"]
+
+        cdncheck_line = json.dumps({
+            "host": "ip.darklab.sh",
+            "ip": "107.178.109.44",
+            "cdn": True,
+            "cdn_name": "cloudflare",
+        })
+        cdncheck_metadata = OutputSignalClassifier("cdncheck -i ip.darklab.sh -jsonl -silent").classify_line(cdncheck_line)
+        assert cdncheck_metadata["signals"] == ["summaries"]
+        cdncheck_entities = cast("list[dict[str, object]]", cdncheck_metadata["entities"])
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cdncheck_entities
+        } == {("domain", "ip.darklab.sh"), ("ip", "107.178.109.44")}
+
+        trufflehog_line = json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": "AKIAQYLPMN5HHHFPZAM2",
+            "RawV2": "AKIAQYLPMN5HHHFPZAM2:secret",
+            "Redacted": "AKIAQYLPMN5HHHFPZAM2",
+        })
+        trufflehog_metadata = OutputSignalClassifier(
+            "trufflehog git https://github.com/trufflesecurity/test_keys --json"
+        ).classify_line(trufflehog_line)
+        assert trufflehog_metadata["signals"] == ["findings"]
+        trufflehog_entities = cast("list[dict[str, object]]", trufflehog_metadata["entities"])
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in trufflehog_entities
+        } == {("domain", "github.com")}
+
+        puredns_metadata = OutputSignalClassifier(
+            "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+            "darklab.sh --resolvers resolvers.txt"
+        ).classify_line("www.darklab.sh")
+        assert puredns_metadata["signals"] == ["findings"]
+        puredns_entities = cast("list[dict[str, object]]", puredns_metadata["entities"])
+        assert puredns_entities[0]["canonical_value"] == "www.darklab.sh"
+        assert classify_line("wildcard detected for *.darklab.sh", command="puredns bruteforce words.txt darklab.sh") == [
+            "warnings",
+        ]
+
+    def test_structured_output_parse_misses_log_safe_diagnostics(self):
+        import core.output_signals as output_signals
+
+        with mock.patch.object(output_signals.log, "debug") as debug:
+            metadata = OutputSignalClassifier("tlsx -u secret.example -json -silent").classify_line(
+                '{"host": "secret.example",'
+            )
+
+        assert "signals" not in metadata
+        debug.assert_called_once()
+        assert debug.call_args.args == ("OUTPUT_SIGNAL_JSON_PARSE_MISS",)
+        extra = debug.call_args.kwargs["extra"]
+        assert extra == {
+            "command_root": "tlsx",
+            "line_index": 0,
+            "line_length": len('{"host": "secret.example",'),
+            "looks_json": True,
+        }
+        assert "secret.example" not in json.dumps(extra)
+
+    def test_nuclei_provenance_logs_safe_fallback_and_classification(self):
+        from services.nuclei import provenance
+
+        with mock.patch.object(provenance.log, "warning") as warning:
+            tokens = provenance.tokenize_command("nuclei -u https://darklab.sh 'unterminated")
+
+        assert tokens == ["nuclei", "-u", "https://darklab.sh", "'unterminated"]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("NUCLEI_PROVENANCE_TOKENIZE_FALLBACK",)
+        warning_extra = warning.call_args.kwargs["extra"]
+        assert warning_extra["command_root"] == "nuclei"
+        assert warning_extra["command_length"] == len("nuclei -u https://darklab.sh 'unterminated")
+        assert "darklab.sh" not in json.dumps(warning_extra)
+
+        with mock.patch.object(provenance.log, "debug") as debug:
+            result = provenance.nuclei_template_provenance(
+                "nuclei -u https://darklab.sh -t custom/nuclei/http.yaml -update-templates"
+            )
+
+        assert result["source_kind"] == "workspace_templates"
+        debug.assert_called_once()
+        assert debug.call_args.args == ("NUCLEI_TEMPLATE_PROVENANCE_CLASSIFIED",)
+        debug_extra = debug.call_args.kwargs["extra"]
+        assert debug_extra == {
+            "source_kind": "workspace_templates",
+            "template_path_count": 1,
+            "operator_updated": True,
+            "has_custom_update_directory": False,
+        }
+        assert "custom/nuclei/http.yaml" not in json.dumps(debug_extra)
 
     def test_classifies_scanner_progress_lines_as_progress_role(self):
         from blueprints.run import _capture_event_with_signals
@@ -15071,6 +15653,57 @@ class TestRunOutputCapture:
         assert events[0].target == "ip.darklab.sh"
         assert events[0].entities[0].canonical_value == "ip.darklab.sh"
 
+    def test_nuclei_source_detail_round_trips_through_run_output_and_package_entries(self):
+        import services.projects.package_rendering as package_rendering
+
+        source_detail = {
+            "adapter": "nuclei",
+            "template_id": "custom-check",
+            "template_provenance": {
+                "schema_version": 1,
+                "tool": "nuclei",
+                "source_kind": "workspace_templates",
+                "operator_updated": True,
+            },
+        }
+        capture = RunOutputCapture(
+            "test-run-output-nuclei-provenance",
+            preview_limit=5,
+            persist_full_output=True,
+            full_output_max_bytes=0,
+        )
+        capture.add_event(LineEvent(
+            "[custom-check] [http] [medium] https://darklab.sh",
+            signals=(LineSignal.findings,),
+            line_index=0,
+            command_root="nuclei",
+            target="https://darklab.sh",
+            source_detail=source_detail,
+        ))
+        capture.finalize()
+
+        assert capture.preview_lines[0]["source_detail"] == source_detail
+        assert capture.artifact_rel_path is not None
+        assert load_full_output_entries(capture.artifact_rel_path)[0]["source_detail"] == source_detail
+        events = load_full_output_events(capture.artifact_rel_path)
+        assert events[0].source_detail == source_detail
+
+        package_entries, companion_entries, cap_notice = cast(
+            "tuple[list[dict[str, object]], list[dict[str, object]], object]",
+            package_rendering._package_run_output_entries(
+                {
+                    "id": "test-run-output-nuclei-provenance",
+                    "output_preview": json.dumps(list(capture.preview_lines)),
+                    "full_output_available": False,
+                    "preview_truncated": False,
+                },
+                include_companion=True,
+            ),
+        )
+        assert package_entries[0]["source_detail"] == source_detail
+        assert companion_entries == []
+        assert cap_notice is None
+
     def test_add_event_preserves_legacy_output_shape(self):
         capture = RunOutputCapture("test-run-output-event", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
         capture.add_event(LineEvent(
@@ -15477,6 +16110,7 @@ class TestAutocompleteContextLoading:
                 "examples": [
                     {"value": "dig darklab.sh A", "description": "A lookup"},
                     {"value": "dig darklab.sh MX", "description": "MX lookup"},
+                    {"value": "dig darklab.sh TXT", "description": "Manual lookup", "smoke": {"profile": "manual"}},
                 ]
             },
             "curl": {
@@ -15516,6 +16150,28 @@ class TestAutocompleteContextLoading:
             "host darklab.sh",
             "wget -S --spider https://darklab.sh",
         ]
+
+    def test_external_tool_docker_pins_have_container_smoke_expectations(self):
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        expectations = json.loads(
+            (REPO_ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json")
+            .read_text(encoding="utf-8")
+        )
+        smoke_commands = {
+            str(record.get("command") or "")
+            for record in expectations["records"]
+            if isinstance(record, dict)
+        }
+
+        for arg_name, version, smoke_command in (
+            ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
+            ("CDNCHECK_VERSION", "v1.2.40", "cdncheck -h"),
+            ("TRUFFLEHOG_VERSION", "v3.95.5", "trufflehog --help"),
+            ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
+            ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
+        ):
+            assert f"ARG {arg_name}={version}" in dockerfile
+            assert smoke_command in smoke_commands
 
     def test_container_smoke_test_commands_spread_sensitive_roots(self):
         registry_context = {
@@ -17776,6 +18432,7 @@ class TestDatabaseInit:
         payload = "\n".join((
             json.dumps({
                 "template-id": "ssl/expired-cert",
+                "template-path": "/tmp/nuclei-templates/ssl/expired-cert.yaml",
                 "matched-at": "https://darklab.sh",
                 "info": {
                     "name": "Expired TLS certificate",
@@ -17802,6 +18459,9 @@ class TestDatabaseInit:
         assert result.findings[0].external_id == "ssl/expired-cert"
         assert result.findings[0].severity == "high"
         assert result.findings[0].source_detail["template_id"] == "ssl/expired-cert"
+        assert result.findings[0].source_detail["template_path"] == "/tmp/nuclei-templates/ssl/expired-cert.yaml"
+        assert result.findings[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
+        assert result.entities[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
         assert result.warnings == []
 
     def test_atlas_import_parser_streams_nessus_xml_and_extracts_cves(self):
@@ -18128,6 +18788,63 @@ SQL syntax error near q</response>
         assert entity_count == 0
         assert link_count == 0
 
+    def test_materializes_new_external_tool_entities_from_classifier_metadata(self):
+        tlsx_line = json.dumps({
+            "host": "ip.darklab.sh",
+            "ip": "107.178.109.44",
+            "tls_version": "tls13",
+            "fingerprint_hash": {"sha1": "c60e09aff9a4570d8d4efd455d552ea051818950"},
+        })
+        cdncheck_line = json.dumps({
+            "host": "cdn.darklab.sh",
+            "ip": "104.21.4.35",
+            "cdn": True,
+            "cdn_name": "cloudflare",
+        })
+        rows = [
+            ("run-atlas-tlsx", "tlsx -u ip.darklab.sh -json -silent", tlsx_line),
+            ("run-atlas-cdncheck", "cdncheck -i cdn.darklab.sh -jsonl -silent", cdncheck_line),
+            (
+                "run-atlas-puredns",
+                "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+                "darklab.sh --resolvers resolvers.txt",
+                "www.darklab.sh",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            for run_id, command, line in rows:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                    (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
+                )
+                classifier = OutputSignalClassifier(command)
+                materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    run_id,
+                    [{"text": line, **classifier.classify_line(line)}],
+                    seen_at="2026-05-14T00:00:01+00:00",
+                )
+            conn.commit()
+            entity_rows = conn.execute(
+                "SELECT type, canonical_value, occurrence_count FROM entities ORDER BY type, canonical_value"
+            ).fetchall()
+            conn.close()
+
+        assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
+            ("domain", "cdn.darklab.sh", 1),
+            ("domain", "ip.darklab.sh", 1),
+            ("domain", "www.darklab.sh", 1),
+            ("hash", "sha1:c60e09aff9a4570d8d4efd455d552ea051818950", 1),
+            ("ip", "104.21.4.35", 1),
+            ("ip", "107.178.109.44", 1),
+        }
+
     def test_materializer_deduplicates_team_entities_across_members(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -18282,6 +18999,158 @@ SQL syntax error near q</response>
         assert {(row["type"], row["canonical_value"]) for row in entity_rows} == {("ip", "192.168.1.5")}
         assert {row["entity_id"] for row in rows} == {entity_rows[0]["id"]}
         assert {row["subject_key"] for row in rows} == {"nmap-service:192.168.1.5:139 samba"}
+
+    def test_record_run_findings_redacts_trufflehog_secret_values(self):
+        from blueprints.run import _TruffleHogOutputFilter
+        from services.projects.findings import record_run_findings
+
+        raw_secret = "AKIAQYLPMN5HHHFPZAM2"
+        raw_secret_v2 = f"{raw_secret}:raw-secret-value"
+        line = json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": raw_secret,
+            "RawV2": raw_secret_v2,
+            "Redacted": raw_secret,
+        })
+        output_filter = _TruffleHogOutputFilter("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+        filtered_line = output_filter.process_output_line(f"{line}\n")
+        filtered_payload = json.loads(filtered_line)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+                "VALUES ('run-trufflehog', 'sess-trufflehog', 'external', "
+                "'trufflehog git https://github.com/trufflesecurity/test_keys --json', ?, ?, 0)",
+                ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
+            )
+            classifier = OutputSignalClassifier("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+            entry = {"text": filtered_line, **classifier.classify_line(filtered_line)}
+            recorded = record_run_findings(conn, "sess-trufflehog", "run-trufflehog", [entry])
+            conn.commit()
+            finding = conn.execute("SELECT title, raw_line, severity FROM findings").fetchone()
+            entity = conn.execute("SELECT type, canonical_value FROM entities").fetchone()
+            conn.close()
+
+        assert len(recorded) == 1
+        assert filtered_payload["Raw"] == "[redacted]"
+        assert filtered_payload["RawV2"] == "[redacted]"
+        assert filtered_payload["Redacted"] == raw_secret
+        assert raw_secret not in filtered_payload["Raw"]
+        assert "raw-secret-value" not in filtered_line
+        assert finding["severity"] == "high"
+        assert finding["title"].startswith("TruffleHog verified AWS secret")
+        assert "https://github.com/trufflesecurity/test_keys:keys:line 2" in finding["raw_line"]
+        assert raw_secret not in finding["raw_line"]
+        assert raw_secret_v2 not in finding["raw_line"]
+        assert "raw-secret-value" not in finding["raw_line"]
+        assert dict(entity) == {"type": "domain", "canonical_value": "github.com"}
+
+    def test_record_run_findings_uses_generic_trufflehog_redaction_hint(self):
+        from blueprints.run import _TruffleHogOutputFilter
+        from services.projects.findings import record_run_findings
+
+        raw_secret = "AKIAQYLPMN5HHHFPZAM2"
+        raw_secret_v2 = f"{raw_secret}:raw-secret-value"
+        provider_redacted = "AKIAQYLPMN5HHHFP****"
+        line = json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": raw_secret,
+            "RawV2": raw_secret_v2,
+            "Redacted": provider_redacted,
+        })
+        output_filter = _TruffleHogOutputFilter("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+        filtered_line = output_filter.process_output_line(f"{line}\n")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+                "VALUES ('run-trufflehog-safe-hint', 'sess-trufflehog', 'external', "
+                "'trufflehog git https://github.com/trufflesecurity/test_keys --json', ?, ?, 0)",
+                ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
+            )
+            classifier = OutputSignalClassifier("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+            entry = {"text": filtered_line, **classifier.classify_line(filtered_line)}
+            record_run_findings(conn, "sess-trufflehog", "run-trufflehog-safe-hint", [entry])
+            conn.commit()
+            finding = conn.execute("SELECT title, raw_line FROM findings").fetchone()
+            conn.close()
+
+        persisted = json.dumps(dict(finding))
+        assert "redacted=[redacted]" in finding["raw_line"]
+        assert raw_secret not in persisted
+        assert raw_secret_v2 not in persisted
+        assert provider_redacted not in persisted
+        assert "raw-secret-value" not in persisted
+
+    def test_trufflehog_safe_finding_text_does_not_trust_redacted_equal_to_raw(self):
+        from services.projects.findings import _trufflehog_safe_finding_text
+
+        raw_secret = "AKIAQYLPMN5HHHFPZAM2"
+        raw_secret_v2 = f"{raw_secret}:raw-secret-value"
+        text = _trufflehog_safe_finding_text(json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": raw_secret,
+            "RawV2": raw_secret_v2,
+            "Redacted": raw_secret,
+        }))
+
+        assert "redacted=[redacted]" not in text
+        assert raw_secret not in text
+        assert raw_secret_v2 not in text
+        assert "raw-secret-value" not in text
+
+    def test_trufflehog_redaction_fallback_logs_without_raw_line(self):
+        from services.projects import findings
+
+        raw_line = '{"Raw": "raw-secret-value"'
+
+        with mock.patch.object(findings.log, "warning") as warning:
+            text = findings._trufflehog_safe_finding_text(raw_line)
+
+        assert text == raw_line
+        warning.assert_called_once()
+        assert warning.call_args.args == ("TRUFFLEHOG_FINDING_REDACTION_FALLBACK",)
+        extra = warning.call_args.kwargs["extra"]
+        assert extra == {"line_length": len(raw_line), "looks_json": True}
+        assert "raw-secret-value" not in json.dumps(extra)
 
     def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
         with tempfile.TemporaryDirectory() as tmp:

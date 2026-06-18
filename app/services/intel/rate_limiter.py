@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -10,9 +11,11 @@ from typing import Any
 
 from config import CFG
 from core import process
+from core.helpers import get_log_session_id
 from services.intel.registry import rate_limit_setting
 
 
+log = logging.getLogger("shell")
 _MEMORY_LOCK = threading.Lock()
 _MEMORY_BUCKETS: dict[str, dict[str, float]] = {}
 
@@ -49,7 +52,16 @@ def _bucket_key(session_token: str, provider: str, profile: str = "") -> str:
     return ":".join(parts)
 
 
-def _load_bucket(store, key: str, capacity: int, now: float) -> dict[str, float]:
+def _load_bucket(
+    store,
+    key: str,
+    capacity: int,
+    now: float,
+    *,
+    provider: str = "",
+    profile: str = "",
+    session_token: str = "",
+) -> dict[str, float]:
     raw = store.get(key) if store else None
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8", errors="replace")
@@ -61,7 +73,12 @@ def _load_bucket(store, key: str, capacity: int, now: float) -> dict[str, float]
                 "updated_at": float(loaded.get("updated_at", now)),
             }
         except (TypeError, ValueError, json.JSONDecodeError):
-            pass
+            log.warning("INTEL_RATE_BUCKET_DECODE_FAILED", extra={
+                "provider": str(provider or "").strip().lower(),
+                "profile": str(profile or "").strip().lower(),
+                "session": get_log_session_id(session_token),
+                "capacity": capacity,
+            })
     return {"tokens": float(capacity), "updated_at": now}
 
 
@@ -105,7 +122,15 @@ def check_rate_limit(
     store = redis_client if redis_client is not None else process.redis_client
     if store is None:
         store = _memory_store()
-    bucket = _load_bucket(store, key, capacity, current_time)
+    bucket = _load_bucket(
+        store,
+        key,
+        capacity,
+        current_time,
+        provider=provider,
+        profile=profile,
+        session_token=session_token,
+    )
     elapsed = max(0.0, current_time - bucket["updated_at"])
     tokens = min(float(capacity), bucket["tokens"] + (elapsed / float(refill_seconds)))
     allowed = tokens >= 1.0

@@ -8,7 +8,7 @@ separate semantic ``kind`` and structural ``role`` fields.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -207,6 +207,7 @@ class LineEvent:
     entities: tuple[LineEntity, ...] = ()
     noise_kind: LineNoiseKind | None = None
     noise_reason: str = ""
+    source_detail: dict[str, Any] = field(default_factory=dict)
 
 
 def to_wire(event: LineEvent) -> dict[str, object]:
@@ -244,6 +245,7 @@ def line_event_from_legacy(
     entities: Sequence[Mapping[str, object]] | None = None,
     noise_kind: LineNoiseKind | str | None = None,
     noise_reason: object = "",
+    source_detail: Mapping[str, object] | None = None,
 ) -> LineEvent:
     legacy_cls = str(cls or "")
     coerced_role = _coerce_role(role, legacy_cls)
@@ -261,6 +263,7 @@ def line_event_from_legacy(
         entities=_entities_from_wire(entities),
         noise_kind=_coerce_noise_kind(noise_kind, coerced_role),
         noise_reason=str(noise_reason or ""),
+        source_detail=_source_detail_from_wire(source_detail),
     )
 
 
@@ -295,6 +298,7 @@ def from_wire(payload: Mapping[str, object], unknown_collector: UnknownCollector
         entities=_entities_from_wire(payload.get("entities")),
         noise_kind=noise_kind,
         noise_reason=str(payload.get("noise_reason", "") or "") if noise_kind is not None else "",
+        source_detail=_source_detail_from_wire(payload.get("source_detail")),
     )
 
 
@@ -359,6 +363,8 @@ def _legacy_payload(event: LineEvent, *, include_timestamps: bool = True) -> dic
         payload["target"] = event.target
     if event.entities:
         payload["entities"] = [entity.to_wire() for entity in event.entities]
+    if event.source_detail:
+        payload["source_detail"] = dict(event.source_detail)
     noise_kind = noise_kind_for_event(event)
     if noise_kind is not None:
         payload["noise_kind"] = noise_kind.value
@@ -440,6 +446,10 @@ def _signals_from_wire(value: object, unknown_collector: UnknownCollector | None
             if unknown_collector is not None:
                 unknown_collector("signal", str(item))
     return tuple(signals)
+
+
+def _source_detail_from_wire(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _entities_from_wire(value: object) -> tuple[LineEntity, ...]:

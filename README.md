@@ -31,7 +31,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Features
 
-- **Terminal workflow** — live output streaming with structured row metadata, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep` and `tail`, keyboard shortcuts, quiet-stream warnings, and same-tab recovery when an active stream detaches or starts moving again
+- **Terminal workflow** — live output streaming with structured row metadata, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep`, `tail`, and the safe JSON/JSONL selector `jq`, keyboard shortcuts, quiet-stream warnings, and same-tab recovery when an active stream detaches or starts moving again
 - **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, a desktop-aligned mobile menu with compact context hints, and a mobile History panel with collapsible search, filter, and bulk-action tools
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, deterministic outcome summaries for supported noisy tools, quieter handling for known progress/status chatter, jump-to-live / jump-to-bottom controls, and exports/permalinks that include the same visible summaries while keeping raw transcripts unchanged
@@ -39,7 +39,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context, folded scanner chatter, detected-change summaries for supported scan output, lazy expansion for unchanged lines, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
-- **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
+- **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Shodan InternetDB, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, RouteViews, FOFA, and ZoomEye, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
 - **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
 - **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. File writes, folder creation, moves, and deletes create audit-log rows with path/count/size metadata but not file contents. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
 - **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, packages, and reports without copying the source records.
@@ -219,6 +219,8 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `amass` | OWASP subdomain enumeration, asset discovery, tracking, and visualization |
 | `httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery) |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
+| `tlsx` | TLS certificate, protocol, cipher, and DNS metadata collection (ProjectDiscovery) |
+| `cdncheck` | CDN, cloud, and WAF provider classification for hosts and IPs (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
 | `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
@@ -227,6 +229,8 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
 | `ffuf` | Fast web fuzzer for directory, file, and vhost discovery. Wordlists at `/usr/share/wordlists/seclists/` |
+| `trufflehog` | Secret scanning for session folders and HTTPS Git repositories |
+| `puredns` | massdns-backed DNS brute forcing with resolver and wildcard output files |
 | `naabu` | Fast port scanner with service discovery (ProjectDiscovery) |
 | `katana` | JavaScript-aware web crawler for attack surface mapping (ProjectDiscovery) |
 | `wafw00f` | WAF detection — identifies web application firewalls from HTTP fingerprints |
@@ -240,7 +244,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `urlscan-cli` | urlscan.io URL submission, result lookup, and search; requires `URLSCAN_API_KEY` in the encrypted secrets vault |
 | `chaos` | ProjectDiscovery Chaos subdomain lookups; requires `PDCP_API_KEY` in the encrypted secrets vault |
 
-The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails; `intel url <url>` checks URLhaus, ThreatFox, and urlscan.io; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and paid-only SecurityTrails use encrypted secrets from the active personal or team scope; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys.
+The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye; `intel url <url>` checks URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye use encrypted secrets from the active personal or team scope; FOFA requires `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls require an F-point balance; ZoomEye uses `ZOOMEYE_API_KEY` against the regional `api.zoomeye.ai` API and requires available resource credits; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Shodan InternetDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys.
 
 ### Tool Notes
 
@@ -276,9 +280,17 @@ When Files are enabled, `wget` downloads go to the active Files folder by defaul
 
 #### nuclei
 
-`nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so generic scratch writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
+`nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so generic scratch writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds. Saved output metadata records whether a Nuclei finding came from that managed cache, an actual workspace template path, a pinned-looking template clone, or an operator-updated template set; normal relative selectors such as `http/` still count as managed-cache templates.
 
-When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active personal/team workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, and `naabu` auxiliary input files.
+When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active personal/team workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/tlsx`, `/tools/cdncheck`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, `tlsx` and `cdncheck` result files, and `naabu` auxiliary input files.
+
+#### trufflehog
+
+`trufflehog` is available for secret scanning against managed inputs. Use `trufflehog filesystem --directory <folder> --json` for a folder in Files, or `trufflehog git https://... --json` for an HTTPS Git repository. Local Git paths, SSH Git URLs, custom clone directories, and no-cleanup/trust-local-config modes are blocked so scans stay in the app's managed runtime boundary.
+
+#### puredns
+
+`puredns` is available for DNS brute forcing with the packaged SecLists DNS wordlist. `bruteforce` requires `--resolvers <file>` with a resolver list from Files, and `--write`, `--write-massdns`, and `--write-wildcards` save outputs back to Files.
 
 ---
 
@@ -647,6 +659,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── censys.py       # Censys Platform host provider normalization
 │   │   │   ├── clients.py      # HTTP/DNS clients for app-native intel providers
 │   │   │   ├── crtsh.py        # crt.sh certificate-transparency provider normalization
+│   │   │   ├── fofa.py         # FOFA search provider normalization
 │   │   │   ├── greynoise.py    # GreyNoise provider normalization
 │   │   │   ├── hibp.py         # HIBP Pwned Passwords provider normalization
 │   │   │   ├── ipinfo.py       # IPinfo provider normalization
@@ -659,12 +672,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── schema.py       # Normalized provider response shapes
 │   │   │   ├── securitytrails.py # SecurityTrails DNS/WHOIS/subdomain provider normalization
 │   │   │   ├── shodan.py       # Shodan provider normalization
+│   │   │   ├── shodan_internetdb.py # Shodan InternetDB provider normalization
 │   │   │   ├── teamcymru.py    # Team Cymru IP-to-ASN provider normalization
 │   │   │   ├── threatfox.py    # ThreatFox IOC and hash provider normalization
 │   │   │   ├── urlhaus.py      # URLhaus URL/host/payload provider normalization
 │   │   │   ├── urlscan.py      # urlscan.io read/search provider normalization
 │   │   │   ├── virustotal.py   # VirusTotal provider normalization
-│   │   │   └── vulners.py      # Vulners CVE provider normalization
+│   │   │   ├── vulners.py      # Vulners CVE provider normalization
+│   │   │   └── zoomeye.py      # ZoomEye search provider normalization
 │   │   ├── metrics/
 │   │   │   ├── __init__.py     # Prometheus metric definitions, label normalizers, and render helpers
 │   │   │   └── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
@@ -688,6 +703,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── payloads.py     # Stable payload builders for notification triggers
 │   │   │   ├── secrets.py      # Notification-channel secret references backed by the existing vault
 │   │   │   └── worker.py       # Dedicated notification delivery worker entrypoint
+│   │   ├── nuclei/
+│   │   │   ├── __init__.py     # Nuclei integration helper package marker
+│   │   │   └── provenance.py   # Template-source provenance helpers for Nuclei output and packages
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── active.py       # Active project preference and lookup helpers

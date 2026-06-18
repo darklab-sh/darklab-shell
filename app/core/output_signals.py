@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import json
 import ipaddress
+import logging
 import re
 from urllib.parse import urlparse
 
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
+from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
 from services.intel.canonical import (
     CanonicalizationError,
     canonical_cve,
@@ -25,6 +28,7 @@ from services.intel.canonical import (
 )
 
 
+log = logging.getLogger("shell")
 SIGNAL_SCOPES = ("findings", "warnings", "errors", "summaries")
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
@@ -114,7 +118,7 @@ _APP_SIGNAL_EXCLUDES = [
 
 _DNS_SIGNAL_ROOTS = {"dig", "host", "nslookup"}
 _CRAWL_URL_ROOTS = {"katana"}
-_PROJECTDISCOVERY_ROOTS = {"chaos", "dnsx", "httpx", "katana", "naabu", "nuclei", "subfinder"}
+_PROJECTDISCOVERY_ROOTS = {"cdncheck", "chaos", "dnsx", "httpx", "katana", "naabu", "nuclei", "subfinder", "tlsx"}
 _HTTPX_RESULT_RE = re.compile(r"^https?://\S+\s+\[\d{3}\](?:\s+\[[^\]]*\])*", re.I)
 _PROJECTDISCOVERY_ENTITY_NOISE_RE = re.compile(
     r"^(?:\s*projectdiscovery\.io|\[INF\]\s+Using\s+Interactsh\s+Server:\s+oast\.site)\s*$",
@@ -248,6 +252,8 @@ _WGET_SUMMARY_RE = re.compile(
     r"^Length:\s*\d+\s+\[[^\]]+\]",
     re.I,
 )
+_PUREDNS_WILDCARD_RE = re.compile(r"\bwildcard\b", re.I)
+_PUREDNS_PROGRESS_RE = re.compile(r"^(?:[*-]\s+)?(?:resolving|validating|loading|starting|finished|done)\b", re.I)
 _SHODAN_DNS_RECORD_TYPES = {"A", "AAAA", "CNAME", "MX", "NS", "SOA", "TXT"}
 _SHODAN_DNS_FINDING_TYPES = {"A", "AAAA", "CNAME", "MX", "NS", "SOA"}
 _SHODAN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.I)
@@ -826,6 +832,213 @@ def _parse_ffuf_result(stripped: str) -> tuple[str, int] | None:
     return match.group(1).strip(), int(match.group(2))
 
 
+def _json_object_line(stripped: str) -> dict[str, object] | None:
+    if not str(stripped or "").lstrip().startswith("{"):
+        return None
+    try:
+        value = json.loads(stripped)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _truthy_json_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "ok", "valid", "verified"}
+    return False
+
+
+def _json_string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, list):
+        result: list[str] = []
+        for item in value:
+            result.extend(_json_string_values(item))
+        return result
+    return []
+
+
+def _json_lookup(data: dict[str, object], *keys: str) -> object:
+    for key in keys:
+        if key in data:
+            return data[key]
+    return None
+
+
+def _is_tlsx_json_finding(data: dict[str, object]) -> bool:
+    return any(key in data for key in (
+        "host",
+        "ip",
+        "tls_version",
+        "cipher",
+        "subject_cn",
+        "subject_an",
+        "fingerprint_hash",
+        "not_before",
+        "not_after",
+    ))
+
+
+def _is_tlsx_json_warning(data: dict[str, object]) -> bool:
+    warning_keys = {
+        "expired",
+        "self_signed",
+        "mismatched",
+        "revoked",
+        "untrusted",
+        "wildcard_cert",
+    }
+    if any(_truthy_json_value(data.get(key)) for key in warning_keys):
+        return True
+    probe_status = data.get("probe_status")
+    return probe_status is not None and not _truthy_json_value(probe_status)
+
+
+def _is_cdncheck_json_summary(data: dict[str, object]) -> bool:
+    return any(key in data for key in (
+        "host",
+        "ip",
+        "cdn",
+        "cdn_name",
+        "cdn_provider",
+        "cloud",
+        "cloud_name",
+        "cloud_provider",
+        "waf",
+        "waf_name",
+        "waf_provider",
+    ))
+
+
+def _is_trufflehog_json_finding(data: dict[str, object]) -> bool:
+    return any(key in data for key in ("DetectorName", "DetectorType", "Verified", "Raw", "Redacted", "SourceMetadata"))
+
+
+def _is_puredns_finding(stripped: str) -> bool:
+    return bool(_HOSTNAME_RE.match(stripped))
+
+
+def _is_puredns_warning(stripped: str) -> bool:
+    return bool(_PUREDNS_WILDCARD_RE.search(stripped))
+
+
+def _is_puredns_summary(stripped: str) -> bool:
+    return bool(_PUREDNS_PROGRESS_RE.search(stripped))
+
+
+def _add_host_or_ip_entity(
+    entities: list[dict[str, object]],
+    seen: set[tuple[str, str]],
+    value: str,
+    *,
+    source_line: int | None,
+) -> None:
+    raw = str(value or "").strip().strip("[]").rstrip(".")
+    if not raw:
+        return
+    try:
+        canonical_ip_value = canonical_ip(raw)
+    except CanonicalizationError:
+        try:
+            canonical_domain_value = canonical_domain(raw)
+        except CanonicalizationError:
+            return
+        _add_entity(
+            entities,
+            seen,
+            entity_type="domain",
+            value=raw,
+            canonical_value=canonical_domain_value,
+            source_line=source_line,
+        )
+        return
+    if _is_public_ip(canonical_ip_value):
+        _add_entity(
+            entities,
+            seen,
+            entity_type="ip",
+            value=raw,
+            canonical_value=canonical_ip_value,
+            source_line=source_line,
+        )
+
+
+def _tlsx_json_entities(data: dict[str, object], source_line: int | None) -> list[dict[str, object]]:
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in [
+        *_json_string_values(_json_lookup(data, "host", "input")),
+        *_json_string_values(data.get("ip")),
+        *_json_string_values(_json_lookup(data, "subject_cn", "subject_common_name")),
+        *_json_string_values(_json_lookup(data, "subject_an", "subject_alt_names")),
+    ]:
+        _add_host_or_ip_entity(entities, seen, raw, source_line=source_line)
+    fingerprints = data.get("fingerprint_hash")
+    if isinstance(fingerprints, dict):
+        for algorithm, raw_value in fingerprints.items():
+            for raw_hash in _json_string_values(raw_value):
+                try:
+                    canonical = canonical_hash(raw_hash, algorithm=str(algorithm or "").strip().lower())
+                except CanonicalizationError:
+                    continue
+                _add_entity(
+                    entities,
+                    seen,
+                    entity_type="hash",
+                    value=raw_hash,
+                    canonical_value=canonical,
+                    source_line=source_line,
+                )
+    return entities
+
+
+def _cdncheck_json_entities(data: dict[str, object], source_line: int | None) -> list[dict[str, object]]:
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in [
+        *_json_string_values(_json_lookup(data, "host", "input", "domain")),
+        *_json_string_values(data.get("ip")),
+    ]:
+        _add_host_or_ip_entity(entities, seen, raw, source_line=source_line)
+    return entities
+
+
+def _nested_dict(value: object, *keys: str) -> dict[str, object]:
+    current = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def _trufflehog_json_entities(data: dict[str, object], source_line: int | None) -> list[dict[str, object]]:
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    git_data = _nested_dict(data.get("SourceMetadata"), "Data", "Git")
+    repository = str(git_data.get("repository") or "").strip()
+    if repository:
+        host = urlparse(repository).hostname or ""
+        if host:
+            _add_host_or_ip_entity(entities, seen, host, source_line=source_line)
+    return entities
+
+
+def _puredns_entities(stripped: str, source_line: int | None) -> list[dict[str, object]]:
+    if not _is_puredns_finding(stripped):
+        return []
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    _add_host_or_ip_entity(entities, seen, stripped, source_line=source_line)
+    return entities
+
+
 def _is_ffuf_warning(stripped: str) -> bool:
     if _is_ffuf_progress_warning(stripped):
         return True
@@ -895,6 +1108,14 @@ def _is_nmap_vulners_finding(stripped: str) -> bool:
 def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root in {"dnsx", "subfinder"}:
         return bool(_HOSTNAME_RE.search(stripped))
+    if root == "tlsx":
+        data = _json_object_line(stripped)
+        return bool(data and _is_tlsx_json_finding(data))
+    if root == "trufflehog":
+        data = _json_object_line(stripped)
+        return bool(data and _is_trufflehog_json_finding(data))
+    if root == "puredns":
+        return _is_puredns_finding(stripped)
     if root == "nslookup":
         return _is_nslookup_address_finding(stripped)
     if root == "ffuf":
@@ -949,6 +1170,11 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
 def _is_command_scoped_warning(root: str, stripped: str) -> bool:
     if _is_dns_warning(root, stripped):
         return True
+    if root == "tlsx":
+        data = _json_object_line(stripped)
+        return bool(data and _is_tlsx_json_warning(data))
+    if root == "puredns":
+        return _is_puredns_warning(stripped)
     if root == "ffuf":
         return _is_ffuf_warning(stripped)
     if root == "whois":
@@ -965,6 +1191,11 @@ def _is_command_scoped_warning(root: str, stripped: str) -> bool:
 def _is_command_scoped_summary(root: str, stripped: str) -> bool:
     if _is_dns_summary(root, stripped):
         return True
+    if root == "cdncheck":
+        data = _json_object_line(stripped)
+        return bool(data and _is_cdncheck_json_summary(data))
+    if root == "puredns":
+        return _is_puredns_summary(stripped)
     if root == "ffuf":
         return bool(_FFUF_CONFIG_RE.search(stripped)) or _is_ffuf_final_progress(stripped)
     if root == "whois":
@@ -1078,6 +1309,17 @@ def _extract_entities_for_command(
                 seen.add(key)
                 entities.append(entity)
             return entities
+    if root == "tlsx":
+        data = _json_object_line(stripped)
+        return _tlsx_json_entities(data, source_line) if data else []
+    if root == "cdncheck":
+        data = _json_object_line(stripped)
+        return _cdncheck_json_entities(data, source_line) if data else []
+    if root == "trufflehog":
+        data = _json_object_line(stripped)
+        return _trufflehog_json_entities(data, source_line) if data else []
+    if root == "puredns":
+        return _puredns_entities(stripped, source_line)
     if root == "openssl" and _is_openssl_noise(stripped):
         return []
     if root == "ffuf" and (_is_ffuf_noise(stripped) or bool(_FFUF_CONFIG_RE.search(stripped))):
@@ -1287,6 +1529,25 @@ def extract_target(command: str) -> str | None:
         target = next((token for token in positionals if "." in token), "")
         return _strip_url_target(target) if target else None
 
+    if root == "tlsx":
+        target = _find_flag_value(tokens, {"-u", "-host"})
+        return _strip_url_target(target) if target else None
+
+    if root == "cdncheck":
+        target = _find_flag_value(tokens, {"-i", "-input"})
+        return _strip_url_target(target) if target else None
+
+    if root == "puredns" and len(tokens) > 1 and tokens[1].lower() == "bruteforce":
+        positionals = _positional_targets(
+            tokens[1:],
+            skip_values_after={
+                "-r", "--resolvers", "--resolvers-trusted", "-d", "--domains",
+                "-w", "--write", "--write-massdns", "--write-wildcards",
+            },
+        )
+        target = next((token for token in positionals if "." in token and not token.startswith("/")), "")
+        return _strip_url_target(target) if target else None
+
     if root == "shodan" and len(tokens) >= 3 and tokens[1].lower() in {"domain", "host"}:
         positionals = _positional_targets(tokens[1:], skip_values_after={"--fields", "--limit"})
         target = positionals[0] if positionals else ""
@@ -1323,6 +1584,21 @@ def extract_target(command: str) -> str | None:
         target = _find_flag_value(tokens, {"-connect"})
         return _strip_url_target(target) if target else None
 
+    if root == "trufflehog" and len(tokens) > 2 and tokens[1].lower() == "git":
+        positionals = _positional_targets(
+            tokens[1:],
+            skip_values_after={
+                "--branch",
+                "--exclude-globs",
+                "--exclude-paths",
+                "--include-paths",
+                "--max-depth",
+                "--since-commit",
+            },
+        )
+        target = next((token for token in positionals if _URL_SCHEME_RE.match(token)), "")
+        return _strip_url_target(target) if target else None
+
     return None
 
 
@@ -1335,8 +1611,11 @@ class OutputSignalClassifier:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
         self.url_template = ""
+        self.nuclei_template_provenance = {}
         if self.root == "ffuf":
             self.url_template = _find_flag_value(tokenize_command(self.command), {"-u", "--url"})
+        elif self.root == "nuclei":
+            self.nuclei_template_provenance = nuclei_template_provenance(self.command)
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.current_nmap_service_target: str | None = None
@@ -1383,6 +1662,11 @@ class OutputSignalClassifier:
         }
         if target:
             metadata["target"] = target
+        if self.root == "nuclei" and self.nuclei_template_provenance:
+            metadata["template_provenance"] = dict(self.nuclei_template_provenance)
+            source_detail = nuclei_source_detail(self.command, line_text=normalized_text)
+            if source_detail:
+                metadata["source_detail"] = source_detail
         if scopes:
             metadata["signals"] = scopes
         role = classify_line_role(
@@ -1427,6 +1711,24 @@ class OutputSignalClassifier:
             )
             if entities:
                 metadata["entities"] = entities
+        if (
+            self.root in {"tlsx", "cdncheck", "trufflehog"}
+            and normalized_text
+            and normalized_text.lstrip().startswith("{")
+            and _json_object_line(normalized_text) is None
+        ):
+            log.debug("OUTPUT_SIGNAL_JSON_PARSE_MISS", extra={
+                "command_root": self.root,
+                "line_index": self.line_index,
+                "line_length": len(normalized_text),
+                "looks_json": True,
+            })
+        if self.root == "puredns" and normalized_text and not scopes and "entities" not in metadata and noise is None:
+            log.debug("OUTPUT_SIGNAL_PARSE_MISS", extra={
+                "command_root": self.root,
+                "line_index": self.line_index,
+                "line_length": len(normalized_text),
+            })
         self.line_index += 1
         self.previous_text = normalized_text
         return metadata

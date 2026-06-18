@@ -79,8 +79,6 @@ No research items are currently tracked.
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
-- **External tool integration candidates:** add the strongest reviewed tool gaps when they fit the sandboxed registry, findings, Atlas, and provenance model. High-value candidates are ProjectDiscovery's `tlsx` for TLS/certificate metadata and `cdncheck` for CDN/WAF classification, plus `trufflehog` or `gitleaks` for exposed-secret findings from repos and files. Medium candidates are resolver-backed brute-force DNS tools such as `puredns` or `shuffledns`, Shodan InternetDB as a free/no-key IP context provider, optional FOFA/ZoomEye providers for users with keys, and a `nuclei` template management or pinning surface so scan provenance can explain which template set produced a result. A lower-risk app-native `jq`-style JSON/JSONL selector could also extend safe post-filtering without exposing real shell pipes.
-
 ### Workflows v2 — playbooks with parameters
 - Evolve workflows from saved command lists into reusable runbooks.
 - Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.

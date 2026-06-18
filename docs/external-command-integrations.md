@@ -39,9 +39,13 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful artifacts; provider configs can contain API keys and remain owner-scoped rather than share/export artifacts. |
 | `dnsx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list input, wordlists, and normal outputs. | DNSX shares the ProjectDiscovery config path conventions and should keep generated state under the active owner folder. |
 | `httpx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list/raw-request inputs, normal outputs, response/screenshot store directories, and config files. | Response stores and screenshots are high-value evidence, while config state should remain visible only to the active personal/team owner. |
+| `tlsx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list, resolver, config, CA certificate, and output files. | TLS evidence is most useful when JSONL output and supporting resolver/config files stay with the active Files workspace. |
+| `cdncheck` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for resolver and output files. | CDN/cloud/WAF classifications are operator context rather than vulnerabilities, and saved JSONL rows should remain tied to the run workspace. |
 | `wget` | When Files are enabled, adds `-P <current workspace folder>` when no directory-prefix flag is present, and declares `-P` / `--directory-prefix` as workspace directory flags. | Default downloads land in the user's Files area instead of failing against the read-only container root, while explicit download folders still stay under the active workspace. |
 | `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
 | `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain visible to the active owner. |
+| `trufflehog` | Allows workspace folder scans through `filesystem --directory`, allows HTTPS Git repository scans through `git`, declares include/exclude regex files as workspace inputs, and rejects non-HTTPS Git repository arguments before launch. | Secret scanning should not read arbitrary local paths, leave custom clone directories behind, or accept SSH/file Git URLs inside the web shell runtime. |
+| `puredns` | Allows `bruteforce` with the packaged SecLists DNS wordlist and declares resolver, trusted-resolver, domain-list, valid-domain, raw massdns, and wildcard output flags as workspace paths. | puredns should use explicit resolver files and save useful outputs in Files instead of relying on hidden home-directory defaults. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the active workspace, and launches with `XDG_CONFIG_HOME=<active workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-owner database path instead of falling back to `$HOME/.config/amass`. |
 | `ipinfo` | Injects optional `IPINFO_TOKEN` from the encrypted secrets vault and blocks config-writing/token-on-command-line flows such as `init`, `config`, `completion install`, and inline token flags. | Users can run the official IPinfo CLI for provider-native IP/ASN output without storing tokens in shell history or letting the CLI write persistent config inside the container. |
 | `urlscan-cli` | Injects `URLSCAN_API_KEY` from the encrypted secrets vault and blocks key/config/completion setup, inline key flags, and stdin-driven scan/result forms. | Users can submit URLs, fetch scan results, and search urlscan.io without writing keys to a local keyring/config file or putting tokens into command history. |
@@ -61,7 +65,7 @@ Validation behavior:
 - Write and read/write flags prepare the destination path before subprocess launch.
 - Directory flags can create and prepare managed session directories.
 
-This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `wget -P`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected ProjectDiscovery flags that create directories, such as `katana -srd`, `katana -sfd`, `httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
+This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `wget -P`, `ffuf -o`, `subfinder -dL`, `tlsx -l`, `cdncheck -o`, `trufflehog filesystem --directory`, `puredns --resolvers`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected ProjectDiscovery flags that create directories, such as `katana -srd`, `katana -sfd`, `httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
 
 ## Runtime Adaptations
 
@@ -135,13 +139,13 @@ Creating resume file: /tools/katana/resume-abcd.cfg
 
 The `intel` built-in uses the same provider keys when a provider needs them, without launching the vendor CLI:
 
-- `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, and RouteViews.
-- `intel domain <domain>` queries VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails.
-- `intel url <url>` queries URLhaus, ThreatFox, and urlscan.io.
+- `intel ip <ip>` queries Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews.
+- `intel domain <domain>` queries VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye.
+- `intel url <url>` queries URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye.
 - `intel hash <md5|sha1|sha256>` queries VirusTotal, AlienVault OTX, URLhaus, and ThreatFox after autodetecting the hash type by hex length, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
 - `intel cve <CVE-ID>` queries NVD and Vulners.
 
-Provider metadata lives in `app/services/intel/registry.py`, including display labels, supported entity types, secret names and aliases, cache scopes, rate-limit config keys, and user-facing usage labels. Provider responses are normalized through `app/services/intel/schema.py` before they are rendered, cached, or logged. Each provider pane reports whether the result came from cache, was blocked by rate limiting or quota backoff, or is missing the needed encrypted secret. If all keyed providers for a lookup are missing, the built-in exits with setup guidance only when no no-key or optional-key provider can run. If only some providers are missing, available providers still render normally and the missing providers show placeholders. The same provider metadata feeds the Options Provider Status modal, `secret show-consumers`, the `providers` alias, and the Options Secrets picker for providers that need stored keys, so app-native HTTP providers and CLI-backed provider wrappers are discoverable from one place.
+Provider metadata lives in `app/services/intel/registry.py`, including display labels, supported entity types, secret names and aliases, cache scopes, rate-limit config keys, and user-facing usage labels. FOFA uses `FOFA_EMAIL` plus `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls need an F-point balance. ZoomEye uses `ZOOMEYE_API_KEY` against the regional API and needs available resource credits. Provider responses are normalized through `app/services/intel/schema.py` before they are rendered, cached, or logged. Each provider pane reports whether the result came from cache, was blocked by rate limiting or quota backoff, or is missing the needed encrypted secret. If all keyed providers for a lookup are missing, the built-in exits with setup guidance only when no no-key or optional-key provider can run. If only some providers are missing, available providers still render normally and the missing providers show placeholders. The same provider metadata feeds the Options Provider Status modal, `secret show-consumers`, the `providers` alias, and the Options Secrets picker for providers that need stored keys, so app-native HTTP providers and CLI-backed provider wrappers are discoverable from one place.
 
 The built-in refuses private, loopback, and other non-public IP addresses by default because passive-intel providers cannot meaningfully classify them. Users can pass `--include-private` when they intentionally want to send that address to configured providers.
 
@@ -171,7 +175,7 @@ Plain non-PTY commands keep their normal adaptations. For example, `mtr darklab.
 
 ProjectDiscovery tools commonly resolve config and resume paths through `XDG_CONFIG_HOME`, falling back to `$HOME/.config` when the variable is absent. Because the scanner wrapper keeps `HOME=/tmp`, those default files would otherwise be written to anonymous tmpfs paths outside the session Files view.
 
-When workspace storage is enabled, `subfinder`, `dnsx`, `httpx`, `katana`, `naabu`, and `nuclei` are launched with:
+When workspace storage is enabled, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, `naabu`, and `nuclei` are launched with:
 
 ```bash
 env XDG_CONFIG_HOME=/workspaces/sess_<hash>/tools <tool> ...
@@ -184,21 +188,68 @@ This keeps useful generated state under session-visible folders such as:
 /tools/subfinder
 /tools/dnsx
 /tools/httpx
+/tools/tlsx
+/tools/cdncheck
 /tools/naabu
 /tools/nuclei
 ```
 
 `nuclei` still receives `-ud /tmp/nuclei-templates` unless the user provides an update directory. Template caches are intentionally left in tmpfs because they are large, reusable container state rather than session evidence.
 
+Nuclei output metadata records template provenance for each run. The app classifies the source as the managed `/tmp/nuclei-templates` cache, an actual session workspace template path passed through `-t`, a pinned-looking `nuclei-templates` clone path, an operator-updated template set when `-update-templates` is used, or a custom update directory. Normal relative template selectors such as `http/`, `cves/`, or `ssl/...` are treated as managed-cache selectors, not workspace templates. Saved output, Run Details restores, and Nuclei JSONL Atlas imports keep this provenance with the line or import `source_detail`, so later review can tell which template source produced the finding.
+
 Several ProjectDiscovery flags are also declared as workspace-aware paths so generated files and secondary outputs can be inspected in Files:
 
 - `katana -srd` / `-store-response-dir` and `katana -sfd` / `-store-field-dir`
 - `httpx -srd` / `-store-response-dir`, including response stores and screenshot output directories
+- `tlsx` list, resolver, config, CA certificate, and output files
+- `cdncheck` resolver and output files
 - `nuclei -srd` / `-store-resp-dir`, `-me`, SARIF/JSON/JSONL exports, trace/error logs, and resume/config inputs
 - `subfinder -oD`, resolver lists, config files, and provider config files
 - `naabu` host-list, exclude-list, ports-file, and output paths
 
+Structured output handling:
+
+- `tlsx -json` rows become findings with domain/IP/certificate-hash Atlas entities and warnings when certificate state flags indicate expired, mismatched, revoked, untrusted, self-signed, wildcard, or failed probe states.
+- `cdncheck -jsonl` rows become summaries with host/IP Atlas entities. CDN/cloud/WAF matches are context, not vulnerabilities.
+- Plain `tlsx` and `cdncheck` text output is still streamed and stored, but it does not create Atlas entities, findings, warnings, or summaries. Use `-json` for `tlsx` and `-jsonl` for `cdncheck` when you want structured capture.
+
+App-native pipe helpers:
+
+- `jq` is a safe JSON/JSONL selector implemented by darklab_shell, not the host `jq` binary. It supports simple field selection, array iteration, key-existence filters, equality filters, contains filters, pretty JSON output by default, `-c` compact JSON output, and `-r` scalar text output. It rejects arbitrary jq programs and reports malformed input without echoing the source line.
+
 Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner. Share and permalink exports remain transcript-only, but project evidence packages can include selected raw workspace artifacts when artifact inclusion is enabled; redacted packages exclude raw artifacts. Do not select provider/config files for evidence packages unless the operator intends to include those secrets in the archive.
+
+---
+
+## TruffleHog
+
+TruffleHog is exposed for two managed scan shapes:
+
+- `trufflehog filesystem --directory <folder> --json` scans a folder from Files.
+- `trufflehog git https://... --json` scans an HTTPS Git repository.
+
+`trufflehog git` repository arguments must start with `https://`. Local paths, `file://` repositories, and `ssh://` repositories are rejected before launch. The registry also blocks custom clone paths, no-cleanup mode, trust-local-git-config, profile/config files, and provider subcommands outside the exposed filesystem/git paths.
+
+`--include-paths` and `--exclude-paths` can read regex files from Files for both filesystem and Git scans. TruffleHog writes findings to stdout; stdout JSON rows are the supported report channel for structured capture.
+
+TruffleHog scan commands receive `--json` automatically unless the user already passed it or is asking for help. JSON rows are treated as findings, and the live transcript masks `Raw` / `RawV2` before output is streamed, stored, shared, exported, or materialized into findings. Persisted Atlas finding text is rebuilt from detector name, verification state, Git repository/file/line metadata, and a generic redacted marker instead of trusting vendor secret fields verbatim. If a TruffleHog command is ever run outside that managed JSON path, plain text output remains transcript-only and does not create structured findings.
+
+---
+
+## puredns
+
+puredns is exposed through `bruteforce` with the packaged SecLists DNS wordlist:
+
+```bash
+puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt example.com --resolvers resolvers.txt --write puredns-results.txt
+```
+
+The registry rejects `bruteforce` commands that omit `--resolvers <file>`, so puredns uses an explicit resolver list from Files instead of its home-directory default. `--resolvers-trusted`, `--domains`, `--write`, `--write-massdns`, and `--write-wildcards` are workspace-aware.
+
+puredns valid-domain rows are treated as findings and materialize domain Atlas entities. Wildcard status rows are treated as warnings. Workspace output files still flow through the run-file artifact records created from workspace flag validation.
+
+The registry supports `puredns bruteforce` with the packaged DNS wordlist. `puredns resolve <file>` and session wordlists as positional operands are not part of the supported command surface; use workspace-aware resolver and output flags for session files.
 
 ---
 

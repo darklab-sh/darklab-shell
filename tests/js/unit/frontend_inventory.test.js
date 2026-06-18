@@ -55,7 +55,7 @@ describe('frontend browser global boundary inventory', () => {
       compatibility_export: 0,
     }),
     window_property_read_purposes: Object.freeze({
-      intentional_bootstrap: 1,
+      intentional_bootstrap: 2,
       lazy_placeholder: 12,
       module_api_bridge: 2,
       vendor_global: 6,

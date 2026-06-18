@@ -126,7 +126,61 @@ var DarklabRunnerCore = (function (global) {
       return null;
     }
 
+    if (helper === 'jq') {
+      const options = { raw: false, compact: false };
+      let expression = null;
+      let index = 1;
+      while (index < normalizedStageTokens.length) {
+        const token = normalizedStageTokens[index];
+        if (token === '-r' || token === '--raw-output') {
+          options.raw = true;
+          index += 1;
+          continue;
+        }
+        if (token === '-c' || token === '--compact-output') {
+          options.compact = true;
+          index += 1;
+          continue;
+        }
+        if (expression !== null) return null;
+        expression = token;
+        index += 1;
+      }
+      const selector = _parseJsonSelectorExpression(expression);
+      return selector ? { kind: 'jq', selector, ...options } : null;
+    }
+
     return null;
+  }
+
+  function _parseJsonSelectorExpression(expression) {
+    const text = String(expression || '').trim();
+    if (!text || text.length > 160) return null;
+    if (/[`;{}$\\]/.test(text)) return null;
+
+    const hasMatch = text.match(/^select\(has\("([A-Za-z_][A-Za-z0-9_-]*)"\)\)$/);
+    if (hasMatch) return { op: 'filter_has', path: [hasMatch[1]] };
+
+    const eqMatch = text.match(/^select\(\.([A-Za-z_][A-Za-z0-9_.-]*)\s*==\s*"([^"]{0,200})"\)$/);
+    if (eqMatch) return { op: 'filter_eq', path: _jsonSelectorPath(eqMatch[1]), value: eqMatch[2] };
+
+    const containsMatch = text.match(/^select\(\.([A-Za-z_][A-Za-z0-9_.-]*)\s+contains\s+"([^"]{0,200})"\)$/);
+    if (containsMatch) return { op: 'filter_contains', path: _jsonSelectorPath(containsMatch[1]), value: containsMatch[2] };
+
+    if (text === '.') return { op: 'identity' };
+    if (text === '.[]') return { op: 'iterate', path: [] };
+
+    const fieldMatch = text.match(/^\.([A-Za-z_][A-Za-z0-9_.-]*)(\[\])?$/);
+    if (fieldMatch) {
+      const path = _jsonSelectorPath(fieldMatch[1]);
+      if (!path.length) return null;
+      return fieldMatch[2] ? { op: 'iterate', path } : { op: 'field', path };
+    }
+    return null;
+  }
+
+  function _jsonSelectorPath(value) {
+    return String(value || '').split('.').filter(Boolean);
   }
 
   function parseSyntheticPostFilterCommand(cmd) {
@@ -163,9 +217,18 @@ var DarklabRunnerCore = (function (global) {
     };
   }
 
-  function applySyntheticPostFilterLines(lineItems, spec) {
+  function _syntheticPostFilterLineLimit(options) {
+    const configured = options && options.maxOutputLines !== undefined
+      ? options.maxOutputLines
+      : global.APP_CONFIG && global.APP_CONFIG.max_output_lines;
+    const limit = Number.parseInt(configured, 10);
+    return Number.isFinite(limit) && limit > 0 ? limit : 0;
+  }
+
+  function applySyntheticPostFilterLines(lineItems, spec, options = {}) {
     const stages = spec && Array.isArray(spec.stages) ? spec.stages : [];
     let items = Array.isArray(lineItems) ? lineItems.slice() : [];
+    const lineLimit = _syntheticPostFilterLineLimit(options);
 
     function textOf(item) {
       return String(item && item.text !== undefined ? item.text : item || '');
@@ -251,9 +314,108 @@ var DarklabRunnerCore = (function (global) {
         });
         flush();
         items = result;
+      } else if (kind === 'jq') {
+        if (lineLimit && items.length > lineLimit) {
+          return [{ text: '[error] jq input exceeded the buffered line safety cap', cls: 'exit-fail' }];
+        }
+        const result = _applyJsonSelectorStage(items, stage, plainItem, textOf);
+        if (result.error) return [{ text: `[error] ${result.error}`, cls: 'exit-fail' }];
+        items = result.items;
       }
     }
     return items;
+  }
+
+  function _applyJsonSelectorStage(items, stage, plainItem, textOf) {
+    const parsed = _parseJsonInputItems(items, textOf);
+    if (parsed.error) return parsed;
+    const selected = [];
+    for (const value of parsed.values) {
+      const nextValues = _selectJsonValues(value, stage.selector);
+      selected.push(...nextValues);
+      if (selected.length > 1000) {
+        return { error: 'jq output exceeded the 1000-line safety cap' };
+      }
+    }
+    let totalChars = 0;
+    const outputItems = [];
+    for (const value of selected) {
+      const text = _formatJsonSelectorValue(value, !!stage.raw, !!stage.compact);
+      totalChars += text.length;
+      if (totalChars > 200000) {
+        return { error: 'jq output exceeded the 200 KB safety cap' };
+      }
+      for (const line of String(text).split('\n')) {
+        outputItems.push(plainItem(line));
+      }
+    }
+    return { items: outputItems };
+  }
+
+  function _parseJsonInputItems(items, textOf) {
+    const lines = items.map(textOf).filter(line => String(line).trim() !== '');
+    if (!lines.length) return { values: [] };
+    const jsonlValues = [];
+    let jsonlFailed = false;
+    for (const line of lines) {
+      try {
+        jsonlValues.push(JSON.parse(line));
+      } catch (_) {
+        jsonlFailed = true;
+        break;
+      }
+    }
+    if (!jsonlFailed) return { values: jsonlValues };
+    try {
+      return { values: [JSON.parse(lines.join('\n'))] };
+    } catch (_) {
+      return { error: 'jq expected JSON or JSONL input' };
+    }
+  }
+
+  function _selectJsonValues(value, selector) {
+    if (!selector) return [];
+    if (selector.op === 'identity') return [value];
+    if (selector.op === 'field') return [_jsonPathValue(value, selector.path)].filter(item => item !== undefined);
+    if (selector.op === 'iterate') {
+      const target = selector.path.length ? _jsonPathValue(value, selector.path) : value;
+      if (Array.isArray(target)) return target;
+      return [];
+    }
+    if (selector.op === 'filter_has') {
+      return _jsonPathValue(value, selector.path) !== undefined ? [value] : [];
+    }
+    if (selector.op === 'filter_eq') {
+      return _jsonFilterText(_jsonPathValue(value, selector.path)) === String(selector.value) ? [value] : [];
+    }
+    if (selector.op === 'filter_contains') {
+      return _jsonFilterText(_jsonPathValue(value, selector.path)).includes(String(selector.value)) ? [value] : [];
+    }
+    return [];
+  }
+
+  function _jsonFilterText(value) {
+    if (value === undefined) return '';
+    if (value === null) return 'null';
+    if (['string', 'number', 'boolean'].includes(typeof value)) return String(value);
+    return JSON.stringify(value);
+  }
+
+  function _jsonPathValue(value, path) {
+    let current = value;
+    for (const part of path || []) {
+      if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+      if (!Object.prototype.hasOwnProperty.call(current, part)) return undefined;
+      current = current[part];
+    }
+    return current;
+  }
+
+  function _formatJsonSelectorValue(value, raw, compact) {
+    if (raw && (value === null || ['string', 'number', 'boolean'].includes(typeof value))) {
+      return value === null ? 'null' : String(value);
+    }
+    return compact ? JSON.stringify(value) : JSON.stringify(value, null, 2);
   }
 
   function isSyntheticPostFilterCommand(cmd) {
@@ -290,6 +452,11 @@ var DarklabRunnerCore = (function (global) {
     return !!(parsed && parsed.kind === 'wc_l');
   }
 
+  function isSyntheticJqCommand(cmd) {
+    const parsed = parseSyntheticPostFilterCommand(cmd);
+    return !!(parsed && parsed.kind === 'jq');
+  }
+
   const api = Object.freeze({
     formatElapsed,
     parseSyntheticPostFilterCommand,
@@ -301,9 +468,10 @@ var DarklabRunnerCore = (function (global) {
     isSyntheticHeadCommand,
     isSyntheticTailCommand,
     isSyntheticWcLineCountCommand,
+    isSyntheticJqCommand,
   });
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
-export const { applySyntheticPostFilterLines, formatElapsed, isSyntheticGrepCommand, isSyntheticHeadCommand, isSyntheticPostFilterCommand, isSyntheticSortCommand, isSyntheticTailCommand, isSyntheticUniqCommand, isSyntheticWcLineCountCommand, parseSyntheticPostFilterCommand } = DarklabRunnerCore;
+export const { applySyntheticPostFilterLines, formatElapsed, isSyntheticGrepCommand, isSyntheticHeadCommand, isSyntheticJqCommand, isSyntheticPostFilterCommand, isSyntheticSortCommand, isSyntheticTailCommand, isSyntheticUniqCommand, isSyntheticWcLineCountCommand, parseSyntheticPostFilterCommand } = DarklabRunnerCore;
 export { DarklabRunnerCore };
