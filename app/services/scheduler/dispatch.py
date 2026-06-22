@@ -18,6 +18,7 @@ from services.scheduler.models import (
     FIRE_STATUS_FIRED,
     FIRE_STATUS_SKIPPED_OVERLAP,
     FIRE_STATUS_SKIPPED_REVOKED,
+    OWNER_KIND_PROJECT_DIGEST,
     OWNER_KIND_USER,
     OWNER_KIND_WATCHER,
     Schedule,
@@ -69,6 +70,8 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
             status, run_id = _fire_user_schedule(conn, schedule, fired_at=fired_at)
         elif schedule.owner_kind == OWNER_KIND_WATCHER:
             status, run_id = _fire_watcher_schedule(conn, schedule, fired_at=fired_at)
+        elif schedule.owner_kind == OWNER_KIND_PROJECT_DIGEST:
+            status, run_id = _fire_project_digest_schedule(conn, schedule, fired_at=fired_at)
         else:
             raise ValueError(f"unsupported schedule owner kind {schedule.owner_kind!r}")
         if status == FIRE_STATUS_SKIPPED_REVOKED:
@@ -303,6 +306,70 @@ def _fire_watcher_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[
         extra=_schedule_log_payload(schedule, fired_at=fired_at, run_id=run_id),
     )
     return FIRE_STATUS_FIRED, run_id
+
+
+def _fire_project_digest_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str, str]:
+    if not _session_token_exists(conn, schedule.session_token):
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_REVOKED,
+            fired_at=fired_at,
+            reason="session token revoked",
+        )
+        log.warning(
+            "PROJECT_DIGEST_DISABLED_REVOKED",
+            extra=_schedule_log_payload(schedule, fired_at=fired_at),
+        )
+        return FIRE_STATUS_SKIPPED_REVOKED, ""
+
+    from services.projects import digests as project_digests  # noqa: PLC0415
+
+    result = project_digests.evaluate_due_digest(
+        conn,
+        session_id=schedule.session_token,
+        project_id=schedule.owner_id,
+        team_id=schedule.team_id,
+        fired_at=fired_at,
+    )
+    queued = int(result.get("queued") or 0)
+    reason = str(result.get("reason") or "")
+    reason_code = _project_digest_reason_code(reason, queued)
+    skipped = queued == 0 and reason.startswith("digest skipped:")
+    record_schedule_fire(
+        conn,
+        schedule,
+        status=FIRE_STATUS_FIRED,
+        fired_at=fired_at,
+        reason=reason,
+    )
+    log_level = logging.WARNING if reason_code in {
+        "skipped_no_configured_channels",
+        "skipped_no_eligible_channels",
+        "skipped_project_unavailable",
+    } else logging.INFO
+    log.log(
+        log_level,
+        "PROJECT_DIGEST_SCHEDULE_SKIPPED" if skipped else "PROJECT_DIGEST_SCHEDULE_FIRED",
+        extra=_schedule_log_payload(
+            schedule,
+            fired_at=fired_at,
+            reason=reason,
+            reason_code=reason_code,
+            outcome="skipped" if skipped else "queued",
+            queued=queued,
+            window_start=str(result.get("window_start") or ""),
+            window_end=str(result.get("window_end") or ""),
+        ),
+    )
+    return FIRE_STATUS_FIRED, ""
+
+
+def _project_digest_reason_code(reason: str, queued: int) -> str:
+    if queued > 0:
+        return "queued"
+    normalized = reason.removeprefix("digest skipped:").strip().replace(" ", "_")
+    return f"skipped_{normalized}" if normalized else "skipped_unknown"
 
 
 def _session_token_exists(conn, session_token: str) -> bool:

@@ -18,6 +18,11 @@
 # Server default if unset: "darklab_shell"
 # app_name: "darklab_shell"
 
+# Public base URL used by background workers when they need to include links in
+# outbound notifications. Leave empty to send in-app relative paths instead.
+# Server default if unset: ""
+# app_public_base_url: "https://shell.example.com"
+
 # Prompt identity shown at the start of the terminal prompt and welcome samples.
 # The UI renders "<username>@<domain>:~ $" when workspaces are disabled and
 # "<username>@<domain>:<workspace path> $" when workspaces are enabled.
@@ -365,6 +370,16 @@
 # Server default if unset:
 # watchers:
 #   max_per_session: 32
+
+# ── Project Digests ─────────────────────────────────────────────────────────
+#
+# Defaults for project attack-surface digest settings. Individual projects opt
+# in and choose their notification channels; these values provide the initial
+# cadence and first-send lookback cap.
+# Server default if unset:
+# project_digests:
+#   default_cadence_preset: daily
+#   first_send_lookback_hours: 24
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 

@@ -16,6 +16,7 @@ from services.scheduler.models import (
     FIRE_STATUSES,
     FIRE_STATUS_FIRED,
     OWNER_KIND_USER,
+    OWNER_KIND_WATCHER,
     OWNER_KINDS,
     OVERLAP_POLICY_SKIP,
     SCHEDULE_KIND_COMMAND,
@@ -115,7 +116,7 @@ def row_to_schedule_fire(row: Any) -> ScheduleFire:
 def _normalize_owner_kind(value: str | None) -> str:
     owner_kind = str(value or OWNER_KIND_USER).strip().lower()
     if owner_kind not in OWNER_KINDS:
-        raise ScheduleError("schedule owner kind must be user or watcher")
+        raise ScheduleError("schedule owner kind must be user, watcher, or project_digest")
     return owner_kind
 
 
@@ -318,8 +319,8 @@ def list_for_owner(
     try:
         if include_watchers:
             rows = conn.execute(
-                f"SELECT * FROM schedules WHERE {owner_sql} ORDER BY updated DESC",  # nosec
-                owner_params,
+                f"SELECT * FROM schedules WHERE {owner_sql} AND owner_kind IN (?, ?) ORDER BY updated DESC",  # nosec
+                (*owner_params, OWNER_KIND_USER, OWNER_KIND_WATCHER),
             ).fetchall()
         else:
             rows = conn.execute(

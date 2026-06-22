@@ -21,6 +21,7 @@ from services.notifications.models import (
     STATUS_RETRY_WAIT,
     STATUS_SENT,
     TRIGGERS,
+    TRIGGER_PROJECT_DIGEST,
     ChannelResult,
     NotificationChannel,
     NotificationEvent,
@@ -122,6 +123,7 @@ def _channel_rows_for_trigger(
     team_id: str = "",
     channel_ids: Iterable[str] | None = None,
     include_muted: bool = False,
+    require_trigger_match: bool = True,
 ) -> list[Any]:
     selected_channel_ids = {str(channel_id) for channel_id in channel_ids or () if str(channel_id or "").strip()}
     if team_id:
@@ -143,9 +145,21 @@ def _channel_rows_for_trigger(
         channel = NotificationChannel.from_row(row)
         if channel.muted and not include_muted:
             continue
-        if trigger in channel.triggers:
+        if not require_trigger_match or trigger in channel.triggers:
             channels.append(row)
     return channels
+
+
+def _existing_event_id(conn, *, session_token: str, team_id: str, channel_id: str, trigger: str, run_id: str) -> str:
+    if not run_id:
+        return ""
+    row = conn.execute(
+        "SELECT id FROM notification_events "
+        "WHERE session_token = ? AND team_id = ? AND channel_id = ? AND trigger = ? AND run_id = ? "
+        "ORDER BY created ASC, id ASC LIMIT 1",
+        (session_token, team_id, channel_id, trigger, run_id),
+    ).fetchone()
+    return str(row["id"] or "") if row is not None else ""
 
 
 def enqueue(
@@ -158,6 +172,7 @@ def enqueue(
     run_id: str | None = None,
     channel_ids: Iterable[str] | None = None,
     include_muted: bool = False,
+    require_trigger_match: bool = True,
     team_id: str = "",
 ) -> list[str]:
     """Queue one notification event for every matching channel."""
@@ -173,7 +188,19 @@ def enqueue(
             team_id=team_id,
             channel_ids=channel_ids,
             include_muted=include_muted,
+            require_trigger_match=require_trigger_match,
         ):
+            existing_id = _existing_event_id(
+                active_conn,
+                session_token=session_token,
+                team_id=team_id,
+                channel_id=str(channel_row["id"]),
+                trigger=normalized_trigger,
+                run_id=run_id or str(event_payload.get("run_id") or ""),
+            )
+            if existing_id:
+                queued_ids.append(existing_id)
+                continue
             event_id = _event_id()
             queued_ids.append(event_id)
             active_conn.execute(
@@ -298,6 +325,81 @@ def _mark_sent(conn, event: NotificationEvent, now: str) -> None:
             "session": get_log_session_id(event.session_token),
         },
     )
+    _mark_project_digest_sent(conn, event, now)
+
+
+def _mark_project_digest_sent(conn, event: NotificationEvent, now: str) -> None:
+    identity = event.payload.get("digest_identity") if isinstance(event.payload, dict) else None
+    if not isinstance(identity, dict):
+        if event.trigger == TRIGGER_PROJECT_DIGEST:
+            log.warning(
+                "PROJECT_DIGEST_SENT_MARK_SKIPPED",
+                extra={
+                    "event_id": event.id,
+                    "channel_id": event.channel_id,
+                    "trigger": event.trigger,
+                    "session": get_log_session_id(event.session_token),
+                    "team_id": event.team_id,
+                    "has_digest_identity": False,
+                    "has_project_id": False,
+                    "has_session_id": False,
+                },
+            )
+        return
+    project_id = str(identity.get("project_id") or "").strip()
+    session_id = str(identity.get("session_id") or event.session_token or "").strip()
+    team_id = str(identity.get("team_id") or event.team_id or "").strip()
+    window_end = str(identity.get("window_end") or "").strip()
+    if not project_id or not session_id:
+        if event.trigger == TRIGGER_PROJECT_DIGEST:
+            log.warning(
+                "PROJECT_DIGEST_SENT_MARK_SKIPPED",
+                extra={
+                    "event_id": event.id,
+                    "channel_id": event.channel_id,
+                    "trigger": event.trigger,
+                    "session": get_log_session_id(event.session_token),
+                    "team_id": team_id,
+                    "has_digest_identity": True,
+                    "has_project_id": bool(project_id),
+                    "has_session_id": bool(session_id),
+                },
+            )
+        return
+    try:
+        from services.projects import digests as project_digests  # noqa: PLC0415
+
+        project_digests.mark_digest_sent(
+            conn,
+            project_id=project_id,
+            session_id=session_id,
+            team_id=team_id,
+            sent_at=window_end or now,
+        )
+        log.info(
+            "PROJECT_DIGEST_SENT_MARKED",
+            extra={
+                "event_id": event.id,
+                "channel_id": event.channel_id,
+                "project_id": project_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "window_start": str(identity.get("window_start") or ""),
+                "window_end": window_end,
+                "sent_at": window_end or now,
+            },
+        )
+    except Exception:
+        log.error(
+            "PROJECT_DIGEST_SENT_MARK_FAILED",
+            exc_info=True,
+            extra={
+                "event_id": event.id,
+                "project_id": project_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+            },
+        )
 
 
 def _retry_delay_seconds(attempts: int) -> int:

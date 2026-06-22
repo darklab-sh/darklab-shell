@@ -3361,6 +3361,7 @@ class TestPostgresMigrations:
         "projects",
         "project_links",
         "project_auto_promote_rules",
+        "project_digest_settings",
         "entities",
         "entity_run_links",
         "entity_intel_snapshots",
@@ -3458,6 +3459,8 @@ class TestPostgresMigrations:
             "0031",
             "0032",
             "0033",
+            "0034",
+            "0035",
         ]
         for table_name in (
             "runs",
@@ -3487,6 +3490,7 @@ class TestPostgresMigrations:
             "projects",
             "project_links",
             "project_auto_promote_rules",
+            "project_digest_settings",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
@@ -4813,6 +4817,765 @@ class TestWatchersFoundation:
             ),
         )
 
+    def test_project_digest_settings_persist_per_owner_scope_and_track_delivery_state(self, monkeypatch, tmp_path):
+        from services.projects import digests
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._insert_project(conn, "prj_digest")
+            self._insert_project(conn, "prj_digest_team", team_id="team_digest")
+            for channel_id, team_id in (
+                ("ntc_one", ""),
+                ("ntc_two", ""),
+                ("ntc_team", "team_digest"),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_channels "
+                    "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+                    "muted, created, updated) "
+                    "VALUES (?, 'tok_watchers', ?, 'webhook', ?, '{}', '{}', '[]', 0, "
+                    "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')",
+                    (channel_id, team_id, channel_id),
+                )
+            personal_default = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            with pytest.raises(ProjectWorkspaceError, match="same owner scope"):
+                digests.save_digest_settings(
+                    "tok_watchers",
+                    "prj_digest",
+                    {"enabled": True, "channel_ids": ["ntc_team"]},
+                    conn=conn,
+                )
+            personal = digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest",
+                {
+                    "enabled": True,
+                    "cadence_preset": "hourly",
+                    "channel_ids": ["ntc_one", "ntc_two", "ntc_one"],
+                    "quiet_no_change": True,
+                },
+                conn=conn,
+            )
+            team = digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_team",
+                {
+                    "enabled": True,
+                    "cadence_preset": "weekly",
+                    "channel_ids": ["ntc_team"],
+                },
+                team_id="team_digest",
+                conn=conn,
+            )
+            team_seen_by_other_member = digests.get_digest_settings(
+                "tok_digest_team_operator",
+                "prj_digest_team",
+                team_id="team_digest",
+                conn=conn,
+            )
+            team_updated_by_other_member = digests.save_digest_settings(
+                "tok_digest_team_operator",
+                "prj_digest_team",
+                {
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_team"],
+                },
+                team_id="team_digest",
+                conn=conn,
+            )
+            team_schedule_rows = conn.execute(
+                "SELECT session_token, cadence_preset FROM schedules "
+                "WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_team' AND team_id = 'team_digest'"
+            ).fetchall()
+            personal_schedule = conn.execute(
+                "SELECT id FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest'"
+            ).fetchone()
+            assert personal_schedule is not None
+            conn.execute(
+                "INSERT INTO schedule_fires "
+                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES ('fire_digest_recent_skip', ?, 'project_digest', 'prj_digest', "
+                "'2026-05-20T10:45:00+00:00', '', 'fired', 'digest skipped: no changes')",
+                (personal_schedule["id"],),
+            )
+            personal_with_fire = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T11:00:00+00:00",
+            )
+            sent = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T11:01:00+00:00",
+            )
+
+        assert personal_default == {
+            "project_id": "prj_digest",
+            "session_id": "tok_watchers",
+            "team_id": "",
+            "enabled": False,
+            "cadence_preset": "daily",
+            "channel_ids": [],
+            "quiet_no_change": False,
+            "last_evaluated_at": "",
+            "last_sent_at": "",
+            "next_due_at": "",
+            "schedule_enabled": False,
+            "schedule_paused_reason": "",
+            "schedule_last_error": "",
+            "schedule_last_fire_status": "",
+            "schedule_last_fire_reason": "",
+            "schedule_last_fire_at": "",
+            "created": "",
+            "updated": "",
+        }
+        assert personal["enabled"] is True
+        assert personal["cadence_preset"] == "hourly"
+        assert personal["channel_ids"] == ["ntc_one", "ntc_two"]
+        assert personal["quiet_no_change"] is True
+        assert personal["schedule_enabled"] is True
+        assert personal["next_due_at"]
+        assert personal_with_fire is not None
+        assert personal_with_fire["schedule_last_fire_status"] == "fired"
+        assert personal_with_fire["schedule_last_fire_reason"] == "digest skipped: no changes"
+        assert personal_with_fire["schedule_last_fire_at"] == "2026-05-20T10:45:00+00:00"
+        assert team["team_id"] == "team_digest"
+        assert team["channel_ids"] == ["ntc_team"]
+        assert team["session_id"] == "tok_watchers"
+        assert team_seen_by_other_member is not None
+        assert team_seen_by_other_member["enabled"] is True
+        assert team_seen_by_other_member["session_id"] == "tok_watchers"
+        assert team_updated_by_other_member["session_id"] == "tok_watchers"
+        assert team_updated_by_other_member["cadence_preset"] == "daily"
+        assert [(row["session_token"], row["cadence_preset"]) for row in team_schedule_rows] == [
+            ("tok_watchers", "daily")
+        ]
+        assert evaluated is not None
+        assert evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert evaluated["last_sent_at"] == ""
+        assert sent is not None
+        assert sent["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert sent["last_sent_at"] == "2026-05-20T11:01:00+00:00"
+        digests._CONFIG_WARNED_KEYS.clear()
+        with mock.patch.dict(
+            app_config.CFG,
+            {"project_digests": {"default_cadence_preset": "quarterly", "first_send_lookback_hours": "later"}},
+        ), mock.patch.object(digests.log, "warning") as warning_log:
+            assert digests._configured_default_cadence() == "daily"
+            assert digests._configured_first_send_lookback_hours("daily") == 24
+        assert [call.args[0] for call in warning_log.call_args_list] == [
+            "PROJECT_DIGEST_CONFIG_INVALID",
+            "PROJECT_DIGEST_CONFIG_INVALID",
+        ]
+
+    def test_project_digest_schedule_fire_queues_explicit_channel_and_sent_callback(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.models import ChannelResult
+        from services.projects import digests
+        from services.scheduler import dispatch as scheduler_dispatch
+        from services.scheduler import service as schedule_service
+        from services.watchers import service as watcher_service
+
+        sent_payloads = []
+
+        class DigestChannel:
+            def __init__(self, channel):
+                self.channel = channel
+
+            def send(self, payload):
+                if self.channel.id in {"ntc_digest_retry", "ntc_all_retry"}:
+                    return ChannelResult.retry("temporary digest outage")
+                sent_payloads.append(payload)
+                return ChannelResult.success()
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest")
+            self._insert_project(conn, "prj_digest_all_retry")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_digest', 'tok_watchers', 'webhook', 'Digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_digest_retry', 'tok_watchers', 'webhook', 'Digest retry', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_all_retry', 'tok_watchers', 'webhook', 'All retry', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                project_id="prj_digest",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_digest_current",
+                state_at_fire="changed",
+                diff_summary={"classifier": "ports", "severity": "high"},
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE watcher_id = ?",
+                ("2026-05-20T10:30:00+00:00", watcher.id),
+            )
+            all_retry_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                project_id="prj_digest_all_retry",
+                command_text="nmap -sV retry.darklab.sh",
+                baseline_run_id="run_retry_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                all_retry_watcher,
+                run_id="run_retry_current",
+                state_at_fire="changed",
+                diff_summary={"classifier": "ports", "severity": "high"},
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE watcher_id = ?",
+                ("2026-05-20T10:30:00+00:00", all_retry_watcher.id),
+            )
+            settings = digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest",
+                {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_digest", "ntc_digest_retry"]},
+                conn=conn,
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_all_retry",
+                {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_all_retry"]},
+                conn=conn,
+            )
+            conn.commit()
+
+            digest_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest'"
+            ).fetchone()
+            all_retry_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_all_retry'"
+            ).fetchone()
+            visible_schedules = schedule_service.list_for_session("tok_watchers", include_watchers=True, conn=conn)
+            status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(digest_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            duplicate_status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(digest_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            queued_event = conn.execute(
+                "SELECT id, payload_json, status, run_id FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()
+            queued_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()["count"]
+            refreshed = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+
+            monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
+            digest_event_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM notification_events WHERE trigger = 'project_digest' "
+                    "AND run_id = ? ORDER BY channel_id",
+                    (queued_event["run_id"],),
+                ).fetchall()
+            ]
+            delivered = notification_dispatcher.dispatch_due_events(conn=conn, event_ids=digest_event_ids)
+            delivered_settings = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            mixed_statuses = {
+                row["channel_id"]: (row["status"], row["last_error"])
+                for row in conn.execute(
+                    "SELECT channel_id, status, last_error FROM notification_events WHERE run_id = ?",
+                    (queued_event["run_id"],),
+                ).fetchall()
+            }
+            all_retry_status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(all_retry_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            all_retry_event = conn.execute(
+                "SELECT id FROM notification_events WHERE trigger = 'project_digest' AND channel_id = 'ntc_all_retry'"
+            ).fetchone()
+            all_retry_delivered = notification_dispatcher.dispatch_due_events(
+                conn=conn,
+                event_ids=[all_retry_event["id"]],
+            )
+            all_retry_settings = digests.get_digest_settings("tok_watchers", "prj_digest_all_retry", conn=conn)
+
+        payload = json.loads(queued_event["payload_json"])
+        assert refreshed is not None
+        assert delivered_settings is not None
+        assert settings["enabled"] is True
+        assert digest_schedule is not None
+        assert digest_schedule["cadence_preset"] == "hourly"
+        assert "prj_digest" not in {schedule.owner_id for schedule in visible_schedules}
+        assert status == "fired"
+        assert duplicate_status == "fired"
+        assert queued_event["status"] == "pending"
+        assert queued_event["run_id"].startswith("project_digest:")
+        assert queued_count == 2
+        assert payload["digest_identity"] == {
+            "project_id": "prj_digest",
+            "session_id": "tok_watchers",
+            "team_id": "",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        }
+        assert payload["summary_fields"]["changed"] == 1
+        assert refreshed["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert refreshed["last_sent_at"] == ""
+        assert delivered == 1
+        assert mixed_statuses["ntc_digest"] == ("sent", "")
+        assert mixed_statuses["ntc_digest_retry"][0] == "retry_wait"
+        assert mixed_statuses["ntc_digest_retry"][1] == "temporary digest outage"
+        assert sent_payloads[0]["digest_identity"]["project_id"] == "prj_digest"
+        assert delivered_settings["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+        assert all_retry_status == "fired"
+        assert all_retry_delivered == 0
+        assert all_retry_settings is not None
+        assert all_retry_settings["last_sent_at"] == ""
+
+    def test_project_digest_schedule_fire_skips_no_change_without_advancing_sent(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.models import ChannelResult
+        from services.projects import digests
+        from services.scheduler import dispatch as scheduler_dispatch
+        from services.scheduler import service as schedule_service
+
+        sent_payloads = []
+
+        class DigestChannel:
+            def __init__(self, channel):
+                self.channel = channel
+
+            def send(self, payload):
+                sent_payloads.append(payload)
+                return ChannelResult.success()
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest_quiet")
+            self._insert_project(conn, "prj_digest_all_clear")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_quiet', 'tok_watchers', 'webhook', 'Quiet digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_all_clear', 'tok_watchers', 'webhook', 'All-clear digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_quiet",
+                {"enabled": True, "cadence_preset": "daily", "channel_ids": ["ntc_quiet"]},
+                conn=conn,
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_all_clear",
+                {
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_all_clear"],
+                    "quiet_no_change": True,
+                },
+                conn=conn,
+            )
+            conn.commit()
+
+            digest_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_quiet'"
+            ).fetchone()
+            all_clear_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_all_clear'"
+            ).fetchone()
+            with mock.patch.object(digests.log, "debug") as digest_debug, \
+                 mock.patch.object(digests.log, "log") as digest_log:
+                status = scheduler_dispatch.fire_schedule(
+                    conn,
+                    schedule_service.row_to_schedule(digest_schedule),
+                    fired_at="2026-05-20T11:00:00+00:00",
+                )
+            event_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()["count"]
+            settings = digests.get_digest_settings("tok_watchers", "prj_digest_quiet", conn=conn)
+            all_clear_status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(all_clear_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            all_clear_event = conn.execute(
+                "SELECT id, payload_json, status FROM notification_events "
+                "WHERE trigger = 'project_digest' AND channel_id = 'ntc_all_clear'"
+            ).fetchone()
+            all_clear_before_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_all_clear", conn=conn)
+            monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
+            all_clear_delivered = notification_dispatcher.dispatch_due_events(
+                conn=conn,
+                event_ids=[all_clear_event["id"]],
+            )
+            all_clear_after_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_all_clear", conn=conn)
+
+        assert status == "fired"
+        assert event_count == 0
+        assert settings is not None
+        assert settings["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert settings["last_sent_at"] == ""
+        digest_debug.assert_any_call(
+            "PROJECT_DIGEST_EVALUATION_STARTED",
+            extra=mock.ANY,
+        )
+        skipped_call = next(call for call in digest_log.call_args_list if call.args[1] == "PROJECT_DIGEST_SKIPPED")
+        assert skipped_call.args[0] == 20
+        assert skipped_call.kwargs["extra"]["reason"] == "digest skipped: no changes"
+        assert skipped_call.kwargs["extra"]["channel_count"] == 1
+        schedule_call = next(
+            call for call in digest_log.call_args_list
+            if call.args[1] == "PROJECT_DIGEST_SCHEDULE_SKIPPED"
+        )
+        assert schedule_call.kwargs["extra"]["outcome"] == "skipped"
+        assert schedule_call.kwargs["extra"]["reason_code"] == "skipped_no_changes"
+        all_clear_payload = json.loads(all_clear_event["payload_json"])
+        assert all_clear_status == "fired"
+        assert all_clear_event["status"] == "pending"
+        assert all_clear_payload["summary_fields"]["changed"] == 0
+        assert all_clear_payload["summary_fields"]["recovered"] == 0
+        assert all_clear_payload["summary_fields"]["failed"] == 0
+        assert all_clear_payload["summary_fields"]["quiet"] == "yes"
+        assert all_clear_payload["top_changes"] == []
+        assert all_clear_before_delivery is not None
+        assert all_clear_before_delivery["last_sent_at"] == ""
+        assert all_clear_delivered == 1
+        assert sent_payloads[0]["summary_fields"]["quiet"] == "yes"
+        assert all_clear_after_delivery is not None
+        assert all_clear_after_delivery["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+
+    def test_project_digest_markers_are_window_end_and_monotonic(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.models import ChannelResult
+        from services.projects import digests
+
+        class DigestChannel:
+            def __init__(self, channel):
+                self.channel = channel
+
+            def send(self, payload):
+                return ChannelResult.success()
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest_monotonic")
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_monotonic",
+                {"enabled": False, "cadence_preset": "hourly", "channel_ids": []},
+                conn=conn,
+            )
+            first_evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T11:00:00Z",
+            )
+            stale_evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T10:00:00+00:00",
+            )
+            newer_evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T12:00:00+00:00",
+            )
+            first = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T11:00:00+00:00",
+            )
+            stale = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T10:00:00+00:00",
+            )
+            newer = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T12:00:00+00:00",
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_digest_monotonic', 'tok_watchers', 'webhook', 'Digest monotonic', '{}', '{}', "
+                "'[]', 0, '2026-05-20T09:00:00+00:00', '2026-05-20T09:00:00+00:00')"
+            )
+            for event_id, window_start, window_end, created in (
+                (
+                    "nte_digest_newer_window",
+                    "2026-05-20T12:00:00+00:00",
+                    "2026-05-20T13:00:00+00:00",
+                    "2026-05-20T12:00:00+00:00",
+                ),
+                (
+                    "nte_digest_older_window",
+                    "2026-05-20T11:00:00+00:00",
+                    "2026-05-20T12:00:00+00:00",
+                    "2026-05-20T11:00:00+00:00",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, 'tok_watchers', '', 'ntc_digest_monotonic', 'project_digest', ?, 'pending', "
+                    "0, '', '', '', '', ?, '')",
+                    (
+                        event_id,
+                        json.dumps({
+                            "digest_identity": {
+                                "project_id": "prj_digest_monotonic",
+                                "session_id": "tok_watchers",
+                                "team_id": "",
+                                "window_start": window_start,
+                                "window_end": window_end,
+                            },
+                        }),
+                        created,
+                    ),
+                )
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES ('nte_digest_missing_identity', 'tok_watchers', '', 'ntc_digest_monotonic', "
+                "'project_digest', '{}', 'pending', 0, '', '', '', '', '2026-05-20T12:30:00+00:00', '')"
+            )
+            monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
+            monkeypatch.setattr(notification_dispatcher, "_delivery_rate_limit_per_minute", lambda: 100)
+            monkeypatch.setattr(notification_dispatcher, "_utc_now", lambda: "2026-05-20T14:30:00+00:00")
+            with mock.patch.object(notification_dispatcher.log, "info") as notify_info, \
+                 mock.patch.object(notification_dispatcher.log, "warning") as notify_warn:
+                newer_delivered = notification_dispatcher.dispatch_due_events(
+                    conn=conn,
+                    event_ids=["nte_digest_newer_window"],
+                )
+                malformed_delivered = notification_dispatcher.dispatch_due_events(
+                    conn=conn,
+                    event_ids=["nte_digest_missing_identity"],
+                )
+                after_newer_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_monotonic", conn=conn)
+                older_delivered = notification_dispatcher.dispatch_due_events(
+                    conn=conn,
+                    event_ids=["nte_digest_older_window"],
+                )
+            after_out_of_order_delivery = digests.get_digest_settings(
+                "tok_watchers",
+                "prj_digest_monotonic",
+                conn=conn,
+            )
+
+        assert first_evaluated is not None
+        assert stale_evaluated is not None
+        assert newer_evaluated is not None
+        assert first_evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert stale_evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert newer_evaluated["last_evaluated_at"] == "2026-05-20T12:00:00+00:00"
+        assert first is not None
+        assert stale is not None
+        assert newer is not None
+        assert first["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+        assert stale["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+        assert newer["last_sent_at"] == "2026-05-20T12:00:00+00:00"
+        assert newer_delivered == 1
+        assert malformed_delivered == 1
+        assert older_delivered == 1
+        assert after_newer_delivery is not None
+        assert after_out_of_order_delivery is not None
+        assert after_newer_delivery["last_sent_at"] == "2026-05-20T13:00:00+00:00"
+        assert after_out_of_order_delivery["last_sent_at"] == "2026-05-20T13:00:00+00:00"
+        sent_marked = [
+            call for call in notify_info.call_args_list
+            if call.args == ("PROJECT_DIGEST_SENT_MARKED",)
+        ]
+        assert sent_marked[0].kwargs["extra"]["window_end"] == "2026-05-20T13:00:00+00:00"
+        skipped_mark = next(
+            call for call in notify_warn.call_args_list
+            if call.args == ("PROJECT_DIGEST_SENT_MARK_SKIPPED",)
+        )
+        assert skipped_mark.kwargs["extra"]["event_id"] == "nte_digest_missing_identity"
+        assert skipped_mark.kwargs["extra"]["has_digest_identity"] is False
+
+    def test_project_digest_settings_reject_archived_scopes_and_delete_with_project(self, monkeypatch, tmp_path):
+        from services.projects import crud, digests
+        from services.teams import storage as team_storage
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._insert_project(conn, "prj_digest_archived")
+            conn.execute("UPDATE projects SET status = 'archived' WHERE id = 'prj_digest_archived'")
+            with pytest.raises(ProjectWorkspaceError, match="archived projects"):
+                digests.save_digest_settings(
+                    "tok_watchers",
+                    "prj_digest_archived",
+                    {"enabled": True, "channel_ids": ["ntc_one"]},
+                    conn=conn,
+                )
+
+            team = team_storage.create_team(conn, name="Digest Team", creator_session_token="tok_watchers")
+            team_storage.update_team_status(conn, team["id"], status="archived")
+            self._insert_project(conn, "prj_digest_team_archived", team_id=team["id"])
+            with pytest.raises(ProjectWorkspaceError, match="archived teams"):
+                digests.save_digest_settings(
+                    "tok_watchers",
+                    "prj_digest_team_archived",
+                    {"enabled": True, "channel_ids": ["ntc_team"]},
+                    team_id=team["id"],
+                    conn=conn,
+                )
+
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest_archived_after_enable")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_archived_after_enable', 'tok_watchers', 'webhook', 'Archived digest', '{}', '{}', "
+                "'[]', 0, '2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                project_id="prj_digest_archived_after_enable",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_archive_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_archive_current",
+                state_at_fire="changed",
+                diff_summary={"classifier": "ports", "severity": "high"},
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE watcher_id = ?",
+                ("2026-05-20T10:30:00+00:00", watcher.id),
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_archived_after_enable",
+                {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_archived_after_enable"]},
+                conn=conn,
+            )
+            conn.execute(
+                "UPDATE projects SET status = 'archived' WHERE id = 'prj_digest_archived_after_enable'"
+            )
+            archived_result = digests.evaluate_due_digest(
+                conn,
+                session_id="tok_watchers",
+                project_id="prj_digest_archived_after_enable",
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            archived_settings = digests.get_digest_settings(
+                "tok_watchers",
+                "prj_digest_archived_after_enable",
+                conn=conn,
+            )
+            archived_event_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()["count"]
+
+            self._insert_project(conn, "prj_digest_delete")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_delete', 'tok_watchers', 'webhook', 'Delete digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_delete",
+                {"enabled": True, "channel_ids": ["ntc_delete"]},
+                conn=conn,
+            )
+            schedule_row = conn.execute(
+                "SELECT id FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_delete'"
+            ).fetchone()
+            assert schedule_row is not None
+            conn.execute(
+                "INSERT INTO schedule_fires "
+                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES ('fire_digest_delete', ?, 'project_digest', 'prj_digest_delete', "
+                "'2026-05-20T11:00:00+00:00', '', 'fired', '')",
+                (schedule_row["id"],),
+            )
+            assert crud.delete_project("tok_watchers", "prj_digest_delete", conn=conn) is True
+            remaining_settings = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_digest_settings WHERE project_id = 'prj_digest_delete'"
+            ).fetchone()["count"]
+            remaining_schedules = conn.execute(
+                "SELECT COUNT(*) AS count FROM schedules "
+                "WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_delete'"
+            ).fetchone()["count"]
+            remaining_fires = conn.execute(
+                "SELECT COUNT(*) AS count FROM schedule_fires WHERE schedule_id = ?",
+                (schedule_row["id"],),
+            ).fetchone()["count"]
+
+        assert archived_result == {"reason": "digest skipped: project archived", "queued": 0}
+        assert archived_settings is not None
+        assert archived_settings["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert archived_settings["last_sent_at"] == ""
+        assert archived_event_count == 0
+        assert remaining_settings == 0
+        assert remaining_schedules == 0
+        assert remaining_fires == 0
+
+    def test_project_digest_event_identity_carries_async_delivery_join_keys(self):
+        from services.projects import digests
+
+        assert digests.digest_event_identity(
+            project_id="prj_digest",
+            session_id="tok_watchers",
+            team_id="team_digest",
+            window_start="2026-05-20T10:00:00+00:00",
+            window_end="2026-05-20T11:00:00+00:00",
+        ) == {
+            "project_id": "prj_digest",
+            "session_id": "tok_watchers",
+            "team_id": "team_digest",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        }
+
     def test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists(self, monkeypatch, tmp_path):
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
@@ -5277,6 +6040,204 @@ class TestWatchersFoundation:
         assert payload["summary"]["top_changes"][0]["fire_id"] == old_fire.id
         assert payload["summary"]["top_changes"][0]["label"] == "New open port 443/tcp https"
         assert payload["summary"]["top_changes"][0]["run_available"] is True
+
+    def test_project_monitoring_summary_window_reports_only_windowed_fires(self, monkeypatch, tmp_path):
+        from services.projects.monitoring import get_project_monitoring_summary
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_old_change", ["80/tcp open http", "22/tcp open ssh"])
+            self._insert_run(conn, "run_window_change", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_window_recovered", ["80/tcp open http"])
+            self._insert_run(conn, "run_window_failed", ["scanner failed"], exit_code=1)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_old_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "22/tcp", "state": "open", "service": "ssh"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            start_boundary_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_start_boundary",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "8443/tcp", "state": "open", "service": "https-alt"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            changed_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            recovered_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_recovered",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="recovered",
+                fire_kind="recovered",
+            )
+            failed_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_failed",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="error",
+                state_reason="run_failed",
+                fire_kind="failed",
+            )
+            duplicate_failed_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_failed_again",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="error",
+                state_reason="run_failed",
+                fire_kind="failed",
+            )
+            no_change_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_no_change",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="no_change",
+                fire_kind="no_change",
+            )
+            end_boundary_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_end_boundary",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "9443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T08:59:00+00:00", old_fire.id))
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:00:00+00:00", start_boundary_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:01:00+00:00", changed_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:03:00+00:00", recovered_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:05:00+00:00", failed_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:07:00+00:00", duplicate_failed_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:09:00+00:00", no_change_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T10:00:00+00:00", end_boundary_fire.id),
+            )
+            conn.commit()
+
+            payload = get_project_monitoring_summary(
+                "tok_watchers",
+                "prj_monitor",
+                window_start="2026-05-20T09:00:00+00:00",
+                window_end="2026-05-20T10:00:00+00:00",
+            )
+            recovered_payload = get_project_monitoring_summary(
+                "tok_watchers",
+                "prj_monitor",
+                window_start="2026-05-20T09:03:00+00:00",
+                window_end="2026-05-20T09:04:00+00:00",
+            )
+            no_change_payload = get_project_monitoring_summary(
+                "tok_watchers",
+                "prj_monitor",
+                window_start="2026-05-20T09:09:00+00:00",
+                window_end="2026-05-20T09:10:00+00:00",
+            )
+
+        assert payload is not None
+        assert payload["digest_window"] == {
+            "start": "2026-05-20T09:00:00+00:00",
+            "end": "2026-05-20T10:00:00+00:00",
+            "fire_count": 6,
+        }
+        assert payload["summary"]["top_changes"]
+        window_summary = payload["window_summary"]
+        assert window_summary["changed_monitor_count"] == 1
+        assert window_summary["recovered_monitor_count"] == 1
+        assert window_summary["failed_monitor_count"] == 1
+        assert window_summary["highest_severity"] == "critical"
+        top_fire_ids = {item["fire_id"] for item in window_summary["top_changes"]}
+        assert changed_fire.id in top_fire_ids
+        assert start_boundary_fire.id in top_fire_ids
+        assert recovered_fire.id in top_fire_ids
+        assert failed_fire.id in top_fire_ids
+        assert old_fire.id not in top_fire_ids
+        assert end_boundary_fire.id not in top_fire_ids
+        assert recovered_payload is not None
+        assert recovered_payload["digest_window"]["fire_count"] == 1
+        assert recovered_payload["window_summary"]["changed_monitor_count"] == 0
+        assert recovered_payload["window_summary"]["recovered_monitor_count"] == 1
+        assert recovered_payload["window_summary"]["failed_monitor_count"] == 0
+        assert recovered_payload["window_summary"]["top_changes"][0]["fire_id"] == recovered_fire.id
+        assert no_change_payload is not None
+        assert no_change_payload["digest_window"]["fire_count"] == 1
+        assert no_change_payload["window_summary"]["changed_monitor_count"] == 0
+        assert no_change_payload["window_summary"]["recovered_monitor_count"] == 0
+        assert no_change_payload["window_summary"]["failed_monitor_count"] == 0
+        assert no_change_payload["window_summary"]["top_changes"] == []
 
     @pytest.mark.parametrize(
         ("summary", "expected"),
@@ -17753,6 +18714,7 @@ class TestDatabaseInit:
             "projects",
             "project_links",
             "project_auto_promote_rules",
+            "project_digest_settings",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
@@ -20446,6 +21408,179 @@ SQL syntax error near q</response>
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()  # second call
+
+    def test_init_upgrades_old_schedule_owner_kind_constraints_for_project_digests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE schedules (
+                    id TEXT PRIMARY KEY,
+                    session_token TEXT NOT NULL,
+                    owner_kind TEXT NOT NULL DEFAULT 'user',
+                    owner_id TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'command',
+                    command_text TEXT NOT NULL,
+                    cron_expr TEXT NOT NULL,
+                    cadence_preset TEXT,
+                    timezone TEXT NOT NULL DEFAULT 'UTC',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    next_run_at TEXT NOT NULL DEFAULT '',
+                    last_run_at TEXT NOT NULL DEFAULT '',
+                    last_run_id TEXT NOT NULL DEFAULT '',
+                    overlap_policy TEXT NOT NULL DEFAULT 'skip',
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    label TEXT NOT NULL DEFAULT '',
+                    paused_reason TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created TEXT NOT NULL,
+                    updated TEXT NOT NULL,
+                    CHECK (owner_kind IN ('user', 'watcher')),
+                    CHECK (kind IN ('command')),
+                    CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
+                    CHECK (overlap_policy IN ('skip'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE schedule_fires (
+                    id TEXT PRIMARY KEY,
+                    schedule_id TEXT NOT NULL,
+                    owner_kind TEXT NOT NULL,
+                    owner_id TEXT NOT NULL DEFAULT '',
+                    fired_at TEXT NOT NULL,
+                    run_id TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    CHECK (owner_kind IN ('user', 'watcher')),
+                    CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO schedules "
+                "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, "
+                "timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy, consecutive_failures, "
+                "label, paused_reason, last_error, created, updated) "
+                "VALUES ('sch_old', 'tok_old', 'watcher', 'wtr_old', 'command', 'echo ok', '0 * * * *', "
+                "'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, 'Old', '', '', "
+                "'2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO schedule_fires "
+                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES ('sfire_old', 'sch_old', 'watcher', 'wtr_old', '2026-06-20T05:00:00+00:00', "
+                "'run_old', 'fired', '')"
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            schedules_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
+            ).fetchone()[0]
+            fires_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedule_fires'"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO schedules "
+                "(id, session_token, team_id, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, "
+                "timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy, consecutive_failures, "
+                "label, paused_reason, last_error, created, updated) "
+                "VALUES ('sch_digest', 'tok_old', '', 'project_digest', 'prj_old', 'command', 'project digest prj_old', "
+                "'0 * * * *', 'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, "
+                "'Digest', '', '', '2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
+            )
+            preserved = conn.execute(
+                "SELECT team_id, owner_kind FROM schedules WHERE id = 'sch_old'"
+            ).fetchone()
+            preserved_fire = conn.execute(
+                "SELECT team_id, owner_kind FROM schedule_fires WHERE id = 'sfire_old'"
+            ).fetchone()
+            conn.close()
+
+        assert "project_digest" in schedules_sql
+        assert "project_digest" in fires_sql
+        assert preserved == ("", "watcher")
+        assert preserved_fire == ("", "watcher")
+
+    def test_init_upgrades_old_notification_event_trigger_constraints_for_project_digests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE notification_events (
+                    id TEXT PRIMARY KEY,
+                    session_token TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    trigger TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT NOT NULL DEFAULT '',
+                    last_attempt_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    run_id TEXT NOT NULL DEFAULT '',
+                    created TEXT NOT NULL,
+                    dead_at TEXT NOT NULL DEFAULT '',
+                    CHECK (
+                        trigger IN (
+                            'run_complete',
+                            'pty_session_ended',
+                            'watcher_changed',
+                            'watcher_error',
+                            'watcher_recovered',
+                            'scheduled_run_failed',
+                            'test'
+                        )
+                    ),
+                    CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES ('nte_old', 'tok_old', 'ntc_old', 'run_complete', '{}', 'sent', 1, '', "
+                "'2026-06-20T05:01:00+00:00', '', 'run_old', '2026-06-20T05:00:00+00:00', '')"
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            events_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_events'"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES ('nte_digest', 'tok_old', '', 'ntc_old', 'project_digest', '{}', 'pending', 0, '', "
+                "'', '', '', '2026-06-20T06:00:00+00:00', '')"
+            )
+            preserved = conn.execute(
+                "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_old'"
+            ).fetchone()
+            digest_row = conn.execute(
+                "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_digest'"
+            ).fetchone()
+            conn.close()
+
+        assert "project_digest" in events_sql
+        assert preserved == ("", "run_complete", "sent")
+        assert digest_row == ("", "project_digest", "pending")
 
     def test_retention_prunes_old_runs(self):
         with tempfile.TemporaryDirectory() as tmp:

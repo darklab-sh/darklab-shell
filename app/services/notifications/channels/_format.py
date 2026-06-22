@@ -64,6 +64,10 @@ def format_field_value(value: Any) -> str:
 
 
 def notification_title(payload: dict[str, Any]) -> str:
+    if str(payload.get("trigger") or "") == "project_digest":
+        app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
+        project_name = str(payload.get("project_name") or "").strip() or "Project"
+        return truncate_text(f"{app_name} project digest: {project_name}", 120)
     trigger = str(payload.get("trigger") or "notification").replace("_", " ")
     app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
     root = str(payload.get("command_root") or "").strip()
@@ -73,6 +77,9 @@ def notification_title(payload: dict[str, Any]) -> str:
 
 
 def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    if str(payload.get("trigger") or "") == "project_digest":
+        return _format_project_digest_fields(payload)
+
     fields: list[tuple[str, str]] = []
     for key, label in (
         ("run_id", "Run"),
@@ -94,6 +101,40 @@ def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
                 display_value = format_field_value(value)
                 if display_value:
                     fields.append((humanize_key(str(key)), display_value))
+    return fields
+
+
+def _format_project_digest_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    summary = payload.get("summary_fields")
+    summary_fields = summary if isinstance(summary, dict) else {}
+    fields: list[tuple[str, str]] = []
+    ordered = (
+        ("project", "Project"),
+        ("window", "Window"),
+        ("changed", "Changed"),
+        ("recovered", "Recovered"),
+        ("failed", "Failed"),
+        ("highest_severity", "Highest Severity"),
+        ("quiet", "Quiet Digest"),
+        ("monitoring_link", "Monitoring"),
+    )
+    for key, label in ordered:
+        value = summary_fields.get(key)
+        if value not in ("", None):
+            fields.append((label, truncate_text(value)))
+
+    top_changes = payload.get("top_changes")
+    if isinstance(top_changes, list):
+        for index, item in enumerate(top_changes[:5], start=1):
+            if not isinstance(item, dict):
+                continue
+            label = truncate_text(item.get("label") or item.get("fire_kind") or "Change", 120)
+            severity = str(item.get("severity") or "none").strip()
+            watcher = str(item.get("watcher_label") or "").strip()
+            detail = f"{severity}: {label}"
+            if watcher:
+                detail = f"{detail} ({truncate_text(watcher, 80)})"
+            fields.append((f"Top Change {index}", truncate_text(detail, 220)))
     return fields
 
 

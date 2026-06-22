@@ -99,6 +99,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages. Values longer than 20 visible characters are shortened at startup |
+| `app_public_base_url` | _(empty)_ | Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their own session |
 | `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
@@ -314,6 +315,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `scheduler.default_timezone` | `UTC` | Default IANA timezone used when a schedule does not set its own timezone |
 | `watchers` | see nested defaults | Server-side only. Change-detection monitor limits. Watchers use scheduler-owned cadence rows and notification triggers |
 | `watchers.max_per_session` | `32` | Maximum change-detection watchers a durable session token can own |
+| `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
+| `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
+| `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |

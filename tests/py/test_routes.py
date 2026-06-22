@@ -5472,6 +5472,39 @@ class TestNotificationChannelRoutes:
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
+                        "nte_project_digest_delivery",
+                        session_id,
+                        channel_id,
+                        "project_digest",
+                        json.dumps({
+                            "trigger": "project_digest",
+                            "project_id": "prj_delivery_audit",
+                            "project_name": "External Edge",
+                            "project_monitoring_url": "/projects/prj_delivery_audit/monitoring",
+                            "digest_identity": {
+                                "project_id": "prj_delivery_audit",
+                                "session_id": session_id,
+                                "team_id": "",
+                                "window_start": "2026-05-22T06:00:00+00:00",
+                                "window_end": "2026-05-22T07:00:00+00:00",
+                            },
+                        }),
+                        "dead",
+                        3,
+                        "",
+                        "2026-05-22T07:11:00+00:00",
+                        "provider rejected digest",
+                        "",
+                        "2026-05-22T07:10:30+00:00",
+                        "2026-05-22T07:11:00+00:00",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
                         "nte_other_delivery",
                         "tok_other_notification_owner",
                         channel_id,
@@ -5496,11 +5529,21 @@ class TestNotificationChannelRoutes:
 
             assert resp.status_code == 200
             payload = resp.get_json()
-            assert payload["total"] == 1
-            assert payload["events"][0]["id"] == "nte_browser_delivery"
-            assert payload["events"][0]["channel_id"] == channel_id
-            assert payload["events"][0]["status"] == "sent"
-            assert payload["events"][0]["payload"]["message"] == "done"
+            assert payload["total"] == 2
+            digest_event = payload["events"][0]
+            assert digest_event["id"] == "nte_project_digest_delivery"
+            assert digest_event["project_digest"] == {
+                "project_id": "prj_delivery_audit",
+                "project_name": "External Edge",
+                "window_start": "2026-05-22T06:00:00+00:00",
+                "window_end": "2026-05-22T07:00:00+00:00",
+                "monitoring_url": "/projects/prj_delivery_audit/monitoring",
+            }
+            run_event = payload["events"][1]
+            assert run_event["id"] == "nte_browser_delivery"
+            assert run_event["channel_id"] == channel_id
+            assert run_event["status"] == "sent"
+            assert run_event["payload"]["message"] == "done"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5880,6 +5923,11 @@ class TestProjectRoutes:
                 f"/projects/{project['id']}/monitoring/summary",
                 headers={"X-Session-ID": session_id},
             )
+            window_summary_resp = client.get(
+                f"/projects/{project['id']}/monitoring/summary"
+                "?window_start=2026-01-01T00:00:00Z&window_end=2027-01-01T00:00:00Z",
+                headers={"X-Session-ID": session_id},
+            )
 
         assert resp.status_code == 200
         payload = resp.get_json()
@@ -5897,6 +5945,12 @@ class TestProjectRoutes:
         summary_payload = summary_resp.get_json()
         assert summary_payload["project"]["id"] == project["id"]
         assert summary_payload["summary"] == payload["summary"]
+        assert window_summary_resp.status_code == 200
+        window_summary_payload = window_summary_resp.get_json()
+        assert window_summary_payload["digest_window"]["start"] == "2026-01-01T00:00:00+00:00"
+        assert window_summary_payload["digest_window"]["end"] == "2027-01-01T00:00:00+00:00"
+        assert window_summary_payload["window_summary"]["changed_monitor_count"] == 1
+        assert window_summary_payload["window_summary"]["top_changes"][0]["fire_kind"] == "changed"
         viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_VIEWED",))
         assert viewed.kwargs["extra"] == {
             "ip": mock.ANY,
@@ -5921,7 +5975,43 @@ class TestProjectRoutes:
             "failed_count": 0,
             "highest_severity": "critical",
             "top_change_count": 1,
+            "windowed": False,
+            "window_changed_count": 0,
+            "window_recovered_count": 0,
+            "window_failed_count": 0,
+            "window_highest_severity": "",
+            "window_top_change_count": 0,
+            "window_fire_count": 0,
         }
+        window_summary_viewed = [
+            call for call in info_log.call_args_list
+            if call.args == ("PROJECT_MONITORING_SUMMARY_VIEWED",) and call.kwargs["extra"]["windowed"]
+        ][0]
+        assert window_summary_viewed.kwargs["extra"]["changed_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["top_change_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["window_changed_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["window_recovered_count"] == 0
+        assert window_summary_viewed.kwargs["extra"]["window_failed_count"] == 0
+        assert window_summary_viewed.kwargs["extra"]["window_highest_severity"] == "critical"
+        assert window_summary_viewed.kwargs["extra"]["window_top_change_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["window_fire_count"] == 1
+
+        anonymous_session_id = "anon_project_monitoring_" + uuid.uuid4().hex[:8]
+        anonymous_project = self._create_project(
+            client,
+            anonymous_session_id,
+            name="Anonymous Monitoring",
+        )
+        anonymous_resp = client.get(
+            f"/projects/{anonymous_project['id']}/monitoring",
+            headers={"X-Session-ID": anonymous_session_id},
+        )
+
+        assert anonymous_resp.status_code == 200
+        anonymous_payload = anonymous_resp.get_json()
+        assert anonymous_payload["notification_channels"] == []
+        assert anonymous_payload["can_manage_digest_settings"] is False
+        assert anonymous_payload["digest_settings"]["enabled"] is False
 
     def test_project_monitoring_route_keeps_deleted_current_run_state(self):
         from services.watchers import service as watcher_service
@@ -6266,6 +6356,132 @@ class TestProjectRoutes:
         assert audit_details["ack_state"] == "expected"
         assert audit_details["note_chars"] == len("Maintenance window")
         assert "Maintenance window" not in json.dumps(audit_details)
+
+    def test_project_digest_settings_routes_expose_channels_and_enforce_team_manage_roles(self, tmp_path):
+        db_path = str(tmp_path / "project-digest-routes.db")
+        lock_path = str(tmp_path / "project-digest-routes.lock")
+        patchers = [
+            mock.patch("core.database.DB_PATH", db_path),
+            mock.patch("core.database.DB_INIT_LOCK_PATH", lock_path),
+        ]
+        for patcher in patchers:
+            patcher.start()
+        db_init()
+        client = get_client()
+        owner_token = "tok_project_digest_owner_" + uuid.uuid4().hex[:8]
+        viewer_token = "tok_project_digest_viewer_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_project_digest_operator_" + uuid.uuid4().hex[:8]
+        try:
+            team = self._create_team(client, owner_token, name="Digest Settings Team")
+            team_id = team["id"]
+            self._join_team(
+                client,
+                owner_token,
+                team_id,
+                viewer_token,
+                role="viewer",
+                display_name="Digest Viewer",
+            )
+            self._join_team(
+                client,
+                owner_token,
+                team_id,
+                operator_token,
+                role="operator",
+                display_name="Digest Operator",
+            )
+            project = self._create_project(
+                client,
+                owner_token,
+                name="Digest Settings",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO notification_channels "
+                    "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+                    "muted, created, updated) "
+                    "VALUES ('ntc_digest_route', ?, ?, 'webhook', 'Digest route', '{}', '{}', '[]', 0, "
+                    "'2026-06-15T10:00:00+00:00', '2026-06-15T10:00:00+00:00')",
+                    (owner_token, team_id),
+                )
+                conn.commit()
+
+            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            route = f"/projects/{project['id']}/digest-settings"
+            viewer_get = client.get(route, headers=viewer_headers)
+            viewer_patch = client.patch(
+                route,
+                headers=viewer_headers,
+                json={
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_digest_route"],
+                },
+            )
+            operator_patch = client.patch(
+                route,
+                headers=operator_headers,
+                json={
+                    "enabled": True,
+                    "cadence_preset": "weekly",
+                    "channel_ids": ["ntc_digest_route"],
+                    "quiet_no_change": True,
+                },
+            )
+            owner_get_after_operator_patch = client.get(route, headers=owner_headers)
+            owner_patch = client.patch(
+                route,
+                headers=owner_headers,
+                json={
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_digest_route"],
+                    "quiet_no_change": False,
+                },
+            )
+            operator_get = client.get(route, headers=operator_headers)
+            monitoring_get = client.get(f"/projects/{project['id']}/monitoring", headers=operator_headers)
+            with db_connect() as conn:
+                digest_schedules = conn.execute(
+                    "SELECT session_token, cadence_preset FROM schedules "
+                    "WHERE owner_kind = 'project_digest' AND owner_id = ? AND team_id = ?",
+                    (project["id"], team_id),
+                ).fetchall()
+
+            assert viewer_get.status_code == 200
+            assert viewer_get.get_json()["can_manage_digest_settings"] is False
+            assert viewer_get.get_json()["digest_settings"]["enabled"] is False
+            assert viewer_get.get_json()["notification_channels"][0]["id"] == "ntc_digest_route"
+            assert viewer_patch.status_code == 403
+            assert viewer_patch.get_json()["error"] == "team_forbidden"
+            assert operator_patch.status_code == 200
+            operator_payload = operator_patch.get_json()
+            assert operator_payload["can_manage_digest_settings"] is True
+            assert operator_payload["digest_settings"]["enabled"] is True
+            assert operator_payload["digest_settings"]["cadence_preset"] == "weekly"
+            assert operator_payload["digest_settings"]["channel_ids"] == ["ntc_digest_route"]
+            assert operator_payload["digest_settings"]["quiet_no_change"] is True
+            assert operator_payload["digest_settings"]["session_id"] == owner_token
+            assert owner_get_after_operator_patch.status_code == 200
+            assert owner_get_after_operator_patch.get_json()["digest_settings"]["enabled"] is True
+            assert owner_get_after_operator_patch.get_json()["digest_settings"]["cadence_preset"] == "weekly"
+            assert owner_patch.status_code == 200
+            assert owner_patch.get_json()["digest_settings"]["cadence_preset"] == "daily"
+            assert operator_get.status_code == 200
+            assert operator_get.get_json()["digest_settings"]["enabled"] is True
+            assert operator_get.get_json()["digest_settings"]["cadence_preset"] == "daily"
+            assert monitoring_get.status_code == 200
+            assert monitoring_get.get_json()["digest_settings"]["cadence_preset"] == "daily"
+            assert monitoring_get.get_json()["can_manage_digest_settings"] is True
+            assert [(row["session_token"], row["cadence_preset"]) for row in digest_schedules] == [
+                (owner_token, "daily")
+            ]
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
 
     def test_project_activity_route_allows_team_viewer_for_team_project_only(self):
         from services.audit.models import AuditEventType

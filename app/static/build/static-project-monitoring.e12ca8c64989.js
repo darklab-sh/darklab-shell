@@ -59,6 +59,9 @@ var exportedDarklabProjectMonitoring = null;
     function defaultState() {
       return {
         counts: {},
+        canManageDigestSettings: true,
+        digestChannels: [],
+        digestSettings: null,
         error: "",
         loaded: false,
         loading: false,
@@ -108,6 +111,9 @@ var exportedDarklabProjectMonitoring = null;
         if (!resp.ok) throw await responseError(resp, "Could not load project monitoring.");
         const payload = await resp.json();
         st.counts = payload && typeof payload.counts === "object" ? payload.counts : {};
+        st.canManageDigestSettings = payload?.can_manage_digest_settings !== false;
+        st.digestChannels = Array.isArray(payload?.notification_channels) ? payload.notification_channels : [];
+        st.digestSettings = payload && typeof payload.digest_settings === "object" ? payload.digest_settings : null;
         st.filterOptions = payload && typeof payload.filter_options === "object" ? payload.filter_options : {};
         st.monitors = Array.isArray(payload.monitors) ? payload.monitors : [];
         st.project = payload && typeof payload.project === "object" ? payload.project : null;
@@ -262,6 +268,140 @@ var exportedDarklabProjectMonitoring = null;
       meta.className = "project-monitoring-meta";
       meta.textContent = parts.map((part) => String(part || "").trim()).filter(Boolean).join(" · ");
       if (meta.textContent) parent.appendChild(meta);
+    }
+    function digestSettingsOrDefault(st) {
+      const settings = st.digestSettings && typeof st.digestSettings === "object" ? st.digestSettings : {};
+      return {
+        enabled: settings.enabled === true,
+        cadence_preset: String(settings.cadence_preset || "daily"),
+        channel_ids: Array.isArray(settings.channel_ids) ? settings.channel_ids.map((item) => String(item || "")) : [],
+        quiet_no_change: settings.quiet_no_change === true,
+        last_evaluated_at: String(settings.last_evaluated_at || ""),
+        last_sent_at: String(settings.last_sent_at || ""),
+        next_due_at: String(settings.next_due_at || ""),
+        schedule_last_error: String(settings.schedule_last_error || ""),
+        schedule_paused_reason: String(settings.schedule_paused_reason || ""),
+        schedule_last_fire_at: String(settings.schedule_last_fire_at || ""),
+        schedule_last_fire_reason: String(settings.schedule_last_fire_reason || ""),
+        schedule_last_fire_status: String(settings.schedule_last_fire_status || "")
+      };
+    }
+    function digestChannelLabel(channel) {
+      const kind = String(channel?.kind || "").replaceAll("_", " ");
+      const label = String(channel?.label || channel?.id || "Channel");
+      return kind ? `${label} · ${kind}` : label;
+    }
+    function renderDigestSettings(projectId, st, { mobile = false } = {}) {
+      const settings = digestSettingsOrDefault(st);
+      const channels = Array.isArray(st.digestChannels) ? st.digestChannels : [];
+      const selectedChannels = new Set(settings.channel_ids);
+      const canManage = st.canManageDigestSettings !== false;
+      const section = document.createElement("section");
+      section.className = mobile ? "project-monitoring-digest is-mobile" : "project-monitoring-digest";
+      section.dataset.projectDigestSettings = String(projectId || "");
+      const head = document.createElement("div");
+      head.className = "project-monitoring-digest-head";
+      const title = document.createElement("div");
+      title.className = "project-monitoring-digest-title";
+      const heading = document.createElement("h3");
+      heading.className = mobile ? "project-mobile-section-heading" : "project-explorer-section-heading";
+      heading.textContent = "Digest Notifications";
+      const status = document.createElement("span");
+      status.className = settings.enabled ? "badge badge-tone-green project-monitoring-digest-status" : "badge badge-tone-muted project-monitoring-digest-status";
+      status.textContent = settings.enabled ? "Enabled" : "Off";
+      title.append(heading, status);
+      const save = makeActionButton("Save", projectId, "primary");
+      save.dataset.projectMonitoringAction = "save-digest";
+      save.dataset.projectId = String(projectId || "");
+      save.disabled = !canManage;
+      if (!canManage) save.title = "View-only team members can't change digest settings";
+      head.append(title, save);
+      const controls = document.createElement("div");
+      controls.className = "project-monitoring-digest-controls";
+      const enabledLabel = document.createElement("label");
+      enabledLabel.className = "form-check project-monitoring-digest-toggle";
+      const enabled = document.createElement("input");
+      enabled.type = "checkbox";
+      enabled.checked = settings.enabled;
+      enabled.disabled = !canManage;
+      enabled.dataset.projectDigestField = "enabled";
+      const enabledText = document.createElement("span");
+      enabledText.textContent = "Send scheduled digests";
+      enabledLabel.append(enabled, enabledText);
+      const cadenceLabelWrap = document.createElement("label");
+      cadenceLabelWrap.className = "project-monitoring-digest-field";
+      const cadenceText = document.createElement("span");
+      cadenceText.textContent = "Cadence";
+      const cadence = document.createElement("select");
+      cadence.className = "form-select";
+      cadence.dataset.projectDigestField = "cadence_preset";
+      cadence.disabled = !canManage;
+      [
+        ["hourly", "Hourly"],
+        ["daily", "Daily"],
+        ["weekly", "Weekly"]
+      ].forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        cadence.appendChild(option);
+      });
+      cadence.value = ["hourly", "daily", "weekly"].includes(settings.cadence_preset) ? settings.cadence_preset : "daily";
+      cadenceLabelWrap.append(cadenceText, cadence);
+      const quietLabel = document.createElement("label");
+      quietLabel.className = "form-check project-monitoring-digest-toggle";
+      const quiet = document.createElement("input");
+      quiet.type = "checkbox";
+      quiet.checked = settings.quiet_no_change;
+      quiet.disabled = !canManage;
+      quiet.dataset.projectDigestField = "quiet_no_change";
+      const quietText = document.createElement("span");
+      quietText.textContent = "Send quiet digests";
+      quietLabel.append(quiet, quietText);
+      controls.append(enabledLabel, cadenceLabelWrap, quietLabel);
+      const channelWrap = document.createElement("div");
+      channelWrap.className = "project-monitoring-digest-channels nice-scroll";
+      const channelTitle = document.createElement("div");
+      channelTitle.className = "project-monitoring-digest-label";
+      channelTitle.textContent = "Channels";
+      channelWrap.appendChild(channelTitle);
+      if (!channels.length) {
+        const empty = document.createElement("div");
+        empty.className = "project-monitoring-empty-line project-monitoring-digest-empty";
+        empty.textContent = "No notification channels are configured.";
+        channelWrap.appendChild(empty);
+      } else {
+        channels.forEach((channel) => {
+          const channelId = String(channel?.id || "");
+          if (!channelId) return;
+          const label = document.createElement("label");
+          label.className = "form-check project-monitoring-digest-channel";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.value = channelId;
+          checkbox.checked = selectedChannels.has(channelId);
+          checkbox.disabled = !canManage;
+          checkbox.dataset.projectDigestField = "channel";
+          const text = document.createElement("span");
+          text.textContent = digestChannelLabel(channel);
+          label.append(checkbox, text);
+          channelWrap.appendChild(label);
+        });
+      }
+      const meta = document.createElement("div");
+      meta.className = "project-monitoring-meta project-monitoring-digest-meta";
+      meta.textContent = [
+        settings.last_sent_at ? `last sent: ${formatDateLabel(settings.last_sent_at)}` : "",
+        settings.next_due_at ? `next due: ${formatDateLabel(settings.next_due_at)}` : "",
+        settings.last_evaluated_at ? `last checked: ${formatDateLabel(settings.last_evaluated_at)}` : "",
+        settings.schedule_last_fire_reason ? `last result: ${settings.schedule_last_fire_reason}` : "",
+        settings.schedule_paused_reason ? `paused: ${settings.schedule_paused_reason}` : "",
+        settings.schedule_last_error ? `last issue: ${settings.schedule_last_error}` : "",
+        canManage ? "" : "read-only"
+      ].filter(Boolean).join(" · ");
+      section.append(head, controls, channelWrap);
+      if (meta.textContent) section.appendChild(meta);
+      return section;
     }
     function makeActionButton(label, projectId, role = "secondary") {
       const normalizedRole = ["primary", "secondary", "ghost", "destructive"].includes(String(role || "")) ? String(role || "") : "secondary";
@@ -584,6 +724,7 @@ var exportedDarklabProjectMonitoring = null;
       root.dataset.projectMonitoringRoot = String(projectId || "");
       root.appendChild(renderCounts(st));
       root.appendChild(renderFilters(projectId, st));
+      root.appendChild(renderDigestSettings(projectId, st, { mobile }));
       const monitors = document.createElement("section");
       monitors.className = "project-monitoring-section";
       const heading = document.createElement("h3");
@@ -755,6 +896,31 @@ var exportedDarklabProjectMonitoring = null;
       );
       await reloadAfterAction(projectId, "Monitoring event updated.");
     }
+    function digestPayloadFromRoot(root) {
+      const selectedChannels = [...root?.querySelectorAll?.('[data-project-digest-field="channel"]:checked') || []].map((item) => String(item.value || "")).filter(Boolean);
+      return {
+        enabled: !!root?.querySelector?.('[data-project-digest-field="enabled"]')?.checked,
+        cadence_preset: String(root?.querySelector?.('[data-project-digest-field="cadence_preset"]')?.value || "daily"),
+        channel_ids: selectedChannels,
+        quiet_no_change: !!root?.querySelector?.('[data-project-digest-field="quiet_no_change"]')?.checked
+      };
+    }
+    async function saveDigestSettings(projectId, action) {
+      const root = action.closest("[data-project-digest-settings]");
+      const payload = digestPayloadFromRoot(root);
+      const resp = await monitoringRequest(`/projects/${encodeURIComponent(projectId)}/digest-settings`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      const st = stateFor(projectId);
+      st.digestSettings = data && typeof data.digest_settings === "object" ? data.digest_settings : st.digestSettings;
+      st.digestChannels = Array.isArray(data?.notification_channels) ? data.notification_channels : st.digestChannels;
+      st.canManageDigestSettings = data?.can_manage_digest_settings !== false;
+      ctx.setProjectWorkspaceMessage?.("Digest settings saved.");
+      ctx.renderProjectExplorer?.();
+      if (ctx.mobileView?.() === "detail") ctx.renderProjectMobileDetail?.();
+    }
     async function handleClick(event) {
       const action = event.target.closest?.("[data-project-monitoring-action]");
       if (!action) return false;
@@ -785,6 +951,10 @@ var exportedDarklabProjectMonitoring = null;
         return true;
       }
       try {
+        if (name === "save-digest") {
+          await saveDigestSettings(projectId, action);
+          return true;
+        }
         if (name === "pause") {
           await updateWatcher(projectId, action.dataset.watcherId, { pause: true, reason: "operator paused" }, "Monitor paused.");
           return true;

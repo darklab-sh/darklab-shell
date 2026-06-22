@@ -193,6 +193,23 @@ describe('notification channel preferences panel', () => {
         last_error: 'provider rejected message',
         run_id: 'run_existing_delivery',
       },
+      {
+        id: 'nte_digest',
+        channel_id: 'ntc_chat',
+        trigger: 'project_digest',
+        status: 'retry_wait',
+        attempts: 2,
+        created: '2026-05-22T08:00:00+00:00',
+        last_attempt_at: '2026-05-22T08:01:00+00:00',
+        next_attempt_at: '2026-05-22T08:03:00+00:00',
+        last_error: 'digest endpoint timed out',
+        run_id: '',
+        project_digest: {
+          project_name: 'External Edge',
+          window_start: '2026-05-22T07:00:00+00:00',
+          window_end: '2026-05-22T08:00:00+00:00',
+        },
+      },
     ]
     const apiFetch = vi.fn(async (url, options = {}) => {
       if (url === '/session/notification-channel-kinds') return jsonResponse(CHANNEL_KIND_CONTRACT)
@@ -265,7 +282,10 @@ describe('notification channel preferences panel', () => {
     Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Deliveries').click()
     await vi.waitFor(() => expect(list.textContent).toContain('Recent deliveries'))
     expect(list.textContent).toContain('watcher error')
+    await vi.waitFor(() => expect(list.textContent).toContain('project digest: External Edge'))
+    expect(list.textContent).toContain('window')
     await vi.waitFor(() => expect(list.textContent).toContain('provider rejected message'))
+    await vi.waitFor(() => expect(list.textContent).toContain('digest endpoint timed out'))
     expect(apiFetch).toHaveBeenCalledWith('/session/notification-events?channel_id=ntc_chat&limit=5')
 
     Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Test').click()

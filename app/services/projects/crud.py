@@ -164,6 +164,22 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
             )
         conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_auto_promote_rules WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM project_digest_settings WHERE project_id = ?", (project_id,))
+        digest_schedule_rows = conn.execute(
+            "SELECT id FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = ?",
+            (project_id,),
+        ).fetchall()
+        digest_schedule_ids = [row["id"] for row in digest_schedule_rows if row["id"]]
+        if digest_schedule_ids:
+            placeholders = ",".join("?" for _ in digest_schedule_ids)
+            conn.execute(
+                "DELETE FROM schedule_fires WHERE schedule_id IN (" + placeholders + ")",  # nosec
+                digest_schedule_ids,
+            )
+            conn.execute(
+                "DELETE FROM schedules WHERE id IN (" + placeholders + ")",  # nosec
+                digest_schedule_ids,
+            )
         watcher_membership_cleared = clear_project_membership(conn, project_id)
         if watcher_membership_cleared:
             log.info("PROJECT_WATCHER_MEMBERSHIP_CLEARED", extra={

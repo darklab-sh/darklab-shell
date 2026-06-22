@@ -17,7 +17,7 @@ import config
 from services.notifications.channels import _http as notification_http
 from services.notifications.channels.webhook import WebhookChannel
 from services.notifications.models import ChannelResult, NotificationChannel
-from services.notifications.payloads import build_run_complete_payload
+from services.notifications.payloads import build_project_digest_payload, build_run_complete_payload
 
 
 class FakeResponse:
@@ -345,3 +345,68 @@ def test_run_complete_payload_exposes_command_root_without_full_command(monkeypa
         "summary_fields": {"critical": 1},
     }
     assert "Authorization" not in json.dumps(payload)
+
+
+def test_project_digest_payload_uses_configured_public_base_url_and_safe_top_changes(monkeypatch):
+    monkeypatch.setitem(config.CFG, "app_name", "Ops Shell")
+    monkeypatch.setitem(config.CFG, "app_public_base_url", "https://shell.example.test")
+    payload = build_project_digest_payload(
+        project={"id": "prj_digest", "name": "External Edge"},
+        digest_identity={
+            "project_id": "prj_digest",
+            "session_id": "tok_digest",
+            "team_id": "",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        },
+        summary={
+            "changed_monitor_count": 1,
+            "recovered_monitor_count": 1,
+            "failed_monitor_count": 0,
+            "highest_severity": "critical",
+            "links": {"project_monitoring": "/projects/prj_digest/monitoring"},
+            "top_changes": [
+                {
+                    "severity": "critical",
+                    "fire_kind": "changed",
+                    "watcher_label": "Internet Edge",
+                    "label": "New open port 443/tcp https with token secret-token " + ("x" * 200),
+                    "run_id": "run-secret",
+                    "baseline_run_id": "run-baseline-secret",
+                }
+            ],
+        },
+    )
+
+    assert payload["project_monitoring_path"] == "/projects/prj_digest/monitoring"
+    assert payload["project_monitoring_url"] == "https://shell.example.test/projects/prj_digest/monitoring"
+    assert payload["summary_fields"]["monitoring_link"] == payload["project_monitoring_url"]
+    assert payload["summary_fields"]["changed"] == 1
+    assert payload["top_changes"][0] == {
+        "severity": "critical",
+        "fire_kind": "changed",
+        "watcher_label": "Internet Edge",
+        "label": payload["top_changes"][0]["label"],
+        "created": "",
+    }
+    serialized = json.dumps(payload)
+    assert "run-secret" not in serialized
+    assert "baseline-secret" not in serialized
+    assert len(payload["top_changes"][0]["label"]) <= 140
+
+
+def test_project_digest_payload_uses_relative_link_without_public_base_url(monkeypatch):
+    monkeypatch.setitem(config.CFG, "app_public_base_url", "")
+    payload = build_project_digest_payload(
+        project={"id": "prj_digest", "name": "External Edge"},
+        digest_identity={
+            "project_id": "prj_digest",
+            "session_id": "tok_digest",
+            "team_id": "",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        },
+        summary={"links": {"project_monitoring": "/projects/prj_digest/monitoring"}},
+    )
+
+    assert payload["project_monitoring_url"] == "/projects/prj_digest/monitoring"

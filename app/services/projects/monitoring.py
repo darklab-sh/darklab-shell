@@ -19,6 +19,9 @@ from services.watchers.models import (
     WATCHER_ACK_ACKNOWLEDGED,
     WATCHER_ACK_NEEDS_ACTION,
     WATCHER_ACK_NEW,
+    WATCHER_FIRE_KIND_CHANGED,
+    WATCHER_FIRE_KIND_FAILED,
+    WATCHER_FIRE_KIND_RECOVERED,
     WATCHER_FIRE_KIND_UNCLASSIFIED,
     WATCHER_STATE_CHANGED,
     WATCHER_STATE_ERROR,
@@ -259,6 +262,39 @@ def _unresolved_summary_fires_for_project(
     return [row_to_watcher_fire(row) for row in rows]
 
 
+def _window_summary_fires_for_project(
+    conn,
+    session_id: str,
+    project_id: str,
+    *,
+    team_id: str = "",
+    window_start: str = "",
+    window_end: str = "",
+) -> list[WatcherFire]:
+    owner_sql, owner_params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias="w",
+        session_column="session_token",
+    )
+    where = [" " + owner_sql, "w.project_id = ?"]
+    params: list[Any] = [*owner_params, project_id]
+    if window_start:
+        where.append("f.created >= ?")
+        params.append(window_start)
+    if window_end:
+        where.append("f.created < ?")
+        params.append(window_end)
+    rows = conn.execute(
+        "SELECT f.* FROM watcher_fires f "
+        "JOIN watchers w ON w.id = f.watcher_id "
+        "WHERE " + " AND ".join(where) + " "  # nosec
+        "ORDER BY f.created DESC, f.id DESC",
+        params,
+    ).fetchall()
+    return [row_to_watcher_fire(row) for row in rows]
+
+
 def _decorate_fire_targets(
     fire: dict[str, Any],
     watcher: Watcher,
@@ -356,11 +392,18 @@ def _project_summary(
     monitors: list[dict[str, Any]],
     timeline: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    recovered_monitor_ids = {
-        str(monitor.get("id") or "")
-        for monitor in monitors
-        if str(_latest_fire_dict(monitor).get("fire_kind") or "") == "recovered"
-    }
+    if monitors:
+        recovered_monitor_ids = {
+            str(monitor.get("id") or "")
+            for monitor in monitors
+            if str(_latest_fire_dict(monitor).get("fire_kind") or "") == WATCHER_FIRE_KIND_RECOVERED
+        }
+    else:
+        recovered_monitor_ids = {
+            str(fire.get("watcher_id") or "")
+            for fire in timeline
+            if str(fire.get("fire_kind") or "") == WATCHER_FIRE_KIND_RECOVERED
+        }
     highest_severity = SEVERITY_NONE
     for fire in timeline:
         rollup = _rollup_dict(fire)
@@ -408,6 +451,22 @@ def _project_summary(
         "highest_severity": highest_severity,
         "top_changes": top_changes,
         "links": _monitoring_links(project_id),
+}
+
+
+def _window_summary_counts(timeline: list[dict[str, Any]]) -> dict[str, int]:
+    changed = set()
+    failed = set()
+    for fire in timeline:
+        watcher_id = str(fire.get("watcher_id") or "")
+        fire_kind = str(fire.get("fire_kind") or WATCHER_FIRE_KIND_UNCLASSIFIED)
+        if fire_kind == WATCHER_FIRE_KIND_CHANGED and watcher_id:
+            changed.add(watcher_id)
+        elif fire_kind == WATCHER_FIRE_KIND_FAILED and watcher_id:
+            failed.add(watcher_id)
+    return {
+        "changed": len(changed),
+        "failed": len(failed),
     }
 
 
@@ -417,6 +476,8 @@ def get_project_monitoring(
     *,
     team_id: str = "",
     fire_limit: int = 8,
+    summary_window_start: str = "",
+    summary_window_end: str = "",
 ) -> dict[str, Any] | None:
     normalized_project_id = str(project_id or "").strip()
     if not normalized_project_id:
@@ -455,6 +516,16 @@ def get_project_monitoring(
             normalized_project_id,
             team_id=team_id,
         )
+        window_fire_rows = []
+        if summary_window_start or summary_window_end:
+            window_fire_rows = _window_summary_fires_for_project(
+                conn,
+                session_id,
+                normalized_project_id,
+                team_id=team_id,
+                window_start=str(summary_window_start or ""),
+                window_end=str(summary_window_end or ""),
+            )
         unresolved_fires_by_watcher = {}
         for fire in summary_fire_rows:
             unresolved_fires_by_watcher.setdefault(fire.watcher_id, fire)
@@ -479,6 +550,13 @@ def get_project_monitoring(
                     run_ids.add(fire.baseline_run_id)
                     requested_baseline_ids.add(fire.baseline_run_id)
         for fire in summary_fire_rows:
+            if fire.run_id:
+                run_ids.add(fire.run_id)
+                requested_run_ids.add(fire.run_id)
+            if fire.baseline_run_id:
+                run_ids.add(fire.baseline_run_id)
+                requested_baseline_ids.add(fire.baseline_run_id)
+        for fire in window_fire_rows:
             if fire.run_id:
                 run_ids.add(fire.run_id)
                 requested_run_ids.add(fire.run_id)
@@ -538,10 +616,28 @@ def get_project_monitoring(
             group = groups_by_watcher.get(watcher.id) or _group_for(watcher, [])
             _decorate_fire_targets(fire, watcher, group, target_options)
             summary_timeline.append(fire)
+        window_timeline = []
+        for raw_fire in window_fire_rows:
+            watcher = watchers_by_id.get(raw_fire.watcher_id)
+            if watcher is None:
+                continue
+            fire = _fire_payload(raw_fire, watcher, run_refs)
+            group = groups_by_watcher.get(watcher.id) or _group_for(watcher, [])
+            _decorate_fire_targets(fire, watcher, group, target_options)
+            window_timeline.append(fire)
         timeline.sort(key=lambda item: (str(item.get("created") or ""), str(item.get("id") or "")), reverse=True)
+        window_timeline.sort(key=lambda item: (str(item.get("created") or ""), str(item.get("id") or "")), reverse=True)
         counts = _counts(monitors)
         visible_timeline = timeline[: max(25, safe_fire_limit)]
         summary = _project_summary(normalized_project_id, counts, monitors, summary_timeline)
+        window_summary = None
+        if summary_window_start or summary_window_end:
+            window_summary = _project_summary(
+                normalized_project_id,
+                _window_summary_counts(window_timeline),
+                [],
+                window_timeline,
+            )
         missing_run_ids = sorted(run_id for run_id in requested_run_ids if run_id not in run_refs)
         missing_baseline_run_ids = sorted(run_id for run_id in requested_baseline_ids if run_id not in run_refs)
         if missing_run_ids or missing_baseline_run_ids:
@@ -590,6 +686,8 @@ def get_project_monitoring(
                 ),
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
+        windowed = window_summary is not None
+        window_counts = _window_summary_counts(window_timeline) if windowed else {}
         log.debug(
             "PROJECT_MONITORING_PAYLOAD_BUILT",
             extra=_monitoring_log_context(
@@ -603,10 +701,15 @@ def get_project_monitoring(
                 run_ref_requested_count=len(run_ids),
                 run_ref_found_count=len(run_refs),
                 counts=counts,
+                windowed=windowed,
+                window_start=str(summary_window_start or ""),
+                window_end=str(summary_window_end or ""),
+                window_fire_count=len(window_timeline),
+                window_counts=window_counts,
                 duration_ms=duration_ms,
             ),
         )
-        return {
+        payload = {
             "project": project,
             "counts": counts,
             "summary": summary,
@@ -615,6 +718,14 @@ def get_project_monitoring(
             "timeline": visible_timeline,
             "filter_options": _filter_options(monitors, timeline, target_options),
         }
+        if window_summary is not None:
+            payload["digest_window"] = {
+                "start": str(summary_window_start or ""),
+                "end": str(summary_window_end or ""),
+                "fire_count": len(window_timeline),
+            }
+            payload["window_summary"] = window_summary
+        return payload
 
 
 def get_project_monitoring_summary(
@@ -623,14 +734,27 @@ def get_project_monitoring_summary(
     *,
     team_id: str = "",
     fire_limit: int = 8,
+    window_start: str = "",
+    window_end: str = "",
 ) -> dict[str, Any] | None:
-    payload = get_project_monitoring(session_id, project_id, team_id=team_id, fire_limit=fire_limit)
+    payload = get_project_monitoring(
+        session_id,
+        project_id,
+        team_id=team_id,
+        fire_limit=fire_limit,
+        summary_window_start=window_start,
+        summary_window_end=window_end,
+    )
     if payload is None:
         return None
-    return {
+    summary_payload = {
         "project": payload["project"],
         "summary": payload["summary"],
     }
+    if "window_summary" in payload:
+        summary_payload["digest_window"] = payload["digest_window"]
+        summary_payload["window_summary"] = payload["window_summary"]
+    return summary_payload
 
 
 def update_project_monitoring_fire_ack(

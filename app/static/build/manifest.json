@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.f7f7004dc444.css",
-      "hash": "f7f7004dc444a5893699f40bac062614c04f9bf655d3e2d6e21db5543e8ccb78",
+      "path": "/static/build/app.f8a8cf0918d9.css",
+      "hash": "f8a8cf0918d991e81aedf9fa2cd9da328b7d324aa96fdbf7c8d163d9ec85f585",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -36,7 +36,7 @@
         "/static/css/welcome.css": "5cdb6be8622e40fd25261ce6eca5c40b0453e039333038aeef63e361d85b325f",
         "/static/css/shell-chrome.css": "04a9131c01be1c8555006a8df822969921c319569c8188973fa13da2b58ce12e",
         "/static/css/mobile.css": "081679f8720be4a712eb53921244277e1d5392f667d2727df0d632426bb5e266",
-        "/static/css/features/projects.css": "2449afff9dbb85c6a4db9643219fcddf55b550ebe4e0c62b9bbc7ee20919182b",
+        "/static/css/features/projects.css": "e48f941781865b99b1e9548bc7d487d54d0b87c6eeaf5ef670f1bd8584b10762",
         "/static/css/features/atlas.css": "3eb83165fe37ea04c23ba7d29d317832ea29ed1a3b087134fe2505045bb96f26",
         "/static/css/features/atlas-mobile.css": "493f398b53a464a6027ed4b761b3e3174f2cf675d2913bfb2af6d1457aa11511",
         "/static/css/features/command-registry.css": "d45f7d3fa1709d60236f0c9932e63d8c8ac1d3df18387640773164dd2d8a5a54",
@@ -500,8 +500,8 @@
       "hash": "75d8e994eb112c127d69c443467b7a06c4be814d24ddeef5ed904a192c56ea4f"
     },
     "/static/js/features/preferences/notification_channels.js": {
-      "path": "/static/build/static-notification-channels.a14ffeb2b61e.js",
-      "hash": "6310e804108ef279747059bd8c574e521a042fedf96400e202ef8c3b4d83d9fb"
+      "path": "/static/build/static-notification-channels.3fb98e86e2d9.js",
+      "hash": "49441c52806bb5f8f4cfb39d33e22155cc2e367119c8ebbe66ed8d35cd8256f8"
     },
     "/static/js/features/preferences/secrets_panel.js": {
       "path": "/static/build/static-secrets-panel.bf2b64697358.js",
@@ -568,8 +568,8 @@
       "hash": "c7b6c0a90095cb406649a8e789c22a09e595eb9a8f6ed238d0081f860e4c49d5"
     },
     "/static/js/features/projects/project_monitoring.js": {
-      "path": "/static/build/static-project-monitoring.e24c18556e71.js",
-      "hash": "f0f887017942f85f242f816030257442baf2fa13fd72bb2ef600bf1d6f84a4f4"
+      "path": "/static/build/static-project-monitoring.e12ca8c64989.js",
+      "hash": "1fcb5d397f82f42ba7c0f90652655c6ee970aa0144785bb8925b2ed482da8a41"
     },
     "/static/js/features/projects/project_navigation.js": {
       "path": "/static/build/static-project-navigation.c6a3e87dabcb.js",

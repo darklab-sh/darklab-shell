@@ -38,6 +38,8 @@ from . import (
     v0031_run_output_summary_status,
     v0032_watcher_monitoring_phase0,
     v0033_watcher_monitoring_policy,
+    v0034_project_digest_settings,
+    v0035_project_digest_schedule_dispatch,
 )
 from .runner import Migration
 
@@ -75,4 +77,6 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0031_run_output_summary_status.MIGRATION,
     v0032_watcher_monitoring_phase0.MIGRATION,
     v0033_watcher_monitoring_policy.MIGRATION,
+    v0034_project_digest_settings.MIGRATION,
+    v0035_project_digest_schedule_dispatch.MIGRATION,
 )

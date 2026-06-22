@@ -273,7 +273,7 @@ MIGRATION = Migration(
             created TEXT NOT NULL,
             dead_at TEXT NOT NULL DEFAULT '',
             CHECK (trigger IN ('run_complete', 'pty_session_ended', 'watcher_changed', 'watcher_error',
-                               'watcher_recovered', 'scheduled_run_failed', 'test')),
+                               'watcher_recovered', 'scheduled_run_failed', 'project_digest', 'test')),
             CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
         )
         """,
@@ -324,7 +324,7 @@ MIGRATION = Migration(
             last_error TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
             updated TEXT NOT NULL,
-            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (owner_kind IN ('user', 'watcher', 'project_digest')),
             CHECK (kind IN ('command')),
             CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
             CHECK (overlap_policy IN ('skip'))
@@ -341,7 +341,7 @@ MIGRATION = Migration(
             run_id TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL,
             reason TEXT NOT NULL DEFAULT '',
-            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (owner_kind IN ('user', 'watcher', 'project_digest')),
             CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
         )
         """,
@@ -455,6 +455,23 @@ MIGRATION = Migration(
             last_applied_at TEXT NOT NULL DEFAULT '',
             match_count BIGINT NOT NULL DEFAULT 0,
             linked_count BIGINT NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS project_digest_settings (
+            project_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
+            enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            cadence_preset TEXT NOT NULL DEFAULT 'daily',
+            channel_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            quiet_no_change BOOLEAN NOT NULL DEFAULT FALSE,
+            last_evaluated_at TEXT NOT NULL DEFAULT '',
+            last_sent_at TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL,
+            updated TEXT NOT NULL,
+            PRIMARY KEY (project_id, session_id, team_id),
+            CHECK (cadence_preset IN ('hourly', 'daily', 'weekly'))
         )
         """,
         """
@@ -890,6 +907,14 @@ MIGRATION = Migration(
         """
         CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_run_scan
         ON project_auto_promote_rules (project_id, enabled, apply_on_run)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_project_digest_settings_due
+        ON project_digest_settings (enabled, team_id, updated DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_project_digest_settings_owner
+        ON project_digest_settings (session_id, team_id, updated DESC)
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,785
+- behavior tests: 3,806
 - docs/inventory meta-tests: 40
-- `pytest`: 2146 (2111 behavior + 35 meta)
-- `vitest`: 1419
-- `playwright`: 266
-- total: 3,831
+- `pytest`: 2159 (2124 behavior + 35 meta)
+- `vitest`: 1421 (1416 behavior + 5 meta)
+- `playwright`: 266 behavior
+- total: 3,846
 
 This document is organized in two parts:
 
@@ -559,6 +559,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSchedulerFoundation.test_scheduler_worker_run_once_runs_daily_retention` | Verifies one worker tick runs daily run/snapshot and audit retention pruning. |
 | `TestSchedulerFoundation.test_scheduler_retention_guard_skips_until_interval_elapses` | Verifies scheduler retention pruning is guarded to run at most once per interval. |
 | `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
+| `TestWatchersFoundation.test_project_digest_settings_persist_per_owner_scope_and_track_delivery_state` | Verifies Project digest settings persist per personal/team owner scope and track evaluated versus sent timestamps separately. |
+| `TestWatchersFoundation.test_project_digest_schedule_fire_queues_explicit_channel_and_sent_callback` | Verifies hidden Project digest schedules enqueue selected channels and advance the sent window after notification delivery succeeds. |
+| `TestWatchersFoundation.test_project_digest_schedule_fire_skips_no_change_without_advancing_sent` | Verifies no-change digest evaluations update the evaluated timestamp without queueing events or advancing the sent window. |
+| `TestWatchersFoundation.test_project_digest_markers_are_window_end_and_monotonic` | Verifies Project digest evaluation and successful-send markers use normalized window timestamps and cannot move backward on stale callbacks. |
+| `TestWatchersFoundation.test_project_digest_settings_reject_archived_scopes_and_delete_with_project` | Verifies Project digest settings reject enabled archived scopes and are removed when a Project is deleted. |
+| `TestWatchersFoundation.test_project_digest_event_identity_carries_async_delivery_join_keys` | Verifies Project digest notification identity includes the scope and window keys needed for async delivery callbacks. |
 | `TestWatchersFoundation.test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists` | Verifies watcher creation inserts the watcher row and owned schedule row together while normal schedule lists hide watcher-owned cadence. |
 | `TestWatchersFoundation.test_watcher_project_membership_infers_single_same_scope_run_link` | Verifies watcher Project membership is inferred only from a single same-scope baseline run link and rejects cross-scope Project assignments. |
 | `TestWatchersFoundation.test_deleting_project_clears_watcher_membership` | Verifies deleting a Project clears watcher Project membership instead of leaving a stale reference. |
@@ -566,6 +572,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWatchersFoundation.test_project_monitoring_payload_keeps_deleted_current_run_visible` | Verifies Project Monitoring keeps deleted-current-run fires visible while disabling current-run actions and preserving available baseline links. |
 | `TestWatchersFoundation.test_project_monitoring_triage_state_uses_unbounded_unresolved_fire` | Verifies Project Monitoring keeps the current triage state tied to the latest unresolved fire even when that fire is older than the visible fire limit. |
 | `TestWatchersFoundation.test_project_monitoring_summary_uses_unbounded_unresolved_fires` | Verifies Project Monitoring summary severity and top changes include unresolved fires that are older than the visible timeline window. |
+| `TestWatchersFoundation.test_project_monitoring_summary_window_reports_only_windowed_fires` | Verifies the Project Monitoring summary can return a bounded digest window without reusing older current-state summary fires. |
 | `TestWatchersFoundation.test_watcher_fire_rollup_maps_classifier_summaries_to_severity_defaults` | Verifies watcher-fire rollups map classifier summaries to the default Monitoring severity, counts, truncation, and run-link fields. |
 | `TestWatchersFoundation.test_watcher_fire_rollup_bounds_top_signals` | Verifies watcher-fire rollups cap top-signal output while preserving the highest-severity signal first. |
 | `TestWatchersFoundation.test_sqlite_watcher_monitoring_backfill_infers_projects_and_fire_state` | Verifies SQLite monitoring migrations backfill watcher Project membership and watcher-fire kind/state fields for legacy rows. |
@@ -1051,6 +1058,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_workspace_metadata_migration_separates_personal_and_team_scopes` | Verifies legacy workspace-file label and note metadata migrates to separate personal/team uniqueness scopes. |
 | `TestDatabaseInit.test_project_slug_migration_separates_personal_and_team_scopes` | Verifies legacy SQLite Project slug constraints are rebuilt into separate personal and team uniqueness scopes. |
 | `TestDatabaseInit.test_init_is_idempotent` | Checks init is idempotent handling. |
+| `TestDatabaseInit.test_init_upgrades_old_schedule_owner_kind_constraints_for_project_digests` | Verifies SQLite databases with the old schedule owner-kind constraint are rebuilt so Project digest schedules can be saved. |
+| `TestDatabaseInit.test_init_upgrades_old_notification_event_trigger_constraints_for_project_digests` | Verifies SQLite databases with the old notification trigger constraint are rebuilt so Project digest delivery events can be queued. |
 | `TestDatabaseInit.test_retention_prunes_old_runs` | Checks that retention prunes old runs. |
 | `TestDatabaseInit.test_retention_prunes_old_snapshots` | Checks that retention prunes old snapshots. |
 | `TestDatabaseInit.test_retention_prunes_old_snapshot_metadata` | Verifies that retention prunes labels and notes for deleted snapshots. |
@@ -1340,6 +1349,7 @@ Slack, Discord, Telegram, and Pushover notification channel coverage.
 | `test_slack_channel_formats_blocks` | Verifies Slack notifications use incoming-webhook blocks with a header and summary fields. |
 | `test_summary_fields_truncate_long_run_ids` | Verifies chat/email notification summary fields shorten long run ids to a readable suffix. |
 | `test_summary_fields_format_structured_count_maps_as_text` | Verifies structured notification count maps render as compact text instead of Python dictionary syntax. |
+| `test_project_digest_payload_formats_for_chat_push_and_email_surfaces` | Verifies Project digest payloads render project, window, counts, monitoring link, and top changes in a compact notification order. |
 | `test_discord_channel_formats_embed` | Verifies Discord notifications use embeds with a title, fields, and timestamp footer. |
 | `test_chat_webhook_channels_share_retry_and_terminal_outcomes` | Verifies chat-webhook channels share retryable 5xx and terminal 4xx handling. |
 | `test_telegram_channel_requires_chat_id` | Verifies Telegram channels require a non-secret chat id in channel config. |
@@ -1393,6 +1403,8 @@ Generic JSON webhook notification channel delivery and payload-shape coverage.
 | `test_webhook_channel_retries_timeout` | Verifies network timeouts are retryable webhook delivery failures. |
 | `test_webhook_channel_log_host_strips_url_userinfo` | Verifies notification HTTP DEBUG/WARN log extras strip URL userinfo from vault-backed webhook URLs. |
 | `test_run_complete_payload_exposes_command_root_without_full_command` | Verifies run-complete payloads include only command root, not full command arguments. |
+| `test_project_digest_payload_uses_configured_public_base_url_and_safe_top_changes` | Verifies Project digest webhook payloads include a configured public Monitoring link and bounded safe top-change fields. |
+| `test_project_digest_payload_uses_relative_link_without_public_base_url` | Verifies Project digest payloads fall back to an in-app relative Monitoring link when no public base URL is configured. |
 
 #### `test_output_search.py`
 
@@ -1594,7 +1606,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload while recording a config-change audit row. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_targets_requested_channel` | Verifies a channel test send targets only the requested notification channel. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_reports_delivery_failure_status` | Verifies a channel test send reports the persisted retry/failure status instead of showing queued success only. |
-| `TestNotificationChannelRoutes.test_notification_event_audit_route_lists_session_channel_deliveries` | Verifies the browser notification delivery audit route returns only the active session's channel events. |
+| `TestNotificationChannelRoutes.test_notification_event_audit_route_lists_session_channel_deliveries` | Verifies the browser notification delivery audit route returns only the active session's channel events and includes Project digest audit context. |
 | `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
 | `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses, removes all channel-owned vault secrets, and records a config-change audit row without secret values. |
 | `TestProjectRoutes.test_project_package_and_link_routes_record_audit_events` | Verifies project link/unlink and package create/delete routes record bounded audit events. |
@@ -1604,6 +1616,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_monitoring_route_scopes_target_filter_options` | Verifies Project Monitoring target filters ignore suppressed and foreign linked Atlas entities while keeping visible current-owner targets. |
 | `TestProjectRoutes.test_project_monitoring_fire_ack_route_updates_fire_and_audits_metadata` | Verifies the Project Monitoring fire triage route updates acknowledgement state and notes while auditing safe metadata only. |
 | `TestProjectRoutes.test_project_monitoring_team_routes_enforce_view_and_triage_capabilities` | Verifies team Project Monitoring read and triage routes enforce view, membership, and triage capabilities while keeping audit details safe. |
+| `TestProjectRoutes.test_project_digest_settings_routes_expose_channels_and_enforce_team_manage_roles` | Verifies Project digest settings routes expose scoped channels, allow read-only team viewing, and limit saves to team roles that can manage automation or notifications. |
 | `TestProjectRoutes.test_project_activity_route_allows_team_viewer_for_team_project_only` | Verifies team viewers can read safe Project Activity for their team project but cannot read foreign project activity. |
 | `TestProjectRoutes.test_project_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed project-delete audit failures roll back the project deletion. |
 | `TestProjectRoutes.test_package_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed package-delete audit failures roll back the package deletion. |
@@ -3069,7 +3082,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders token-required and empty states from refresh responses` | Verifies the Notifications tab surfaces durable-token errors and the empty-channel nudge from refresh responses. |
 | `uses cached channel metadata for tab revisits and preserves it after forced load failures` | Verifies the Notifications tab reuses cached channel rows for normal tab revisits and keeps the cached list visible after a forced refresh hits a rate-limit response. |
 | `validates required secrets and submits editor payloads without exposing them in the list` | Verifies the channel editor blocks missing secrets, then submits secret/config/trigger payloads through the channel route. |
-| `renders channel actions and routes test, deliveries, mute, and delete requests` | Verifies notification channel rows route test-send success/failure to toasts, show delivery audit rows, and keep mute/delete updating panel state. |
+| `renders channel actions and routes test, deliveries, mute, and delete requests` | Verifies notification channel rows route test-send success/failure to toasts, show delivery audit rows with Project digest context, and keep mute/delete updating panel state. |
 
 #### `output.test.js`
 
@@ -3198,6 +3211,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders project monitoring counts monitors and disables missing-run comparisons` | Verifies the Project Monitoring tab renders dashboard counts, grouped monitor cards, filters, watcher policy chips, severity/top-signal rollups, timeline rows, and disables unavailable actions when baseline or current runs are missing. |
+| `saves digest settings from the monitoring tab` | Verifies Project Monitoring saves digest enabled state, cadence, explicit channels, and quiet-digest preference through the project digest settings route. |
+| `renders digest settings as read-only for team viewers` | Verifies Project Monitoring keeps digest controls visible but disabled for users who can view team projects without managing automation or notification settings. |
 | `renders monitor timing and baseline run metadata on cards` | Verifies monitor cards show next run, last run, last change, and current baseline metadata from the Monitoring payload. |
 | `changed-since filters exclude monitors without fire timestamps` | Verifies the changed-window filter removes never-run monitor cards while still filtering timeline events by their own fire timestamps. |
 | `maps dashboard status filters onto equivalent timeline fire kinds` | Verifies a quiet status filter keeps quiet monitor cards and no-change timeline events aligned. |

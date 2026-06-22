@@ -10,6 +10,36 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Attack-surface digest summary window contract** — Project Monitoring summaries can now include the bounded `window_summary` used by scheduled Project digest notifications while keeping the current dashboard summary unchanged.
+  - The summary route accepts `window_start` and `window_end` ISO datetimes and returns `digest_window` metadata plus changed, recovered, failed, severity, top-change, and link fields for only watcher fires in that window.
+  - **Tests:** focused service and route coverage verifies windowed summaries exclude older fires, preserve current summary behavior, and normalize route query timestamps.
+
+- **Attack-surface digest settings** — Projects now have owner-scoped digest settings storage for scheduled attack-surface notifications.
+  - The new `project_digest_settings` table stores enabled state, cadence, explicit notification channel ids, quiet/no-change behavior, `last_evaluated_at`, and `last_sent_at` for personal and team-owned Projects.
+  - Team Project digest settings resolve through the Project owner token, so every eligible team member sees and updates the same Project digest row and hidden schedule instead of creating per-member duplicates.
+  - SQLite bootstrap/upgrades and Postgres migrations create the same table and indexes, Project deletion removes stale digest settings, and digest event identity helpers carry the project/scope/window keys that async delivery callbacks will need.
+  - **Tests:** focused backend coverage verifies personal/team scope persistence, archived project/team enablement guards, Project deletion cleanup, timestamp updates, delivery join-key shape, and SQLite/Postgres schema parity.
+
+- **Attack-surface digest scheduler dispatch** — Enabled Project digest settings now create hidden scheduler-owned digest jobs that evaluate bounded monitoring windows and enqueue selected notification channels.
+  - Digest jobs use the existing scheduler due detection, cron parsing, hidden internal owner-kind pattern, and worker locking instead of a parallel sweep loop.
+  - Evaluation advances `last_evaluated_at` for queued or explicitly skipped runs, keeps no-change projects quiet unless quiet digests are enabled, and queued events update `last_sent_at` only after a selected channel reaches terminal sent.
+  - Successful digest delivery now advances the sent window to the digest window end, not delayed delivery time, and stale delivery callbacks cannot move the sent marker backward.
+  - SQLite startup now rebuilds legacy schedule owner-kind and notification trigger constraints when needed so existing local databases can save Project digest schedules and queue Project digest delivery events without recreating history.
+  - The notification dispatcher can deliver explicitly selected digest channels without requiring those channels to subscribe to a new UI trigger, while delivery deferrals, retries, rate limits, do-not-disturb, and dead-letter rows remain on the existing notification path.
+  - **Tests:** focused backend coverage verifies hidden digest schedules, explicit-channel enqueueing, no-change skips, window-end sent-state callbacks, stale sent-callback guards, legacy SQLite schedule/notification constraint upgrades, and SQLite/Postgres schedule/trigger constraint parity.
+
+- **Attack-surface digest notification payloads** — Project digest notifications now render compact, bounded payloads for webhooks, chat, Pushover, and email-compatible channels.
+  - Digest payloads include project name, digest window, changed/recovered/failed counts, highest severity, safe top changes, and a Project Monitoring link.
+  - Background-worker links use `app_public_base_url` when configured and fall back to in-app relative paths otherwise, without deriving URLs from request hostnames.
+  - Top changes omit run ids and baseline ids, cap labels, and keep chat/push/email field ordering readable instead of alphabetizing digest summary fields.
+  - **Tests:** focused notification payload and channel-format coverage verifies public/relative links, bounded safe JSON fields, redaction of run identifiers, and chat/push/email digest rendering.
+
+- **Attack-surface digest browser controls** — Project Monitoring now exposes digest settings next to the monitor dashboard.
+  - Project owners and team roles that can manage automation or notification settings can enable digests, choose hourly/daily/weekly cadence, select explicit channels, and toggle quiet no-change digests.
+  - Team viewers see the same settings as read-only, including last sent, last checked, next due, paused, and last issue details when present.
+  - Notification delivery audit rows now include Project digest project/window context so delayed, retried, or dead-lettered digest sends can be traced from each channel's delivery history.
+  - **Tests:** focused route and Vitest coverage verifies scoped channel exposure, team read-only behavior, save permissions, browser rendering, and digest settings interaction.
+
 - **Nuclei template provenance** — Nuclei runs now attach template-source provenance to saved output metadata and Nuclei JSONL imports.
   - Provenance records whether templates came from the managed `/tmp/nuclei-templates` cache, a session workspace template path, a pinned-looking `nuclei-templates` clone, an operator-updated template set, or another custom update directory.
   - Built-in relative template selectors such as `-t http/` stay in the managed-cache bucket, while actual workspace-looking paths keep workspace provenance.

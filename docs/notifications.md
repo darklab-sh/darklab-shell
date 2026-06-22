@@ -31,9 +31,10 @@ Channels subscribe to one or more trigger names:
 | `watcher_error` | A watcher failed while checking its source. |
 | `watcher_recovered` | A watcher that had previously changed or failed returned to a clean state. |
 | `scheduled_run_failed` | A scheduled run could not be started or completed by the scheduler path. |
+| `project_digest` | A Project Monitoring digest window was queued for explicitly selected digest channels. |
 | `test` | A manual test send from the UI, terminal built-in, API, or CLI. |
 
-The shipped app emits `run_complete`, `scheduled_run_failed`, watcher state triggers, and `test` from run, automation, watcher, and channel-management surfaces. Other trigger names are accepted by the channel contract and only produce deliveries when a matching app source enqueues them.
+The shipped app emits `run_complete`, `scheduled_run_failed`, watcher state triggers, `project_digest`, and `test` from run, automation, watcher, Project Monitoring, and channel-management surfaces. Project digest delivery uses the channels selected in the Project Monitoring digest settings, so channels do not need to subscribe to `project_digest` in the normal channel trigger list. Other trigger names are accepted by the channel contract and only produce deliveries when a matching app source enqueues them.
 
 ## Payload Shape
 
@@ -111,6 +112,14 @@ Notifications are queued in `notification_events`. A dedicated worker claims due
 The delivery audit is visible from the Options **Notifications** tab by opening a channel's **Deliveries** row. It is also available through `/api/v1/notification-events`, terminal `notify events`, and `darklab notify events`.
 
 Channel create, update, mute/unmute, delete, and manual test actions also write `notification.config_change` rows to the operator audit log. Those config-change rows show what changed and where it came from, but they do not store webhook URLs, bot tokens, Pushover keys, SMTP passwords, or replacement secret values. Secret writes still use the separate secret audit path.
+
+## Project Digest Notifications
+
+Project Monitoring can send attack-surface digest notifications through the same outbound channels. Open a Project's **Monitoring** tab, turn on digest notifications, choose hourly/daily/weekly cadence, select one or more channels, and decide whether quiet no-change digests should be sent. Team viewers can see the settings, but only project owners and team roles that can manage automation or notification settings can save changes.
+
+Digests are project-level and changes-only by default. Each send uses the Project Monitoring summary for a bounded window since the last successful digest, with a first-send lookback capped by the project digest config. The payload includes the project name, window, changed/recovered/failed counts, highest severity, a short top-change list, and a Monitoring link. Set `app_public_base_url` when notification recipients need a full external URL; otherwise the payload uses an in-app relative link.
+
+Digest delivery uses explicit channel selection, so a channel does not need to subscribe to a new trigger in its normal channel settings. Delivery still follows the same worker path as every other notification: do-not-disturb windows, muted channels, per-channel rate limits, retries, and dead letters all show in the channel's **Deliveries** row. Project digest delivery rows include the project name and digest window so a failed or delayed digest can be matched back to the Project Monitoring settings.
 
 ## Webhook Quickstart
 
@@ -196,6 +205,7 @@ The SMTP password is read from the environment variable named by `notifications.
 - Terminal, API, and CLI channel management require a durable session token.
 - Test sends use the same queued dispatcher path as real events and report whether the selected channel delivered, deferred, or failed the test event.
 - Manual test sends use `notifications.test_timeout_seconds`, so a broken webhook or SMTP relay returns feedback faster than normal background delivery.
+- Project digest notifications use explicit channel selection from Project Monitoring and appear in the same per-channel delivery history as run and watcher notifications.
 - Sent delivery audit rows are kept for `notifications.events.retention_days` days. Retry and dead-letter rows remain until they are retried or deleted with their channel/session data.
 - Delivery history stays attached to the session token even if a channel row is later deleted.
 

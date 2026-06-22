@@ -152,6 +152,7 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab_shell",
+        "app_public_base_url":        "",
         "prompt_username":            split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[0],
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
@@ -375,6 +376,10 @@ def load_config(conf_dir=None):
         },
         "watchers": {
             "max_per_session": 32,
+        },
+        "project_digests": {
+            "default_cadence_preset": "daily",
+            "first_send_lookback_hours": 24,
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,

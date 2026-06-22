@@ -26,6 +26,7 @@ from services.notifications.models import (
     CHANNEL_KINDS,
     EVENT_STATUSES,
     TRIGGER_PTY_SESSION_ENDED,
+    TRIGGER_PROJECT_DIGEST,
     TRIGGER_RUN_COMPLETE,
     TRIGGER_SCHEDULED_RUN_FAILED,
     TRIGGER_TEST,
@@ -350,7 +351,22 @@ def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
     }
     if event.team_id:
         payload["team_id"] = event.team_id
+    if event.trigger == TRIGGER_PROJECT_DIGEST:
+        payload["project_digest"] = _project_digest_event_context(event.payload)
     return payload
+
+
+def _project_digest_event_context(payload: Mapping[str, Any]) -> dict[str, str]:
+    identity = payload.get("digest_identity") if isinstance(payload, Mapping) else None
+    if not isinstance(identity, Mapping):
+        identity = {}
+    return {
+        "project_id": str(payload.get("project_id") or identity.get("project_id") or ""),
+        "project_name": str(payload.get("project_name") or "Project"),
+        "window_start": str(identity.get("window_start") or ""),
+        "window_end": str(identity.get("window_end") or ""),
+        "monitoring_url": str(payload.get("project_monitoring_url") or payload.get("project_monitoring_path") or ""),
+    }
 
 
 def _serialize_test_event(event: NotificationEvent) -> dict[str, Any]:

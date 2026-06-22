@@ -28,7 +28,7 @@ MIGRATION = Migration(
             last_error TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
             updated TEXT NOT NULL,
-            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (owner_kind IN ('user', 'watcher', 'project_digest')),
             CHECK (kind IN ('command')),
             CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
             CHECK (overlap_policy IN ('skip'))
@@ -44,7 +44,7 @@ MIGRATION = Migration(
             run_id TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL,
             reason TEXT NOT NULL DEFAULT '',
-            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (owner_kind IN ('user', 'watcher', 'project_digest')),
             CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
         )
         """,
