@@ -84,6 +84,7 @@ from services.projects.monitoring import (
     get_project_monitoring_summary,
     update_project_monitoring_fire_ack,
 )
+from services.projects.overview import get_project_intel_overview
 from services.projects.package_archive import (
     build_evidence_package_archive,
     create_evidence_package,
@@ -691,6 +692,15 @@ def projects_summary(project_id):
         return error_response
     summary = get_project_summary(session_id, project_id, team_id=team_id)
     return _project_json_or_404(summary)
+
+
+@projects_bp.route("/projects/<project_id>/overview")
+def projects_overview(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    overview = get_project_intel_overview(session_id, project_id, team_id=team_id)
+    return _project_json_or_404(overview)
 
 
 @projects_bp.route("/projects/<project_id>/activity")

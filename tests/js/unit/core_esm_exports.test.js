@@ -417,6 +417,7 @@ import { DarklabProjectFindingsBoard } from '../../../app/static/js/features/pro
 import { DarklabProjectReport } from '../../../app/static/js/features/projects/project_report.js'
 import { DarklabProjectActivity } from '../../../app/static/js/features/projects/project_activity.js'
 import { DarklabProjectArtifacts } from '../../../app/static/js/features/projects/project_artifacts.js'
+import { DarklabProjectOverview } from '../../../app/static/js/features/projects/project_overview.js'
 import { DarklabProjectPackages } from '../../../app/static/js/features/projects/project_packages.js'
 
 let freshModuleCounter = 0
@@ -477,6 +478,7 @@ describe('core ESM exports', () => {
     expect(openStatusMonitor).toBeTypeOf('function')
     expect(openAtlas).toBeTypeOf('function')
     expect(DarklabProjectWorkspaceState).toBeTruthy()
+    expect(DarklabProjectOverview.createProjectOverviewController).toBeTypeOf('function')
 
     const bridgeGlobal = typeof window !== 'undefined' ? window : globalThis
     const globals = snapshotGlobals(bridgeGlobal, [

@@ -369,6 +369,7 @@ def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, object]]:
         output_line(format_native_record("certificates", str(payload.get("certificate_count") or 0), 14), "builtin-kv"),
         output_line(format_native_record("first seen", str(payload.get("first_seen") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("last seen", str(payload.get("last_seen") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("latest expiry", str(payload.get("latest_expiry") or "-"), 14), "builtin-kv"),
     ]
     names = payload.get("names")
     if isinstance(names, list) and names:

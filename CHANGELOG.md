@@ -10,7 +10,16 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
-- **Attack-surface digest summary window contract** — Project Monitoring summaries can now include the bounded `window_summary` used by scheduled Project digest notifications while keeping the current dashboard summary unchanged.
+- **Project Overview tab for target intelligence** — Projects now have a target-focused Overview tab that rolls up findings, certificate status, cached intel, ports, services, and recent changes.
+  - Overview rows use existing Atlas `entity_id` values as their merge/filter identity, keep `host` targets mapped through the current domain/IP canonicalization path, and keep fallback `type:value` strings display-only.
+  - Certificate status keeps `unknown` separate from healthy, finding rollups use the same severity order as the Project workspace UI, and deep-link hints use existing Entities/Findings query params instead of a new filter dialect.
+  - The backend overview aggregator returns bounded target rows with open ports, services, certificate status, provider highlights, finding counts, top actionable severity, recent-change markers, and deep-link hints while preserving personal/team scope.
+  - `GET /projects/<project_id>/overview` exposes the overview payload with the same Project owner/team scoping as the existing summary and workspace routes.
+  - The Projects modal now includes an Overview tab that lazily loads the overview payload, shows target/port/service/finding/certificate rollups, keeps unknown certificates visually distinct from healthy certificates, and opens existing Entities/Findings tabs with backend-provided filter hints.
+  - crt.sh intel snapshots now preserve bounded certificate rows and expiry dates when the public service responds, while temporary crt.sh timeouts and 5xx responses are surfaced as upstream outages instead of implying a target has no certificate data.
+  - **Tests:** focused backend, route, browser-module, and Playwright coverage verifies the payload skeleton, host-to-domain/IP mapping, Atlas entity identity, review/suppression/verification rollups, certificate status buckets, recent-change states, deep-link hint shape, populated target rollups, route-level 404s, team-scope access, Overview tab rendering, desktop/mobile Overview smoke paths, deep-link filter actions, suppressed-target exclusion, and cross-scope protection.
+
+- **Bounded change windows for Project digests** — Scheduled Project digest notifications now summarize only the monitoring changes in the selected digest window while keeping the current dashboard summary unchanged.
   - The summary route accepts `window_start` and `window_end` ISO datetimes and returns `digest_window` metadata plus changed, recovered, failed, severity, top-change, and link fields for only watcher fires in that window.
   - **Tests:** focused service and route coverage verifies windowed summaries exclude older fires, preserve current summary behavior, and normalize route query timestamps.
 

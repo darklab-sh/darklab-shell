@@ -130,10 +130,12 @@ var exportedDarklabProjectWorkspaceLifecycle = null;
           total
         });
         seedListSummaries(rows);
+        ctx.invalidateProjectTargetPage?.();
         ctx.invalidateProjectFindings();
         ctx.invalidateProjectRuns?.();
         ctx.invalidateProjectEntities?.();
         ctx.invalidateProjectArtifacts?.();
+        ctx.invalidateProjectOverview?.();
         ctx.invalidateProjectMonitoring?.();
         ensureSelectedProject();
         if (ctx.workspaceTab?.() !== "details") {

@@ -49,14 +49,14 @@ describe('frontend browser global boundary inventory', () => {
   const EXPECTED_BOUNDARY_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
       intentional_bootstrap: 2,
-      lazy_placeholder: 68,
+      lazy_placeholder: 69,
       module_api_bridge: 35,
       test_hook: 3,
       compatibility_export: 0,
     }),
     window_property_read_purposes: Object.freeze({
       intentional_bootstrap: 2,
-      lazy_placeholder: 12,
+      lazy_placeholder: 13,
       module_api_bridge: 2,
       vendor_global: 6,
       compatibility_read: 0,

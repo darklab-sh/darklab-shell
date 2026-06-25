@@ -648,7 +648,8 @@ var exportedDarklabProjectMobileDetail = null;
         return;
       }
       const projectId = String(project.id || ctx.selectedProjectId() || "");
-      if (ctx.projectWorkspaceTab() === "runs") ctx.projectMobileDetailBody.appendChild(renderRunsTab(projectId, summary));
+      if (ctx.projectWorkspaceTab() === "overview") ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileOverviewTab(projectId, summary));
+      else if (ctx.projectWorkspaceTab() === "runs") ctx.projectMobileDetailBody.appendChild(renderRunsTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === "entities") ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileEntitiesTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === "findings") ctx.projectMobileDetailBody.appendChild(renderFindingsTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === "artifacts") ctx.projectMobileDetailBody.appendChild(renderArtifactsTab(projectId, summary));

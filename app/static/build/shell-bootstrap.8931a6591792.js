@@ -422,6 +422,7 @@ var exportedLoadMobileRunningIndicator = null;
     if (name === "atlas_mobile") return { url: "/static/js/features/atlas/atlas_mobile.js", type: "module" };
     if (name === "findings_board") return { url: "/static/js/features/findings/findings_board_modal.js", type: "module" };
     if (name === "project_activity") return { url: "/static/js/features/projects/project_activity.js", type: "module" };
+    if (name === "project_overview") return { url: "/static/js/features/projects/project_overview.js", type: "module" };
     if (name === "project_monitoring") return { url: "/static/js/features/projects/project_monitoring.js", type: "module" };
     if (name === "project_artifacts") return { url: "/static/js/features/projects/project_artifacts.js", type: "module" };
     if (name === "project_details") return { url: "/static/js/features/projects/project_details.js", type: "module" };
@@ -724,6 +725,10 @@ var exportedLoadMobileRunningIndicator = null;
   async function loadProjectActivity() {
     const activityModule = await loadLazyAsset("project_activity");
     return _requireLazyModuleExport(activityModule, "DarklabProjectActivity", (value) => value && typeof value.createProjectActivityController === "function");
+  }
+  async function loadProjectOverview() {
+    const overviewModule = await loadLazyAsset("project_overview");
+    return _requireLazyModuleExport(overviewModule, "DarklabProjectOverview", (value) => value && typeof value.createProjectOverviewController === "function");
   }
   async function loadProjectMonitoring() {
     const monitoringModule = await loadLazyAsset("project_monitoring");
@@ -1332,6 +1337,7 @@ var exportedLoadMobileRunningIndicator = null;
   window.loadAtlasOverlay = loadAtlasOverlay;
   window.loadFindingsBoard = loadFindingsBoard;
   window.loadProjectActivity = loadProjectActivity;
+  window.loadProjectOverview = loadProjectOverview;
   window.loadProjectMonitoring = loadProjectMonitoring;
   window.loadProjectArtifacts = loadProjectArtifacts;
   window.loadProjectWorkspace = loadProjectWorkspace;
@@ -5473,6 +5479,7 @@ var importedProjectMobileShell;
 var importedProjectMonitoring;
 var importedProjectNavigation;
 var importedProjectNestedSheets;
+var importedProjectOverview;
 var importedProjectPackages;
 var importedProjectReport;
 var importedProjectRuns;
@@ -6942,6 +6949,8 @@ var importedProjectWorkspaceShell;
   let projectReportControllerPromise = null;
   let projectActivityController = null;
   let projectActivityControllerPromise = null;
+  let projectOverviewController = null;
+  let projectOverviewControllerPromise = null;
   let projectMonitoringController = null;
   let projectMonitoringControllerPromise = null;
   function _projectActivityController() {
@@ -6976,6 +6985,47 @@ var importedProjectWorkspaceShell;
       projectActivityControllerPromise = null;
     });
     return projectActivityControllerPromise;
+  }
+  function _projectOverviewController() {
+    if (projectOverviewController) return projectOverviewController;
+    const projectOverview = _projectModule("DarklabProjectOverview", importedProjectOverview);
+    const factory = projectOverview && projectOverview.createProjectOverviewController;
+    if (typeof factory !== "function") throw new Error("DarklabProjectOverview is unavailable");
+    projectOverviewController = factory({
+      projectWorkspaceRequest: _projectWorkspaceRequest,
+      projectResponseError: _projectResponseError,
+      formatDate: _formatProjectDate,
+      makeProjectButton: _makeProjectButton,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      emptyProjectPanel: _emptyProjectPanel,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      setProjectWorkspaceTab: projectWorkspaceState.setTab,
+      projectTargetFilterSet: _projectTargetFilterSet,
+      projectRunFilterSet: _projectRunFilterSet,
+      projectFindingSeverityFilterSet: _projectFindingSeverityFilterSet,
+      projectFindingStatusFilterSet: _projectFindingStatusFilterSet,
+      setProjectFindingOrphanFilter: (projectId, value) => _projectFiltersController().setFindingOrphanFilter(projectId, value),
+      invalidateProjectFilteredFindings: _invalidateProjectFilteredFindings,
+      logClientError: _shellLogClientError,
+      mobileView: () => _projectMobileShellController().currentView()
+    });
+    return projectOverviewController;
+  }
+  function _projectOverviewControllerIfReady() {
+    return projectOverviewController || null;
+  }
+  function _loadProjectOverviewController() {
+    if (projectOverviewController) return Promise.resolve(projectOverviewController);
+    if (projectOverviewControllerPromise) return projectOverviewControllerPromise;
+    const loader = global.loadProjectOverview;
+    projectOverviewControllerPromise = (typeof loader === "function" ? loader() : Promise.resolve()).then((namespace) => {
+      if (namespace) importedProjectOverview = namespace;
+      return _projectOverviewController();
+    }).finally(() => {
+      projectOverviewControllerPromise = null;
+    });
+    return projectOverviewControllerPromise;
   }
   function _projectMonitoringController() {
     if (projectMonitoringController) return projectMonitoringController;
@@ -7411,6 +7461,7 @@ var importedProjectWorkspaceShell;
       renderProjectList: _renderProjectList,
       renderProjectMobile: _renderProjectMobile,
       renderProjectActivity: _renderProjectActivity,
+      renderProjectOverview: _renderProjectOverview,
       renderProjectMonitoring: _renderProjectMonitoring,
       renderProjectPackages: _renderProjectPackages,
       renderProjectPackageWizardModal: _renderProjectPackageWizardModal,
@@ -7502,6 +7553,7 @@ var importedProjectWorkspaceShell;
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectWorkspace: _renderProjectWorkspace,
       invalidateProjectTargetPage: (projectId) => _projectDetailsController().invalidateTargetPage(projectId),
+      invalidateProjectOverview: (projectId = "") => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       loadProjectTargetPage: (projectId, options) => _projectDetailsController().loadTargetPage(projectId, options),
       renderProjectMobileDetail: _renderProjectMobileDetail,
       loadProjectAutocompleteTargets: () => {
@@ -7676,6 +7728,7 @@ var importedProjectWorkspaceShell;
       renderProjectMobileDetailTopbar: _renderProjectMobileDetailTopbar,
       renderProjectMobileTabs: _renderProjectMobileTabs,
       renderProjectMobileEntitiesTab: (projectId, summary) => _projectEntitiesController().renderMobileEntitiesTab(projectId, summary),
+      renderProjectMobileOverviewTab: _renderProjectMobileOverviewTab,
       renderProjectMobilePackagesTab: _renderProjectMobilePackagesTab,
       renderProjectMobileReportTab: _renderProjectMobileReportTab,
       renderProjectMobileActivityTab: _renderProjectMobileActivityTab,
@@ -7752,8 +7805,10 @@ var importedProjectWorkspaceShell;
       loadActiveProjectContext,
       invalidateProjectFindings: _invalidateProjectFindings,
       invalidateProjectRuns: _invalidateProjectRuns,
+      invalidateProjectTargetPage: (projectId) => _projectDetailsController().invalidateTargetPage(projectId),
       invalidateProjectEntities: (projectId = "") => _projectEntitiesController().invalidate(projectId),
       invalidateProjectArtifacts: (projectId = "") => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectOverview: (projectId = "") => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectMonitoring: (projectId = "") => _projectMonitoringControllerIfReady()?.invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,
       syncProjectNotesForm: _syncProjectNotesForm,
@@ -7797,6 +7852,7 @@ var importedProjectWorkspaceShell;
       findingTriageEditor: _shellValue("DarklabFindingTriageEditor"),
       flushProjectNotesAutosave: _flushProjectNotesAutosave,
       invalidateProjectFindings: _invalidateProjectFindings,
+      invalidateProjectOverview: (projectId = "") => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       isProjectWorkspaceOpen: isProjectWorkspaceOpen3,
       linkLastRunToProject: _linkLastRunToProject,
       ensureProjectSummary: _ensureProjectSummary,
@@ -8630,6 +8686,21 @@ var importedProjectWorkspaceShell;
       container.replaceChildren(_emptyProjectPanel("Could not load project activity."));
     });
   }
+  function _renderProjectOverview(container, projectId, summary) {
+    if (projectOverviewController) {
+      projectOverviewController.renderOverview(container, projectId, summary);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel("Loading project overview..."));
+    _loadProjectOverviewController().then((controller) => {
+      if (!container.isConnected || projectWorkspaceState.tab() !== "overview") return;
+      controller.renderOverview(container, projectId, summary);
+    }).catch((err) => {
+      _shellLogClientError("failed to load project overview", err);
+      if (!container.isConnected) return;
+      container.replaceChildren(_emptyProjectPanel("Could not load project overview."));
+    });
+  }
   function _renderProjectMonitoring(container, projectId, summary) {
     if (projectMonitoringController) {
       projectMonitoringController.renderMonitoring(container, projectId, summary);
@@ -8725,6 +8796,19 @@ var importedProjectWorkspaceShell;
     }).catch((err) => {
       _shellLogClientError("failed to load mobile project activity", err);
       if (panel.isConnected) panel.replaceChildren("Could not load project activity.");
+    });
+    return panel;
+  }
+  function _renderProjectMobileOverviewTab(projectId, summary) {
+    if (projectOverviewController) return projectOverviewController.renderMobileOverviewTab(projectId, summary);
+    const panel = _emptyProjectPanel("Loading project overview...");
+    _loadProjectOverviewController().then(() => {
+      if (projectWorkspaceState.tab() === "overview" && _projectMobileShellController().currentView() === "detail") {
+        _renderProjectMobileDetail();
+      }
+    }).catch((err) => {
+      _shellLogClientError("failed to load mobile project overview", err);
+      if (panel.isConnected) panel.replaceChildren("Could not load project overview.");
     });
     return panel;
   }

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,806
+- behavior tests: 3,821
 - docs/inventory meta-tests: 40
-- `pytest`: 2159 (2124 behavior + 35 meta)
-- `vitest`: 1421 (1416 behavior + 5 meta)
-- `playwright`: 266 behavior
-- total: 3,846
+- `pytest`: 2169 (2134 behavior + 35 meta)
+- `vitest`: 1424 (1419 behavior + 5 meta)
+- `playwright`: 268 behavior
+- total: 3,861
 
 This document is organized in two parts:
 
@@ -509,6 +509,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPackagePresetCatalog.test_package_preset_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator package preset overrides log a warning and fall back to the shipped catalog. |
 | `TestPackagePresetCatalog.test_package_preset_loader_caps_display_lengths_and_default_labels` | Verifies package preset display text and default labels are bounded. |
 | `TestPackagePresetCatalog.test_package_preset_loader_rejects_too_many_presets` | Verifies package preset catalogs reject more entries than the configured catalog cap. |
+| `TestProjectOverviewContract.test_payload_contract_and_overview_helpers_pin_phase_one_decisions` | Verifies the Project overview payload skeleton, certificate buckets, and severity order match the Phase 1 contract. |
+| `TestProjectOverviewContract.test_finding_rollup_uses_review_suppression_and_verification_axes` | Verifies overview finding rollups keep review state, suppression, and verification state as distinct axes. |
+| `TestProjectOverviewContract.test_target_identity_uses_existing_atlas_entity_contract` | Verifies overview target identity follows the existing Atlas entity contract and host-to-domain/IP canonicalization. |
+| `TestProjectOverviewContract.test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects` | Verifies overview recent-change states and deep-link hints use existing monitoring and filter contracts. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, and deep-link rollups. |
+| `TestProjectOverviewContract.test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows` | Verifies Project Overview certificate status uses crt.sh's latest expiry instead of old historical certificate rows. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_respects_scope_and_suppression` | Verifies the Project overview aggregator excludes suppressed targets and does not expose out-of-scope Project data. |
 | `TestReportTemplateCatalog.test_default_report_template_sections_match_plan` | Verifies the shipped report template catalog keeps the configured report section order. |
 | `TestReportTemplateCatalog.test_report_template_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator report template overrides log a warning and fall back to the shipped catalog. |
 | `TestReportTemplateCatalog.test_report_draft_storage_handles_scope_and_conflicts` | Verifies report draft storage keeps personal/team drafts separate and rejects stale saves. |
@@ -630,6 +637,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_json_api_client_rejects_cross_origin_redirects_before_forwarding_secrets` | Verifies app-native intel HTTPS clients stop cross-origin redirects before provider API-key headers can be forwarded. |
 | `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
 | `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
+| `TestIntelServices.test_crtsh_provider_reports_transient_upstream_failures` | Verifies crt.sh 5xx and timeout-style failures are surfaced as temporary upstream outages. |
 | `TestIntelServices.test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized` | Verifies Team Cymru DNS origin and ASN-description records normalize into rendered ownership fields. |
 | `TestIntelServices.test_fofa_accepts_api_key_alias_and_zoomeye_uses_regional_api_key_auth` | Verifies FOFA accepts the `FOFA_API_KEY` alias and ZoomEye uses regional API-key authentication. |
 | `TestIntelServices.test_new_intel_provider_modules_normalize_payloads` | Verifies URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews provider modules normalize representative payloads and request contracts. |
@@ -1592,7 +1600,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestTeamRoutes.test_active_team_scope_shares_projects_and_team_run_links` | Verifies active team scope shares Projects and team-owned run links with team members, finalizes team runs into team Projects, and keeps personal Projects isolated. |
 | `TestTeamRoutes.test_project_slugs_are_unique_inside_personal_and_team_scopes` | Verifies one token can reuse the same Project slug in personal and team scopes while duplicates still suffix inside each scope. |
 | `TestTeamRoutes.test_team_run_rewrites_workspace_paths_against_team_workspace` | Verifies team-scoped run startup rewrites workspace flags against the team workspace and redacts hashed team paths from streamed output. |
-| `TestTeamRoutes.test_active_team_scope_shares_cross_member_project_entities_and_findings` | Verifies team Project counts, summaries, entities, and findings include rows created by another team member's team-owned run. |
+| `TestTeamRoutes.test_active_team_scope_shares_cross_member_project_entities_and_findings` | Verifies team Project counts, summaries, overview rows, entities, and findings include rows created by another team member's team-owned run. |
 | `TestTeamRoutes.test_active_team_scope_shares_project_artifacts_and_packages` | Verifies active team scope shares Project artifacts, evidence packages, and package build jobs across team members while preserving creator attribution and owner-workspace file access. |
 | `TestTeamRoutes.test_team_scope_shares_workspace_files_and_metadata` | Verifies team Files routes share team workspace files, labels, notes, read/download access, moves, and deletes across members while preserving personal isolation and non-member denial. |
 | `TestTeamRoutes.test_team_workspace_viewers_and_archived_teams_are_read_only` | Verifies team viewers and archived teams can read and download team Files while write, move, delete, and create operations are denied. |
@@ -1609,6 +1617,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestNotificationChannelRoutes.test_notification_event_audit_route_lists_session_channel_deliveries` | Verifies the browser notification delivery audit route returns only the active session's channel events and includes Project digest audit context. |
 | `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
 | `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses, removes all channel-owned vault secrets, and records a config-change audit row without secret values. |
+| `TestProjectRoutes.test_project_overview_route_returns_empty_contract_and_404_for_foreign_project` | Verifies the Project overview route returns an empty overview contract for in-scope Projects and 404s out-of-scope Projects. |
+| `TestProjectRoutes.test_project_overview_route_returns_target_rollup_and_existing_filter_hints` | Verifies the Project overview route returns target rollups and deep-link hints that round-trip through existing Entities and Findings filters. |
 | `TestProjectRoutes.test_project_package_and_link_routes_record_audit_events` | Verifies project link/unlink and package create/delete routes record bounded audit events. |
 | `TestProjectRoutes.test_project_activity_route_lists_personal_safe_events_and_filters` | Verifies personal Project Activity returns scoped, filtered, user-safe audit rows without leaking matching team rows. |
 | `TestProjectRoutes.test_project_monitoring_route_returns_scoped_watchers_and_missing_run_state` | Verifies the Project Monitoring route returns scoped watcher cards and marks missing baseline runs without breaking timeline rows. |
@@ -3225,6 +3235,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resets monitoring filters and retries after load errors` | Verifies Project Monitoring reset and retry controls clear filter/error state and reload dashboard data after a failed request. |
 | `updates monitoring fire triage state with the row note` | Verifies Project Monitoring triage actions send the selected acknowledgement state and row note through the project-scoped fire update route. |
 
+#### `project_overview.test.js`
+
+| Test | Description |
+| --- | --- |
+| `loads and renders bounded target overview rows with rollups` | Verifies Project Overview loads the scoped endpoint and renders target rollups, ports, services, certificate badges, severity chips, and provider highlights. |
+| `uses existing Project filters when target actions open Entities and Findings` | Verifies Project Overview target actions switch to existing Entities/Findings tabs while applying the backend-provided filter hints through the current Project filter sets. |
+| `renders mobile overview rows and re-renders mobile detail when actions use hints` | Verifies Project Overview renders the mobile stacked layout and keeps target action deep-links on the mobile detail surface with the same backend-provided filter hints. |
+
 #### `project_report.test.js`
 
 | Test | Description |
@@ -4255,6 +4273,13 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `save-txt button shows a toast when there is no output to export` | Verifies that save-txt button shows a toast when there is no output to export. |
 | `shows only when scrolled off tail and swaps from live to bottom state` | Verifies that shows only when scrolled off tail and swaps from live to bottom state. |
 | `scoped search jumps between warnings and errors` | Verifies that the scoped search controls and signal chips jump between warning and error matches in the live transcript. |
+
+#### `project-overview.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `renders a populated desktop Overview and deep-links to filtered Findings` | Verifies that the Project Overview tab renders rollups, target chips, highlights, and sends the existing target/severity filters when opening Findings. |
+| `renders the Overview tab inside the mobile project detail sheet` | Verifies that the mobile Projects detail sheet can render the Overview tab with the same target chips and target action controls. |
 
 #### `rate-limit.spec.js`
 

@@ -7,6 +7,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -19,7 +20,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
-  - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Architecture](#architecture)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
@@ -30,17 +30,257 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Project-scoped target intelligence overview
+
+A read-first engagement console for a project: roll up hosts, ports, services, cert
+expirations, top findings by severity, and provider-enriched context per target so an
+operator can understand the current attack surface before drilling into individual runs,
+Atlas rows, or findings. This is the pull surface that complements the attack-surface delta
+digest notifications (which only say *that* the surface changed). It is primarily an
+aggregation + read layer over data that already exists — reuse, not new subsystems.
+
+Data sources to join (all already present):
+- Linked Atlas target entities via `_project_atlas_entity_select_sql(target_only=True)` and
+  `list_project_entities` in `app/services/projects/queries.py`.
+- Intel provider snapshots from `entity_intel_snapshots`, summarized through
+  `summarize_intel_snapshots` in `app/services/atlas/lookup.py` (cert expiry, open ports,
+  services, provider highlights).
+- Findings rollup via `_project_finding_summary_rows` / `list_project_findings` in
+  `app/services/projects/findings.py`.
+- Monitoring/delta context via `get_project_monitoring_summary` in
+  `app/services/projects/monitoring.py` (recent attack-surface changes per target).
+- Target relationships and review state already exposed by `get_project_summary`.
+
+#### Open Decisions
+
+- **Target identity for v1.**
+  - Recommended decision: build overview rows from Project targets plus linked Atlas target
+    entities, merged by the existing Atlas `entity_id`. Do not add a parallel `target_key`
+    dialect; the Project target path already canonicalizes with `canonical_entity(...)`,
+    deduplicates with `entity_signature(...)`, and materializes targets through
+    `upsert_entity(...)`. Keep a human-readable `type:value` value only as a display label or
+    fallback for degraded data.
+  - Type-vocabulary mismatch to resolve in Phase 1: `PROJECT_TARGET_TYPES` is
+    `{domain, url, host, ip}` while Atlas `ENTITY_TYPES` is `{ip, domain, hash, cve, url}`, and
+    the project Atlas-target filter (`_project_atlas_entity_select_sql(target_only=True)`) is
+    further restricted to `domain/ip/url`. There is no `cidr` target type today. Pin and test
+    the existing `host` mapping from `_canonical_target_payload`: IP-like host values become
+    Atlas `ip` entities, and other host values become Atlas `domain` entities.
+  - Phase 1 should also define the `target_id` filter contract explicitly: overview
+    deep-links should pass the Atlas `entity_id`, which is also the Project target identifier
+    exposed by current target rows. Legacy finding `target_id` fields may still match through
+    existing `COALESCE(f.entity_id, f.target_id)` filters, but the overview should not invent
+    another identifier.
+- **Severity and review-state semantics.**
+  - Recommended decision: show the highest-severity finding that is not suppressed and not
+    marked `false_positive` as the default target severity, while carrying counts broken down
+    by the real `FINDING_REVIEW_STATES` (`new`, `reviewed`, `important`, `needs_followup`,
+    `false_positive`) plus the separate `suppressed` flag, so reviewers can understand why a
+    target looks quiet. (There is no `accepted-risk` or `resolved` review state.)
+  - Use the same severity vocabulary and ordering as `findingSeverityRank` in
+    `project_workspace_constants.js` so the backend aggregator and browser sort/display logic
+    agree on what "highest severity" means.
+  - Open question for Phase 1: finding review state and `FINDING_VERIFICATION_STATES`
+    (`not_started`…`verified`…`not_applicable`) are distinct axes in `contracts.py`. Decide
+    whether the overview's "quieting" logic and counts key off review state, verification
+    state, or both.
+- **Certificate expiry thresholds.**
+  - Recommended decision: use `expired`, `<=14 days`, `<=30 days`, `healthy`, and a distinct
+    `unknown/no-data` bucket for the first version. Keep the raw expiry timestamp and derived
+    `days_until_expiry` in the payload so the UI can sort and label without recalculating, and
+    never render missing certificate intel as healthy.
+- **Recent-change window.**
+  - Recommended decision: use the same bounded Project Monitoring window semantics as digest
+    notifications when a digest window exists, and fall back to the latest watcher-fire
+    context when no successful digest window has been established yet. If neither digest nor
+    watcher context exists, omit or disable the recent-change rollup instead of showing
+    `0 changes`.
+- **Deep-link filter contract.**
+  - Recommended decision: define backend-provided filter hints for each target row using the
+    existing query params, not a new filter language. For v1, populate Findings links with
+    `target_id` and optional `review_state`/`severity`, and Entities links with `target_id` or
+    `run_id` where applicable. Those hints should carry the same Atlas `entity_id` used as the
+    overview merge identity and should validate through `_project_entity_filter_clause` and
+    the Findings filter SQL.
+
+#### Phase 1 — Contract and source mapping — Complete
+
+- Define the stable payload shape and version before writing UI:
+  `{ project, generated_at, payload_version, targets: [...], rollups: {...},
+  recent_changes: [...] }`.
+- Define the canonical row identity (`entity_id`), display label, target type, source flags,
+  and merge rules for Project targets, Atlas target entities, findings, intel snapshots, and
+  monitoring rows.
+- Define `host` target canonicalization as a required mapping: IP-like `host` values resolve
+  to Atlas `ip` entities, all other valid `host` values resolve to Atlas `domain` entities,
+  and no `cidr` target row is introduced.
+- Define the `target_id` deep-link/filter meaning as Atlas `entity_id`; document that current
+  Project target row IDs already use that value, and that legacy findings are only supported
+  through existing `COALESCE(f.entity_id, f.target_id)` filters.
+- Define display fallback behavior for legacy or degraded data without an `entity_id`, keeping
+  fallback `type:value` labels display-only and out of merge/filter identity.
+- Define the finding rollup contract: top severity is the highest non-suppressed,
+  non-`false_positive` finding; counts include every `FINDING_REVIEW_STATES` value plus the
+  separate `suppressed` count.
+- Decide whether verification-state counts are included in the first payload. If included,
+  keep them under a distinct `finding_counts_by_verification_state` field instead of mixing
+  them with review-state counts.
+- Define the backend severity order from the same vocabulary as `findingSeverityRank`
+  (`critical`, `high`, `medium`, `low`, `info`) so backend and browser ranking cannot drift.
+- Define certificate status as `expired`, `expiring_14d`, `expiring_30d`, `healthy`, or
+  `unknown`, with `unknown` used for missing/no-data certificate intel.
+- Define target row limits, per-target highlight limits, stale/missing provider behavior, and
+  deterministic sort order for large projects.
+- Define empty and degraded states for projects with no targets, targets with no intel,
+  findings without provider data, stale provider snapshots, missing certificate data, and
+  monitoring data with deleted run references.
+- Define recent-change states separately for `windowed`, `watcher-context-only`, and
+  `not-monitored` projects so an unmonitored project never looks like a monitored project with
+  zero changes.
+- Define target deep-link filter hints as existing endpoint query params: Findings hints may
+  include `target_id`, `review_state`, and `severity`; Entities hints may include `target_id`
+  and `run_id`. Do not create a new filter syntax.
+- Add focused contract tests for Atlas entity identity, host-to-domain/IP mapping,
+  duplicate-source merging, payload bounds, empty states, no-window/no-watcher monitoring
+  states, certificate `unknown` vs `healthy`, severity ordering, deep-link filter params, and
+  cross-scope exclusion.
+
+#### Phase 2 — Backend aggregator implementation — Complete
+
+- Add `get_project_intel_overview(session_id, project_id, *, team_id="")` to
+  `app/services/projects/queries.py` (or a new `app/services/projects/overview.py` if the
+  join logic grows past ~150 lines).
+- Return the Phase 1 payload shape. Each target row carries host/value, canonical
+  `entity_id`, display label, target type, target review state, source flags, open ports +
+  services, cert expiry with a `days_until_expiry` derived field and an explicit
+  `unknown/no-data` state, top finding severity ranked with the shared severity order, finding
+  counts by review state and suppression state, `summarize_intel_snapshots` highlights,
+  recent-change markers, and deep-link filter hints populated with existing filter params.
+- Build overview rows by Atlas `entity_id`: start with linked Project target entities,
+  include explicitly linked Atlas-only target entities in the same owner scope, and join intel
+  snapshots, findings, and monitoring context back to that same ID.
+- Reuse `canonical_entity(...)`, `entity_signature(...)`, and target materialization behavior
+  instead of rebuilding URL/domain/IP normalization inside the overview aggregator.
+- Keep certificate `unknown` separate from healthy in rollups, row badges, and sorting.
+- Return recent-change state metadata so the UI can distinguish `windowed`,
+  `watcher-context-only`, and `not-monitored` without guessing from empty arrays.
+- Populate deep-link hints server-side with Atlas `entity_id` filter params that already work
+  with `_project_entity_filter_clause` and the Findings filter SQL.
+- Reuse existing owner/scope clauses (`shared_owner_where`, `_project_entity_owner_clause`)
+  so team-mode and session scoping stay identical to the rest of the workspace.
+- Bound the result the same way `get_project_summary` does (target `LIMIT`, capped highlight
+  counts) so large engagements don't produce unbounded payloads.
+- Unit-test the aggregator against a seeded project with mixed targets, expiring/expired
+  certs, duplicate target sources, suppressed entities, stale/missing intel snapshots, and
+  findings across severities, review states, suppression states, and verification states.
+
+#### Phase 3 — HTTP endpoint — Complete
+
+- Add `GET /projects/<project_id>/overview` to `app/blueprints/projects.py`, following the
+  exact `_project_owner()` + `_project_json_or_404` pattern used by `projects_summary`.
+- Return 404 for missing/out-of-scope projects; never leak cross-session data.
+- Add blueprint-level tests covering owner scoping, team scope, empty project, and the
+  populated shape.
+- Add route tests proving `target_id` deep-link hints use linked Atlas entity IDs, reject
+  out-of-scope entities, and round-trip through the existing Entities/Findings filter params.
+- Add route coverage for projects with no monitoring window and no watcher context so the API
+  exposes `not-monitored` instead of a false zero-change state.
+
+#### Phase 4 — Workspace tab (desktop) — Complete
+
+- Register an `overview` tab in both tab-list definitions in
+  `app/static/js/features/projects/project_navigation.js` (place it right after `details`).
+- Add a new feature module `app/static/js/features/projects/project_overview.js` exporting
+  `renderProjectOverview(content, projectId, summary)`; wire it into
+  `app/static/js/features/projects/project_workspace_renderer.js` alongside the other
+  `activeTab === ...` branches.
+- Render with shared workspace primitives (`project_shared_ui.js`) — summary cards for the
+  rollups, then a per-target table/list with severity, ports/services, cert-expiry badge,
+  and a provider-highlight chip. No one-off CSS/markup; extend shared helpers if a primitive
+  is missing.
+- Fetch lazily on first activation (mirror the `loadProjectFindings` pattern) and cache on
+  the workspace state object; refresh on project switch.
+- Render explicit empty/degraded states for no targets, no intel yet, missing cert data, stale
+  provider data, and no findings.
+- Render healthy certificate status separately from unknown/no-data, and avoid green/clean
+  styling for missing provider intel.
+- Render recent-change rollups only when the payload reports `windowed` or
+  `watcher-context-only`; show a neutral not-monitored state when that is the contract value.
+- Use the backend-provided deep-link filter hints for Entities and Findings tab actions.
+  Treat those hints as existing endpoint query params populated by the backend, not browser-side
+  target matching logic.
+
+#### Phase 5 — Mobile + cross-surface polish — Complete
+
+- Cover the overview in the mobile shell (`project_mobile_detail.js` / mobile tab list) with
+  one-handed-friendly stacked cards; reuse the same fetch/state path as desktop.
+- Make each target row deep-link into the existing Entities/Findings tabs filtered to that
+  target so the overview is a launchpad, not a dead end.
+- Preserve the same backend-provided filter hints and certificate/recent-change states in the
+  mobile layout; do not fork mobile-specific target matching or status rules.
+- Surface the cert-expiry and recent-change rollups as the natural follow-through from a
+  delta digest notification (link target where a digest deep-link already lands).
+
+#### Phase 6 — Tests, docs, and release polish — Complete
+
+- Add focused Playwright coverage for one populated desktop path, one mobile smoke path, and
+  one target→Findings deep-link. Keep exhaustive empty/degraded state coverage in backend and
+  Vitest tests unless the browser behavior itself becomes the risk.
+- Add backend/Vitest coverage for the decision-heavy cases: Atlas `entity_id` identity,
+  host-to-domain/IP mapping, severity rank parity, certificate unknown vs healthy, no-monitoring
+  recent-change state, and existing-query-param deep-link hints.
+- Update FEATURES/ARCHITECTURE/README for the new tab and endpoint, add a CHANGELOG entry,
+  and update the frontend inventory allowlist for the new JS module.
+- Update the documented test counts in all the tracked locations when new tests land.
+
+#### Success Criteria
+
+- The Overview endpoint and UI never leak target, finding, intel, run, or notification context
+  across personal/team scopes.
+- Target rows merge duplicate source records predictably through the existing Atlas `entity_id`.
+- Large projects return bounded payloads with stable ordering and capped per-target highlights.
+- Overview rows show useful empty/degraded states instead of implying missing intel is clean.
+- Certificate status keeps healthy and unknown/no-data targets visually and semantically
+  distinct.
+- Desktop and mobile Overview surfaces render the same data contract with app-consistent
+  project workspace controls.
+- Target rows can launch into Entities and Findings with filters that preserve the selected
+  target through the same Atlas entity identifier used by the overview row.
+- Cert-expiry, top-severity, service/port, provider, and recent-change rollups match the
+  underlying Atlas, finding, intel snapshot, and monitoring data.
+- Official docs describe the Overview tab and endpoint as current behavior, and test counts
+  stay in sync after coverage lands.
 
 ## Known Issues
 
-No known issues are currently tracked.
+- **Replace crt.sh as the primary certificate intel source.**
+  - crt.sh is useful when it responds, but the public JSON endpoint is too prone to timeouts
+    and 5xx responses to be the only source behind Project Overview certificate status.
+  - Find a more reliable provider or app-native collection path for certificate expiry,
+    issuer, subject/SAN, and observed-at data. Candidate directions include reusing
+    `tlsx`/TLS scan output already collected by operators, another passive certificate
+    transparency provider with better availability, or a hybrid where crt.sh is retained as
+    a best-effort enrichment source instead of the primary status source.
+  - Success criteria: Project Overview certificate badges should not depend on crt.sh
+    availability, missing provider data must still render as `unknown` rather than healthy,
+    and provider failures should remain visible as degraded intel instead of silently looking
+    like no certificate data exists.
 
 ---
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Unify terminal `intel` lookups with Atlas intel snapshots.**
+  - The terminal `intel <type> <value>` built-in currently calls provider lookup and renders
+    results, but it does not persist successful provider data into `entity_intel_snapshots`.
+    Atlas modal **Refresh intel** uses a separate persistence path, so Projects -> Overview
+    only sees updated provider data after a modal refresh.
+  - Add a shared persistence helper that can store lookup results for an existing matching
+    Atlas entity in the active personal/team scope. Keep casual terminal lookups from creating
+    new Atlas entities unexpectedly unless that behavior is explicitly designed later.
+  - Success criteria: when a terminal `intel` lookup succeeds for an entity that already
+    exists in Atlas, Atlas detail and Project Overview should show the refreshed provider data
+    without requiring a second manual refresh from the Atlas modal.
 
 ---
 
@@ -140,11 +380,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Tune artifact embedding/listing once provenance and report-created run links are available; screenshot galleries and richer binary handling can stay later work.
   - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
   - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
-
-### Project-scoped target intelligence overview
-- Add a project overview surface that rolls up hosts, ports, services, cert expirations, top findings by severity, and provider-enriched context for each target.
-- Treat the overview as an engagement console: enough context to understand the current attack surface before drilling into individual runs, targets, Atlas rows, or findings.
-- Reuse existing project summaries, Atlas materialization, target relationships, findings, and intel provider snapshots so the overview stays consistent with the rest of the workspace.
 
 ### Native ticketing integrations
 - From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.

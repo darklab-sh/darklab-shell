@@ -45,6 +45,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, packages, and reports without copying the source records.
   - Active projects can auto-link completed runs and the Atlas entities those runs produce. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
   - Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, evidence packages, and readable report exports.
+  - The Overview tab rolls up each target's ports, services, certificate status, cached provider highlights, top finding severity, and recent-change state, with actions that jump into the existing Entities and Findings tabs already filtered to that target.
   - Project views hide suppressed Atlas noise by default and expose paged finding review in list or board form, artifact review, cached entity intel context, metadata editing, project-scoped Atlas exports, and target/finding provenance context.
   - The Monitoring tab shows project-linked watcher checks with status totals, grouped monitor cards, severity and top-signal summaries, filters, current triage state, Run Details and Compare links, safe missing-run states when older baseline or current runs have been deleted, digest notification settings, and a **New monitor** action that opens the watcher form already linked to the project.
   - Evidence packages preserve selected project evidence through operator-configured presets, provenance-aware manifests, import hints, raw transcript pages, cleaner manifest line indexes, polled archive builds, safe audit correlation, raw artifacts, or redacted text/JSON artifact derivatives.
@@ -244,7 +245,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `urlscan-cli` | urlscan.io URL submission, result lookup, and search; requires `URLSCAN_API_KEY` in the encrypted secrets vault |
 | `chaos` | ProjectDiscovery Chaos subdomain lookups; requires `PDCP_API_KEY` in the encrypted secrets vault |
 
-The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye; `intel url <url>` checks URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye use encrypted secrets from the active personal or team scope; FOFA requires `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls require an F-point balance; ZoomEye uses `ZOOMEYE_API_KEY` against the regional `api.zoomeye.ai` API and requires available resource credits; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Shodan InternetDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys.
+The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye; `intel url <url>` checks URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye use encrypted secrets from the active personal or team scope; FOFA requires `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls require an F-point balance; ZoomEye uses `ZOOMEYE_API_KEY` against the regional `api.zoomeye.ai` API and requires available resource credits; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Shodan InternetDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys. crt.sh rows include certificate expiry dates when the public service responds, and temporary crt.sh timeouts or 5xx responses are shown as provider outages instead of implying the domain has no certificate data.
 
 ### Tool Notes
 
@@ -723,6 +724,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
 │   │   │   ├── monitoring.py   # Project Monitoring tab payload, watcher status cards, and fire timeline helpers
+│   │   │   ├── overview.py     # Project overview payload contract, target identity, and status helpers
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
@@ -934,6 +936,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_monitoring.js # Lazy-loaded Project Monitoring filters, grouped cards, policy chips, timeline, run actions, and triage controls
 │   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
 │   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
+│   │       │   │   ├── project_overview.js # Lazy-loaded Project Overview target rollups, cert status, and deep-link actions
 │   │       │   │   ├── project_packages.js # Lazy-loaded evidence package rows, manifest preview, wizard, and download helpers
 │   │       │   │   ├── project_report.js # Lazy-loaded Project Report tab editor, preview, export, and print/PDF helpers
 │   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
@@ -1113,6 +1116,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── kill.spec.js    # kill confirmation and running-tab stop behavior
 │   │   │   ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
 │   │   │   ├── output.spec.js  # copy/clear/save/export behavior
+│   │   │   ├── project-overview.spec.js # Project Overview desktop/mobile smoke and target deep-link coverage
 │   │   │   ├── rate-limit.spec.js # per-session /runs rate limiting
 │   │   │   ├── runner-stall.spec.js   # SSE stall recovery
 │   │   │   ├── search.spec.js  # search/highlight/navigation behavior
@@ -1166,6 +1170,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
 │   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
 │   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
+│   │       ├── project_overview.test.js # Project Overview target rollups, cert badges, and deep-link action coverage
 │   │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
 │   │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
 │   │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage

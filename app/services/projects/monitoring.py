@@ -749,6 +749,7 @@ def get_project_monitoring_summary(
         return None
     summary_payload = {
         "project": payload["project"],
+        "counts": payload["counts"],
         "summary": payload["summary"],
     }
     if "window_summary" in payload:

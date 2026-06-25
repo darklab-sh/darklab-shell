@@ -2777,6 +2777,403 @@ class TestPackagePresetCatalog:
             package_presets.normalize_package_preset_catalog({"presets": raw_presets})
 
 
+class TestProjectOverviewContract:
+    def _project_db(self, monkeypatch, tmp_path):
+        db_path = str(tmp_path / "project-overview.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        database.db_init()
+        return db_path
+
+    def test_payload_contract_and_overview_helpers_pin_phase_one_decisions(self):
+        payload = project_workspace.overview_payload_contract({"id": "prj_overview"})
+
+        assert payload == {
+            "project": {"id": "prj_overview"},
+            "generated_at": "",
+            "payload_version": project_workspace.OVERVIEW_PAYLOAD_VERSION,
+            "targets": [],
+            "rollups": {
+                "target_count": 0,
+                "certificate_statuses": {
+                    "expired": 0,
+                    "expiring_14d": 0,
+                    "expiring_30d": 0,
+                    "healthy": 0,
+                    "unknown": 0,
+                },
+                "finding_severities": {
+                    "critical": 0,
+                    "high": 0,
+                    "medium": 0,
+                    "low": 0,
+                    "info": 0,
+                },
+                "recent_change_state": "not-monitored",
+            },
+            "recent_changes": [],
+        }
+        assert project_workspace.classify_certificate_status(-1) == "expired"
+        assert project_workspace.classify_certificate_status(14) == "expiring_14d"
+        assert project_workspace.classify_certificate_status(30) == "expiring_30d"
+        assert project_workspace.classify_certificate_status(31) == "healthy"
+        assert project_workspace.classify_certificate_status(None, has_certificate_data=False) == "unknown"
+        assert project_workspace.severity_rank("critical") < project_workspace.severity_rank("high")
+        assert project_workspace.severity_rank("info") < project_workspace.severity_rank("unknown")
+        assert project_workspace.OVERVIEW_TARGET_LIMIT == 200
+        assert project_workspace.OVERVIEW_TARGET_HIGHLIGHT_LIMIT == 5
+
+    def test_finding_rollup_uses_review_suppression_and_verification_axes(self):
+        findings = [
+            {"severity": "high", "review_state": "new", "verification_status": "not_started"},
+            {"severity": "critical", "review_state": "false_positive", "verification_status": "verified"},
+            {"severity": "medium", "review_state": "important", "suppressed": True},
+            {"severity": "low", "status": "needs_followup", "verification_state": "needs_retest"},
+        ]
+
+        assert project_workspace.highest_actionable_finding_severity(findings) == "high"
+        counts = project_workspace.finding_state_counts(findings)
+
+        assert counts["by_review_state"] == {
+            "new": 1,
+            "reviewed": 0,
+            "important": 1,
+            "needs_followup": 1,
+            "false_positive": 1,
+        }
+        assert counts["suppressed"] == 1
+        assert counts["by_verification_state"] == {
+            "not_started": 1,
+            "ready_to_verify": 0,
+            "verified": 1,
+            "needs_retest": 1,
+            "not_applicable": 0,
+        }
+
+    def test_target_identity_uses_existing_atlas_entity_contract(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_contract", {"name": "Overview Contract"})
+        assert project is not None
+
+        host_ip = project_workspace.add_project_target(
+            "tok_overview_contract",
+            project["id"],
+            {"type": "host", "value": "192.0.2.25"},
+        )
+        assert host_ip is not None
+        host_domain = project_workspace.add_project_target(
+            "tok_overview_contract",
+            project["id"],
+            {"type": "host", "value": "Api.Example.COM"},
+        )
+        assert host_domain is not None
+        duplicate_domain = project_workspace.add_project_target(
+            "tok_overview_contract",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert duplicate_domain is not None
+        foreign_project = project_workspace.create_project("tok_overview_foreign", {"name": "Foreign Contract"})
+        assert foreign_project is not None
+        foreign_domain = project_workspace.add_project_target(
+            "tok_overview_foreign",
+            foreign_project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert foreign_domain is not None
+
+        assert host_ip["type"] == "ip"
+        assert host_ip["value"] == "192.0.2.25"
+        assert host_domain["type"] == "domain"
+        assert host_domain["value"] == "api.example.com"
+        assert duplicate_domain["id"] == host_domain["id"]
+        assert foreign_domain["id"] != host_domain["id"]
+        with database.db_connect() as conn:
+            rows = conn.execute(
+                "SELECT e.id, e.type, e.canonical_value, l.entity_id "
+                "FROM entities e JOIN project_links l ON l.entity_id = e.id "
+                "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+                "ORDER BY e.type, e.canonical_value",
+                (project["id"],),
+            ).fetchall()
+
+        assert [(row["id"], row["entity_id"]) for row in rows] == [
+            (host_domain["id"], host_domain["id"]),
+            (host_ip["id"], host_ip["id"]),
+        ]
+        target_page = project_workspace.list_project_targets(
+            "tok_overview_contract",
+            project["id"],
+            limit=10,
+        )
+        assert target_page is not None
+        targets = target_page["targets"]
+        assert {target["id"] for target in targets} == {host_domain["id"], host_ip["id"]}
+        assert project_workspace.overview_identity_for_target_payload(
+            {"type": "host", "value": "192.0.2.25"}
+        ) == {
+            "entity_type": "ip",
+            "canonical_value": "192.0.2.25",
+            "display_label": "ip:192.0.2.25",
+        }
+        assert project_workspace.overview_identity_for_target_payload(
+            {"type": "host", "value": "Api.Example.COM"}
+        ) == {
+            "entity_type": "domain",
+            "canonical_value": "api.example.com",
+            "display_label": "domain:api.example.com",
+        }
+        with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, host, or ip"):
+            project_workspace.add_project_target(
+                "tok_overview_contract",
+                project["id"],
+                {"type": "cidr", "value": "192.0.2.0/24"},
+            )
+
+    def test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects(self):
+        assert project_workspace.classify_recent_change_state({
+            "digest_window": {"start": "2026-06-24T00:00:00Z"},
+            "window_summary": {},
+        }) == "windowed"
+        assert project_workspace.classify_recent_change_state({
+            "monitors": [{"id": "mon_1"}],
+            "timeline": [],
+        }) == "watcher-context-only"
+        assert project_workspace.classify_recent_change_state({
+            "counts": {"active": 1, "changed": 0, "failed": 0, "quiet": 0, "paused": 0},
+            "summary": {"top_changes": []},
+        }) == "watcher-context-only"
+        assert project_workspace.classify_recent_change_state({
+            "summary": {
+                "changed_monitor_count": 1,
+                "recovered_monitor_count": 0,
+                "failed_monitor_count": 0,
+                "top_changes": [{"fire_id": "fire_1"}],
+            },
+        }) == "watcher-context-only"
+        assert project_workspace.classify_recent_change_state({"monitors": [], "timeline": []}) == "not-monitored"
+
+        assert project_workspace.target_deep_link_hints(
+            "ent_overview",
+            run_id="run_overview",
+            review_state="new",
+            severity="high",
+        ) == {
+            "entities": {"target_id": "ent_overview", "run_id": "run_overview"},
+            "findings": {
+                "target_id": "ent_overview",
+                "orphan_filter": "all",
+                "review_state": "new",
+                "severity": "high",
+            },
+        }
+
+    def test_get_project_intel_overview_returns_bounded_target_rollups(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_rollup", {"name": "Overview Rollup"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_rollup",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        quiet_target = project_workspace.add_project_target(
+            "tok_overview_rollup",
+            project["id"],
+            {"type": "ip", "value": "192.0.2.44"},
+        )
+        assert quiet_target is not None
+        future_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-censys",
+                    "tok_overview_rollup",
+                    target["id"],
+                    "censys",
+                    "Censys summary",
+                    json.dumps({
+                        "providers": {
+                            "censys": {
+                                "ports": [443, 80],
+                                "services": ["https", "http"],
+                                "certificate": {"not_after": future_expiry},
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                    }),
+                    now,
+                    future_expiry,
+                ),
+            )
+            for finding_id, severity, status, suppressed, verification in (
+                ("finding-overview-high", "high", "new", 0, "not_started"),
+                ("finding-overview-critical-fp", "critical", "false_positive", 0, "verified"),
+                ("finding-overview-suppressed", "medium", "important", 1, "needs_retest"),
+            ):
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, "
+                    "suppressed, title, created, last_seen_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        finding_id,
+                        "tok_overview_rollup",
+                        target["id"],
+                        target["id"],
+                        f"subject-{finding_id}",
+                        f"sig-{finding_id}",
+                        severity,
+                        status,
+                        suppressed,
+                        finding_id,
+                        now,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO finding_triage_details "
+                    "(id, session_id, finding_id, verification_status, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (f"triage-{finding_id}", "tok_overview_rollup", finding_id, verification, now, now),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_rollup", project["id"])
+
+        assert overview is not None
+        assert overview["payload_version"] == project_workspace.OVERVIEW_PAYLOAD_VERSION
+        assert overview["rollups"]["target_count"] == 2
+        assert overview["rollups"]["certificate_statuses"]["healthy"] == 1
+        assert overview["rollups"]["certificate_statuses"]["unknown"] == 1
+        assert overview["rollups"]["finding_severities"]["high"] == 1
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        target_row = rows_by_id[target["id"]]
+        quiet_row = rows_by_id[quiet_target["id"]]
+        assert target_row["open_ports"] == [80, 443]
+        assert target_row["services"] == ["http", "https"]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["top_finding_severity"] == "high"
+        assert target_row["finding_counts"]["by_review_state"]["false_positive"] == 1
+        assert target_row["finding_counts"]["suppressed"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 1
+        assert target_row["intel_summary"]["providers_with_data"] == ["censys"]
+        assert target_row["deep_link_hints"]["findings"]["target_id"] == target["id"]
+        assert quiet_row["certificate"]["status"] == "unknown"
+        assert quiet_row["source_flags"]["has_intel"] is False
+
+    def test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_crtsh", {"name": "Overview crt.sh"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_crtsh",
+            project["id"],
+            {"type": "domain", "value": "kali.darklab.sh"},
+        )
+        assert target is not None
+        old_expiry = (datetime.now(timezone.utc) - timedelta(days=1549)).replace(microsecond=0).isoformat()
+        latest_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).replace(microsecond=0).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-crtsh",
+                    "tok_overview_crtsh",
+                    target["id"],
+                    "crtsh",
+                    "crt.sh summary",
+                    json.dumps({
+                        "providers": {
+                            "crtsh": {
+                                "certificate_count": 33,
+                                "names": ["kali.darklab.sh"],
+                                "last_seen": "2026-05-18T03:29:31",
+                                "latest_expiry": latest_expiry,
+                                "certificates": [
+                                    {"not_after": old_expiry, "names": ["kali.darklab.sh"]},
+                                    {"not_after": latest_expiry, "names": ["kali.darklab.sh"]},
+                                ],
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+                    }),
+                    now,
+                    latest_expiry,
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_crtsh", project["id"])
+
+        assert overview is not None
+        target_row = overview["targets"][0]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["certificate"]["expires_at"] == latest_expiry
+        assert target_row["certificate"]["days_until_expiry"] is not None
+
+    def test_get_project_intel_overview_respects_scope_and_suppression(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_scope", {"name": "Overview Scope"})
+        assert project is not None
+        visible = project_workspace.add_project_target(
+            "tok_overview_scope",
+            project["id"],
+            {"type": "domain", "value": "visible.example"},
+        )
+        assert visible is not None
+        suppressed = project_workspace.add_project_target(
+            "tok_overview_scope",
+            project["id"],
+            {"type": "domain", "value": "suppressed.example"},
+        )
+        assert suppressed is not None
+        foreign_project = project_workspace.create_project("tok_overview_other", {"name": "Other Scope"})
+        assert foreign_project is not None
+        foreign = project_workspace.add_project_target(
+            "tok_overview_other",
+            foreign_project["id"],
+            {"type": "domain", "value": "foreign.example"},
+        )
+        assert foreign is not None
+        with database.db_connect() as conn:
+            conn.execute("UPDATE entities SET suppressed = 1 WHERE id = ?", (suppressed["id"],))
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, title, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "finding-foreign-overview",
+                    "tok_overview_other",
+                    foreign["id"],
+                    foreign["id"],
+                    "subject-foreign",
+                    "sig-foreign",
+                    "critical",
+                    "new",
+                    "foreign finding",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_scope", project["id"])
+        foreign_lookup = project_workspace.get_project_intel_overview("tok_overview_scope", foreign_project["id"])
+
+        assert overview is not None
+        assert [row["entity_id"] for row in overview["targets"]] == [visible["id"]]
+        assert overview["rollups"]["finding_severities"]["critical"] == 0
+        assert foreign_lookup is None
+
+
 class TestReportTemplateCatalog:
     def setup_method(self):
         report_templates.clear_report_template_catalog_cache()
@@ -8877,11 +9274,15 @@ class TestIntelServices:
                             "name_value": "www.example.test\n*.Example.TEST",
                             "issuer_name": "Test CA",
                             "not_before": "2026-01-02T00:00:00",
+                            "not_after": "2026-04-02T00:00:00",
+                            "id": 11,
                         },
                         {
                             "name_value": "api.example.test",
                             "issuer_name": "Test CA",
                             "not_before": "2026-01-01T00:00:00",
+                            "not_after": "2026-04-01T00:00:00",
+                            "min_cert_id": 10,
                         },
                     ]
                 self.calls.append(("domain", value, api_key))
@@ -9119,6 +9520,23 @@ class TestIntelServices:
             "example.test",
             "api.example.test",
         ]
+        assert crtsh_result.payload["providers"]["crtsh"]["latest_expiry"] == "2026-04-02T00:00:00"
+        assert crtsh_result.payload["providers"]["crtsh"]["certificates"] == [
+            {
+                "id": "11",
+                "names": ["www.example.test", "example.test"],
+                "issuer": "Test CA",
+                "not_before": "2026-01-02T00:00:00",
+                "not_after": "2026-04-02T00:00:00",
+            },
+            {
+                "id": "10",
+                "names": ["api.example.test"],
+                "issuer": "Test CA",
+                "not_before": "2026-01-01T00:00:00",
+                "not_after": "2026-04-01T00:00:00",
+            },
+        ]
         assert teamcymru_result.payload["providers"]["teamcymru"]["asn"] == "15169"
         assert hibp_result.payload["providers"]["hibp"]["pwned"] is True
         assert hibp_result.payload["providers"]["hibp"]["count"] == 7
@@ -9151,6 +9569,18 @@ class TestIntelServices:
         assert ("ip", "8.8.8.8", "ipinfo-token") in client.calls
         assert ("fofa", 'domain="example.test"', "ops@example.test", "fofa-key", 10) in client.calls
         assert ("zoomeye", 'site:"example.test"', "zoomeye-key", 10) in client.calls
+
+    def test_crtsh_provider_reports_transient_upstream_failures(self):
+        from services.intel.base import ProviderApiError
+        from services.intel.crtsh import CrtshProvider
+
+        client = mock.Mock(last_status=503)
+        client.lookup_domain.side_effect = ProviderApiError("provider returned HTTP 503", status=503)
+
+        with pytest.raises(ProviderApiError, match="crt\\.sh is temporarily unavailable"):
+            CrtshProvider(client=client).lookup_domain("Example.TEST.", session_token="session-1")
+
+        client.lookup_domain.assert_called_once_with("example.test")
 
     def test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized(self):
         from services.intel.teamcymru import TeamCymruProvider

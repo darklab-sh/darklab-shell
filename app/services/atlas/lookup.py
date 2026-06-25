@@ -871,6 +871,7 @@ def _domain_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str,
             _highlight("Certificates", payload.get("certificate_count"), provider),
             _highlight("Names", _join_list(payload.get("names"), limit=4), provider),
             _highlight("Last seen", payload.get("last_seen"), provider),
+            _highlight("Latest expiry", payload.get("latest_expiry"), provider),
         ]
     if provider == "urlscan":
         return [_highlight("urlscan results", payload.get("result_count"), provider)]

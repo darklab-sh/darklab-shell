@@ -151,6 +151,7 @@ var exportedDarklabProjectTargets = null;
         await ctx.syncEntityNote("target", savedTargetId, metadata.noteBody);
         ctx.setLastTargetType(payload.type || ctx.getLastTargetType());
         closeEditor();
+        ctx.invalidateProjectOverview?.(projectId);
         await ctx.loadProjectTargetPage?.(projectId, { skipFinalRender: true });
         ctx.renderProjectExplorer?.();
         ctx.renderProjectMobileDetail?.();

@@ -320,10 +320,14 @@ class CensysApiClient(JsonApiClient):
 
 class CrtshApiClient(JsonApiClient):
     base_url = "https://crt.sh"
+    timeout_seconds = 5
 
     def lookup_domain(self, value: str) -> list[Any]:
-        query = urlencode({"q": value, "output": "json"})
-        loaded = self._json_request_any(f"{self.base_url}/?{query}")
+        query = urlencode({"q": value, "output": "json", "deduplicate": "Y"})
+        loaded = self._json_request_any(
+            f"{self.base_url}/?{query}",
+            headers={"Accept": "application/json", "User-Agent": "darklab_shell"},
+        )
         return loaded if isinstance(loaded, list) else []
 
 

@@ -4028,13 +4028,14 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                     "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, "
                     "raw_line, created) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
                     (
                         finding_id,
                         owner_token,
+                        team_id,
                         run_id,
                         entity_id,
                         entity_id,
@@ -4078,10 +4079,15 @@ class TestTeamRoutes:
             )
             projects = client.get("/projects?include_counts=1", headers=operator_headers)
             summary = client.get(f"/projects/{project_id}/summary", headers=operator_headers)
+            overview = client.get(f"/projects/{project_id}/overview", headers=operator_headers)
             entities = client.get(f"/projects/{project_id}/entities?type=domain", headers=operator_headers)
             findings = client.get(f"/projects/{project_id}/findings", headers=operator_headers)
             personal_summary = client.get(
                 f"/projects/{project_id}/summary",
+                headers={"X-Session-ID": operator_token},
+            )
+            personal_overview = client.get(
+                f"/projects/{project_id}/overview",
                 headers={"X-Session-ID": operator_token},
             )
 
@@ -4102,6 +4108,12 @@ class TestTeamRoutes:
             assert summary_payload["counts"]["labels"] == 1
             assert summary_payload["counts"]["notes"] == 1
             assert [item["id"] for item in summary_payload["targets"]] == [entity_id]
+            assert overview.status_code == 200
+            overview_payload = overview.get_json()
+            assert overview_payload["rollups"]["target_count"] == 1
+            assert overview_payload["rollups"]["finding_severities"]["high"] == 1
+            assert overview_payload["targets"][0]["entity_id"] == entity_id
+            assert overview_payload["targets"][0]["top_finding_severity"] == "high"
             assert entities.status_code == 200
             assert [item["id"] for item in entities.get_json()["entities"]] == [entity_id]
             assert entities.get_json()["entities"][0]["labels"][0]["label"] == "cross-member"
@@ -4109,6 +4121,7 @@ class TestTeamRoutes:
             assert [item["id"] for item in findings.get_json()["findings"]] == [finding_id]
             assert findings.get_json()["findings"][0]["note"]["body"] == "visible to the team"
             assert personal_summary.status_code == 404
+            assert personal_overview.status_code == 404
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5766,6 +5779,133 @@ class TestProjectRoutes:
         )
         assert resp.status_code == 201
         return json.loads(resp.data)["link"]
+
+    def _create_target(self, client, session_id, project_id, target_type="domain", value="api.example.com", *, headers=None):
+        resp = client.post(
+            f"/projects/{project_id}/targets",
+            json={"type": target_type, "value": value},
+            headers=headers or {"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 201
+        return resp.get_json()["target"]
+
+    def test_project_overview_route_returns_empty_contract_and_404_for_foreign_project(self):
+        client = get_client()
+        session_id = self._session_id("project-overview-empty")
+        foreign_session = self._session_id("project-overview-foreign")
+        project = self._create_project(client, session_id, name="Overview Empty")
+        foreign_project = self._create_project(client, foreign_session, name="Overview Foreign")
+
+        resp = client.get(
+            f"/projects/{project['id']}/overview",
+            headers={"X-Session-ID": session_id},
+        )
+        foreign_resp = client.get(
+            f"/projects/{foreign_project['id']}/overview",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["project"]["id"] == project["id"]
+        assert payload["payload_version"] == 1
+        assert payload["targets"] == []
+        assert payload["rollups"]["target_count"] == 0
+        assert payload["rollups"]["certificate_statuses"]["unknown"] == 0
+        assert payload["rollups"]["recent_change_state"] == "not-monitored"
+        assert payload["recent_changes"] == []
+        assert foreign_resp.status_code == 404
+
+    def test_project_overview_route_returns_target_rollup_and_existing_filter_hints(self):
+        client = get_client()
+        session_id = self._session_id("project-overview")
+        project = self._create_project(client, session_id, name="Overview Populated")
+        target = self._create_target(client, session_id, project["id"])
+        snapshot_id = f"snap-route-overview-{target['id']}"
+        finding_id = f"finding-route-overview-{target['id']}"
+        now = datetime.now(timezone.utc).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=20)).isoformat()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, 'censys', 'ok', ?, ?, ?, ?)",
+                (
+                    snapshot_id,
+                    session_id,
+                    target["id"],
+                    "Censys route overview",
+                    json.dumps({
+                        "providers": {
+                            "censys": {
+                                "ports": [443],
+                                "services": ["https"],
+                                "certificate": {"not_after": expires_at},
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                    }),
+                    now,
+                    expires_at,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, "
+                "title, created, last_seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'high', 'new', ?, ?, ?)",
+                (
+                    finding_id,
+                    session_id,
+                    target["id"],
+                    target["id"],
+                    "subject-route-overview",
+                    "sig-route-overview",
+                    "Overview high finding",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        resp = client.get(
+            f"/projects/{project['id']}/overview",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["rollups"]["target_count"] == 1
+        assert payload["rollups"]["certificate_statuses"]["expiring_30d"] == 1
+        assert payload["rollups"]["finding_severities"]["high"] == 1
+        target_row = payload["targets"][0]
+        assert target_row["entity_id"] == target["id"]
+        assert target_row["open_ports"] == [443]
+        assert target_row["services"] == ["https"]
+        assert target_row["certificate"]["status"] == "expiring_30d"
+        assert target_row["top_finding_severity"] == "high"
+        assert target_row["deep_link_hints"]["entities"] == {"target_id": target["id"]}
+        assert target_row["deep_link_hints"]["findings"] == {
+            "target_id": target["id"],
+            "orphan_filter": "all",
+            "severity": "high",
+        }
+
+        entity_params = urlencode(target_row["deep_link_hints"]["entities"])
+        finding_params = urlencode(target_row["deep_link_hints"]["findings"])
+        entities_resp = client.get(
+            f"/projects/{project['id']}/entities?{entity_params}",
+            headers={"X-Session-ID": session_id},
+        )
+        findings_resp = client.get(
+            f"/projects/{project['id']}/findings?{finding_params}",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert entities_resp.status_code == 200
+        assert [item["id"] for item in entities_resp.get_json()["entities"]] == [target["id"]]
+        assert findings_resp.status_code == 200
+        assert [item["id"] for item in findings_resp.get_json()["findings"]] == [finding_id]
 
     def test_project_package_and_link_routes_record_audit_events(self):
         client = get_client()

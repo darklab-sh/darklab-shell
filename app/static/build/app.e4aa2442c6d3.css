@@ -10053,6 +10053,188 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 
 
 
+.project-overview-root {
+  display: grid;
+  gap: 14px;
+}
+
+
+
+.project-overview-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+
+
+.project-overview-summary-card {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--theme-chrome-border);
+  border-radius: 8px;
+  background: var(--theme-chrome-row-bg);
+}
+
+
+
+.project-overview-summary-card strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+
+
+.project-overview-summary-card span,
+.project-overview-summary-detail,
+.project-overview-target-meta,
+.project-overview-target-detail,
+.project-overview-recent-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+
+.project-overview-summary-card.is-attention {
+  border-color: color-mix(in srgb, var(--warning, #f4c430) 55%, var(--theme-chrome-border));
+}
+
+
+
+.project-overview-recent-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+
+
+.project-overview-target-list {
+  display: grid;
+  gap: 8px;
+}
+
+
+
+.project-overview-target-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: var(--theme-chrome-row-bg);
+}
+
+
+
+.project-overview-target-row.is-mobile {
+  border: 1px solid var(--theme-chrome-border);
+  border-radius: 8px;
+}
+
+
+
+.project-overview-target-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+
+
+.project-overview-target-title {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+
+
+.project-overview-target-chips,
+.project-overview-target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+
+
+.project-overview-chip.badge {
+  min-height: 20px;
+}
+
+
+
+.project-overview-highlights {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 0;
+  padding-left: 17px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+
+.project-overview-target-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+
+
+.project-overview-root.is-mobile .project-overview-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+
+
+.project-overview-root.is-mobile .project-overview-summary-card {
+  padding: 10px;
+}
+
+
+
+.project-overview-root.is-mobile .project-overview-summary-card strong {
+  font-size: 18px;
+}
+
+
+
+.project-overview-root.is-mobile .project-overview-target-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+
+
+.project-overview-root.is-mobile .project-overview-target-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-content: stretch;
+  width: 100%;
+}
+
+
+
+.project-overview-root.is-mobile .project-overview-target-actions .btn {
+  min-width: 0;
+  justify-content: center;
+  width: 100%;
+}
+
+
+
 .project-monitoring-digest {
   display: grid;
   gap: 14px;

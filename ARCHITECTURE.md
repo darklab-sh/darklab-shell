@@ -498,6 +498,7 @@ Client-visible error codes include `session_required`, `file_required`,
 | `DELETE` | `/projects/active` | Clears the active project context for the active personal/team scope. |
 | `GET` | `/projects/<project_id>` | Returns one active-scope project. |
 | `GET` | `/projects/<project_id>/summary` | Returns one project plus linked-record, package, and derived metadata counts. |
+| `GET` | `/projects/<project_id>/overview` | Returns the scoped target intelligence overview for one project, including target rollups, provider highlights, certificate status, recent-change state, and deep-link filter hints. |
 | `GET` | `/projects/<project_id>/activity` | Returns scoped, user-safe audit activity for one active-scope project with filters and offset pagination. |
 | `GET` | `/projects/<project_id>/monitoring` | Returns scoped watcher monitor cards, status counts, filter metadata, derived groups, and fire timeline rows for one active-scope project. |
 | `GET` | `/projects/<project_id>/digest-settings` | Returns scoped Project digest settings, available notification channels, and whether the current actor can edit them. |
@@ -2118,12 +2119,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,806
+- behavior tests: 3,821
 - docs/inventory meta-tests: 40
-- `pytest`: 2159 (2124 behavior + 35 meta)
-- `vitest`: 1421 (1416 behavior + 5 meta)
-- `playwright`: 266 behavior
-- total: 3,846
+- `pytest`: 2169 (2134 behavior + 35 meta)
+- `vitest`: 1424 (1419 behavior + 5 meta)
+- `playwright`: 268 behavior
+- total: 3,861
 
 ### Testing Architecture
 
