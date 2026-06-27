@@ -76,6 +76,7 @@ let exportedLoadMobileRunningIndicator = null;
     if (name === 'atlas_mobile') return { url: '/static/js/features/atlas/atlas_mobile.js', type: 'module' };
     if (name === 'findings_board') return { url: '/static/js/features/findings/findings_board_modal.js', type: 'module' };
     if (name === 'project_activity') return { url: '/static/js/features/projects/project_activity.js', type: 'module' };
+    if (name === 'project_overview') return { url: '/static/js/features/projects/project_overview.js', type: 'module' };
     if (name === 'project_monitoring') return { url: '/static/js/features/projects/project_monitoring.js', type: 'module' };
     if (name === 'project_artifacts') return { url: '/static/js/features/projects/project_artifacts.js', type: 'module' };
     if (name === 'project_details') return { url: '/static/js/features/projects/project_details.js', type: 'module' };
@@ -436,6 +437,13 @@ let exportedLoadMobileRunningIndicator = null;
     const activityModule = await loadLazyAsset('project_activity');
     return _requireLazyModuleExport(activityModule, 'DarklabProjectActivity', value => (
       value && typeof value.createProjectActivityController === 'function'
+    ));
+  }
+
+  async function loadProjectOverview() {
+    const overviewModule = await loadLazyAsset('project_overview');
+    return _requireLazyModuleExport(overviewModule, 'DarklabProjectOverview', value => (
+      value && typeof value.createProjectOverviewController === 'function'
     ));
   }
 
@@ -1157,6 +1165,7 @@ let exportedLoadMobileRunningIndicator = null;
   window.loadAtlasOverlay = loadAtlasOverlay;
   window.loadFindingsBoard = loadFindingsBoard;
   window.loadProjectActivity = loadProjectActivity;
+  window.loadProjectOverview = loadProjectOverview;
   window.loadProjectMonitoring = loadProjectMonitoring;
   window.loadProjectArtifacts = loadProjectArtifacts;
   window.loadProjectWorkspace = loadProjectWorkspace;

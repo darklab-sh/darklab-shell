@@ -52,6 +52,7 @@ class Provider(ABC):
     name: str
     secret_env: str
     secret_env_aliases: tuple[str, ...] = ()
+    required_secret_envs: tuple[str, ...] = ()
     secret_getter: SecretGetter = get_secret_value_for_env
     client: Any = None
     cache_scopes: dict[str, str] = field(default_factory=dict)
@@ -65,6 +66,12 @@ class Provider(ABC):
             if value:
                 return value
         raise ProviderMissingSecret(f"{' or '.join(env_names)} is not configured")
+
+    def require_secrets(self, session_token: str) -> None:
+        self.secret_value(session_token)
+        for env_name in self.required_secret_envs:
+            if not self.secret_getter(session_token, env_name):
+                raise ProviderMissingSecret(f"{env_name} is not configured")
 
     def rate_limit(
         self,

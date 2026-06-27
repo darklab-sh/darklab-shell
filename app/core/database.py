@@ -371,6 +371,7 @@ def _create_notification_schema(conn):
                     'watcher_error',
                     'watcher_recovered',
                     'scheduled_run_failed',
+                    'project_digest',
                     'test'
                 )
             ),
@@ -487,7 +488,7 @@ def _create_schedule_schema(conn):
             last_error           TEXT NOT NULL DEFAULT '',
             created              TEXT NOT NULL,
             updated              TEXT NOT NULL,
-            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (owner_kind IN ('user', 'watcher', 'project_digest')),
             CHECK (kind IN ('command')),
             CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
             CHECK (overlap_policy IN ('skip'))
@@ -504,10 +505,173 @@ def _create_schedule_schema(conn):
             run_id       TEXT NOT NULL DEFAULT '',
             status       TEXT NOT NULL,
             reason       TEXT NOT NULL DEFAULT '',
-            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (owner_kind IN ('user', 'watcher', 'project_digest')),
             CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
         )
     """)
+
+
+def _sqlite_table_sql(conn, table_name):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return str(row["sql"] or "") if row is not None else ""
+
+
+def _sqlite_table_has_project_digest_owner(conn, table_name):
+    return "project_digest" in _sqlite_table_sql(conn, table_name)
+
+
+def _sqlite_rebuild_notification_events_trigger(conn):
+    """Rebuild old SQLite notification_events tables whose trigger check predates project digests."""
+    needs_events = (
+        sqlite_table_exists(conn, "notification_events")
+        and "project_digest" not in _sqlite_table_sql(conn, "notification_events")
+    )
+    if not needs_events:
+        return
+
+    for index_name in (
+        "idx_notification_events_status_next_attempt",
+        "idx_notification_events_session_created",
+        "idx_notification_events_team_created",
+        "idx_notification_events_channel_created",
+        "idx_notification_events_run",
+    ):
+        conn.execute(f"DROP INDEX IF EXISTS {quote_sqlite_identifier(index_name)}")
+
+    columns = sqlite_table_columns(conn, "notification_events")
+    conn.execute("ALTER TABLE notification_events RENAME TO notification_events_old_trigger")
+    _create_notification_schema(conn)
+    source_columns = [
+        "id",
+        "session_token",
+        "team_id",
+        "channel_id",
+        "trigger",
+        "payload_json",
+        "status",
+        "attempts",
+        "next_attempt_at",
+        "last_attempt_at",
+        "last_error",
+        "run_id",
+        "created",
+        "dead_at",
+    ]
+    source_columns_sql = ", ".join(quote_sqlite_identifier(column) for column in source_columns)
+    select_exprs = [
+        quote_sqlite_identifier(column) if column in columns else f"'' AS {quote_sqlite_identifier(column)}"
+        for column in source_columns
+    ]
+    # Fixed schema-owned identifiers only; no runtime/user input.
+    copy_sql = (  # nosec B608
+        "INSERT INTO notification_events ({source_columns_sql}) "
+        "SELECT {select_sql} FROM notification_events_old_trigger"
+    ).format(source_columns_sql=source_columns_sql, select_sql=", ".join(select_exprs))
+    conn.execute(copy_sql)
+    conn.execute("DROP TABLE notification_events_old_trigger")
+    log.info("SQLITE_NOTIFICATION_EVENTS_TRIGGER_CONSTRAINT_UPGRADED", extra={
+        "notification_events_rebuilt": True,
+    })
+
+
+def _sqlite_rebuild_schedules_owner_kind(conn):
+    """Rebuild old SQLite schedule tables whose owner_kind check predates project digests."""
+    needs_schedules = (
+        sqlite_table_exists(conn, "schedules")
+        and not _sqlite_table_has_project_digest_owner(conn, "schedules")
+    )
+    needs_fires = (
+        sqlite_table_exists(conn, "schedule_fires")
+        and not _sqlite_table_has_project_digest_owner(conn, "schedule_fires")
+    )
+    if not needs_schedules and not needs_fires:
+        return
+
+    for index_name in (
+        "idx_schedules_due",
+        "idx_schedules_session_updated",
+        "idx_schedules_team_updated",
+        "idx_schedules_owner",
+        "idx_schedule_fires_schedule_fired",
+        "idx_schedule_fires_team_schedule",
+    ):
+        conn.execute(f"DROP INDEX IF EXISTS {quote_sqlite_identifier(index_name)}")
+
+    if needs_schedules:
+        columns = sqlite_table_columns(conn, "schedules")
+        conn.execute("ALTER TABLE schedules RENAME TO schedules_old_owner_kind")
+        _create_schedule_schema(conn)
+        source_columns = [
+            "id",
+            "session_token",
+            "team_id",
+            "owner_kind",
+            "owner_id",
+            "kind",
+            "command_text",
+            "cron_expr",
+            "cadence_preset",
+            "timezone",
+            "enabled",
+            "next_run_at",
+            "last_run_at",
+            "last_run_id",
+            "overlap_policy",
+            "consecutive_failures",
+            "label",
+            "paused_reason",
+            "last_error",
+            "created",
+            "updated",
+        ]
+        source_columns_sql = ", ".join(quote_sqlite_identifier(column) for column in source_columns)
+        select_exprs = [
+            quote_sqlite_identifier(column) if column in columns else f"'' AS {quote_sqlite_identifier(column)}"
+            for column in source_columns
+        ]
+        # Fixed schema-owned identifiers only; no runtime/user input.
+        copy_sql = (  # nosec B608
+            "INSERT INTO schedules ({source_columns_sql}) "
+            "SELECT {select_sql} FROM schedules_old_owner_kind"
+        ).format(source_columns_sql=source_columns_sql, select_sql=", ".join(select_exprs))
+        conn.execute(copy_sql)
+        conn.execute("DROP TABLE schedules_old_owner_kind")
+
+    if needs_fires:
+        columns = sqlite_table_columns(conn, "schedule_fires")
+        conn.execute("ALTER TABLE schedule_fires RENAME TO schedule_fires_old_owner_kind")
+        _create_schedule_schema(conn)
+        source_columns = [
+            "id",
+            "schedule_id",
+            "team_id",
+            "owner_kind",
+            "owner_id",
+            "fired_at",
+            "run_id",
+            "status",
+            "reason",
+        ]
+        source_columns_sql = ", ".join(quote_sqlite_identifier(column) for column in source_columns)
+        select_exprs = [
+            quote_sqlite_identifier(column) if column in columns else f"'' AS {quote_sqlite_identifier(column)}"
+            for column in source_columns
+        ]
+        # Fixed schema-owned identifiers only; no runtime/user input.
+        copy_sql = (  # nosec B608
+            "INSERT INTO schedule_fires ({source_columns_sql}) "
+            "SELECT {select_sql} FROM schedule_fires_old_owner_kind"
+        ).format(source_columns_sql=source_columns_sql, select_sql=", ".join(select_exprs))
+        conn.execute(copy_sql)
+        conn.execute("DROP TABLE schedule_fires_old_owner_kind")
+
+    log.info("SQLITE_SCHEDULE_OWNER_KIND_CONSTRAINT_UPGRADED", extra={
+        "schedules_rebuilt": needs_schedules,
+        "schedule_fires_rebuilt": needs_fires,
+    })
 
 
 def _create_watcher_schema(conn):
@@ -619,6 +783,23 @@ def _create_project_workspace_schema(conn):
             last_applied_at    TEXT NOT NULL DEFAULT '',
             match_count        INTEGER NOT NULL DEFAULT 0,
             linked_count       INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS project_digest_settings (
+            project_id         TEXT NOT NULL,
+            session_id         TEXT NOT NULL,
+            team_id            TEXT NOT NULL DEFAULT '',
+            enabled            INTEGER NOT NULL DEFAULT 0,
+            cadence_preset     TEXT NOT NULL DEFAULT 'daily',
+            channel_ids_json   {_json_column_sql("[]")},
+            quiet_no_change    INTEGER NOT NULL DEFAULT 0,
+            last_evaluated_at  TEXT NOT NULL DEFAULT '',
+            last_sent_at       TEXT NOT NULL DEFAULT '',
+            created            TEXT NOT NULL,
+            updated            TEXT NOT NULL,
+            PRIMARY KEY (project_id, session_id, team_id),
+            CHECK (cadence_preset IN ('hourly', 'daily', 'weekly'))
         )
     """)
     conn.execute("""
@@ -1114,6 +1295,14 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_project_auto_promote_rules_run_scan "
         "ON project_auto_promote_rules (project_id, enabled, apply_on_run)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_digest_settings_due "
+        "ON project_digest_settings (enabled, team_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_digest_settings_owner "
+        "ON project_digest_settings (session_id, team_id, updated DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen "
@@ -2054,6 +2243,13 @@ def _migrate_schema(conn):
         except SQLiteOperationalError:
             pass
     try:
+        _sqlite_rebuild_notification_events_trigger(conn)
+    except SQLiteOperationalError as exc:
+        log.warning("SQLITE_NOTIFICATION_EVENTS_TRIGGER_CONSTRAINT_UPGRADE_FAILED", extra={
+            "database_backend": "sqlite",
+            "error": str(exc),
+        })
+    try:
         _create_ai_assist_schema(conn)
     except SQLiteOperationalError:
         pass
@@ -2092,6 +2288,13 @@ def _migrate_schema(conn):
             conn.execute(stmt)
         except SQLiteOperationalError:
             pass
+    try:
+        _sqlite_rebuild_schedules_owner_kind(conn)
+    except SQLiteOperationalError as exc:
+        log.warning("SQLITE_SCHEDULE_OWNER_KIND_CONSTRAINT_UPGRADE_FAILED", extra={
+            "database_backend": "sqlite",
+            "error": str(exc),
+        })
     try:
         result = conn.execute(
             """
@@ -2179,6 +2382,26 @@ def _migrate_schema(conn):
         pass
     try:
         _create_project_workspace_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS project_digest_settings (
+                project_id         TEXT NOT NULL,
+                session_id         TEXT NOT NULL,
+                team_id            TEXT NOT NULL DEFAULT '',
+                enabled            INTEGER NOT NULL DEFAULT 0,
+                cadence_preset     TEXT NOT NULL DEFAULT 'daily',
+                channel_ids_json   {_json_column_sql("[]")},
+                quiet_no_change    INTEGER NOT NULL DEFAULT 0,
+                last_evaluated_at  TEXT NOT NULL DEFAULT '',
+                last_sent_at       TEXT NOT NULL DEFAULT '',
+                created            TEXT NOT NULL,
+                updated            TEXT NOT NULL,
+                PRIMARY KEY (project_id, session_id, team_id),
+                CHECK (cadence_preset IN ('hourly', 'daily', 'weekly'))
+            )
+        """)
     except SQLiteOperationalError:
         pass
     for stmt in (

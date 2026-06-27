@@ -3399,6 +3399,25 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).toHaveBeenCalledWith('file: created folder shared', '', 'tab-1')
   })
 
+  it('fails visibly when the workspace directory creator is unavailable', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+    })
+
+    await submitCommand('mkdir scans')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      '[error] workspace folder creation is unavailable',
+      'exit-fail',
+      'tab-1',
+    ))
+    expect(status.className).toBe('status-pill fail')
+  })
+
   it('moves workspace files and folders from file move and mv commands', async () => {
     const appendLine = vi.fn()
     const moveWorkspacePath = vi.fn((source, destination) => Promise.resolve({

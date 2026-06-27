@@ -18,7 +18,7 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -495,6 +495,7 @@ def _capture_event_with_signals(
         command_root=str(metadata.get("command_root", "")),
         target=str(metadata.get("target", "")),
         entities=metadata_event.entities,
+        source_detail=metadata.get("source_detail") if isinstance(metadata.get("source_detail"), dict) else {},
     )
     capture.add_event(captured_event)
     return metadata, captured_event
@@ -1637,6 +1638,13 @@ class _SyntheticPostFilterStageProcessor:
             self._line_buffer.append(line)
             return []
 
+        if self.kind == "jq":
+            if self._line_buffer_limit and len(self._line_buffer) >= self._line_buffer_limit:
+                self._line_buffer_dropped += 1
+                return []
+            self._line_buffer.append(line)
+            return []
+
         return [line]
 
     def finalize_output_lines(self) -> list[str]:
@@ -1702,6 +1710,63 @@ class _SyntheticPostFilterStageProcessor:
                     prev = n
             return [*_buffer_truncation_notice(), *result]
 
+        if self.kind == "jq":
+            selector = self.spec.get("selector") if isinstance(self.spec, dict) else {}
+            selector_op = selector.get("op", "") if isinstance(selector, dict) else ""
+            if self._line_buffer_dropped > 0:
+                log.warning("JQ_SELECTOR_CAP_HIT", extra={
+                    "cap": "input_lines",
+                    "limit": self._line_buffer_limit,
+                    "dropped_count": self._line_buffer_dropped,
+                    "selector_op": selector_op,
+                })
+                return [
+                    "[error] jq input exceeded the buffered line safety cap\n",
+                ]
+            parsed = _parse_jq_input_values(self._line_buffer)
+            if isinstance(parsed, str):
+                log.debug("JQ_SELECTOR_PARSE_FAILED", extra={
+                    "selector_op": selector_op,
+                    "input_line_count": len(self._line_buffer),
+                    "error": parsed,
+                })
+                return [f"[error] {parsed}\n"]
+            selected: list[Any] = []
+            for value in parsed:
+                selected.extend(_select_jq_values(value, selector if isinstance(selector, dict) else {}))
+                if len(selected) > 1000:
+                    log.warning("JQ_SELECTOR_CAP_HIT", extra={
+                        "cap": "output_lines",
+                        "limit": 1000,
+                        "selector_op": selector_op,
+                    })
+                    return ["[error] jq output exceeded the 1000-line safety cap\n"]
+            output_lines: list[str] = []
+            total_chars = 0
+            for value in selected:
+                rendered = _format_jq_value(
+                    value,
+                    raw=bool(self.spec.get("raw")),
+                    compact=bool(self.spec.get("compact")),
+                )
+                total_chars += len(rendered)
+                if total_chars > 200000:
+                    log.warning("JQ_SELECTOR_CAP_HIT", extra={
+                        "cap": "output_bytes",
+                        "limit": 200000,
+                        "selector_op": selector_op,
+                    })
+                    return ["[error] jq output exceeded the 200 KB safety cap\n"]
+                output_lines.extend(f"{line}\n" for line in rendered.split("\n"))
+            log.debug("JQ_SELECTOR_STAGE_COMPLETED", extra={
+                "selector_op": selector_op,
+                "input_line_count": len(self._line_buffer),
+                "selected_count": len(selected),
+                "raw_output": bool(self.spec.get("raw")),
+                "compact_output": bool(self.spec.get("compact")),
+            })
+            return output_lines
+
         return []
 
 
@@ -1736,6 +1801,85 @@ class _SyntheticPostFilterProcessor:
         return lines
 
 
+def _parse_jq_input_values(lines: list[str]) -> list[Any] | str:
+    non_empty = [str(line).strip() for line in lines if str(line).strip()]
+    if not non_empty:
+        return []
+    jsonl_values: list[Any] = []
+    for line in non_empty:
+        try:
+            jsonl_values.append(json.loads(line))
+        except json.JSONDecodeError:
+            break
+    else:
+        return jsonl_values
+    try:
+        return [json.loads("\n".join(non_empty))]
+    except json.JSONDecodeError:
+        return "jq expected JSON or JSONL input"
+
+
+def _jq_path_value(value: Any, path: list[str]) -> Any:
+    current = value
+    for part in path:
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _jq_path_exists(value: Any, path: list[str]) -> bool:
+    current = value
+    for part in path:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
+
+
+def _select_jq_values(value: Any, selector: dict[str, Any]) -> list[Any]:
+    op = str(selector.get("op") or "")
+    path = [str(part) for part in selector.get("path", []) or []]
+    if op == "identity":
+        return [value]
+    if op == "field":
+        return [_jq_path_value(value, path)] if _jq_path_exists(value, path) else []
+    if op == "iterate":
+        target = _jq_path_value(value, path) if path else value
+        return list(target) if isinstance(target, list) else []
+    if op == "filter_has":
+        return [value] if _jq_path_exists(value, path) else []
+    if op == "filter_eq":
+        haystack = _jq_filter_text(_jq_path_value(value, path) if _jq_path_exists(value, path) else "")
+        return [value] if haystack == str(selector.get("value", "")) else []
+    if op == "filter_contains":
+        haystack = _jq_filter_text(_jq_path_value(value, path) if _jq_path_exists(value, path) else "")
+        return [value] if str(selector.get("value", "")) in haystack else []
+    return []
+
+
+def _jq_filter_text(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str | int | float):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _format_jq_value(value: Any, *, raw: bool, compact: bool) -> str:
+    if raw and (value is None or isinstance(value, str | int | float | bool)):
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+    if compact:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
 class _WorkspacePathOutputFilter:
     """Display absolute owner-workspace paths as user-facing workspace paths."""
 
@@ -1761,6 +1905,32 @@ class _WorkspacePathOutputFilter:
             return f"/{suffix}" if suffix else "/"
 
         return self.pattern.sub(_replace, line)
+
+
+class _TruffleHogOutputFilter:
+    _SECRET_FIELDS = {"Raw", "RawV2"}
+
+    def __init__(self, command: str):
+        self.enabled = command_root(command) == "trufflehog"
+
+    def process_output_line(self, line: str) -> str:
+        if not self.enabled:
+            return line
+        suffix = "\n" if str(line).endswith("\n") else ""
+        try:
+            parsed = json.loads(str(line).rstrip("\n"))
+        except (TypeError, ValueError):
+            return line
+        if not isinstance(parsed, dict):
+            return line
+        redacted = False
+        for secret_field in self._SECRET_FIELDS:
+            if secret_field in parsed and parsed[secret_field] not in ("", None):
+                parsed[secret_field] = "[redacted]"
+                redacted = True
+        if not redacted:
+            return line
+        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + suffix
 
 
 @dataclass(frozen=True)
@@ -1976,6 +2146,21 @@ def _filter_builtin_command_events(events, variable_notice: str, postfilter: _Sy
     return filtered_events
 
 
+def _runtime_env_names(command: str) -> list[str]:
+    names: list[str] = []
+    tokens = split_command_argv(command)
+    start = 1 if tokens and tokens[0] == "env" else 0
+    for token in tokens[start:]:
+        if "=" not in token or token.startswith("-"):
+            break
+        name = token.split("=", 1)[0].strip()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            names.append(name)
+            continue
+        break
+    return names
+
+
 def _resolve_secret_environment(command: str, session_id: str, *, team_id: str = "") -> tuple[dict[str, str], list[str]]:
     if is_help_invocation(command):
         return {}, []
@@ -2019,6 +2204,14 @@ def _resolve_secret_environment(command: str, session_id: str, *, team_id: str =
                 if value is not None:
                     break
         except (InvalidSecretName, MasterKeyError, SecretDecryptError) as exc:
+            log.error("SECRET_ENV_RESOLVE_FAILED", exc_info=True, extra={
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "command_root": command_root(command) or "",
+                "secret_name": env_name,
+                "lookup_env_names": lookup_env_names,
+                "error_type": type(exc).__name__,
+            })
             raise _RunPreparationError("Secrets vault unavailable. Check server logs.", status_code=503) from exc
         if value is None:
             missing_label = " or ".join(lookup_env_names)
@@ -2088,8 +2281,15 @@ def _prepare_real_command(
     else:
         command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
     if command != execution_command:
-        log.info("CMD_REWRITE", extra={
-            "ip": client_ip, "original": original_command, "rewritten": command,
+        log.debug("CMD_REWRITE_APPLIED", extra={
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "command_root": command_root(original_command) or "",
+            "rewrite_notice": notice or "",
+            "workspace_read_count": len(validation.workspace_reads),
+            "workspace_write_count": len(validation.workspace_writes),
+            "workspace_exec_path_count": len(validation.workspace_exec_paths),
+            "runtime_env_names": _runtime_env_names(command),
         })
 
     missing_runtime = runtime_missing_command_name(command)
@@ -2484,9 +2684,12 @@ def _brokered_real_run_worker(
     command_timeout = CFG["command_timeout_seconds"] or None
     heartbeat_interval = CFG.get("run_broker_heartbeat_seconds") or CFG["heartbeat_interval_seconds"]
     run_started_dt = datetime.fromisoformat(run_started)
+    trufflehog_output_filter = _TruffleHogOutputFilter(original_command)
 
     def _process_real_output_line(line: str) -> list[str]:
-        return postfilter.process_output_line(workspace_path_filter.process_output_line(line))
+        filtered = workspace_path_filter.process_output_line(line)
+        filtered = trufflehog_output_filter.process_output_line(filtered)
+        return postfilter.process_output_line(filtered)
 
     try:
         if variable_notice:

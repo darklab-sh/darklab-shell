@@ -1823,6 +1823,310 @@ commands:
           hint_only: true
           value_type: domain
           description: Usually provided through -d
+  - root: tlsx
+    description: Collects TLS certificate, protocol, cipher, and DNS metadata from hosts or target lists.
+    category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Use -u for one host or -l/-list for a session file; add -json for structured rows that are easier to review later.
+        - Atlas entities, findings, and warnings are created from -json rows; plain text output stays transcript-only.
+        - Resolver, config, CA certificate, input-list, and output paths are workspace-aware when Files are enabled.
+      gotchas:
+        - Banner output is noisy during batch runs; add -silent with -json when you want clean machine-readable lines.
+        - ProjectDiscovery dashboard/upload/update flags are blocked so runs do not write cloud state or mutate the container image.
+      safe_defaults:
+        - Start with tlsx -u <host> -json -silent, then save larger runs with -l targets.txt -o tlsx-results.json.
+      common_flags:
+        - "-u/-host — single host"
+        - "-l/-list — host list (session file)"
+        - "-json — emit JSONL rows"
+        - "-o/-output — write results to a session file"
+      artifact_behavior: With Files enabled, -l/-list, -config, -r/-resolvers, and -cc/-cacert read from the session workspace, and -o/-output writes results there; bare file paths are denied.
+    help:
+      flags:
+        - -h
+        - --help
+    policy:
+      allow:
+        - tlsx
+      deny:
+        - tlsx -l
+        - tlsx -list
+        - tlsx -o
+        - tlsx -output
+        - tlsx -config
+        - tlsx -r
+        - tlsx -resolvers
+        - tlsx -cc
+        - tlsx -cacert
+        - tlsx -up
+        - tlsx -update
+        - tlsx -duc
+        - tlsx -disable-update-check
+        - tlsx -pd
+        - tlsx -dashboard
+        - tlsx -pdu
+        - tlsx -dashboard-upload
+        - tlsx -auth
+        - tlsx -tid
+        - tlsx -aid
+        - tlsx -aname
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -output
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -r
+        mode: read
+        value: separate
+        format: text
+      - flag: -resolvers
+        mode: read
+        value: separate
+        format: text
+      - flag: -cc
+        mode: read
+        value: separate
+        format: text
+      - flag: -cacert
+        mode: read
+        value: separate
+        format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}/tools
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: tlsx -h
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: tlsx -u ip.darklab.sh -json -silent
+          description: Inspect TLS details for one host as JSONL
+          smoke:
+            profile: manual
+        - value: tlsx -l tls-targets.txt -json -silent -o tlsx-results.json
+          description: Read hosts from a session file and save JSONL results
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -u
+          description: Single host to inspect
+          takes_value: true
+          value_hint:
+            placeholder: <host>
+            hint_only: true
+            value_type: host
+            description: Hostname or IP address
+        - value: -host
+          description: Single host to inspect
+          takes_value: true
+          value_hint:
+            placeholder: <host>
+            hint_only: true
+            value_type: host
+            description: Hostname or IP address
+        - value: -l
+          description: Read hosts from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <host-file>
+            hint_only: true
+            value_type: host
+            description: Session file containing one host per line
+          suggest:
+            - value: tls-targets.txt
+              description: Session host list
+        - value: -list
+          description: Read hosts from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <host-file>
+            hint_only: true
+            value_type: host
+            description: Session file containing one host per line
+        - value: -json
+          description: Emit JSONL output
+        - value: -silent
+          description: Show result rows only
+        - value: -o
+          description: Write TLS results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: tlsx-results.json
+              description: Save JSONL TLS results
+        - value: -output
+          description: Write TLS results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: tlsx-results.json
+              description: Save JSONL TLS results
+        - value: -config
+          description: Read ProjectDiscovery config from a session file
+          takes_value: true
+          feature_required: workspace
+        - value: -r
+          description: Read resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+        - value: -cc
+          description: Read a custom CA certificate from a session file
+          takes_value: true
+          feature_required: workspace
+      arguments:
+        - placeholder: <host>
+          hint_only: true
+          value_type: host
+          description: Usually provided through -u
+  - root: cdncheck
+    description: Classifies hosts and IPs against CDN, cloud, and WAF provider ranges.
+    category: Network Reconnaissance
+    knowledge:
+      notes:
+        - Use -i for one or more host/IP values; add -jsonl when you want structured provider classifications.
+        - Atlas entities and summary rows are created from -jsonl rows; plain text output stays transcript-only.
+        - Resolver and output paths are workspace-aware when Files are enabled.
+      gotchas:
+        - Classifications are context, not proof of a vulnerability; treat provider matches as routing or exposure clues.
+        - ProjectDiscovery updater flags are blocked so the container image stays deterministic.
+      safe_defaults:
+        - Use cdncheck -i <host> -jsonl -silent for one target, then save batches with -o cdncheck-results.jsonl.
+      common_flags:
+        - "-i/-input — host or IP to classify"
+        - "-jsonl — emit JSONL rows"
+        - "-r/-resolver — resolver file"
+        - "-o/-output — write results to a session file"
+      artifact_behavior: With Files enabled, -r/-resolver reads a resolver file from the session workspace and -o/-output writes results there; bare file paths are denied.
+    help:
+      flags:
+        - -h
+        - --help
+    policy:
+      allow:
+        - cdncheck
+      deny:
+        - cdncheck -o
+        - cdncheck -output
+        - cdncheck -r
+        - cdncheck -resolver
+        - cdncheck -up
+        - cdncheck -update
+        - cdncheck -duc
+        - cdncheck -disable-update-check
+    workspace_flags:
+      - flag: -o
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -output
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -r
+        mode: read
+        value: separate
+        format: text
+      - flag: -resolver
+        mode: read
+        value: separate
+        format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}/tools
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: cdncheck -h
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: cdncheck -i ip.darklab.sh -jsonl -silent
+          description: Classify one host and show structured provider data
+          smoke:
+            profile: manual
+        - value: cdncheck -i ip.darklab.sh -jsonl -silent -o cdncheck-results.jsonl
+          description: Save provider classifications to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -i
+          description: Host or IP to classify
+          takes_value: true
+          value_hint:
+            placeholder: <host-or-ip>
+            hint_only: true
+            value_type: host
+            description: Hostname or IP address
+        - value: -input
+          description: Host or IP to classify
+          takes_value: true
+          value_hint:
+            placeholder: <host-or-ip>
+            hint_only: true
+            value_type: host
+            description: Hostname or IP address
+        - value: -jsonl
+          description: Emit JSONL output
+        - value: -silent
+          description: Show result rows only
+        - value: -r
+          description: Read resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+        - value: -resolver
+          description: Read resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+        - value: -o
+          description: Write CDN classifications to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: cdncheck-results.jsonl
+              description: Save JSONL provider classifications
+        - value: -output
+          description: Write CDN classifications to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: cdncheck-results.jsonl
+              description: Save JSONL provider classifications
+      arguments:
+        - placeholder: <host-or-ip>
+          hint_only: true
+          value_type: host
+          description: Usually provided through -i
   - root: httpx
     description: Probes HTTP(S) services and reports web metadata such as status, title, and technology signals.
     category: Network Reconnaissance
@@ -2588,6 +2892,341 @@ commands:
           hint_only: true
           value_type: url
           description: Usually provided through -u
+  - root: trufflehog
+    description: Scans workspace folders or HTTPS Git repositories for exposed secrets.
+    category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - Use filesystem --directory for a session folder, or git https://... for a remote repository scan.
+        - JSON output is added automatically for managed scans so the app can classify and redact secret fields before storing output.
+      gotchas:
+        - Local file:// and ssh:// Git scans, clone-path overrides, and no-cleanup modes are blocked to keep scans inside managed paths.
+        - The --config path is blocked because detector config can carry sensitive policy and verifier settings.
+      safe_defaults:
+        - Run trufflehog filesystem --directory <folder> --json for workspace files, or trufflehog git https://... --json for a public remote repository.
+      common_flags:
+        - "filesystem --directory — scan a session folder"
+        - "git https://... — scan an HTTPS Git repository"
+        - "--json — emit JSON rows"
+        - "--include-paths/--exclude-paths — read path regexes from session files"
+      artifact_behavior: TruffleHog writes findings to stdout. With Files enabled, --directory reads a session folder and include/exclude path regex files read from the session workspace; local Git file paths and custom clone directories are blocked.
+    help:
+      flags:
+        - --help
+        - -h
+      subcommands:
+        - help
+    policy:
+      allow:
+        - trufflehog --help
+        - trufflehog -h
+        - trufflehog help
+        - trufflehog filesystem --directory
+        - trufflehog git
+      deny:
+        - trufflehog --config
+        - trufflehog --profile
+        - trufflehog filesystem --config
+        - trufflehog filesystem --profile
+        - trufflehog filesystem --include-paths
+        - trufflehog filesystem --exclude-paths
+        - trufflehog git --config
+        - trufflehog git --profile
+        - trufflehog git --include-paths
+        - trufflehog git --exclude-paths
+        - trufflehog git --clone-path
+        - trufflehog git --no-cleanup
+        - trufflehog git --trust-local-git-config
+        - trufflehog git file://
+        - trufflehog git ssh://
+        - trufflehog github
+        - trufflehog gitlab
+        - trufflehog s3
+        - trufflehog gcs
+        - trufflehog syslog
+        - trufflehog circleci
+        - trufflehog docker
+    workspace_flags:
+      - flag: --directory
+        mode: read
+        value: separate_or_attached
+        kind: directory
+        subcommands:
+          - filesystem
+      - flag: --include-paths
+        mode: read
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - filesystem
+          - git
+      - flag: --exclude-paths
+        mode: read
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - filesystem
+          - git
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - --json
+          position: append
+          unless_any:
+            - --json
+            - --help
+            - -h
+            - help
+    autocomplete:
+      examples:
+        - value: trufflehog --help
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: trufflehog filesystem --directory secrets --json
+          description: Scan a session folder for exposed secrets
+          feature_required: workspace
+        - value: trufflehog git https://github.com/trufflesecurity/test_keys --json
+          description: Scan an HTTPS Git repository for exposed secrets
+          smoke:
+            profile: manual
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --json
+          description: Emit JSON rows
+      subcommands:
+        filesystem:
+          description: Scan files in a session folder
+          examples:
+            - value: trufflehog filesystem --directory secrets --json
+              description: Scan a session folder for exposed secrets
+              feature_required: workspace
+          flags:
+            - value: --directory
+              description: Session folder to scan
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: secrets
+                  description: Session folder to scan
+            - value: --include-paths
+              description: Read include regexes from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: trufflehog-include.txt
+                  description: Include-path regexes
+            - value: --exclude-paths
+              description: Read exclude regexes from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: trufflehog-exclude.txt
+                  description: Exclude-path regexes
+            - value: --json
+              description: Emit JSON rows
+        git:
+          description: Scan an HTTPS Git repository
+          examples:
+            - value: trufflehog git https://github.com/trufflesecurity/test_keys --json
+              description: Scan an HTTPS Git repository for exposed secrets
+              smoke:
+                profile: manual
+          flags:
+            - value: --include-paths
+              description: Read include regexes from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --exclude-paths
+              description: Read exclude regexes from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --json
+              description: Emit JSON rows
+          arguments:
+            - placeholder: <https-git-url>
+              hint_only: true
+              value_type: url
+              description: HTTPS Git repository URL
+  - root: puredns
+    description: Brute-forces DNS names through massdns with resolver files and wildcard handling.
+    category: Network Reconnaissance
+    knowledge:
+      notes:
+        - The registry exposes puredns bruteforce with the packaged SecLists DNS wordlist and workspace-aware resolver/output flags.
+        - puredns bruteforce requires --resolvers with a session resolver file so puredns does not fall back to its home-directory default.
+      gotchas:
+        - puredns positional wordlist and domain-file operands are not part of the supported command surface; use the packaged DNS wordlist plus workspace-aware resolver and output flags.
+        - --debug and custom --bin paths are blocked because they create unmanaged intermediate files or change the trusted massdns binary.
+      safe_defaults:
+        - Use puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt <domain> --resolvers resolvers.txt --write puredns-results.txt.
+      common_flags:
+        - "bruteforce — generate and resolve subdomains"
+        - "--resolvers — public resolver list (session file)"
+        - "--resolvers-trusted — trusted resolver list (session file)"
+        - "--write/--write-massdns/--write-wildcards — session output files"
+      artifact_behavior: With Files enabled, resolver/domain-list flags read from the session workspace and --write, --write-massdns, and --write-wildcards write there; positional workspace input files are intentionally not exposed.
+    help:
+      flags:
+        - -h
+        - --help
+      subcommands:
+        - help
+    policy:
+      allow:
+        - puredns -h
+        - puredns --help
+        - puredns help
+        - puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+      deny:
+        - puredns --debug
+        - puredns -b
+        - puredns --bin
+        - puredns -r
+        - puredns --resolvers
+        - puredns --resolvers-trusted
+        - puredns -w
+        - puredns --write
+        - puredns --write-massdns
+        - puredns --write-wildcards
+        - puredns -d
+        - puredns --domains
+        - puredns resolve
+    workspace_flags:
+      - flag: -r
+        mode: read
+        value: separate
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: --resolvers
+        mode: read
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: --resolvers-trusted
+        mode: read
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: -d
+        mode: read
+        value: separate
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: --domains
+        mode: read
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: -w
+        mode: write
+        value: separate
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: --write
+        mode: write
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: --write-massdns
+        mode: write
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - bruteforce
+      - flag: --write-wildcards
+        mode: write
+        value: separate_or_attached
+        format: text
+        subcommands:
+          - bruteforce
+    autocomplete:
+      examples:
+        - value: puredns -h
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
+        - value: puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt darklab.sh --resolvers resolvers.txt --write puredns-results.txt
+          description: Brute-force subdomains with a packaged wordlist and session resolver list
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --help
+          description: Show help and usage
+          closes: true
+      subcommands:
+        bruteforce:
+          description: Brute-force subdomains with a wordlist and resolver file
+          examples:
+            - value: puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt darklab.sh --resolvers resolvers.txt --write puredns-results.txt
+              description: Brute-force subdomains with a packaged wordlist and session resolver list
+              feature_required: workspace
+          flags:
+            - value: --resolvers
+              description: Read public resolvers from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: resolvers.txt
+                  description: Public resolver list
+            - value: -r
+              description: Read public resolvers from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --resolvers-trusted
+              description: Read trusted resolvers from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --domains
+              description: Read root domains from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: -d
+              description: Read root domains from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --write
+              description: Write valid domains to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: puredns-results.txt
+                  description: Save valid domains
+            - value: -w
+              description: Write valid domains to a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --write-massdns
+              description: Write raw massdns output to a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --write-wildcards
+              description: Write wildcard roots to a session file
+              takes_value: true
+              feature_required: workspace
+          arguments:
+            - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: Packaged DNS wordlist
+              value_type: wordlist
+              wordlist_category: dns
+            - placeholder: <domain>
+              hint_only: true
+              value_type: domain
+              description: Root domain to brute-force
   - root: naabu
     description: Performs fast port discovery against hosts or target lists.
     category: Network Reconnaissance
@@ -4724,6 +5363,20 @@ pipe_helpers:
       flags:
         - value: -l
           description: Count lines
+  - root: jq
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Select fields from JSON or JSONL
+      flags:
+        - value: -r
+          description: Print scalar values as text
+        - value: -c
+          description: Print compact JSON
+      arguments:
+        - placeholder: <selector>
+          hint_only: true
+          description: Small selector such as .host, .results[], select(has("ip")), select(.status == "ok"), or select(.title contains "login")
   - root: sort
     autocomplete:
       pipe:

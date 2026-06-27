@@ -110,7 +110,7 @@ Classifier order:
 4. **TLS certificate fields** — detects selected `openssl s_client` certificate changes.
 5. **Textual fallback** — compares bounded output lines when no structured classifier applies. It ignores progress/status-line/PTY chrome and records added, removed, and unchanged entity counts when the structured output metadata is available.
 
-Diff summaries store bounded added, removed, and changed signals. If source output or changed-signal lists are capped, the fire row carries `truncated=true`. Project Monitoring turns those summaries into severity and top-signal rollups for cards, timelines, and digest-ready summaries.
+Diff summaries store bounded added, removed, and changed signals. If source output or changed-signal lists are capped, the fire row carries `truncated=true`. Project Monitoring turns those summaries into severity and top-signal rollups for cards, timelines, and attack-surface digest notifications.
 
 Watcher options tune which changes count as diff-worthy:
 
@@ -156,6 +156,8 @@ Notification behavior:
 - a failed watcher run moves the watcher toward `error` and can send `watcher_error`
 
 Five consecutive failed watcher runs disable the owned schedule. The watcher row stays visible so you can inspect the error, edit the command, and resume it when ready.
+
+Project digest notifications reuse the same watcher fire summaries instead of re-reading run output. When a Project digest is due, the scheduler asks Project Monitoring for the bounded window since the last successful digest and sends the compact rollup through the notification channels selected on that Project's Monitoring tab.
 
 ---
 

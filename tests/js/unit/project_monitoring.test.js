@@ -51,6 +51,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
 }
 
 const monitoringPayload = {
+  can_manage_digest_settings: true,
   counts: {
     active: 1,
     changed: 1,
@@ -58,7 +59,30 @@ const monitoringPayload = {
     quiet: 1,
     paused: 0,
   },
+  digest_settings: {
+    enabled: true,
+    cadence_preset: 'daily',
+    channel_ids: ['ntc_ops'],
+    quiet_no_change: false,
+    last_evaluated_at: '2026-06-15T11:30:00+00:00',
+    last_sent_at: '2026-06-15T11:35:00+00:00',
+    next_due_at: '2026-06-16T11:35:00+00:00',
+    schedule_last_error: '',
+    schedule_paused_reason: '',
+    schedule_last_fire_at: '2026-06-15T11:30:00+00:00',
+    schedule_last_fire_reason: 'digest skipped: no changes',
+    schedule_last_fire_status: 'fired',
+  },
   quiet_no_change_threshold: 3,
+  notification_channels: [{
+    id: 'ntc_ops',
+    kind: 'slack',
+    label: 'Ops Slack',
+  }, {
+    id: 'ntc_email',
+    kind: 'email',
+    label: 'Security Email',
+  }],
   filter_options: {
     statuses: [
       { value: 'changed', label: 'changed' },
@@ -267,6 +291,16 @@ describe('project monitoring controller', () => {
 
     expect(projectWorkspaceRequest).toHaveBeenCalledWith('/projects/prj_1/monitoring?fire_limit=8', { cache: 'no-store' })
     expect(container.textContent).toContain('Changed')
+    expect(container.textContent).toContain('Digest Notifications')
+    expect(container.textContent).toContain('Ops Slack · slack')
+    expect(container.textContent).toContain('Security Email · email')
+    expect(container.textContent).toContain('last sent: 2026-06-15 11:35:00+00:00')
+    expect(container.textContent).toContain('next due: 2026-06-16 11:35:00+00:00')
+    expect(container.textContent).toContain('last result: digest skipped: no changes')
+    const rootChildren = [...container.querySelector('[data-project-monitoring-root]').children]
+    expect(rootChildren[0].classList.contains('project-monitoring-counts')).toBe(true)
+    expect(rootChildren[1].classList.contains('project-monitoring-filters')).toBe(true)
+    expect(rootChildren[2].classList.contains('project-monitoring-digest')).toBe(true)
     expect(container.textContent).toContain('Ports')
     expect(container.textContent).toContain('TLS')
     expect(container.textContent).toContain('Missing baseline')
@@ -296,6 +330,72 @@ describe('project monitoring controller', () => {
     controller.renderMonitoring(container, 'prj_1')
     expect(container.textContent).toContain('Ports')
     expect(container.textContent).not.toContain('TLS')
+  })
+
+  it('saves digest settings from the monitoring tab', async () => {
+    const monitoringApi = loadMonitoringModule()
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (String(url).endsWith('/digest-settings')) {
+        expect(options.method).toBe('PATCH')
+        expect(JSON.parse(options.body)).toEqual({
+          enabled: true,
+          cadence_preset: 'weekly',
+          channel_ids: ['ntc_ops', 'ntc_email'],
+          quiet_no_change: true,
+        })
+        return apiResponse({
+          can_manage_digest_settings: true,
+          digest_settings: {
+            enabled: true,
+            cadence_preset: 'weekly',
+            channel_ids: ['ntc_ops', 'ntc_email'],
+            quiet_no_change: true,
+            last_evaluated_at: '',
+            last_sent_at: '',
+          },
+          notification_channels: monitoringPayload.notification_channels,
+        })
+      }
+      return apiResponse(monitoringPayload)
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = monitoringApi.createProjectMonitoringController(ctx)
+
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+    expect(container.querySelector('.project-monitoring-digest-toggle').classList.contains('form-check')).toBe(true)
+    expect(container.querySelector('.project-monitoring-digest-channel').classList.contains('form-check')).toBe(true)
+    expect(container.querySelector('.project-monitoring-digest-channels').classList.contains('nice-scroll')).toBe(true)
+    container.querySelector('[data-project-digest-field="cadence_preset"]').value = 'weekly'
+    container.querySelector('[data-project-digest-field="quiet_no_change"]').checked = true
+    container.querySelector('[data-project-digest-field="channel"][value="ntc_email"]').checked = true
+    const save = container.querySelector('[data-project-monitoring-action="save-digest"]')
+
+    await controller.handleClick({ target: save, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Digest settings saved.')
+    expect(ctx.renderProjectExplorer).toHaveBeenCalled()
+    expect(controller.stateFor('prj_1').digestSettings.cadence_preset).toBe('weekly')
+  })
+
+  it('renders digest settings as read-only for team viewers', async () => {
+    const monitoringApi = loadMonitoringModule()
+    const readonlyPayload = {
+      ...monitoringPayload,
+      can_manage_digest_settings: false,
+    }
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse(readonlyPayload))
+    const controller = monitoringApi.createProjectMonitoringController(makeContext(projectWorkspaceRequest))
+
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+
+    expect(container.textContent).toContain('read-only')
+    expect(container.querySelector('[data-project-monitoring-action="save-digest"]').disabled).toBe(true)
+    expect([...container.querySelectorAll('[data-project-digest-field]')]
+      .every(control => control.disabled)).toBe(true)
   })
 
   it('renders monitor timing and baseline run metadata on cards', async () => {

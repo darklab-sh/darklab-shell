@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
+import logging
 import os
 import re
 import yaml
 
 
+log = logging.getLogger("shell")
 SECRET_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
@@ -81,7 +83,13 @@ def load_yaml_mapping(path: str) -> dict:
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
-    except yaml.YAMLError:
+    except yaml.YAMLError as exc:
+        log.warning("COMMAND_REGISTRY_YAML_LOAD_FAILED", extra={
+            "path": path,
+            "overlay": ".local" in os.path.basename(path),
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:240],
+        })
         return {}
     return data if isinstance(data, dict) else {}
 

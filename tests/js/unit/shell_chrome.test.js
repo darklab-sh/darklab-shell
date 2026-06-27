@@ -42,6 +42,7 @@ const PROJECT_ARTIFACTS_SRC = readScriptSource('app/static/js/features/projects/
 const PROJECT_PACKAGES_SRC = readScriptSource('app/static/js/features/projects/project_packages.js')
 const PROJECT_REPORT_SRC = readScriptSource('app/static/js/features/projects/project_report.js')
 const PROJECT_ACTIVITY_SRC = readScriptSource('app/static/js/features/projects/project_activity.js')
+const PROJECT_OVERVIEW_SRC = readScriptSource('app/static/js/features/projects/project_overview.js')
 const PROJECT_CONTEXT_BRIDGE_SRC = readScriptSource('app/static/js/features/projects/project_context_bridge.js')
 const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').replace(
   '\n})(globalThis);',
@@ -492,6 +493,11 @@ function loadShellChrome({
       ${PROJECT_ACTIVITY_SRC}
       global.DarklabProjectActivity = exportedDarklabProjectActivity;
       window.DarklabProjectActivity = exportedDarklabProjectActivity;
+      ${PROJECT_OVERVIEW_SRC}
+      global.DarklabProjectOverview = exportedDarklabProjectOverview;
+      window.DarklabProjectOverview = exportedDarklabProjectOverview;
+      global.loadProjectOverview = () => Promise.resolve(exportedDarklabProjectOverview);
+      window.loadProjectOverview = global.loadProjectOverview;
       ${PROJECT_CONTEXT_BRIDGE_SRC}
       var openFindingsBoard = exportedOpenFindingsBoard;
       ${SHELL_CHROME_SRC}
@@ -931,6 +937,36 @@ describe('shell chrome project workspace', () => {
         counts_by_type: { ip: 1 },
       },
     }
+    let defaultTargetPage = {
+      targets: [
+        { id: 'target-1', type: 'domain', value: 'darklab.sh', review_state: 'confirmed' },
+        { id: 'target-4', type: 'ip', value: '192.0.2.10', review_state: 'pending' },
+      ],
+      total: 4,
+      limit: 50,
+      offset: 0,
+      counts_by_type: { domain: 2, ip: 1, url: 1 },
+    }
+    let overviewTargets = [
+      {
+        entity_id: 'entity-target-1',
+        target_id: 'target-1',
+        type: 'domain',
+        value: 'darklab.sh',
+        target_review_state: 'confirmed',
+        source_flags: { has_intel: false, has_recent_changes: false },
+        deep_link_hints: { entities: { target_id: 'entity-target-1' }, findings: { target_id: 'entity-target-1' } },
+      },
+      {
+        entity_id: 'entity-target-4',
+        target_id: 'target-4',
+        type: 'ip',
+        value: '192.0.2.10',
+        target_review_state: 'pending',
+        source_flags: { has_intel: false, has_recent_changes: false },
+        deep_link_hints: { entities: { target_id: 'entity-target-4' }, findings: { target_id: 'entity-target-4' } },
+      },
+    ]
     let projectListFetches = 0
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
@@ -956,21 +992,42 @@ describe('shell chrome project workspace', () => {
       }
       if (String(url).startsWith('/projects/project-1/targets?')) {
         const params = new URL(url, 'http://localhost').searchParams
-        let page = {
-          targets: [
-            { id: 'target-1', type: 'domain', value: 'darklab.sh', review_state: 'confirmed' },
-            { id: 'target-4', type: 'ip', value: '192.0.2.10', review_state: 'pending' },
-          ],
-          total: 4,
-          limit: Number(params.get('limit') || 50),
-          offset: Number(params.get('offset') || 0),
-          counts_by_type: { domain: 2, ip: 1, url: 1 },
-        }
+        let page = defaultTargetPage
+        let useRequestPaging = true
         if (params.get('auto_discovered') === '1') page = targetPages.auto
-        else if (params.get('type') === 'domain' && params.get('offset') === '1') page = targetPages['type=domain&offset=1']
-        else if (params.get('type') === 'domain') page = targetPages['type=domain']
-        else if (params.get('q') === 'login') page = targetPages['q=login']
-        return Promise.resolve({ ok: true, json: () => Promise.resolve(page) })
+        else if (params.get('type') === 'domain' && params.get('offset') === '1') {
+          page = targetPages['type=domain&offset=1']
+          useRequestPaging = false
+        } else if (params.get('type') === 'domain') {
+          page = targetPages['type=domain']
+          useRequestPaging = false
+        } else if (params.get('q') === 'login') page = targetPages['q=login']
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ...page,
+            limit: useRequestPaging ? Number(params.get('limit') || page.limit || 50) : page.limit,
+            offset: useRequestPaging ? Number(params.get('offset') || page.offset || 0) : page.offset,
+          }),
+        })
+      }
+      if (url === '/projects/project-1/overview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            rollups: {
+              target_count: overviewTargets.length,
+              provider_count: 0,
+              open_port_count: 0,
+              service_count: 0,
+              finding_severities: {},
+              certificate_statuses: {},
+              recent_change_state: 'not-monitored',
+            },
+            recent_changes: [],
+            targets: overviewTargets,
+          }),
+        })
       }
       if (url === '/projects/project-1/targets/target-4') {
         if (options?.method === 'DELETE') {
@@ -981,6 +1038,7 @@ describe('shell chrome project workspace', () => {
             offset: 0,
             counts_by_type: {},
           }
+          overviewTargets = overviewTargets.filter(target => target.target_id !== 'target-4')
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
         }
         return Promise.resolve({
@@ -1001,6 +1059,21 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0', { cache: 'no-store' })
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.sh')
+    document.querySelector('.project-workspace-close')?.click()
+    await tick()
+    defaultTargetPage = {
+      ...defaultTargetPage,
+      targets: [
+        ...defaultTargetPage.targets,
+        { id: 'target-5', type: 'domain', value: 'new.darklab.sh', review_state: 'pending' },
+      ],
+      total: 5,
+      counts_by_type: { domain: 3, ip: 1, url: 1 },
+    }
+    await shell.openProjectWorkspace()
+    await tick()
+    await tick()
+    expect(document.querySelector('.project-target-browser')?.textContent).toContain('new.darklab.sh')
     const targetAllCount = () => (
       document.querySelector('.project-target-type-tab[data-project-target-type=""] .project-target-type-tab-count')?.textContent
     )
@@ -1009,11 +1082,11 @@ describe('shell chrome project workspace', () => {
     await tick()
     document.querySelector('[data-project-tab="details"]').click()
     await tick()
-    expect(targetAllCount()).toBe('4')
+    expect(targetAllCount()).toBe('5')
 
     const projectListFetchesBeforeTargetPage = projectListFetches
     document.querySelector('[data-project-target-type="domain"]').click()
-    expect(targetAllCount()).toBe('4')
+    expect(targetAllCount()).toBe('5')
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&type=domain', { cache: 'no-store' })
     expect(document.querySelector('.project-target-pagination.project-workspace-pagination')?.textContent).toContain('1-1 of 2 targets')
@@ -1037,19 +1110,42 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&q=login&auto_discovered=1', { cache: 'no-store' })
     const projectListFetchesBeforeConfirm = projectListFetches
+    const explorerBody = document.getElementById('project-explorer-body')
+    explorerBody.scrollTop = 420
     document.querySelector('[data-project-action="confirm-target"][data-target-id="target-4"]').click()
     await tick()
     await tick()
     expect(projectListFetches).toBe(projectListFetchesBeforeConfirm)
+    expect(explorerBody.scrollTop).toBe(420)
     expect(document.querySelector('.project-target-row')?.textContent).toContain('192.0.2.10')
     expect(document.querySelector('[data-project-action="confirm-target"][data-target-id="target-4"]')).toBeNull()
 
+    overviewTargets = overviewTargets.map(target => (
+      target.target_id === 'target-4' ? { ...target, target_review_state: 'confirmed' } : target
+    ))
+    document.querySelector('[data-project-tab="overview"]').click()
+    await tick()
+    await tick()
+    await tick()
+    await tick()
+    expect(document.querySelector('.project-overview-target-list')?.textContent).toContain('192.0.2.10')
+    document.querySelector('[data-project-tab="details"]').click()
+    await tick()
+
     const projectListFetchesBeforeDelete = projectListFetches
+    explorerBody.scrollTop = 360
     document.querySelector('[data-project-action="delete-target"][data-target-id="target-4"]').click()
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets/target-4', expect.objectContaining({ method: 'DELETE' }))
     expect(projectListFetches).toBe(projectListFetchesBeforeDelete)
+    expect(explorerBody.scrollTop).toBe(360)
+    document.querySelector('[data-project-tab="overview"]').click()
+    await tick()
+    await tick()
+    await tick()
+    await tick()
+    expect(document.querySelector('.project-overview-target-list')?.textContent || '').not.toContain('192.0.2.10')
   })
 
   it('renders Project auto-promote rules with preview, save, apply, and source detail chips', async () => {
@@ -1574,6 +1670,38 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
+      if (url === '/projects/project-1/overview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            rollups: {
+              target_count: 1,
+              provider_count: 1,
+              open_port_count: 2,
+              service_count: 2,
+              finding_severities: { high: 1 },
+              certificate_statuses: { healthy: 1 },
+              recent_change_state: 'windowed',
+            },
+            recent_changes: [{ target_ids: ['ent-1'] }],
+            targets: [{
+              entity_id: 'ent-1',
+              type: 'domain',
+              value: 'darklab.sh',
+              target_review_state: 'confirmed',
+              open_ports: [80, 443],
+              services: ['http', 'https'],
+              certificate: { status: 'healthy', days_until_expiry: 42 },
+              top_finding_severity: 'high',
+              source_flags: { has_intel: true, has_recent_changes: true },
+              deep_link_hints: {
+                entities: { target_id: 'ent-1' },
+                findings: { target_id: 'ent-1', severity: 'high' },
+              },
+            }],
+          }),
+        })
+      }
       if (url === '/projects/project-1/auto-promote-rules') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ rules }) })
       }
@@ -1611,6 +1739,14 @@ describe('shell chrome project workspace', () => {
       expect(document.querySelector('.project-mobile-summary-menu-btn')?.dataset.projectId).toBe('project-1')
       expect(document.getElementById('project-mobile-tabs').textContent).toContain('999+')
       expect(document.getElementById('project-mobile-tabs').textContent).not.toContain('Artifacts')
+
+      document.querySelector('[data-project-mobile-detail-tab="overview"]').click()
+      await tick()
+      await tick()
+      await tick()
+      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('darklab.sh')
+      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('Cert: Healthy')
+      expect(document.getElementById('project-mobile-detail-body').querySelector('.project-overview-root.is-mobile')).not.toBeNull()
 
       document.querySelector('[data-project-mobile-detail-tab="packages"]').click()
       await tick()

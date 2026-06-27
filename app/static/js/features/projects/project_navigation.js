@@ -99,6 +99,7 @@ let exportedDarklabProjectNavigation = null;
       };
       return [
         { id: 'details', label: 'Details' },
+        { id: 'overview', label: 'Overview' },
         { id: 'runs', label: 'Runs', count: clamp(counts.runs) },
         { id: 'entities', label: 'Entities', count: tabCountText(projectId, summary, 'entities', counts.entities) },
         { id: 'findings', label: 'Findings', count: clamp(counts.findings) },
@@ -166,6 +167,7 @@ let exportedDarklabProjectNavigation = null;
       const projectId = String(project.id || '');
       const tabItems = [
         { id: 'details', label: 'Details' },
+        { id: 'overview', label: 'Overview' },
         { id: 'runs', label: 'Runs', count: tabCountText(projectId, summary, 'runs', tabCounts.runs) },
         { id: 'entities', label: 'Entities', count: tabCountText(projectId, summary, 'entities', tabCounts.entities) },
         { id: 'findings', label: 'Findings', count: tabCountText(projectId, summary, 'findings', tabCounts.findings) },

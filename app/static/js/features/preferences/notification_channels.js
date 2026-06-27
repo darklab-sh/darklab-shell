@@ -141,8 +141,26 @@ let exportedOpenNotificationChannelEditor = null;
     return value ? value.slice(0, 8) : '';
   }
 
+  function _eventTitle(event) {
+    const trigger = String(event.trigger || 'notification').replaceAll('_', ' ');
+    const digest = event.project_digest || {};
+    const projectName = String(digest.project_name || '').trim();
+    if (event.trigger === 'project_digest' && projectName) {
+      return `${trigger}: ${projectName}`;
+    }
+    return trigger;
+  }
+
+  function _eventDigestMeta(event) {
+    const digest = event.project_digest || {};
+    if (event.trigger !== 'project_digest' || !digest.window_start || !digest.window_end) return '';
+    return `window ${_formatDeliveryTime(digest.window_start)} - ${_formatDeliveryTime(digest.window_end)}`;
+  }
+
   function _eventMeta(event) {
     const parts = [];
+    const digestMeta = _eventDigestMeta(event);
+    if (digestMeta) parts.push(digestMeta);
     const runId = _shortRunId(event.run_id);
     if (runId) parts.push(`run ${runId}`);
     if (event.attempts) parts.push(`${event.attempts} attempt${event.attempts === 1 ? '' : 's'}`);
@@ -164,7 +182,7 @@ let exportedOpenNotificationChannelEditor = null;
     main.className = 'options-notification-event-main';
     const title = document.createElement('div');
     title.className = 'options-notification-event-title';
-    title.textContent = String(event.trigger || 'notification').replaceAll('_', ' ');
+    title.textContent = _eventTitle(event);
     const meta = document.createElement('div');
     meta.className = 'options-secret-meta';
     meta.textContent = _eventMeta(event);

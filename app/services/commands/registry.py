@@ -409,7 +409,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             "category": "Getting started",
             "answer": (
                 "The shell supports built-in commands plus a narrow set of commands with built-in "
-                "pipe support like grep, head, tail, wc -l, sort, and uniq. For a full list of built-in "
+                "pipe support like grep, head, tail, wc -l, jq, sort, and uniq. For a full list of built-in "
                 "commands, run commands --built-in in the web shell."
             ),
             "answer_html": (
@@ -423,7 +423,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
                 "supported pipe helpers, for example <code>command | grep pattern</code>, "
                 "<code>command | head -n 20</code>, <code>command | head -20</code>, "
                 "<code>command | tail -n 20</code>, <code>command | tail -20</code>, "
-                "<code>command | wc -l</code>, <code>command | sort -rn</code>, or "
+                "<code>command | wc -l</code>, <code>command | jq -r .host</code>, <code>command | sort -rn</code>, or "
                 "<code>command | uniq -c</code>. These helpers can also be chained together, "
                 "for example <code>command | grep pattern | wc -l</code>.<br><br>"
                 "General shell piping, arbitrary chaining, and redirection are still blocked."
@@ -1134,11 +1134,16 @@ def pipe_catalog_from_registry(registry: dict | None = None) -> list[dict[str, o
             flag_description = str(flag.get("description") or "").strip()
             if value:
                 flags.append({"value": value, "description": flag_description})
+        raw_arg_hints = autocomplete.get("arg_hints")
+        arg_hints = cast(dict[str, object], raw_arg_hints) if isinstance(raw_arg_hints, dict) else {}
+        arguments = _catalog_suggestions(arg_hints.get("__positional__"))
         pipe_entry: dict[str, object] = {
             "root": root,
             "description": description,
             "flags": flags,
         }
+        if arguments:
+            pipe_entry["arguments"] = arguments
         feature_required = entry.get("feature_required")
         if feature_required:
             pipe_entry["feature_required"] = feature_required
@@ -1848,7 +1853,15 @@ def _load_yaml_mapping(path):
     try:
         with open(path) as f:
             loaded = yaml.safe_load(f) or {}
-    except (FileNotFoundError, yaml.YAMLError):
+    except FileNotFoundError:
+        return {}
+    except yaml.YAMLError as exc:
+        log.warning("COMMAND_REGISTRY_YAML_LOAD_FAILED", extra={
+            "path": path,
+            "overlay": ".local" in os.path.basename(path),
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:240],
+        })
         return {}
     return loaded if isinstance(loaded, dict) else {}
 
@@ -2492,6 +2505,9 @@ def load_container_smoke_test_commands():
         ]
         for example in _example_sources(spec):
             if not isinstance(example, dict):
+                continue
+            smoke_profile = _example_smoke_profile(example)
+            if smoke_profile in {"disabled", "manual", "skip"}:
                 continue
             if not _suggestion_enabled_for_features(example, {"workspace_enabled": False}):
                 continue
@@ -3307,6 +3323,45 @@ def _reserved_interactive_deny_matches(command: str, deny_entries: list[str]) ->
     )
 
 
+def _trufflehog_git_uri_restriction_reason(command: str) -> str:
+    tokens = split_command_argv(command)
+    if len(tokens) < 3 or tokens[0].lower() != "trufflehog" or tokens[1].lower() != "git":
+        return ""
+    value_flags = {
+        "--branch",
+        "--exclude-globs",
+        "--exclude-paths",
+        "--include-paths",
+        "--max-depth",
+        "--since-commit",
+    }
+    index = 2
+    while index < len(tokens):
+        token = tokens[index]
+        if token in value_flags:
+            index += 2
+            continue
+        if any(token.startswith(f"{flag}=") for flag in value_flags):
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        if token.lower().startswith("https://"):
+            return ""
+        return "trufflehog git scans must use an HTTPS repository URL."
+    return ""
+
+
+def _puredns_resolver_restriction_reason(command: str) -> str:
+    tokens = split_command_argv(command)
+    if len(tokens) < 2 or tokens[0].lower() != "puredns" or tokens[1].lower() != "bruteforce":
+        return ""
+    if any(token in {"-r", "--resolvers"} or token.startswith("--resolvers=") for token in tokens[2:]):
+        return ""
+    return "puredns bruteforce requires --resolvers with a session resolver file."
+
+
 def _rewrite_workspace_file_flags(
     command: str,
     session_id: str,
@@ -3599,6 +3654,24 @@ def validate_command(
         return CommandValidationResult(
             False,
             f"Command not allowed: '{command.strip()}'",
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
+    trufflehog_git_reason = _trufflehog_git_uri_restriction_reason(command_to_validate)
+    if trufflehog_git_reason:
+        return CommandValidationResult(
+            False,
+            trufflehog_git_reason,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
+    puredns_resolver_reason = _puredns_resolver_restriction_reason(command_to_validate)
+    if puredns_resolver_reason:
+        return CommandValidationResult(
+            False,
+            puredns_resolver_reason,
             display_command=command,
             exec_command=command_to_validate,
         )

@@ -6,6 +6,79 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.3] — 2026-06-27
+
+### Added
+
+- **Project Overview tab for target intelligence** — Projects now have a target-focused Overview tab that rolls up findings, certificate status, cached intel, ports, services, and recent changes.
+  - Overview rows use existing Atlas `entity_id` values as their merge/filter identity, keep `host` targets mapped through the current domain/IP canonicalization path, and keep fallback `type:value` strings display-only.
+  - Certificate status keeps `unknown` separate from healthy, accepts ISO and RFC/OpenSSL-style expiry dates, prefers fresh provider certificate data over stale expired snapshots, and labels stale cached provider data separately from missing intel.
+  - Finding rollups use the same severity order as the Project workspace UI, count review/verification state through the active personal/team owner scope, use `High-risk targets` wording for critical/high targets, and keep recent-change summary cards visually neutral while the dedicated recent-state badge carries Windowed, Watcher context, or Not monitored styling.
+  - The backend overview aggregator returns bounded target rows with open ports, services, certificate status, provider highlights, finding counts, top actionable severity, recent-change markers, and deep-link hints while preserving personal/team scope.
+  - `GET /projects/<project_id>/overview` exposes the overview payload with the same Project owner/team scoping as the existing summary and workspace routes, accepts digest-window parameters when users need the same bounded recent-change view as a notification, ignores stale expired provider certificate data when fresh provider intel is available for the same target, and emits bounded structured logs for successful views, scoped misses, route failures, overview truncation, degraded source data, and browser-side load failures.
+  - The Projects modal now includes an Overview tab that lazily loads the overview payload, shows target/port/service/finding/certificate rollups, keeps unknown certificates visually distinct from healthy certificates, labels stale cached provider data separately from missing intel, and opens existing Entities/Findings tabs with backend-provided filter hints.
+  - Certificate rollups can use current live-provider data or bounded crt.sh snapshots when those sources respond. Temporary crt.sh timeouts and 5xx responses are surfaced as upstream outages instead of implying a target has no certificate data.
+  - Overview summary and attention cards use the shared theme tokens, including the caution color for high-risk target attention states.
+  - **Tests:** focused backend, route, browser-module, and Playwright coverage verifies the payload skeleton, host-to-domain/IP mapping, Atlas entity identity, review/suppression/verification rollups, certificate status buckets, RFC/OpenSSL-style certificate dates, stale provider data, fresh-vs-stale certificate selection, recent-change states, monitoring-target change markers, deep-link hint shape, populated and empty target rollups, neutral unknown-cert/no-intel/not-monitored UI states, route-level 404s, structured route/build logs, degraded-source warning logs, browser load-failure levels, stable load-error rendering, team-scope access, Overview tab rendering, desktop/mobile Overview smoke paths, source-mode Overview lazy loading, real Overview endpoint browser loading, deep-link filter actions, filter reset behavior, run/review-state hints, mobile Findings hints, suppressed-target exclusion, and cross-scope protection.
+
+- **Workspace file operations are stricter and more reliable** — Terminal folder creation and app-mediated moves now fail clearly instead of reporting false success or leaving partial files behind.
+  - `mkdir` and `file add-dir` now use the ESM-exported workspace directory creator directly, and missing workspace handlers return a visible terminal error instead of printing a fake success line.
+  - Workspace create/write/move routes now reject control characters and leading/trailing whitespace in paths, so visually confusing names such as newline-prefixed folders are not created.
+  - Workspace moves clean up partial copy destinations before scanner/appuser fallback moves, preventing sticky-directory ownership mismatches from leaving duplicate files or returning an unhandled 500.
+  - **Tests:** focused Vitest and backend/route coverage verifies terminal handler failures, directory creation calls, unsafe path rejection, and partial-move cleanup.
+
+- **Attack-surface digest notifications** — Projects can now send scheduled attack-surface digest notifications through explicitly selected existing notification channels.
+  - Project Monitoring summaries support bounded `window_start` / `window_end` views with digest-window metadata, changed/recovered/failed counts, severity, top-change, and link fields so scheduled sends report only the selected window while the dashboard summary remains current-state.
+  - The new `project_digest_settings` table stores enabled state, cadence, explicit notification channel ids, quiet/no-change behavior, `last_evaluated_at`, and `last_sent_at` for personal and team-owned Projects.
+  - Team Project digest settings resolve through the Project owner token, so every eligible team member sees and updates the same Project digest row and hidden schedule instead of creating per-member duplicates.
+  - SQLite bootstrap/upgrades and Postgres migrations create the same table and indexes, Project deletion removes stale digest settings, and digest event identity helpers carry the project/scope/window keys that async delivery callbacks will need.
+  - Digest jobs use the existing scheduler due detection, cron parsing, hidden internal owner-kind pattern, and worker locking instead of a parallel sweep loop.
+  - Evaluation advances `last_evaluated_at` for queued or explicitly skipped runs, keeps no-change projects quiet unless quiet digests are enabled, and queued events update `last_sent_at` only after a selected channel reaches terminal sent.
+  - Successful digest delivery now advances the sent window to the digest window end, not delayed delivery time, and stale delivery callbacks cannot move the sent marker backward.
+  - SQLite startup now rebuilds legacy schedule owner-kind and notification trigger constraints when needed so existing local databases can save Project digest schedules and queue Project digest delivery events without recreating history.
+  - The notification dispatcher can deliver explicitly selected digest channels without requiring those channels to subscribe to a new UI trigger, while delivery deferrals, retries, rate limits, do-not-disturb, and dead-letter rows remain on the existing notification path.
+  - Digest payloads include project name, digest window, changed/recovered/failed counts, highest severity, safe top changes, and a Project Monitoring link.
+  - Background-worker links use `app_public_base_url` when configured and fall back to in-app relative paths otherwise, without deriving URLs from request hostnames.
+  - Top changes omit run ids and baseline ids, cap labels, and keep chat/push/email field ordering readable instead of alphabetizing digest summary fields.
+  - Project owners and team roles that can manage automation or notification settings can enable digests, choose hourly/daily/weekly cadence, select explicit channels, and toggle quiet no-change digests.
+  - Team viewers see the same settings as read-only, including last sent, last checked, next due, paused, and last issue details when present.
+  - Notification delivery audit rows now include Project digest project/window context so delayed, retried, or dead-lettered digest sends can be traced from each channel's delivery history.
+  - **Tests:** focused service, route, backend, notification, channel-format, and Vitest coverage verifies bounded summary windows, personal/team scope persistence, archived project/team enablement guards, Project deletion cleanup, timestamp updates, delivery join-key shape, SQLite/Postgres schema parity, hidden digest schedules, explicit-channel enqueueing, no-change skips, window-end sent-state callbacks, stale sent-callback guards, legacy SQLite schedule/notification constraint upgrades, safe/public links, bounded JSON fields, run-id redaction, chat/push/email rendering, scoped channel exposure, team read-only behavior, save permissions, browser rendering, and digest settings interaction.
+
+- **Nuclei template provenance** — Nuclei runs now attach template-source provenance to saved output metadata and Nuclei JSONL imports.
+  - Provenance records whether templates came from the managed `/tmp/nuclei-templates` cache, a session workspace template path, a pinned-looking `nuclei-templates` clone, an operator-updated template set, or another custom update directory.
+  - Built-in relative template selectors such as `-t http/` stay in the managed-cache bucket, while actual workspace-looking paths keep workspace provenance.
+  - Nuclei finding rows also preserve the template ID in `source_detail`, and Atlas Nuclei JSONL imports keep template path/source detail where the JSONL includes it.
+  - History restore and Run Details output replay now preserve the template provenance metadata for restored Nuclei lines.
+  - **Tests:** focused output-signal, saved-output, Run Details, package-rendering, and Atlas import parser coverage checks managed-cache, workspace-template, pinned-clone, operator-updated provenance, and restored provenance metadata.
+
+- **App-native JSON/JSONL pipe selector** — `command | jq ...` now runs through a safe darklab_shell selector instead of exposing real shell pipes or the host `jq` binary.
+  - Supported selectors cover `.field`, `.nested.field`, `.items[]`, `.[]`, `select(has("key"))`, `select(.key == "value")`, and `select(.key contains "value")`, with pretty JSON output by default, `-c` for compact JSON, and `-r` for scalar text.
+  - The helper runs in both server-side external command post-filters and browser-side workspace/local command post-filters, enforces the same input and output caps on both paths, rejects arbitrary jq programs, and reports malformed JSON without echoing the input line.
+  - Pipe-helper catalog and autocomplete metadata now list `jq` beside `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`.
+  - **Tests:** focused parser, execution, catalog, autocomplete, malformed-input, cap, non-leaking error, and Python/JavaScript parser parity tests cover the selector.
+
+- **App-native intel providers and Atlas snapshot refreshes** — `intel ip`, `intel domain`, and `intel url` now include the new provider set without adding provider CLIs or SDK packages, and successful terminal lookups refresh matching Atlas intel snapshots.
+  - Shodan InternetDB runs as a no-key IP provider and normalizes open ports, CPEs, hostnames, tags, and CVEs through the same cache, rate-limit, metrics, and Atlas snapshot path as other app-native intel providers.
+  - FOFA runs through the app-owned HTTPS client with vault-backed `FOFA_EMAIL` plus `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, bounded search size, paid/credited-account-safe fields, provider JSON error surfacing, and normalized IP/domain/URL search-match rows. FOFA preflight checks the account email before cache, quota, rate-limit, or client work, and provider status labels FOFA as requiring a paid account or F-point balance.
+  - ZoomEye runs through the app-owned HTTPS client with vault-backed `ZOOMEYE_API_KEY`, the regional `api.zoomeye.ai/v2/search` POST shape with `API-KEY` authorization, no CLI `~/.config` token/cache behavior, bounded host searches, and normalized IP/domain/URL match rows. Provider status labels ZoomEye as requiring a paid account or available resource credits.
+  - Live TLS certificate intel checks the served certificate on port 443 without an API key, giving domain lookups and Project Overview a current certificate-expiry source that does not depend only on crt.sh availability.
+  - Terminal `intel <type> <value>` lookups reuse the Atlas intel snapshot writer when the same entity already exists in the active personal or team scope, so Atlas detail and Project Overview can show fresh provider data without a second **Refresh intel** action in the Atlas modal.
+  - Lookup-only values still do not create new Atlas entities, keeping casual terminal checks separate from curated Atlas/project state.
+  - Provider readiness, Options secret suggestions, `secret show-consumers`, `providers`, cache TTLs, rate limits, quota backoff, terminal formatting, docs, and Atlas-compatible response shapes now include the new providers.
+  - **Tests:** focused intel registry, client contract, provider normalization, schema/cache, terminal formatting, missing-secret preflight, snapshot persistence, lookup-only skip, and docs tests cover the intel provider and Atlas refresh paths.
+
+- **External tool integrations for staged recon tools** — The Docker image now pins and installs `tlsx` 1.2.2, `cdncheck` 1.2.40, TruffleHog 3.95.5, `massdns` 1.1.0, and puredns 2.1.1, and the command registry exposes the supported `tlsx`, `cdncheck`, TruffleHog, and puredns command shapes.
+  - Registry entries include descriptions, examples, autocomplete hints, help smoke examples, workspace-aware file flags, operator guidance, and policy guardrails for the new tools.
+  - `tlsx` and `cdncheck` use the same ProjectDiscovery `XDG_CONFIG_HOME=<workspace>/tools` runtime wrapper as the existing ProjectDiscovery tools, with workspace inputs/outputs for lists, resolvers, config, CA certificates, and JSONL result files.
+  - TruffleHog supports managed Files folder scans and HTTPS Git scans, with app-native validation rejecting non-HTTPS Git repository arguments and registry denials for custom clone paths, local config trust, no-cleanup mode, and unsupported provider subcommands.
+  - puredns supports `bruteforce` with the packaged SecLists DNS wordlist plus workspace resolver/domain-list inputs and `--write`, `--write-massdns`, and `--write-wildcards` outputs; `bruteforce` requires `--resolvers <file>` so scans use explicit session resolver files, and positional session wordlists are not part of the supported command surface.
+  - `tlsx -json` rows produce TLS findings, warning states for certificate/probe problems, and domain/IP/certificate-hash entities.
+  - `cdncheck -jsonl` rows produce contextual summaries and host/IP entities without treating CDN/cloud/WAF matches as vulnerabilities.
+  - TruffleHog JSON rows produce redacted findings from detector, verification, source, and a generic redacted marker so `Raw` / `RawV2` secret values and unsafe vendor redaction hints do not become finding titles, raw-line snippets, streamed output, or stored transcript text.
+  - puredns valid domains produce domain entities/findings, wildcard rows produce warnings, and workspace outputs keep using run-file artifact provenance.
+  - **Tests:** Dockerfile parsing, documentation guards, full image build, container binary smoke checks, command-registry policy, workspace rewrites, runtime wrappers, output-signal mapping, Atlas materialization, structured-output redaction, and TruffleHog unsafe-redaction coverage verify the staged tool integrations end to end.
+
 ## [2.2] — 2026-06-16
 
 ### Added

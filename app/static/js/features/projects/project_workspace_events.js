@@ -147,6 +147,15 @@ let exportedDarklabProjectWorkspaceEvents = null;
       }
     }
 
+    function preserveProjectScroll(render) {
+      const scrollBody = mobileView() === 'detail' ? ctx.projectMobileDetailBody : ctx.projectExplorerBody;
+      const scrollTop = Number(scrollBody?.scrollTop ?? NaN);
+      render();
+      if (scrollBody && Number.isFinite(scrollTop)) {
+        scrollBody.scrollTop = scrollTop;
+      }
+    }
+
     function projectPageOffset(pagination, direction) {
       const limit = Math.max(1, Number(pagination?.limit || 50));
       const offset = Math.max(0, Number(pagination?.offset || 0));
@@ -1129,9 +1138,12 @@ let exportedDarklabProjectWorkspaceEvents = null;
           });
           ctx.clearEditingTargetIf(targetId);
           ctx.removeCachedProjectTarget?.(projectId, targetId);
+          ctx.invalidateProjectOverview?.(projectId);
           await ctx.loadProjectTargetPage?.(projectId, { skipFinalRender: true });
-          ctx.renderProjectExplorer?.();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail?.();
+          preserveProjectScroll(() => {
+            ctx.renderProjectExplorer?.();
+            if (mobileView() === 'detail') ctx.renderProjectMobileDetail?.();
+          });
           ctx.loadProjectAutocompleteTargets?.();
           ctx.setProjectWorkspaceMessage('Target removed.');
           return;
@@ -1152,7 +1164,11 @@ let exportedDarklabProjectWorkspaceEvents = null;
               : { review_state: reviewState, status: reviewState };
             ctx.updateCachedProjectTarget?.(projectId, targetId, target);
           }
-          ctx.renderProjectExplorer?.();
+          ctx.invalidateProjectOverview?.(projectId);
+          preserveProjectScroll(() => {
+            ctx.renderProjectExplorer?.();
+            if (mobileView() === 'detail') ctx.renderProjectMobileDetail?.();
+          });
           ctx.loadProjectAutocompleteTargets?.();
           ctx.setProjectWorkspaceMessage(reviewState === 'confirmed' ? 'Target confirmed.' : 'Target dismissed.');
           return;

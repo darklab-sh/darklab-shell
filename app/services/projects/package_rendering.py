@@ -334,6 +334,7 @@ def _package_output_entry(item) -> dict[str, object]:
                 command_root=item.get("command_root", ""),
                 target=item.get("target", ""),
                 entities=item.get("entities") if isinstance(item.get("entities"), list) else None,
+                source_detail=item.get("source_detail") if isinstance(item.get("source_detail"), dict) else None,
             )
         )
     return to_legacy_entry(line_event_from_legacy(str(item or "")))

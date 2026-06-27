@@ -13,7 +13,8 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.atlas.scope import entity_exists_in_scope, metadata_owner_id
-from services.intel.lookup import lookup_entity
+from services.intel.canonical import entity_signature
+from services.intel.lookup import IntelLookupResult, lookup_entity
 from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
 
 log = logging.getLogger("shell")
@@ -42,9 +43,55 @@ def _snapshot_summary(payload: dict[str, Any], fallback: str = "") -> str:
     return "lookup completed"
 
 
+def _matching_entity_id(
+    conn,
+    session_id: str,
+    entity_type: str,
+    canonical_value: str,
+    *,
+    team_id: str = "",
+) -> str:
+    signature_hash = entity_signature(entity_type, canonical_value)
+    if team_id:
+        row = conn.execute(
+            "SELECT id FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
+            (team_id, entity_type, signature_hash),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM entities WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
+            (session_id, entity_type, signature_hash),
+        ).fetchone()
+    return str(row["id"] or "") if row else ""
+
+
+def persist_lookup_for_existing_entity(
+    session_id: str,
+    lookup: IntelLookupResult,
+    *,
+    team_id: str = "",
+) -> dict[str, Any] | None:
+    """Persist lookup provider snapshots when the Atlas entity already exists."""
+    with db_connect() as conn:
+        entity_id = _matching_entity_id(
+            conn,
+            session_id,
+            lookup.entity_type,
+            lookup.canonical_value,
+            team_id=team_id,
+        )
+    if not entity_id:
+        log.debug("INTEL_LOOKUP_SNAPSHOT_SKIPPED", extra={
+            "session": get_log_session_id(session_id),
+            "entity_type": lookup.entity_type,
+            "reason": "entity_not_found",
+        })
+        return None
+    return _persist_lookup_snapshots(session_id, entity_id, lookup, team_id=team_id)
+
+
 def refresh_entity_intel(session_id: str, entity_id: str, *, team_id: str = "") -> dict[str, Any] | None:
     """Refresh provider intel for one Atlas entity and persist snapshots."""
-    metadata_session = metadata_owner_id(session_id, team_id)
     with db_connect() as conn:
         if not entity_exists_in_scope(conn, session_id, entity_id, team_id=team_id):
             return None
@@ -66,6 +113,17 @@ def refresh_entity_intel(session_id: str, entity_id: str, *, team_id: str = "") 
             "entity_id": entity_id,
             "entity_type": entity["type"],
         })
+    return _persist_lookup_snapshots(session_id, entity_id, lookup, team_id=team_id)
+
+
+def _persist_lookup_snapshots(
+    session_id: str,
+    entity_id: str,
+    lookup: IntelLookupResult,
+    *,
+    team_id: str = "",
+) -> dict[str, Any]:
+    metadata_session = metadata_owner_id(session_id, team_id)
     fetched_at = _now()
     snapshots: list[dict[str, Any]] = []
     replaced_payloads: list[Any] = []

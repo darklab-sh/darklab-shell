@@ -170,6 +170,10 @@ describe('frontend config bootstrap', () => {
                 url: '/static/js/features/projects/project_activity.js?v=activity-hash',
                 type: 'module',
               },
+              project_overview: {
+                url: '/static/js/features/projects/project_overview.js?v=overview-hash',
+                type: 'module',
+              },
               project_artifacts: {
                 url: '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
                 type: 'module',
@@ -323,6 +327,11 @@ describe('frontend config bootstrap', () => {
           window.DarklabProjectActivity = DarklabProjectActivity
           return { DarklabProjectActivity }
         }
+        if (url.includes('/project_overview.js')) {
+          const DarklabProjectOverview = { createProjectOverviewController: vi.fn() }
+          window.DarklabProjectOverview = DarklabProjectOverview
+          return { DarklabProjectOverview }
+        }
         if (url.includes('/project_artifacts.js')) {
           const DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
           window.DarklabProjectArtifacts = DarklabProjectArtifacts
@@ -392,6 +401,11 @@ describe('frontend config bootstrap', () => {
     expect(activityApi).toBe(window.DarklabProjectActivity)
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_activity.js?v=activity-hash')
 
+    const overviewPromise = window.loadProjectOverview()
+    const overviewApi = await overviewPromise
+    expect(overviewApi).toBe(window.DarklabProjectOverview)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_overview.js?v=overview-hash')
+
     const artifactsPromise = window.loadProjectArtifacts()
     const artifactsApi = await artifactsPromise
     expect(artifactsApi).toBe(window.DarklabProjectArtifacts)
@@ -445,6 +459,7 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
       '/static/js/features/projects/project_report.js?v=report-hash',
       '/static/js/features/projects/project_activity.js?v=activity-hash',
+      '/static/js/features/projects/project_overview.js?v=overview-hash',
       '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
       '/static/js/features/projects/project_packages.js?v=packages-hash',
       '/static/js/features/history/history_run_details.js?v=history-details-hash',

@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 import http.client
+import base64
 import json
+import logging
 import os
+import shutil
+import socket
 import ssl
-import subprocess
+# Team Cymru TXT lookups use dig without shell access.
+import subprocess  # nosec B404
+import time
 from typing import Any
 from urllib.parse import quote, urlencode, urljoin, urlsplit
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.x509.oid import NameOID
 
 from services.intel.base import ProviderApiError
 
 
+log = logging.getLogger("shell")
 SYSTEM_CA_BUNDLE_PATHS = (
     "/etc/ssl/certs/ca-certificates.crt",
     "/etc/pki/tls/certs/ca-bundle.crt",
@@ -41,6 +52,14 @@ class JsonApiClient:
         path = parsed.path or "/"
         if parsed.query:
             path = f"{path}?{parsed.query}"
+        safe_path = parsed.path or "/"
+        started = time.perf_counter()
+        log.debug("INTEL_HTTP_REQUEST", extra={
+            "provider_host": parsed.hostname or "",
+            "method": method.upper(),
+            "path": safe_path,
+            "has_query": bool(parsed.query),
+        })
         conn: http.client.HTTPSConnection | None = None
         try:
             conn = http.client.HTTPSConnection(
@@ -59,6 +78,11 @@ class JsonApiClient:
                 response.read()
                 redirect_url = urljoin(url, location)
                 if _url_origin(redirect_url) != _url_origin(url):
+                    log.warning("INTEL_HTTP_REDIRECT_BLOCKED", extra={
+                        "provider_host": parsed.hostname or "",
+                        "status": int(response.status),
+                        "redirect_host": urlsplit(redirect_url).hostname or "",
+                    })
                     raise ProviderApiError(
                         "provider redirected to an untrusted host",
                         status=int(response.status),
@@ -73,6 +97,14 @@ class JsonApiClient:
                     _redirects_remaining=_redirects_remaining - 1,
                 )
             raw_bytes = response.read()
+            log.debug("INTEL_HTTP_RESPONSE", extra={
+                "provider_host": parsed.hostname or "",
+                "method": method.upper(),
+                "path": safe_path,
+                "status": int(response.status),
+                "response_bytes": len(raw_bytes),
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            })
             raw = raw_bytes.decode("utf-8", errors="replace")
             reset_at = _header_float(response.getheader("x-ratelimit-reset"))
             if response.status >= 400:
@@ -97,12 +129,27 @@ class JsonApiClient:
         try:
             loaded = json.loads(raw or "{}")
         except json.JSONDecodeError as exc:
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_DECODE_FAILED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": method.upper(),
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+            })
             raise ProviderApiError("provider returned invalid JSON", status=self.last_status) from exc
         return loaded
 
     def _json_request(self, url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
         loaded = self._json_request_any(url, headers=headers)
         if not isinstance(loaded, dict):
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_SHAPE_UNEXPECTED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": "GET",
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+                "shape": type(loaded).__name__,
+            })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
 
@@ -121,6 +168,14 @@ class JsonApiClient:
             body=json.dumps(payload, separators=(",", ":")),
         )
         if not isinstance(loaded, dict):
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_SHAPE_UNEXPECTED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": "POST",
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+                "shape": type(loaded).__name__,
+            })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
 
@@ -142,6 +197,14 @@ class JsonApiClient:
             body=urlencode(payload),
         )
         if not isinstance(loaded, dict):
+            parsed = urlsplit(url)
+            log.warning("INTEL_HTTP_JSON_SHAPE_UNEXPECTED", extra={
+                "provider_host": parsed.hostname or "",
+                "method": "POST",
+                "path": parsed.path or "/",
+                "status": self.last_status or "",
+                "shape": type(loaded).__name__,
+            })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
 
@@ -176,6 +239,14 @@ class ShodanApiClient(JsonApiClient):
         path = quote(value, safe="")
         query = urlencode({"key": api_key})
         return self._json_request(f"{self.base_url}/shodan/host/{path}?{query}")
+
+
+class ShodanInternetDbClient(JsonApiClient):
+    base_url = "https://internetdb.shodan.io"
+
+    def lookup_ip(self, value: str) -> dict[str, Any]:
+        path = quote(value, safe="")
+        return self._json_request(f"{self.base_url}/{path}")
 
 
 class VirusTotalApiClient(JsonApiClient):
@@ -256,11 +327,102 @@ class CensysApiClient(JsonApiClient):
 
 class CrtshApiClient(JsonApiClient):
     base_url = "https://crt.sh"
+    timeout_seconds = 5
 
     def lookup_domain(self, value: str) -> list[Any]:
-        query = urlencode({"q": value, "output": "json"})
-        loaded = self._json_request_any(f"{self.base_url}/?{query}")
+        query = urlencode({"q": value, "output": "json", "deduplicate": "Y"})
+        loaded = self._json_request_any(
+            f"{self.base_url}/?{query}",
+            headers={"Accept": "application/json", "User-Agent": "darklab_shell"},
+        )
         return loaded if isinstance(loaded, list) else []
+
+
+class TlsCertificateClient:
+    timeout_seconds = 5
+    last_status: int | None = None
+
+    def lookup_domain(self, value: str, *, port: int = 443) -> dict[str, Any]:
+        host = str(value or "").strip().rstrip(".")
+        if not host:
+            raise ProviderApiError("domain is required for TLS certificate lookup")
+        context = _tls_observation_context()
+        try:
+            with socket.create_connection((host, int(port)), timeout=self.timeout_seconds) as sock:
+                with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+                    der = tls_sock.getpeercert(binary_form=True)
+        except (TimeoutError, socket.timeout) as exc:
+            raise ProviderApiError("TLS certificate lookup timed out") from exc
+        except ssl.SSLError as exc:
+            raise ProviderApiError(f"TLS certificate handshake failed: {exc}") from exc
+        except OSError as exc:
+            raise ProviderApiError(f"TLS certificate lookup failed: {exc}") from exc
+        if not der:
+            raise ProviderApiError("TLS certificate lookup returned no peer certificate")
+        self.last_status = 200
+        cert = x509.load_der_x509_certificate(der)
+        return _normalize_tls_certificate(cert, host=host, port=int(port))
+
+
+def _tls_observation_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # This client observes certificate metadata only. It does not make a trust
+    # decision, so expired or self-signed certificates must still be readable.
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _cert_time(value) -> str:
+    if value is None:
+        return ""
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _cert_name_attributes(cert: x509.Certificate, oid) -> list[str]:
+    values: list[str] = []
+    for item in cert.subject.get_attributes_for_oid(oid):
+        rendered = str(item.value or "").strip()
+        if rendered and rendered not in values:
+            values.append(rendered)
+    return values
+
+
+def _normalize_tls_certificate(cert: x509.Certificate, *, host: str, port: int) -> dict[str, Any]:
+    names: list[str] = []
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        for name in san.get_values_for_type(x509.DNSName):
+            normalized = str(name or "").strip().lower().lstrip("*.").rstrip(".")
+            if normalized and normalized not in names:
+                names.append(normalized)
+    except x509.ExtensionNotFound:
+        pass
+    for common_name in _cert_name_attributes(cert, NameOID.COMMON_NAME):
+        normalized = common_name.lower().lstrip("*.").rstrip(".")
+        if normalized and normalized not in names:
+            names.append(normalized)
+    if host and host not in names:
+        names.insert(0, host)
+    try:
+        not_before = cert.not_valid_before_utc
+        not_after = cert.not_valid_after_utc
+    except AttributeError:
+        not_before = cert.not_valid_before
+        not_after = cert.not_valid_after
+    issuer = cert.issuer.rfc4514_string()
+    subject = cert.subject.rfc4514_string()
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+    return {
+        "host": host,
+        "port": port,
+        "subject": subject,
+        "issuer": issuer,
+        "not_before": _cert_time(not_before),
+        "not_after": _cert_time(not_after),
+        "fingerprint_sha256": fingerprint,
+        "names": names[:50],
+    }
 
 
 class HibpPwnedPasswordsClient(JsonApiClient):
@@ -376,6 +538,58 @@ class SecurityTrailsApiClient(JsonApiClient):
         return {"domain": domain, "whois": whois, "subdomains": subdomains}
 
 
+class FofaApiClient(JsonApiClient):
+    base_url = "https://fofa.info/api/v1"
+    fields = "host,ip,port,protocol,title,server,country_name"
+
+    def search(self, query: str, *, email: str, api_key: str, size: int = 10, page: int = 1) -> dict[str, Any]:
+        bounded_size = max(1, min(int(size), 10))
+        bounded_page = max(1, int(page))
+        encoded_query = base64.b64encode(str(query or "").encode("utf-8")).decode("ascii")
+        params = urlencode({
+            "email": email,
+            "key": api_key,
+            "qbase64": encoded_query,
+            "fields": self.fields,
+            "size": bounded_size,
+            "page": bounded_page,
+        })
+        return self._json_request(f"{self.base_url}/search/all?{params}")
+
+
+class ZoomEyeApiClient(JsonApiClient):
+    base_url = "https://api.zoomeye.ai/v2"
+    fields = "ip,port,service,app,os,device,city,country,asn,organization"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"API-KEY": api_key, "Accept": "application/json"}
+
+    def search_hosts(
+        self,
+        query: str,
+        *,
+        api_key: str,
+        page: int = 1,
+        size: int = 10,
+        sub_type: str = "all",
+    ) -> dict[str, Any]:
+        bounded_size = max(1, min(int(size), 10))
+        bounded_page = max(1, int(page))
+        encoded_query = base64.b64encode(str(query or "").encode("utf-8")).decode("ascii")
+        return self._json_post(
+            f"{self.base_url}/search",
+            {
+                "qbase64": encoded_query,
+                "sub_type": sub_type,
+                "page": bounded_page,
+                "facets": "",
+                "fields": self.fields,
+                "pagesize": bounded_size,
+            },
+            headers=self._headers(api_key),
+        )
+
+
 class RouteViewsApiClient(JsonApiClient):
     base_url = "https://api.routeviews.org"
 
@@ -412,9 +626,13 @@ class TeamCymruDnsClient:
         return {"records": records, "asn_records": asn_records}
 
     def _lookup_txt(self, query: str) -> list[str]:
+        dig_bin = shutil.which("dig")
+        if not dig_bin:
+            raise ProviderApiError("dig is not available for Team Cymru DNS lookup")
         try:
-            proc = subprocess.run(
-                ["dig", "+short", "TXT", query],
+            # Fixed argv, no shell, and the query comes from the Team Cymru helper.
+            proc = subprocess.run(  # nosec B603
+                [dig_bin, "+short", "TXT", query],
                 capture_output=True,
                 check=False,
                 text=True,

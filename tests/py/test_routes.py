@@ -39,6 +39,7 @@ import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
 from services.commands.builtins import execute_builtin_command
+from core.output_signals import OutputSignalClassifier
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import DatabaseBackend, quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
@@ -4027,13 +4028,14 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                     "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, "
                     "raw_line, created) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
                     (
                         finding_id,
                         owner_token,
+                        team_id,
                         run_id,
                         entity_id,
                         entity_id,
@@ -4077,10 +4079,15 @@ class TestTeamRoutes:
             )
             projects = client.get("/projects?include_counts=1", headers=operator_headers)
             summary = client.get(f"/projects/{project_id}/summary", headers=operator_headers)
+            overview = client.get(f"/projects/{project_id}/overview", headers=operator_headers)
             entities = client.get(f"/projects/{project_id}/entities?type=domain", headers=operator_headers)
             findings = client.get(f"/projects/{project_id}/findings", headers=operator_headers)
             personal_summary = client.get(
                 f"/projects/{project_id}/summary",
+                headers={"X-Session-ID": operator_token},
+            )
+            personal_overview = client.get(
+                f"/projects/{project_id}/overview",
                 headers={"X-Session-ID": operator_token},
             )
 
@@ -4101,6 +4108,12 @@ class TestTeamRoutes:
             assert summary_payload["counts"]["labels"] == 1
             assert summary_payload["counts"]["notes"] == 1
             assert [item["id"] for item in summary_payload["targets"]] == [entity_id]
+            assert overview.status_code == 200
+            overview_payload = overview.get_json()
+            assert overview_payload["rollups"]["target_count"] == 1
+            assert overview_payload["rollups"]["finding_severities"]["high"] == 1
+            assert overview_payload["targets"][0]["entity_id"] == entity_id
+            assert overview_payload["targets"][0]["top_finding_severity"] == "high"
             assert entities.status_code == 200
             assert [item["id"] for item in entities.get_json()["entities"]] == [entity_id]
             assert entities.get_json()["entities"][0]["labels"][0]["label"] == "cross-member"
@@ -4108,6 +4121,7 @@ class TestTeamRoutes:
             assert [item["id"] for item in findings.get_json()["findings"]] == [finding_id]
             assert findings.get_json()["findings"][0]["note"]["body"] == "visible to the team"
             assert personal_summary.status_code == 404
+            assert personal_overview.status_code == 404
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5471,6 +5485,39 @@ class TestNotificationChannelRoutes:
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
+                        "nte_project_digest_delivery",
+                        session_id,
+                        channel_id,
+                        "project_digest",
+                        json.dumps({
+                            "trigger": "project_digest",
+                            "project_id": "prj_delivery_audit",
+                            "project_name": "External Edge",
+                            "project_monitoring_url": "/projects/prj_delivery_audit/monitoring",
+                            "digest_identity": {
+                                "project_id": "prj_delivery_audit",
+                                "session_id": session_id,
+                                "team_id": "",
+                                "window_start": "2026-05-22T06:00:00+00:00",
+                                "window_end": "2026-05-22T07:00:00+00:00",
+                            },
+                        }),
+                        "dead",
+                        3,
+                        "",
+                        "2026-05-22T07:11:00+00:00",
+                        "provider rejected digest",
+                        "",
+                        "2026-05-22T07:10:30+00:00",
+                        "2026-05-22T07:11:00+00:00",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
                         "nte_other_delivery",
                         "tok_other_notification_owner",
                         channel_id,
@@ -5495,11 +5542,21 @@ class TestNotificationChannelRoutes:
 
             assert resp.status_code == 200
             payload = resp.get_json()
-            assert payload["total"] == 1
-            assert payload["events"][0]["id"] == "nte_browser_delivery"
-            assert payload["events"][0]["channel_id"] == channel_id
-            assert payload["events"][0]["status"] == "sent"
-            assert payload["events"][0]["payload"]["message"] == "done"
+            assert payload["total"] == 2
+            digest_event = payload["events"][0]
+            assert digest_event["id"] == "nte_project_digest_delivery"
+            assert digest_event["project_digest"] == {
+                "project_id": "prj_delivery_audit",
+                "project_name": "External Edge",
+                "window_start": "2026-05-22T06:00:00+00:00",
+                "window_end": "2026-05-22T07:00:00+00:00",
+                "monitoring_url": "/projects/prj_delivery_audit/monitoring",
+            }
+            run_event = payload["events"][1]
+            assert run_event["id"] == "nte_browser_delivery"
+            assert run_event["channel_id"] == channel_id
+            assert run_event["status"] == "sent"
+            assert run_event["payload"]["message"] == "done"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5723,6 +5780,268 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return json.loads(resp.data)["link"]
 
+    def _create_target(self, client, session_id, project_id, target_type="domain", value="api.example.com", *, headers=None):
+        resp = client.post(
+            f"/projects/{project_id}/targets",
+            json={"type": target_type, "value": value},
+            headers=headers or {"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 201
+        return resp.get_json()["target"]
+
+    def test_project_overview_route_returns_empty_contract_and_404_for_foreign_project(self):
+        client = get_client()
+        session_id = self._session_id("project-overview-empty")
+        foreign_session = self._session_id("project-overview-foreign")
+        project = self._create_project(client, session_id, name="Overview Empty")
+        foreign_project = self._create_project(client, foreign_session, name="Overview Foreign")
+
+        with mock.patch.object(project_routes.log, "debug") as debug_log, \
+             mock.patch.object(project_routes.log, "info") as info_log:
+            resp = client.get(
+                f"/projects/{project['id']}/overview",
+                headers={"X-Session-ID": session_id},
+            )
+            foreign_resp = client.get(
+                f"/projects/{foreign_project['id']}/overview",
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["project"]["id"] == project["id"]
+        assert payload["payload_version"] == 1
+        assert payload["targets"] == []
+        assert payload["rollups"]["target_count"] == 0
+        assert payload["rollups"]["certificate_statuses"]["unknown"] == 0
+        assert payload["rollups"]["recent_change_state"] == "not-monitored"
+        assert payload["recent_changes"] == []
+        assert foreign_resp.status_code == 404
+        viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_OVERVIEW_VIEWED",))
+        assert viewed.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_count": 0,
+            "recent_change_state": "not-monitored",
+            "windowed": False,
+            "duration_ms": mock.ANY,
+        }
+        miss = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_MISS",))
+        assert miss.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": foreign_project["id"],
+            "route": "project_overview",
+            "windowed": False,
+            "duration_ms": mock.ANY,
+        }
+
+    def test_project_overview_route_logs_aggregator_failures(self):
+        client = get_client()
+        session_id = self._session_id("project-overview-error")
+        project = self._create_project(client, session_id, name="Overview Error")
+
+        with mock.patch.object(
+            project_routes,
+            "get_project_intel_overview",
+            side_effect=RuntimeError("overview exploded"),
+        ), mock.patch.object(project_routes.log, "error") as error_log:
+            with pytest.raises(RuntimeError, match="overview exploded"):
+                client.get(
+                    f"/projects/{project['id']}/overview?window_start=2026-01-01T00:00:00Z",
+                    headers={"X-Session-ID": session_id},
+                )
+
+        error_log.assert_called_once()
+        assert error_log.call_args.args == ("PROJECT_OVERVIEW_FAILED",)
+        assert error_log.call_args.kwargs["exc_info"] is True
+        assert error_log.call_args.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "windowed": True,
+            "duration_ms": mock.ANY,
+        }
+
+    def test_project_overview_route_returns_target_rollup_and_existing_filter_hints(self):
+        client = get_client()
+        session_id = self._session_id("project-overview")
+        project = self._create_project(client, session_id, name="Overview Populated")
+        target = self._create_target(client, session_id, project["id"])
+        snapshot_id = f"snap-route-overview-{target['id']}"
+        finding_id = f"finding-route-overview-{target['id']}"
+        now = datetime.now(timezone.utc).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=20)).isoformat()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, 'censys', 'ok', ?, ?, ?, ?)",
+                (
+                    snapshot_id,
+                    session_id,
+                    target["id"],
+                    "Censys route overview",
+                    json.dumps({
+                        "providers": {
+                            "censys": {
+                                "ports": [443],
+                                "services": ["https"],
+                                "certificate": {"not_after": expires_at},
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                    }),
+                    now,
+                    expires_at,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, "
+                "title, created, last_seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'high', 'new', ?, ?, ?)",
+                (
+                    finding_id,
+                    session_id,
+                    target["id"],
+                    target["id"],
+                    "subject-route-overview",
+                    "sig-route-overview",
+                    "Overview high finding",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        resp = client.get(
+            f"/projects/{project['id']}/overview",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["rollups"]["target_count"] == 1
+        assert payload["rollups"]["certificate_statuses"]["expiring_30d"] == 1
+        assert payload["rollups"]["finding_severities"]["high"] == 1
+        target_row = payload["targets"][0]
+        assert target_row["entity_id"] == target["id"]
+        assert target_row["open_ports"] == [443]
+        assert target_row["services"] == ["https"]
+        assert target_row["certificate"]["status"] == "expiring_30d"
+        assert target_row["top_finding_severity"] == "high"
+        assert target_row["deep_link_hints"]["entities"] == {"target_id": target["id"]}
+        assert target_row["deep_link_hints"]["findings"] == {
+            "target_id": target["id"],
+            "orphan_filter": "all",
+            "severity": "high",
+        }
+
+        entity_params = urlencode(target_row["deep_link_hints"]["entities"])
+        finding_params = urlencode(target_row["deep_link_hints"]["findings"])
+        entities_resp = client.get(
+            f"/projects/{project['id']}/entities?{entity_params}",
+            headers={"X-Session-ID": session_id},
+        )
+        findings_resp = client.get(
+            f"/projects/{project['id']}/findings?{finding_params}",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert entities_resp.status_code == 200
+        assert [item["id"] for item in entities_resp.get_json()["entities"]] == [target["id"]]
+        assert findings_resp.status_code == 200
+        assert [item["id"] for item in findings_resp.get_json()["findings"]] == [finding_id]
+
+    def test_project_overview_route_forwards_digest_window_params_to_recent_changes(self):
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        session_id = "tok_project_overview_window_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Overview Windowed")
+        target = self._create_target(client, session_id, project["id"], value="api.example.com")
+        old_run_id = self._seed_run(session_id, "nmap -sV api.example.com")
+        window_run_id = self._seed_run(session_id, "nmap -sV api.example.com")
+        with db_connect() as conn:
+            watcher = watcher_service.create_watcher(
+                session_id,
+                command_text="nmap -sV api.example.com",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=old_run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "22/tcp", "state": "open", "service": "ssh"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            window_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=window_run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id=window_run_id,
+                conn=conn,
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T08:00:00+00:00", old_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:30:00+00:00", window_fire.id),
+            )
+            conn.commit()
+
+        resp = client.get(
+            f"/projects/{project['id']}/overview"
+            "?window_start=2026-05-20T09:00:00Z&window_end=2026-05-20T10:00:00Z",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["rollups"]["recent_change_state"] == "windowed"
+        assert payload["recent_changes"] == [{
+            "fire_id": window_fire.id,
+            "watcher_id": watcher.id,
+            "severity": "critical",
+            "state": "changed",
+            "target_ids": [target["id"]],
+            "created": "2026-05-20T09:30:00+00:00",
+        }]
+        assert old_fire.id not in json.dumps(payload["recent_changes"])
+        assert payload["targets"][0]["source_flags"]["has_recent_changes"] is True
+        assert payload["targets"][0]["recent_change_markers"][0]["fire_id"] == window_fire.id
+
     def test_project_package_and_link_routes_record_audit_events(self):
         client = get_client()
         session_id = self._session_id("project-audit")
@@ -5879,6 +6198,11 @@ class TestProjectRoutes:
                 f"/projects/{project['id']}/monitoring/summary",
                 headers={"X-Session-ID": session_id},
             )
+            window_summary_resp = client.get(
+                f"/projects/{project['id']}/monitoring/summary"
+                "?window_start=2026-01-01T00:00:00Z&window_end=2027-01-01T00:00:00Z",
+                headers={"X-Session-ID": session_id},
+            )
 
         assert resp.status_code == 200
         payload = resp.get_json()
@@ -5896,6 +6220,12 @@ class TestProjectRoutes:
         summary_payload = summary_resp.get_json()
         assert summary_payload["project"]["id"] == project["id"]
         assert summary_payload["summary"] == payload["summary"]
+        assert window_summary_resp.status_code == 200
+        window_summary_payload = window_summary_resp.get_json()
+        assert window_summary_payload["digest_window"]["start"] == "2026-01-01T00:00:00+00:00"
+        assert window_summary_payload["digest_window"]["end"] == "2027-01-01T00:00:00+00:00"
+        assert window_summary_payload["window_summary"]["changed_monitor_count"] == 1
+        assert window_summary_payload["window_summary"]["top_changes"][0]["fire_kind"] == "changed"
         viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_VIEWED",))
         assert viewed.kwargs["extra"] == {
             "ip": mock.ANY,
@@ -5920,7 +6250,43 @@ class TestProjectRoutes:
             "failed_count": 0,
             "highest_severity": "critical",
             "top_change_count": 1,
+            "windowed": False,
+            "window_changed_count": 0,
+            "window_recovered_count": 0,
+            "window_failed_count": 0,
+            "window_highest_severity": "",
+            "window_top_change_count": 0,
+            "window_fire_count": 0,
         }
+        window_summary_viewed = [
+            call for call in info_log.call_args_list
+            if call.args == ("PROJECT_MONITORING_SUMMARY_VIEWED",) and call.kwargs["extra"]["windowed"]
+        ][0]
+        assert window_summary_viewed.kwargs["extra"]["changed_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["top_change_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["window_changed_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["window_recovered_count"] == 0
+        assert window_summary_viewed.kwargs["extra"]["window_failed_count"] == 0
+        assert window_summary_viewed.kwargs["extra"]["window_highest_severity"] == "critical"
+        assert window_summary_viewed.kwargs["extra"]["window_top_change_count"] == 1
+        assert window_summary_viewed.kwargs["extra"]["window_fire_count"] == 1
+
+        anonymous_session_id = "anon_project_monitoring_" + uuid.uuid4().hex[:8]
+        anonymous_project = self._create_project(
+            client,
+            anonymous_session_id,
+            name="Anonymous Monitoring",
+        )
+        anonymous_resp = client.get(
+            f"/projects/{anonymous_project['id']}/monitoring",
+            headers={"X-Session-ID": anonymous_session_id},
+        )
+
+        assert anonymous_resp.status_code == 200
+        anonymous_payload = anonymous_resp.get_json()
+        assert anonymous_payload["notification_channels"] == []
+        assert anonymous_payload["can_manage_digest_settings"] is False
+        assert anonymous_payload["digest_settings"]["enabled"] is False
 
     def test_project_monitoring_route_keeps_deleted_current_run_state(self):
         from services.watchers import service as watcher_service
@@ -6265,6 +6631,132 @@ class TestProjectRoutes:
         assert audit_details["ack_state"] == "expected"
         assert audit_details["note_chars"] == len("Maintenance window")
         assert "Maintenance window" not in json.dumps(audit_details)
+
+    def test_project_digest_settings_routes_expose_channels_and_enforce_team_manage_roles(self, tmp_path):
+        db_path = str(tmp_path / "project-digest-routes.db")
+        lock_path = str(tmp_path / "project-digest-routes.lock")
+        patchers = [
+            mock.patch("core.database.DB_PATH", db_path),
+            mock.patch("core.database.DB_INIT_LOCK_PATH", lock_path),
+        ]
+        for patcher in patchers:
+            patcher.start()
+        db_init()
+        client = get_client()
+        owner_token = "tok_project_digest_owner_" + uuid.uuid4().hex[:8]
+        viewer_token = "tok_project_digest_viewer_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_project_digest_operator_" + uuid.uuid4().hex[:8]
+        try:
+            team = self._create_team(client, owner_token, name="Digest Settings Team")
+            team_id = team["id"]
+            self._join_team(
+                client,
+                owner_token,
+                team_id,
+                viewer_token,
+                role="viewer",
+                display_name="Digest Viewer",
+            )
+            self._join_team(
+                client,
+                owner_token,
+                team_id,
+                operator_token,
+                role="operator",
+                display_name="Digest Operator",
+            )
+            project = self._create_project(
+                client,
+                owner_token,
+                name="Digest Settings",
+                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            )
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO notification_channels "
+                    "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+                    "muted, created, updated) "
+                    "VALUES ('ntc_digest_route', ?, ?, 'webhook', 'Digest route', '{}', '{}', '[]', 0, "
+                    "'2026-06-15T10:00:00+00:00', '2026-06-15T10:00:00+00:00')",
+                    (owner_token, team_id),
+                )
+                conn.commit()
+
+            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            route = f"/projects/{project['id']}/digest-settings"
+            viewer_get = client.get(route, headers=viewer_headers)
+            viewer_patch = client.patch(
+                route,
+                headers=viewer_headers,
+                json={
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_digest_route"],
+                },
+            )
+            operator_patch = client.patch(
+                route,
+                headers=operator_headers,
+                json={
+                    "enabled": True,
+                    "cadence_preset": "weekly",
+                    "channel_ids": ["ntc_digest_route"],
+                    "quiet_no_change": True,
+                },
+            )
+            owner_get_after_operator_patch = client.get(route, headers=owner_headers)
+            owner_patch = client.patch(
+                route,
+                headers=owner_headers,
+                json={
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_digest_route"],
+                    "quiet_no_change": False,
+                },
+            )
+            operator_get = client.get(route, headers=operator_headers)
+            monitoring_get = client.get(f"/projects/{project['id']}/monitoring", headers=operator_headers)
+            with db_connect() as conn:
+                digest_schedules = conn.execute(
+                    "SELECT session_token, cadence_preset FROM schedules "
+                    "WHERE owner_kind = 'project_digest' AND owner_id = ? AND team_id = ?",
+                    (project["id"], team_id),
+                ).fetchall()
+
+            assert viewer_get.status_code == 200
+            assert viewer_get.get_json()["can_manage_digest_settings"] is False
+            assert viewer_get.get_json()["digest_settings"]["enabled"] is False
+            assert viewer_get.get_json()["notification_channels"][0]["id"] == "ntc_digest_route"
+            assert viewer_patch.status_code == 403
+            assert viewer_patch.get_json()["error"] == "team_forbidden"
+            assert operator_patch.status_code == 200
+            operator_payload = operator_patch.get_json()
+            assert operator_payload["can_manage_digest_settings"] is True
+            assert operator_payload["digest_settings"]["enabled"] is True
+            assert operator_payload["digest_settings"]["cadence_preset"] == "weekly"
+            assert operator_payload["digest_settings"]["channel_ids"] == ["ntc_digest_route"]
+            assert operator_payload["digest_settings"]["quiet_no_change"] is True
+            assert operator_payload["digest_settings"]["session_id"] == owner_token
+            assert owner_get_after_operator_patch.status_code == 200
+            assert owner_get_after_operator_patch.get_json()["digest_settings"]["enabled"] is True
+            assert owner_get_after_operator_patch.get_json()["digest_settings"]["cadence_preset"] == "weekly"
+            assert owner_patch.status_code == 200
+            assert owner_patch.get_json()["digest_settings"]["cadence_preset"] == "daily"
+            assert operator_get.status_code == 200
+            assert operator_get.get_json()["digest_settings"]["enabled"] is True
+            assert operator_get.get_json()["digest_settings"]["cadence_preset"] == "daily"
+            assert monitoring_get.status_code == 200
+            assert monitoring_get.get_json()["digest_settings"]["cadence_preset"] == "daily"
+            assert monitoring_get.get_json()["can_manage_digest_settings"] is True
+            assert [(row["session_token"], row["cadence_preset"]) for row in digest_schedules] == [
+                (owner_token, "daily")
+            ]
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
 
     def test_project_activity_route_allows_team_viewer_for_team_project_only(self):
         from services.audit.models import AuditEventType
@@ -13072,6 +13564,9 @@ class TestCommandCatalogRoute:
             ("intel urlscan.io", "URLSCAN_API_KEY", ()),
             ("intel ThreatFox", "THREATFOX_AUTH_KEY", ()),
             ("intel SecurityTrails", "SECURITYTRAILS_API_KEY", ()),
+            ("intel FOFA", "FOFA_KEY", ("FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN")),
+            ("intel FOFA", "FOFA_EMAIL", ()),
+            ("intel ZoomEye", "ZOOMEYE_API_KEY", ()),
         }
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -15736,7 +16231,14 @@ class TestWorkspaceRoutes:
         client = get_client()
         session = "workspace-paths-" + uuid.uuid4().hex[:8]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
-            for bad_path in ("../escape.txt", "/tmp/escape.txt", "a\\b.txt"):
+            for bad_path in (
+                "../escape.txt",
+                "/tmp/escape.txt",
+                "a\\b.txt",
+                " dataperk.com",
+                "dataperk.com ",
+                "\n  dataperk.com",
+            ):
                 resp = client.post(
                     "/workspace/files",
                     headers={"X-Session-ID": session},
@@ -20462,6 +20964,24 @@ class TestRunPermalinkRoute:
                 "after another command, use this command's history permalink"
                 in data["preview_notice"]
             )
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_view_preserves_nuclei_template_provenance_metadata(self):
+        run_id = "permalink-json-nuclei-provenance-run"
+        command = "nuclei -u https://darklab.sh -t custom/nuclei/http.yaml -update-templates"
+        line = "[custom-check] [http] [medium] https://darklab.sh"
+        metadata = OutputSignalClassifier(command).classify_line(line)
+        self._insert_run(run_id, command, [{"text": line, **metadata}])
+        try:
+            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": "test-session"})
+            data = json.loads(resp.data)
+            assert resp.status_code == 200
+            source_detail = data["output_entries"][0]["source_detail"]
+            assert source_detail["adapter"] == "nuclei"
+            assert source_detail["template_id"] == "custom-check"
+            assert source_detail["template_provenance"]["source_kind"] == "workspace_templates"
+            assert source_detail["template_provenance"]["operator_updated"] is True
         finally:
             self._delete_run(run_id)
 

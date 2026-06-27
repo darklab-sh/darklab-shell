@@ -285,7 +285,15 @@ The app now standardizes on TCP connect scans for nmap. `rewrite_command()` inje
 
 **Go tools are installed with `GOBIN=/usr/local/bin` so they are accessible to the `scanner` user.**
 
-All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
+Go tools such as `nuclei`, `subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `tlsx`, `cdncheck`, `amass`, `assetfinder`, `gobuster`, `ffuf`, `trufflehog`, and `puredns` are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
+
+### TruffleHog Output Redaction
+
+**TruffleHog managed scans use JSON output so raw secret fields can be masked before persistence.**
+
+The command registry appends `--json` to `trufflehog filesystem --directory ...` and `trufflehog git https://...` scans unless the flag is already present or the command is a help request. The run-output path then parses TruffleHog JSON rows and replaces `Raw` / `RawV2` with a redaction marker before the line is streamed, stored, shared, exported, or used to create findings.
+
+The app treats TruffleHog's `Redacted` field as untrusted display data. Finding text records detector, verification state, source location, and a generic redacted marker, but does not persist the vendor-provided secret hint verbatim when it matches raw secret material. TruffleHog's own verification behavior remains available for users who intentionally run the scanner; the app's safety boundary is controlled command shapes, managed inputs, HTTPS-only Git scans, JSON output, and server-side transcript masking.
 
 ### SQLite WAL Mode
 

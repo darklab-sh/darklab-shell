@@ -30,6 +30,7 @@ import tempfile
 import textwrap
 import time
 import unittest.mock as mock
+import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -2435,6 +2436,7 @@ class TestLoadConfig:
         assert cfg["intel_cache_ttl_abuseipdb_ip_seconds"] == 21600
         assert cfg["intel_cache_ttl_ipinfo_ip_seconds"] == 21600
         assert cfg["intel_cache_ttl_teamcymru_ip_seconds"] == 86400
+        assert cfg["intel_cache_ttl_tls_certificate_domain_seconds"] == 21600
         assert cfg["intel_cache_ttl_crtsh_domain_seconds"] == 86400
         assert cfg["intel_cache_ttl_hibp_password_seconds"] == 604800
         assert cfg["intel_cache_ttl_nvd_cve_seconds"] == 86400
@@ -2462,6 +2464,8 @@ class TestLoadConfig:
         assert cfg["intel_rate_limit_ipinfo_refill_seconds"] == 2
         assert cfg["intel_rate_limit_teamcymru_bucket"] == 30
         assert cfg["intel_rate_limit_teamcymru_refill_seconds"] == 2
+        assert cfg["intel_rate_limit_tls_certificate_bucket"] == 20
+        assert cfg["intel_rate_limit_tls_certificate_refill_seconds"] == 3
         assert cfg["intel_rate_limit_crtsh_bucket"] == 10
         assert cfg["intel_rate_limit_crtsh_refill_seconds"] == 6
         assert cfg["intel_rate_limit_hibp_bucket"] == 10
@@ -2775,6 +2779,857 @@ class TestPackagePresetCatalog:
 
         with pytest.raises(ProjectWorkspaceError, match="preset cap"):
             package_presets.normalize_package_preset_catalog({"presets": raw_presets})
+
+
+class TestProjectOverviewContract:
+    def _project_db(self, monkeypatch, tmp_path):
+        db_path = str(tmp_path / "project-overview.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        database.db_init()
+        return db_path
+
+    def test_payload_contract_and_overview_helpers_pin_phase_one_decisions(self):
+        payload = project_workspace.overview_payload_contract({"id": "prj_overview"})
+
+        assert payload == {
+            "project": {"id": "prj_overview"},
+            "generated_at": "",
+            "payload_version": project_workspace.OVERVIEW_PAYLOAD_VERSION,
+            "targets": [],
+            "rollups": {
+                "target_count": 0,
+                "certificate_statuses": {
+                    "expired": 0,
+                    "expiring_14d": 0,
+                    "expiring_30d": 0,
+                    "healthy": 0,
+                    "unknown": 0,
+                },
+                "finding_severities": {
+                    "critical": 0,
+                    "high": 0,
+                    "medium": 0,
+                    "low": 0,
+                    "info": 0,
+                },
+                "recent_change_state": "not-monitored",
+            },
+            "recent_changes": [],
+        }
+        assert project_workspace.classify_certificate_status(-1) == "expired"
+        assert project_workspace.classify_certificate_status(14) == "expiring_14d"
+        assert project_workspace.classify_certificate_status(30) == "expiring_30d"
+        assert project_workspace.classify_certificate_status(31) == "healthy"
+        assert project_workspace.classify_certificate_status(None, has_certificate_data=False) == "unknown"
+        assert project_workspace.severity_rank("critical") < project_workspace.severity_rank("high")
+        assert project_workspace.severity_rank("info") < project_workspace.severity_rank("unknown")
+        assert project_workspace.OVERVIEW_TARGET_LIMIT == 200
+        assert project_workspace.OVERVIEW_TARGET_HIGHLIGHT_LIMIT == 5
+
+    def test_finding_rollup_uses_review_suppression_and_verification_axes(self):
+        findings = [
+            {"severity": "high", "review_state": "new", "verification_status": "not_started"},
+            {"severity": "critical", "review_state": "false_positive", "verification_status": "verified"},
+            {"severity": "medium", "review_state": "important", "suppressed": True},
+            {"severity": "low", "status": "needs_followup", "verification_state": "needs_retest"},
+        ]
+
+        assert project_workspace.highest_actionable_finding_severity(findings) == "high"
+        counts = project_workspace.finding_state_counts(findings)
+
+        assert counts["by_review_state"] == {
+            "new": 1,
+            "reviewed": 0,
+            "important": 1,
+            "needs_followup": 1,
+            "false_positive": 1,
+        }
+        assert counts["suppressed"] == 1
+        assert counts["by_verification_state"] == {
+            "not_started": 1,
+            "ready_to_verify": 0,
+            "verified": 1,
+            "needs_retest": 1,
+            "not_applicable": 0,
+        }
+
+    def test_target_identity_uses_existing_atlas_entity_contract(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_contract", {"name": "Overview Contract"})
+        assert project is not None
+
+        host_ip = project_workspace.add_project_target(
+            "tok_overview_contract",
+            project["id"],
+            {"type": "host", "value": "192.0.2.25"},
+        )
+        assert host_ip is not None
+        host_domain = project_workspace.add_project_target(
+            "tok_overview_contract",
+            project["id"],
+            {"type": "host", "value": "Api.Example.COM"},
+        )
+        assert host_domain is not None
+        duplicate_domain = project_workspace.add_project_target(
+            "tok_overview_contract",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert duplicate_domain is not None
+        foreign_project = project_workspace.create_project("tok_overview_foreign", {"name": "Foreign Contract"})
+        assert foreign_project is not None
+        foreign_domain = project_workspace.add_project_target(
+            "tok_overview_foreign",
+            foreign_project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert foreign_domain is not None
+
+        assert host_ip["type"] == "ip"
+        assert host_ip["value"] == "192.0.2.25"
+        assert host_domain["type"] == "domain"
+        assert host_domain["value"] == "api.example.com"
+        assert duplicate_domain["id"] == host_domain["id"]
+        assert foreign_domain["id"] != host_domain["id"]
+        with database.db_connect() as conn:
+            rows = conn.execute(
+                "SELECT e.id, e.type, e.canonical_value, l.entity_id "
+                "FROM entities e JOIN project_links l ON l.entity_id = e.id "
+                "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+                "ORDER BY e.type, e.canonical_value",
+                (project["id"],),
+            ).fetchall()
+
+        assert [(row["id"], row["entity_id"]) for row in rows] == [
+            (host_domain["id"], host_domain["id"]),
+            (host_ip["id"], host_ip["id"]),
+        ]
+        target_page = project_workspace.list_project_targets(
+            "tok_overview_contract",
+            project["id"],
+            limit=10,
+        )
+        assert target_page is not None
+        targets = target_page["targets"]
+        assert {target["id"] for target in targets} == {host_domain["id"], host_ip["id"]}
+        assert project_workspace.overview_identity_for_target_payload(
+            {"type": "host", "value": "192.0.2.25"}
+        ) == {
+            "entity_type": "ip",
+            "canonical_value": "192.0.2.25",
+            "display_label": "ip:192.0.2.25",
+        }
+        assert project_workspace.overview_identity_for_target_payload(
+            {"type": "host", "value": "Api.Example.COM"}
+        ) == {
+            "entity_type": "domain",
+            "canonical_value": "api.example.com",
+            "display_label": "domain:api.example.com",
+        }
+        with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, host, or ip"):
+            project_workspace.add_project_target(
+                "tok_overview_contract",
+                project["id"],
+                {"type": "cidr", "value": "192.0.2.0/24"},
+            )
+
+    def test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects(self):
+        assert project_workspace.classify_recent_change_state({
+            "digest_window": {"start": "2026-06-24T00:00:00Z"},
+            "window_summary": {},
+        }) == "windowed"
+        assert project_workspace.classify_recent_change_state({
+            "monitors": [{"id": "mon_1"}],
+            "timeline": [],
+        }) == "watcher-context-only"
+        assert project_workspace.classify_recent_change_state({
+            "counts": {"active": 1, "changed": 0, "failed": 0, "quiet": 0, "paused": 0},
+            "summary": {"top_changes": []},
+        }) == "watcher-context-only"
+        assert project_workspace.classify_recent_change_state({
+            "summary": {
+                "changed_monitor_count": 1,
+                "recovered_monitor_count": 0,
+                "failed_monitor_count": 0,
+                "top_changes": [{"fire_id": "fire_1"}],
+            },
+        }) == "watcher-context-only"
+        assert project_workspace.classify_recent_change_state({"monitors": [], "timeline": []}) == "not-monitored"
+
+        assert project_workspace.target_deep_link_hints(
+            "ent_overview",
+            run_id="run_overview",
+            review_state="new",
+            severity="high",
+        ) == {
+            "entities": {"target_id": "ent_overview", "run_id": "run_overview"},
+            "findings": {
+                "target_id": "ent_overview",
+                "orphan_filter": "all",
+                "review_state": "new",
+                "severity": "high",
+            },
+        }
+
+    def test_get_project_intel_overview_returns_bounded_target_rollups(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_rollup", {"name": "Overview Rollup"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_rollup",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        quiet_target = project_workspace.add_project_target(
+            "tok_overview_rollup",
+            project["id"],
+            {"type": "ip", "value": "192.0.2.44"},
+        )
+        assert quiet_target is not None
+        future_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-censys",
+                    "tok_overview_rollup",
+                    target["id"],
+                    "censys",
+                    "Censys summary",
+                    json.dumps({
+                        "providers": {
+                            "censys": {
+                                "ports": [443, 80],
+                                "services": ["https", "http"],
+                                "certificate": {"not_after": future_expiry},
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                    }),
+                    now,
+                    future_expiry,
+                ),
+            )
+            for finding_id, severity, status, suppressed, verification in (
+                ("finding-overview-high", "high", "new", 0, "not_started"),
+                ("finding-overview-critical-fp", "critical", "false_positive", 0, "verified"),
+                ("finding-overview-suppressed", "medium", "important", 1, "needs_retest"),
+            ):
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, "
+                    "suppressed, title, created, last_seen_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        finding_id,
+                        "tok_overview_rollup",
+                        target["id"],
+                        target["id"],
+                        f"subject-{finding_id}",
+                        f"sig-{finding_id}",
+                        severity,
+                        status,
+                        suppressed,
+                        finding_id,
+                        now,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO finding_triage_details "
+                    "(id, session_id, finding_id, verification_status, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (f"triage-{finding_id}", "tok_overview_rollup", finding_id, verification, now, now),
+                )
+            conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, team_id, finding_id, verification_status, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "triage-overview-foreign-team",
+                    "tok_overview_foreign",
+                    "team-overview-foreign",
+                    "finding-overview-high",
+                    "verified",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_rollup", project["id"])
+
+        assert overview is not None
+        assert overview["payload_version"] == project_workspace.OVERVIEW_PAYLOAD_VERSION
+        assert overview["rollups"]["target_count"] == 2
+        assert overview["rollups"]["certificate_statuses"]["healthy"] == 1
+        assert overview["rollups"]["certificate_statuses"]["unknown"] == 1
+        assert overview["rollups"]["finding_severities"]["high"] == 1
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        target_row = rows_by_id[target["id"]]
+        quiet_row = rows_by_id[quiet_target["id"]]
+        assert target_row["open_ports"] == [80, 443]
+        assert target_row["services"] == ["http", "https"]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["top_finding_severity"] == "high"
+        assert target_row["finding_counts"]["by_review_state"]["new"] == 1
+        assert target_row["finding_counts"]["by_review_state"]["false_positive"] == 1
+        assert target_row["finding_counts"]["suppressed"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["not_started"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["verified"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 1
+        assert target_row["intel_summary"]["providers_with_data"] == ["censys"]
+        assert target_row["deep_link_hints"]["findings"]["target_id"] == target["id"]
+        assert quiet_row["certificate"]["status"] == "unknown"
+        assert quiet_row["source_flags"]["has_intel"] is False
+
+    def test_get_project_intel_overview_marks_stale_provider_data(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_stale", {"name": "Overview Stale"})
+        assert project is not None
+        stale_target = project_workspace.add_project_target(
+            "tok_overview_stale",
+            project["id"],
+            {"type": "domain", "value": "stale.example.com"},
+        )
+        assert stale_target is not None
+        mixed_target = project_workspace.add_project_target(
+            "tok_overview_stale",
+            project["id"],
+            {"type": "domain", "value": "mixed.example.com"},
+        )
+        assert mixed_target is not None
+        now = datetime.now(timezone.utc)
+        expired_at = (now - timedelta(days=1)).isoformat()
+        fresh_at = (now + timedelta(days=1)).isoformat()
+        with database.db_connect() as conn:
+            for snapshot_id, target_id, provider, expires_at in (
+                ("snap-overview-stale", stale_target["id"], "censys", expired_at),
+                ("snap-overview-mixed-stale", mixed_target["id"], "censys", expired_at),
+                ("snap-overview-mixed-fresh", mixed_target["id"], "shodan", fresh_at),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_intel_snapshots "
+                    "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                    "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                    (
+                        snapshot_id,
+                        "tok_overview_stale",
+                        target_id,
+                        provider,
+                        f"{provider} summary",
+                        json.dumps({
+                            "providers": {provider: {"ports": [443]}},
+                            "summary": {"has_intel": True, "providers_with_data": [provider]},
+                        }),
+                        now.isoformat(),
+                        expires_at,
+                    ),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_stale", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        stale_row = rows_by_id[stale_target["id"]]
+        mixed_row = rows_by_id[mixed_target["id"]]
+        assert stale_row["source_flags"]["has_intel"] is True
+        assert stale_row["source_flags"]["has_stale_intel"] is True
+        assert mixed_row["source_flags"]["has_intel"] is True
+        assert mixed_row["source_flags"]["has_stale_intel"] is False
+
+    def test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_multi_snapshot", {"name": "Overview Multi Snapshot"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_multi_snapshot",
+            project["id"],
+            {"type": "domain", "value": "multi-snapshot.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        older_fetched = (now - timedelta(days=3)).isoformat()
+        newer_fetched = (now - timedelta(hours=1)).isoformat()
+        old_expiry = (now - timedelta(days=20)).isoformat()
+        latest_expiry = (now + timedelta(days=45)).isoformat()
+        with database.db_connect() as conn:
+            for snapshot_id, provider, fetched_at, expires_at, ports in (
+                ("snap-overview-old-expired", "censys", older_fetched, old_expiry, [80]),
+                ("snap-overview-new-healthy", "tls_certificate", newer_fetched, latest_expiry, [443]),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_intel_snapshots "
+                    "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                    "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                    (
+                        snapshot_id,
+                        "tok_overview_multi_snapshot",
+                        target["id"],
+                        provider,
+                        "Censys multi snapshot",
+                        json.dumps({
+                            "providers": {
+                                provider: {
+                                    "ports": ports,
+                                    "services": ["https" if 443 in ports else "http"],
+                                    "certificate": {"not_after": expires_at},
+                                },
+                            },
+                            "summary": {"has_intel": True, "providers_with_data": [provider]},
+                        }),
+                        fetched_at,
+                        expires_at,
+                    ),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_multi_snapshot", project["id"])
+
+        assert overview is not None
+        target_row = overview["targets"][0]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["certificate"]["expires_at"] == latest_expiry
+        assert target_row["certificate"]["days_until_expiry"] is not None
+        assert target_row["certificate"]["days_until_expiry"] > 30
+        assert target_row["certificate"]["last_checked_at"] == newer_fetched
+        assert target_row["open_ports"] == [443]
+        assert target_row["services"] == ["https"]
+        assert target_row["source_flags"]["has_stale_intel"] is False
+
+    def test_get_project_intel_overview_logs_build_and_truncation_context(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
+        from services.projects import overview as overview_service
+
+        self._project_db(monkeypatch, tmp_path)
+        monkeypatch.setattr(overview_service, "OVERVIEW_TARGET_LIMIT", 2)
+        project = project_workspace.create_project("tok_overview_logs", {"name": "Overview Logs"})
+        assert project is not None
+        for index in range(overview_service.OVERVIEW_TARGET_LIMIT + 1):
+            created = project_workspace.add_project_target(
+                "tok_overview_logs",
+                project["id"],
+                {"type": "domain", "value": f"target-{index}.example.com"},
+            )
+            assert created is not None
+
+        with mock.patch.object(overview_service.log, "debug") as debug_log, \
+             mock.patch.object(overview_service.log, "warning") as warning_log:
+            overview = project_workspace.get_project_intel_overview("tok_overview_logs", project["id"])
+
+        assert overview is not None
+        assert overview["rollups"]["target_count"] == overview_service.OVERVIEW_TARGET_LIMIT
+        started = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_BUILD_STARTED",))
+        assert started.kwargs["extra"] == {
+            "session": get_log_session_id("tok_overview_logs"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_limit": overview_service.OVERVIEW_TARGET_LIMIT,
+            "windowed": False,
+        }
+        limit_reached = next(
+            call for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_TARGET_LIMIT_REACHED",)
+        )
+        assert limit_reached.kwargs["extra"] == {
+            "session": get_log_session_id("tok_overview_logs"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_limit": overview_service.OVERVIEW_TARGET_LIMIT,
+            "loaded_target_count": overview_service.OVERVIEW_TARGET_LIMIT + 1,
+        }
+        built = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_PAYLOAD_BUILT",))
+        assert built.kwargs["extra"] == {
+            "session": get_log_session_id("tok_overview_logs"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_count": overview_service.OVERVIEW_TARGET_LIMIT,
+            "snapshot_entity_count": 0,
+            "finding_entity_count": 0,
+            "recent_change_state": "not-monitored",
+            "recent_change_count": 0,
+            "payload_target_count": overview_service.OVERVIEW_TARGET_LIMIT,
+            "target_truncated": True,
+        }
+
+    def test_get_project_intel_overview_logs_degraded_source_data(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
+        from services.projects import overview as overview_service
+
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_degraded", {"name": "Overview Degraded"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_degraded",
+            project["id"],
+            {"type": "domain", "value": "degraded.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-degraded-ok",
+                    "tok_overview_degraded",
+                    target["id"],
+                    "badshape",
+                    "Bad shape summary",
+                    json.dumps({
+                        "providers": {
+                            "badshape": ["not", "a", "payload"],
+                            "baddate": {"latest_expiry": "not a date"},
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["badshape", "baddate"]},
+                    }),
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'error', ?, ?, ?, ?)",
+                (
+                    "snap-overview-degraded-error",
+                    "tok_overview_degraded",
+                    target["id"],
+                    "nonfatal",
+                    "Nonfatal summary",
+                    json.dumps({"providers": {"nonfatal": "not a payload"}}),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        monitoring_payload = {
+            "summary": {
+                "top_changes": [{
+                    "fire_id": "fire-overview-dropped",
+                    "watcher_id": "watch-overview-dropped",
+                    "severity": "critical",
+                    "state": "changed",
+                    "target_ids": [target["id"], "ent_deleted_target"],
+                    "created": now,
+                }]
+            },
+            "monitors": [{"id": "watch-overview-dropped"}],
+            "timeline": [],
+        }
+        monkeypatch.setattr(overview_service, "get_project_monitoring_summary", lambda *args, **kwargs: monitoring_payload)
+
+        with mock.patch.object(overview_service.log, "warning") as warning_log, \
+             mock.patch.object(overview_service.log, "debug") as debug_log:
+            overview = project_workspace.get_project_intel_overview("tok_overview_degraded", project["id"])
+
+        assert overview is not None
+        assert overview["recent_changes"][0]["target_ids"] == [target["id"]]
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_OVERVIEW_RECENT_CHANGE_TARGETS_DROPPED"] == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "fire_id": "fire-overview-dropped",
+            "dropped_target_count": 1,
+            "matched_target_count": 1,
+        }
+        assert warning_events["PROJECT_OVERVIEW_CERT_DATE_PARSE_FAILED"] == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_id": target["id"],
+            "provider": "baddate",
+            "invalid_cert_date_count": 1,
+        }
+        skipped_warnings = [
+            call.kwargs["extra"] for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED",)
+        ]
+        assert skipped_warnings == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_id": target["id"],
+            "snapshot_id": "snap-overview-degraded-ok",
+            "provider": "badshape",
+            "status": "ok",
+            "shape": "list",
+        }]
+        skipped_debug = [
+            call.kwargs["extra"] for call in debug_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED",)
+        ]
+        assert skipped_debug == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_id": target["id"],
+            "snapshot_id": "snap-overview-degraded-error",
+            "provider": "nonfatal",
+            "status": "error",
+            "shape": "str",
+        }]
+
+    def test_get_project_intel_overview_marks_recent_changes_from_monitoring_targets(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        db_path = self._project_db(monkeypatch, tmp_path)
+        monkeypatch.setattr(database, "CFG", {
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+            "watchers": {"max_per_session": 32},
+        })
+        project = project_workspace.create_project("tok_overview_recent", {"name": "Overview Recent"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_recent",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        quiet_target = project_workspace.add_project_target(
+            "tok_overview_recent",
+            project["id"],
+            {"type": "domain", "value": "quiet.example.com"},
+        )
+        assert quiet_target is not None
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_overview_recent", "2026-05-20T10:00:00+00:00", ""),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run_overview_recent",
+                    "tok_overview_recent",
+                    "nmap -sV api.example.com",
+                    "2026-05-20T10:00:00+00:00",
+                    "2026-05-20T10:00:01+00:00",
+                    0,
+                    json.dumps(["443/tcp open https api.example.com"]),
+                    1,
+                ),
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_overview_recent",
+                command_text="nmap -sV api.example.com",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_overview_recent",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{
+                        "key": "443/tcp",
+                        "port": "443",
+                        "proto": "tcp",
+                        "state": "open",
+                        "service": "https",
+                    }],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id="run_overview_recent",
+                consecutive_changed=1,
+                conn=conn,
+            )
+            conn.commit()
+
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        overview = project_workspace.get_project_intel_overview("tok_overview_recent", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        target_row = rows_by_id[target["id"]]
+        quiet_row = rows_by_id[quiet_target["id"]]
+        assert overview["rollups"]["recent_change_state"] == "watcher-context-only"
+        assert overview["recent_changes"][0]["fire_id"] == fire.id
+        assert overview["recent_changes"][0]["target_ids"] == [target["id"]]
+        assert target_row["source_flags"]["has_recent_changes"] is True
+        assert target_row["recent_change_markers"][0]["fire_id"] == fire.id
+        assert target_row["recent_change_markers"][0]["target_ids"] == [target["id"]]
+        assert quiet_row["source_flags"]["has_recent_changes"] is False
+        assert quiet_row["recent_change_markers"] == []
+
+    def test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_crtsh", {"name": "Overview crt.sh"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_crtsh",
+            project["id"],
+            {"type": "domain", "value": "kali.darklab.sh"},
+        )
+        assert target is not None
+        old_expiry = (datetime.now(timezone.utc) - timedelta(days=1549)).replace(microsecond=0).isoformat()
+        latest_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).replace(microsecond=0).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-crtsh",
+                    "tok_overview_crtsh",
+                    target["id"],
+                    "crtsh",
+                    "crt.sh summary",
+                    json.dumps({
+                        "providers": {
+                            "crtsh": {
+                                "certificate_count": 33,
+                                "names": ["kali.darklab.sh"],
+                                "last_seen": "2026-05-18T03:29:31",
+                                "latest_expiry": latest_expiry,
+                                "certificates": [
+                                    {"not_after": old_expiry, "names": ["kali.darklab.sh"]},
+                                    {"not_after": latest_expiry, "names": ["kali.darklab.sh"]},
+                                ],
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+                    }),
+                    now,
+                    latest_expiry,
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_crtsh", project["id"])
+
+        assert overview is not None
+        target_row = overview["targets"][0]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["certificate"]["expires_at"] == latest_expiry
+        assert target_row["certificate"]["days_until_expiry"] is not None
+
+    def test_project_intel_overview_parses_rfc_certificate_dates(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_cert_rfc", {"name": "Overview Cert RFC"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_cert_rfc",
+            project["id"],
+            {"type": "domain", "value": "rfc.example.com"},
+        )
+        assert target is not None
+        rfc_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).strftime("%b %d %H:%M:%S %Y GMT")
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-rfc-cert",
+                    "tok_overview_cert_rfc",
+                    target["id"],
+                    "tls_certificate",
+                    "TLS certificate summary",
+                    json.dumps({
+                        "providers": {
+                            "tls_certificate": {
+                                "certificate_count": 1,
+                                "latest_expiry": rfc_expiry,
+                                "certificates": [{"not_after": rfc_expiry, "names": ["rfc.example.com"]}],
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["tls_certificate"]},
+                    }),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_cert_rfc", project["id"])
+
+        assert overview is not None
+        target_row = overview["targets"][0]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["certificate"]["expires_at"] == rfc_expiry
+        assert target_row["certificate"]["days_until_expiry"] is not None
+
+    def test_get_project_intel_overview_respects_scope_and_suppression(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_scope", {"name": "Overview Scope"})
+        assert project is not None
+        visible = project_workspace.add_project_target(
+            "tok_overview_scope",
+            project["id"],
+            {"type": "domain", "value": "visible.example"},
+        )
+        assert visible is not None
+        suppressed = project_workspace.add_project_target(
+            "tok_overview_scope",
+            project["id"],
+            {"type": "domain", "value": "suppressed.example"},
+        )
+        assert suppressed is not None
+        foreign_project = project_workspace.create_project("tok_overview_other", {"name": "Other Scope"})
+        assert foreign_project is not None
+        foreign = project_workspace.add_project_target(
+            "tok_overview_other",
+            foreign_project["id"],
+            {"type": "domain", "value": "foreign.example"},
+        )
+        assert foreign is not None
+        with database.db_connect() as conn:
+            conn.execute("UPDATE entities SET suppressed = 1 WHERE id = ?", (suppressed["id"],))
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, title, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "finding-foreign-overview",
+                    "tok_overview_other",
+                    foreign["id"],
+                    foreign["id"],
+                    "subject-foreign",
+                    "sig-foreign",
+                    "critical",
+                    "new",
+                    "foreign finding",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_scope", project["id"])
+        foreign_lookup = project_workspace.get_project_intel_overview("tok_overview_scope", foreign_project["id"])
+
+        assert overview is not None
+        assert [row["entity_id"] for row in overview["targets"]] == [visible["id"]]
+        assert overview["rollups"]["finding_severities"]["critical"] == 0
+        assert foreign_lookup is None
 
 
 class TestReportTemplateCatalog:
@@ -3361,6 +4216,7 @@ class TestPostgresMigrations:
         "projects",
         "project_links",
         "project_auto_promote_rules",
+        "project_digest_settings",
         "entities",
         "entity_run_links",
         "entity_intel_snapshots",
@@ -3458,6 +4314,8 @@ class TestPostgresMigrations:
             "0031",
             "0032",
             "0033",
+            "0034",
+            "0035",
         ]
         for table_name in (
             "runs",
@@ -3487,6 +4345,7 @@ class TestPostgresMigrations:
             "projects",
             "project_links",
             "project_auto_promote_rules",
+            "project_digest_settings",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
@@ -4813,6 +5672,765 @@ class TestWatchersFoundation:
             ),
         )
 
+    def test_project_digest_settings_persist_per_owner_scope_and_track_delivery_state(self, monkeypatch, tmp_path):
+        from services.projects import digests
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._insert_project(conn, "prj_digest")
+            self._insert_project(conn, "prj_digest_team", team_id="team_digest")
+            for channel_id, team_id in (
+                ("ntc_one", ""),
+                ("ntc_two", ""),
+                ("ntc_team", "team_digest"),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_channels "
+                    "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+                    "muted, created, updated) "
+                    "VALUES (?, 'tok_watchers', ?, 'webhook', ?, '{}', '{}', '[]', 0, "
+                    "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')",
+                    (channel_id, team_id, channel_id),
+                )
+            personal_default = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            with pytest.raises(ProjectWorkspaceError, match="same owner scope"):
+                digests.save_digest_settings(
+                    "tok_watchers",
+                    "prj_digest",
+                    {"enabled": True, "channel_ids": ["ntc_team"]},
+                    conn=conn,
+                )
+            personal = digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest",
+                {
+                    "enabled": True,
+                    "cadence_preset": "hourly",
+                    "channel_ids": ["ntc_one", "ntc_two", "ntc_one"],
+                    "quiet_no_change": True,
+                },
+                conn=conn,
+            )
+            team = digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_team",
+                {
+                    "enabled": True,
+                    "cadence_preset": "weekly",
+                    "channel_ids": ["ntc_team"],
+                },
+                team_id="team_digest",
+                conn=conn,
+            )
+            team_seen_by_other_member = digests.get_digest_settings(
+                "tok_digest_team_operator",
+                "prj_digest_team",
+                team_id="team_digest",
+                conn=conn,
+            )
+            team_updated_by_other_member = digests.save_digest_settings(
+                "tok_digest_team_operator",
+                "prj_digest_team",
+                {
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_team"],
+                },
+                team_id="team_digest",
+                conn=conn,
+            )
+            team_schedule_rows = conn.execute(
+                "SELECT session_token, cadence_preset FROM schedules "
+                "WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_team' AND team_id = 'team_digest'"
+            ).fetchall()
+            personal_schedule = conn.execute(
+                "SELECT id FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest'"
+            ).fetchone()
+            assert personal_schedule is not None
+            conn.execute(
+                "INSERT INTO schedule_fires "
+                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES ('fire_digest_recent_skip', ?, 'project_digest', 'prj_digest', "
+                "'2026-05-20T10:45:00+00:00', '', 'fired', 'digest skipped: no changes')",
+                (personal_schedule["id"],),
+            )
+            personal_with_fire = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T11:00:00+00:00",
+            )
+            sent = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T11:01:00+00:00",
+            )
+
+        assert personal_default == {
+            "project_id": "prj_digest",
+            "session_id": "tok_watchers",
+            "team_id": "",
+            "enabled": False,
+            "cadence_preset": "daily",
+            "channel_ids": [],
+            "quiet_no_change": False,
+            "last_evaluated_at": "",
+            "last_sent_at": "",
+            "next_due_at": "",
+            "schedule_enabled": False,
+            "schedule_paused_reason": "",
+            "schedule_last_error": "",
+            "schedule_last_fire_status": "",
+            "schedule_last_fire_reason": "",
+            "schedule_last_fire_at": "",
+            "created": "",
+            "updated": "",
+        }
+        assert personal["enabled"] is True
+        assert personal["cadence_preset"] == "hourly"
+        assert personal["channel_ids"] == ["ntc_one", "ntc_two"]
+        assert personal["quiet_no_change"] is True
+        assert personal["schedule_enabled"] is True
+        assert personal["next_due_at"]
+        assert personal_with_fire is not None
+        assert personal_with_fire["schedule_last_fire_status"] == "fired"
+        assert personal_with_fire["schedule_last_fire_reason"] == "digest skipped: no changes"
+        assert personal_with_fire["schedule_last_fire_at"] == "2026-05-20T10:45:00+00:00"
+        assert team["team_id"] == "team_digest"
+        assert team["channel_ids"] == ["ntc_team"]
+        assert team["session_id"] == "tok_watchers"
+        assert team_seen_by_other_member is not None
+        assert team_seen_by_other_member["enabled"] is True
+        assert team_seen_by_other_member["session_id"] == "tok_watchers"
+        assert team_updated_by_other_member["session_id"] == "tok_watchers"
+        assert team_updated_by_other_member["cadence_preset"] == "daily"
+        assert [(row["session_token"], row["cadence_preset"]) for row in team_schedule_rows] == [
+            ("tok_watchers", "daily")
+        ]
+        assert evaluated is not None
+        assert evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert evaluated["last_sent_at"] == ""
+        assert sent is not None
+        assert sent["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert sent["last_sent_at"] == "2026-05-20T11:01:00+00:00"
+        digests._CONFIG_WARNED_KEYS.clear()
+        with mock.patch.dict(
+            app_config.CFG,
+            {"project_digests": {"default_cadence_preset": "quarterly", "first_send_lookback_hours": "later"}},
+        ), mock.patch.object(digests.log, "warning") as warning_log:
+            assert digests._configured_default_cadence() == "daily"
+            assert digests._configured_first_send_lookback_hours("daily") == 24
+        assert [call.args[0] for call in warning_log.call_args_list] == [
+            "PROJECT_DIGEST_CONFIG_INVALID",
+            "PROJECT_DIGEST_CONFIG_INVALID",
+        ]
+
+    def test_project_digest_schedule_fire_queues_explicit_channel_and_sent_callback(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.models import ChannelResult
+        from services.projects import digests
+        from services.scheduler import dispatch as scheduler_dispatch
+        from services.scheduler import service as schedule_service
+        from services.watchers import service as watcher_service
+
+        sent_payloads = []
+
+        class DigestChannel:
+            def __init__(self, channel):
+                self.channel = channel
+
+            def send(self, payload):
+                if self.channel.id in {"ntc_digest_retry", "ntc_all_retry"}:
+                    return ChannelResult.retry("temporary digest outage")
+                sent_payloads.append(payload)
+                return ChannelResult.success()
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest")
+            self._insert_project(conn, "prj_digest_all_retry")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_digest', 'tok_watchers', 'webhook', 'Digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_digest_retry', 'tok_watchers', 'webhook', 'Digest retry', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_all_retry', 'tok_watchers', 'webhook', 'All retry', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                project_id="prj_digest",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_digest_current",
+                state_at_fire="changed",
+                diff_summary={"classifier": "ports", "severity": "high"},
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE watcher_id = ?",
+                ("2026-05-20T10:30:00+00:00", watcher.id),
+            )
+            all_retry_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                project_id="prj_digest_all_retry",
+                command_text="nmap -sV retry.darklab.sh",
+                baseline_run_id="run_retry_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                all_retry_watcher,
+                run_id="run_retry_current",
+                state_at_fire="changed",
+                diff_summary={"classifier": "ports", "severity": "high"},
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE watcher_id = ?",
+                ("2026-05-20T10:30:00+00:00", all_retry_watcher.id),
+            )
+            settings = digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest",
+                {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_digest", "ntc_digest_retry"]},
+                conn=conn,
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_all_retry",
+                {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_all_retry"]},
+                conn=conn,
+            )
+            conn.commit()
+
+            digest_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest'"
+            ).fetchone()
+            all_retry_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_all_retry'"
+            ).fetchone()
+            visible_schedules = schedule_service.list_for_session("tok_watchers", include_watchers=True, conn=conn)
+            status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(digest_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            duplicate_status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(digest_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            queued_event = conn.execute(
+                "SELECT id, payload_json, status, run_id FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()
+            queued_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()["count"]
+            refreshed = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+
+            monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
+            digest_event_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM notification_events WHERE trigger = 'project_digest' "
+                    "AND run_id = ? ORDER BY channel_id",
+                    (queued_event["run_id"],),
+                ).fetchall()
+            ]
+            delivered = notification_dispatcher.dispatch_due_events(conn=conn, event_ids=digest_event_ids)
+            delivered_settings = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            mixed_statuses = {
+                row["channel_id"]: (row["status"], row["last_error"])
+                for row in conn.execute(
+                    "SELECT channel_id, status, last_error FROM notification_events WHERE run_id = ?",
+                    (queued_event["run_id"],),
+                ).fetchall()
+            }
+            all_retry_status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(all_retry_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            all_retry_event = conn.execute(
+                "SELECT id FROM notification_events WHERE trigger = 'project_digest' AND channel_id = 'ntc_all_retry'"
+            ).fetchone()
+            all_retry_delivered = notification_dispatcher.dispatch_due_events(
+                conn=conn,
+                event_ids=[all_retry_event["id"]],
+            )
+            all_retry_settings = digests.get_digest_settings("tok_watchers", "prj_digest_all_retry", conn=conn)
+
+        payload = json.loads(queued_event["payload_json"])
+        assert refreshed is not None
+        assert delivered_settings is not None
+        assert settings["enabled"] is True
+        assert digest_schedule is not None
+        assert digest_schedule["cadence_preset"] == "hourly"
+        assert "prj_digest" not in {schedule.owner_id for schedule in visible_schedules}
+        assert status == "fired"
+        assert duplicate_status == "fired"
+        assert queued_event["status"] == "pending"
+        assert queued_event["run_id"].startswith("project_digest:")
+        assert queued_count == 2
+        assert payload["digest_identity"] == {
+            "project_id": "prj_digest",
+            "session_id": "tok_watchers",
+            "team_id": "",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        }
+        assert payload["summary_fields"]["changed"] == 1
+        assert refreshed["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert refreshed["last_sent_at"] == ""
+        assert delivered == 1
+        assert mixed_statuses["ntc_digest"] == ("sent", "")
+        assert mixed_statuses["ntc_digest_retry"][0] == "retry_wait"
+        assert mixed_statuses["ntc_digest_retry"][1] == "temporary digest outage"
+        assert sent_payloads[0]["digest_identity"]["project_id"] == "prj_digest"
+        assert delivered_settings["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+        assert all_retry_status == "fired"
+        assert all_retry_delivered == 0
+        assert all_retry_settings is not None
+        assert all_retry_settings["last_sent_at"] == ""
+
+    def test_project_digest_schedule_fire_skips_no_change_without_advancing_sent(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.models import ChannelResult
+        from services.projects import digests
+        from services.scheduler import dispatch as scheduler_dispatch
+        from services.scheduler import service as schedule_service
+
+        sent_payloads = []
+
+        class DigestChannel:
+            def __init__(self, channel):
+                self.channel = channel
+
+            def send(self, payload):
+                sent_payloads.append(payload)
+                return ChannelResult.success()
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest_quiet")
+            self._insert_project(conn, "prj_digest_all_clear")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_quiet', 'tok_watchers', 'webhook', 'Quiet digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_all_clear', 'tok_watchers', 'webhook', 'All-clear digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_quiet",
+                {"enabled": True, "cadence_preset": "daily", "channel_ids": ["ntc_quiet"]},
+                conn=conn,
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_all_clear",
+                {
+                    "enabled": True,
+                    "cadence_preset": "daily",
+                    "channel_ids": ["ntc_all_clear"],
+                    "quiet_no_change": True,
+                },
+                conn=conn,
+            )
+            conn.commit()
+
+            digest_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_quiet'"
+            ).fetchone()
+            all_clear_schedule = conn.execute(
+                "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_all_clear'"
+            ).fetchone()
+            with mock.patch.object(digests.log, "debug") as digest_debug, \
+                 mock.patch.object(digests.log, "log") as digest_log:
+                status = scheduler_dispatch.fire_schedule(
+                    conn,
+                    schedule_service.row_to_schedule(digest_schedule),
+                    fired_at="2026-05-20T11:00:00+00:00",
+                )
+            event_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()["count"]
+            settings = digests.get_digest_settings("tok_watchers", "prj_digest_quiet", conn=conn)
+            all_clear_status = scheduler_dispatch.fire_schedule(
+                conn,
+                schedule_service.row_to_schedule(all_clear_schedule),
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            all_clear_event = conn.execute(
+                "SELECT id, payload_json, status FROM notification_events "
+                "WHERE trigger = 'project_digest' AND channel_id = 'ntc_all_clear'"
+            ).fetchone()
+            all_clear_before_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_all_clear", conn=conn)
+            monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
+            all_clear_delivered = notification_dispatcher.dispatch_due_events(
+                conn=conn,
+                event_ids=[all_clear_event["id"]],
+            )
+            all_clear_after_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_all_clear", conn=conn)
+
+        assert status == "fired"
+        assert event_count == 0
+        assert settings is not None
+        assert settings["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert settings["last_sent_at"] == ""
+        digest_debug.assert_any_call(
+            "PROJECT_DIGEST_EVALUATION_STARTED",
+            extra=mock.ANY,
+        )
+        skipped_call = next(call for call in digest_log.call_args_list if call.args[1] == "PROJECT_DIGEST_SKIPPED")
+        assert skipped_call.args[0] == 20
+        assert skipped_call.kwargs["extra"]["reason"] == "digest skipped: no changes"
+        assert skipped_call.kwargs["extra"]["channel_count"] == 1
+        schedule_call = next(
+            call for call in digest_log.call_args_list
+            if call.args[1] == "PROJECT_DIGEST_SCHEDULE_SKIPPED"
+        )
+        assert schedule_call.kwargs["extra"]["outcome"] == "skipped"
+        assert schedule_call.kwargs["extra"]["reason_code"] == "skipped_no_changes"
+        all_clear_payload = json.loads(all_clear_event["payload_json"])
+        assert all_clear_status == "fired"
+        assert all_clear_event["status"] == "pending"
+        assert all_clear_payload["summary_fields"]["changed"] == 0
+        assert all_clear_payload["summary_fields"]["recovered"] == 0
+        assert all_clear_payload["summary_fields"]["failed"] == 0
+        assert all_clear_payload["summary_fields"]["quiet"] == "yes"
+        assert all_clear_payload["top_changes"] == []
+        assert all_clear_before_delivery is not None
+        assert all_clear_before_delivery["last_sent_at"] == ""
+        assert all_clear_delivered == 1
+        assert sent_payloads[0]["summary_fields"]["quiet"] == "yes"
+        assert all_clear_after_delivery is not None
+        assert all_clear_after_delivery["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+
+    def test_project_digest_markers_are_window_end_and_monotonic(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.models import ChannelResult
+        from services.projects import digests
+
+        class DigestChannel:
+            def __init__(self, channel):
+                self.channel = channel
+
+            def send(self, payload):
+                return ChannelResult.success()
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest_monotonic")
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_monotonic",
+                {"enabled": False, "cadence_preset": "hourly", "channel_ids": []},
+                conn=conn,
+            )
+            first_evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T11:00:00Z",
+            )
+            stale_evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T10:00:00+00:00",
+            )
+            newer_evaluated = digests.mark_digest_evaluated(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                evaluated_at="2026-05-20T12:00:00+00:00",
+            )
+            first = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T11:00:00+00:00",
+            )
+            stale = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T10:00:00+00:00",
+            )
+            newer = digests.mark_digest_sent(
+                conn,
+                project_id="prj_digest_monotonic",
+                session_id="tok_watchers",
+                sent_at="2026-05-20T12:00:00+00:00",
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_digest_monotonic', 'tok_watchers', 'webhook', 'Digest monotonic', '{}', '{}', "
+                "'[]', 0, '2026-05-20T09:00:00+00:00', '2026-05-20T09:00:00+00:00')"
+            )
+            for event_id, window_start, window_end, created in (
+                (
+                    "nte_digest_newer_window",
+                    "2026-05-20T12:00:00+00:00",
+                    "2026-05-20T13:00:00+00:00",
+                    "2026-05-20T12:00:00+00:00",
+                ),
+                (
+                    "nte_digest_older_window",
+                    "2026-05-20T11:00:00+00:00",
+                    "2026-05-20T12:00:00+00:00",
+                    "2026-05-20T11:00:00+00:00",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, 'tok_watchers', '', 'ntc_digest_monotonic', 'project_digest', ?, 'pending', "
+                    "0, '', '', '', '', ?, '')",
+                    (
+                        event_id,
+                        json.dumps({
+                            "digest_identity": {
+                                "project_id": "prj_digest_monotonic",
+                                "session_id": "tok_watchers",
+                                "team_id": "",
+                                "window_start": window_start,
+                                "window_end": window_end,
+                            },
+                        }),
+                        created,
+                    ),
+                )
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES ('nte_digest_missing_identity', 'tok_watchers', '', 'ntc_digest_monotonic', "
+                "'project_digest', '{}', 'pending', 0, '', '', '', '', '2026-05-20T12:30:00+00:00', '')"
+            )
+            monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
+            monkeypatch.setattr(notification_dispatcher, "_delivery_rate_limit_per_minute", lambda: 100)
+            monkeypatch.setattr(notification_dispatcher, "_utc_now", lambda: "2026-05-20T14:30:00+00:00")
+            with mock.patch.object(notification_dispatcher.log, "info") as notify_info, \
+                 mock.patch.object(notification_dispatcher.log, "warning") as notify_warn:
+                newer_delivered = notification_dispatcher.dispatch_due_events(
+                    conn=conn,
+                    event_ids=["nte_digest_newer_window"],
+                )
+                malformed_delivered = notification_dispatcher.dispatch_due_events(
+                    conn=conn,
+                    event_ids=["nte_digest_missing_identity"],
+                )
+                after_newer_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_monotonic", conn=conn)
+                older_delivered = notification_dispatcher.dispatch_due_events(
+                    conn=conn,
+                    event_ids=["nte_digest_older_window"],
+                )
+            after_out_of_order_delivery = digests.get_digest_settings(
+                "tok_watchers",
+                "prj_digest_monotonic",
+                conn=conn,
+            )
+
+        assert first_evaluated is not None
+        assert stale_evaluated is not None
+        assert newer_evaluated is not None
+        assert first_evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert stale_evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert newer_evaluated["last_evaluated_at"] == "2026-05-20T12:00:00+00:00"
+        assert first is not None
+        assert stale is not None
+        assert newer is not None
+        assert first["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+        assert stale["last_sent_at"] == "2026-05-20T11:00:00+00:00"
+        assert newer["last_sent_at"] == "2026-05-20T12:00:00+00:00"
+        assert newer_delivered == 1
+        assert malformed_delivered == 1
+        assert older_delivered == 1
+        assert after_newer_delivery is not None
+        assert after_out_of_order_delivery is not None
+        assert after_newer_delivery["last_sent_at"] == "2026-05-20T13:00:00+00:00"
+        assert after_out_of_order_delivery["last_sent_at"] == "2026-05-20T13:00:00+00:00"
+        sent_marked = [
+            call for call in notify_info.call_args_list
+            if call.args == ("PROJECT_DIGEST_SENT_MARKED",)
+        ]
+        assert sent_marked[0].kwargs["extra"]["window_end"] == "2026-05-20T13:00:00+00:00"
+        skipped_mark = next(
+            call for call in notify_warn.call_args_list
+            if call.args == ("PROJECT_DIGEST_SENT_MARK_SKIPPED",)
+        )
+        assert skipped_mark.kwargs["extra"]["event_id"] == "nte_digest_missing_identity"
+        assert skipped_mark.kwargs["extra"]["has_digest_identity"] is False
+
+    def test_project_digest_settings_reject_archived_scopes_and_delete_with_project(self, monkeypatch, tmp_path):
+        from services.projects import crud, digests
+        from services.teams import storage as team_storage
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._insert_project(conn, "prj_digest_archived")
+            conn.execute("UPDATE projects SET status = 'archived' WHERE id = 'prj_digest_archived'")
+            with pytest.raises(ProjectWorkspaceError, match="archived projects"):
+                digests.save_digest_settings(
+                    "tok_watchers",
+                    "prj_digest_archived",
+                    {"enabled": True, "channel_ids": ["ntc_one"]},
+                    conn=conn,
+                )
+
+            team = team_storage.create_team(conn, name="Digest Team", creator_session_token="tok_watchers")
+            team_storage.update_team_status(conn, team["id"], status="archived")
+            self._insert_project(conn, "prj_digest_team_archived", team_id=team["id"])
+            with pytest.raises(ProjectWorkspaceError, match="archived teams"):
+                digests.save_digest_settings(
+                    "tok_watchers",
+                    "prj_digest_team_archived",
+                    {"enabled": True, "channel_ids": ["ntc_team"]},
+                    team_id=team["id"],
+                    conn=conn,
+                )
+
+            self._register_token(conn)
+            self._insert_project(conn, "prj_digest_archived_after_enable")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_archived_after_enable', 'tok_watchers', 'webhook', 'Archived digest', '{}', '{}', "
+                "'[]', 0, '2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                project_id="prj_digest_archived_after_enable",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_archive_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_archive_current",
+                state_at_fire="changed",
+                diff_summary={"classifier": "ports", "severity": "high"},
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE watcher_id = ?",
+                ("2026-05-20T10:30:00+00:00", watcher.id),
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_archived_after_enable",
+                {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_archived_after_enable"]},
+                conn=conn,
+            )
+            conn.execute(
+                "UPDATE projects SET status = 'archived' WHERE id = 'prj_digest_archived_after_enable'"
+            )
+            archived_result = digests.evaluate_due_digest(
+                conn,
+                session_id="tok_watchers",
+                project_id="prj_digest_archived_after_enable",
+                fired_at="2026-05-20T11:00:00+00:00",
+            )
+            archived_settings = digests.get_digest_settings(
+                "tok_watchers",
+                "prj_digest_archived_after_enable",
+                conn=conn,
+            )
+            archived_event_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
+            ).fetchone()["count"]
+
+            self._insert_project(conn, "prj_digest_delete")
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES ('ntc_delete', 'tok_watchers', 'webhook', 'Delete digest', '{}', '{}', '[]', 0, "
+                "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
+            )
+            digests.save_digest_settings(
+                "tok_watchers",
+                "prj_digest_delete",
+                {"enabled": True, "channel_ids": ["ntc_delete"]},
+                conn=conn,
+            )
+            schedule_row = conn.execute(
+                "SELECT id FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_delete'"
+            ).fetchone()
+            assert schedule_row is not None
+            conn.execute(
+                "INSERT INTO schedule_fires "
+                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES ('fire_digest_delete', ?, 'project_digest', 'prj_digest_delete', "
+                "'2026-05-20T11:00:00+00:00', '', 'fired', '')",
+                (schedule_row["id"],),
+            )
+            assert crud.delete_project("tok_watchers", "prj_digest_delete", conn=conn) is True
+            remaining_settings = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_digest_settings WHERE project_id = 'prj_digest_delete'"
+            ).fetchone()["count"]
+            remaining_schedules = conn.execute(
+                "SELECT COUNT(*) AS count FROM schedules "
+                "WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_delete'"
+            ).fetchone()["count"]
+            remaining_fires = conn.execute(
+                "SELECT COUNT(*) AS count FROM schedule_fires WHERE schedule_id = ?",
+                (schedule_row["id"],),
+            ).fetchone()["count"]
+
+        assert archived_result == {"reason": "digest skipped: project archived", "queued": 0}
+        assert archived_settings is not None
+        assert archived_settings["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
+        assert archived_settings["last_sent_at"] == ""
+        assert archived_event_count == 0
+        assert remaining_settings == 0
+        assert remaining_schedules == 0
+        assert remaining_fires == 0
+
+    def test_project_digest_event_identity_carries_async_delivery_join_keys(self):
+        from services.projects import digests
+
+        assert digests.digest_event_identity(
+            project_id="prj_digest",
+            session_id="tok_watchers",
+            team_id="team_digest",
+            window_start="2026-05-20T10:00:00+00:00",
+            window_end="2026-05-20T11:00:00+00:00",
+        ) == {
+            "project_id": "prj_digest",
+            "session_id": "tok_watchers",
+            "team_id": "team_digest",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        }
+
     def test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists(self, monkeypatch, tmp_path):
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
@@ -5277,6 +6895,204 @@ class TestWatchersFoundation:
         assert payload["summary"]["top_changes"][0]["fire_id"] == old_fire.id
         assert payload["summary"]["top_changes"][0]["label"] == "New open port 443/tcp https"
         assert payload["summary"]["top_changes"][0]["run_available"] is True
+
+    def test_project_monitoring_summary_window_reports_only_windowed_fires(self, monkeypatch, tmp_path):
+        from services.projects.monitoring import get_project_monitoring_summary
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_project(conn, "prj_monitor")
+            self._insert_run(conn, "run_base", ["80/tcp open http"])
+            self._insert_run(conn, "run_old_change", ["80/tcp open http", "22/tcp open ssh"])
+            self._insert_run(conn, "run_window_change", ["80/tcp open http", "443/tcp open https"])
+            self._insert_run(conn, "run_window_recovered", ["80/tcp open http"])
+            self._insert_run(conn, "run_window_failed", ["scanner failed"], exit_code=1)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_base",
+                project_id="prj_monitor",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_old_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "22/tcp", "state": "open", "service": "ssh"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            start_boundary_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_start_boundary",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "8443/tcp", "state": "open", "service": "https-alt"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            changed_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_change",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            recovered_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_recovered",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="recovered",
+                fire_kind="recovered",
+            )
+            failed_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_failed",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="error",
+                state_reason="run_failed",
+                fire_kind="failed",
+            )
+            duplicate_failed_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_failed_again",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="error",
+                state_reason="run_failed",
+                fire_kind="failed",
+            )
+            no_change_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_no_change",
+                diff_summary={"classifier": "ports"},
+                diff_kind="none",
+                state_at_fire="ok",
+                state_reason="no_change",
+                fire_kind="no_change",
+            )
+            end_boundary_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_window_end_boundary",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "9443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T08:59:00+00:00", old_fire.id))
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:00:00+00:00", start_boundary_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:01:00+00:00", changed_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:03:00+00:00", recovered_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:05:00+00:00", failed_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:07:00+00:00", duplicate_failed_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:09:00+00:00", no_change_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T10:00:00+00:00", end_boundary_fire.id),
+            )
+            conn.commit()
+
+            payload = get_project_monitoring_summary(
+                "tok_watchers",
+                "prj_monitor",
+                window_start="2026-05-20T09:00:00+00:00",
+                window_end="2026-05-20T10:00:00+00:00",
+            )
+            recovered_payload = get_project_monitoring_summary(
+                "tok_watchers",
+                "prj_monitor",
+                window_start="2026-05-20T09:03:00+00:00",
+                window_end="2026-05-20T09:04:00+00:00",
+            )
+            no_change_payload = get_project_monitoring_summary(
+                "tok_watchers",
+                "prj_monitor",
+                window_start="2026-05-20T09:09:00+00:00",
+                window_end="2026-05-20T09:10:00+00:00",
+            )
+
+        assert payload is not None
+        assert payload["digest_window"] == {
+            "start": "2026-05-20T09:00:00+00:00",
+            "end": "2026-05-20T10:00:00+00:00",
+            "fire_count": 6,
+        }
+        assert payload["summary"]["top_changes"]
+        window_summary = payload["window_summary"]
+        assert window_summary["changed_monitor_count"] == 1
+        assert window_summary["recovered_monitor_count"] == 1
+        assert window_summary["failed_monitor_count"] == 1
+        assert window_summary["highest_severity"] == "critical"
+        top_fire_ids = {item["fire_id"] for item in window_summary["top_changes"]}
+        assert changed_fire.id in top_fire_ids
+        assert start_boundary_fire.id in top_fire_ids
+        assert recovered_fire.id in top_fire_ids
+        assert failed_fire.id in top_fire_ids
+        assert old_fire.id not in top_fire_ids
+        assert end_boundary_fire.id not in top_fire_ids
+        assert recovered_payload is not None
+        assert recovered_payload["digest_window"]["fire_count"] == 1
+        assert recovered_payload["window_summary"]["changed_monitor_count"] == 0
+        assert recovered_payload["window_summary"]["recovered_monitor_count"] == 1
+        assert recovered_payload["window_summary"]["failed_monitor_count"] == 0
+        assert recovered_payload["window_summary"]["top_changes"][0]["fire_id"] == recovered_fire.id
+        assert no_change_payload is not None
+        assert no_change_payload["digest_window"]["fire_count"] == 1
+        assert no_change_payload["window_summary"]["changed_monitor_count"] == 0
+        assert no_change_payload["window_summary"]["recovered_monitor_count"] == 0
+        assert no_change_payload["window_summary"]["failed_monitor_count"] == 0
+        assert no_change_payload["window_summary"]["top_changes"] == []
 
     @pytest.mark.parametrize(
         ("summary", "expected"),
@@ -7393,6 +9209,7 @@ class TestIntelServices:
         assert [item.id for item in registry.providers_for_entity_type("ip")] == [
             "shodan",
             "censys",
+            "shodan_internetdb",
             "greynoise",
             "otx",
             "abuseipdb",
@@ -7400,16 +9217,21 @@ class TestIntelServices:
             "teamcymru",
             "urlhaus",
             "threatfox",
+            "fofa",
+            "zoomeye",
             "routeviews",
         ]
         assert [item.id for item in registry.providers_for_entity_type("domain")] == [
             "virustotal",
             "otx",
+            "tls_certificate",
             "crtsh",
             "urlscan",
             "urlhaus",
             "threatfox",
             "securitytrails",
+            "fofa",
+            "zoomeye",
         ]
         assert [item.id for item in registry.providers_for_entity_type("hash")] == [
             "virustotal",
@@ -7419,7 +9241,13 @@ class TestIntelServices:
             "threatfox",
         ]
         assert [item.id for item in registry.providers_for_entity_type("cve")] == ["nvd", "vulners"]
-        assert [item.id for item in registry.providers_for_entity_type("url")] == ["urlscan", "urlhaus", "threatfox"]
+        assert [item.id for item in registry.providers_for_entity_type("url")] == [
+            "urlscan",
+            "urlhaus",
+            "threatfox",
+            "fofa",
+            "zoomeye",
+        ]
         assert registry.provider_label("GREYNOISE") == "GreyNoise"
         assert registry.cache_scope("virustotal", "hash") == "file"
         vt = registry.provider_definition("virustotal")
@@ -7435,7 +9263,20 @@ class TestIntelServices:
             ("nvd", ("cve",), (), "Free public lookup"),
             ("urlhaus", ("ip", "domain", "hash", "url"), ("URLHAUS_AUTH_KEY",), "Free abuse.ch Auth-Key"),
             ("ipinfo", ("ip",), ("IPINFO_TOKEN",), "Free public basics; optional account token"),
+            ("shodan_internetdb", ("ip",), (), "Free public lookup"),
             ("securitytrails", ("domain",), ("SECURITYTRAILS_API_KEY",), "Paid account required"),
+            (
+                "fofa",
+                ("ip", "domain", "url"),
+                ("FOFA_KEY", "FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN", "FOFA_EMAIL"),
+                "Paid account or F-point balance required",
+            ),
+            (
+                "zoomeye",
+                ("ip", "domain", "url"),
+                ("ZOOMEYE_API_KEY",),
+                "Paid account or resource credits required",
+            ),
             ("vulners", ("cve",), ("VULNERS_API_KEY",), "Free signup; paid tiers"),
             ("chaos", ("domain",), ("PDCP_API_KEY",), "ProjectDiscovery Cloud account key"),
         }
@@ -7457,6 +9298,9 @@ class TestIntelServices:
             ("intel urlscan.io", "URLSCAN_API_KEY", ()),
             ("intel ThreatFox", "THREATFOX_AUTH_KEY", ()),
             ("intel SecurityTrails", "SECURITYTRAILS_API_KEY", ()),
+            ("intel FOFA", "FOFA_KEY", ("FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN")),
+            ("intel FOFA", "FOFA_EMAIL", ()),
+            ("intel ZoomEye", "ZOOMEYE_API_KEY", ()),
         }
 
     def test_canonical_entity_normalizes_supported_values(self):
@@ -7514,6 +9358,9 @@ class TestIntelServices:
         assert enriched["providers"]["otx"]["pulse_count"] == 0
         assert enriched["providers"]["abuseipdb"]["total_reports"] == 0
         assert enriched["providers"]["teamcymru"]["asn"] == ""
+        assert enriched["providers"]["shodan_internetdb"]["ports"] == []
+        assert enriched["providers"]["fofa"]["result_count"] == 0
+        assert enriched["providers"]["zoomeye"]["result_count"] == 0
         assert enriched["summary"]["has_intel"] is True
         assert enriched["summary"]["providers_with_data"] == ["shodan"]
         assert enriched["summary"]["cache_status"] == {"shodan": "hit"}
@@ -7548,6 +9395,8 @@ class TestIntelServices:
         assert url["providers"]["urlhaus"]["threat"] == "malware_download"
         assert url["providers"]["threatfox"]["ioc_count"] == 0
         assert url["providers"]["urlscan"]["result_count"] == 0
+        assert url["providers"]["fofa"]["results"] == []
+        assert url["providers"]["zoomeye"]["results"] == []
         assert url["summary"]["providers_with_data"] == ["urlhaus"]
 
     def test_cache_round_trips_normalized_payload_with_provider_ttl(self):
@@ -7566,6 +9415,8 @@ class TestIntelServices:
         assert cache.get_cached_response("shodan", "ip", "1.1.1.1", redis_client=redis) is None
         assert cache.quota_negative_cache_ttl("virustotal", cfg={"intel_negative_cache_virustotal_quota_seconds": 44}) == 44
         assert cache.quota_negative_cache_ttl("otx", cfg={"intel_negative_cache_otx_quota_seconds": 45}) == 45
+        assert cache.quota_negative_cache_ttl("fofa", cfg={"intel_negative_cache_fofa_quota_seconds": 46}) == 46
+        assert cache.quota_negative_cache_ttl("zoomeye", cfg={"intel_negative_cache_zoomeye_quota_seconds": 47}) == 47
         assert cache.quota_negative_cache_ttl(
             "abuseipdb",
             cfg={"intel_negative_cache_abuseipdb_quota_seconds": 46},
@@ -7642,6 +9493,38 @@ class TestIntelServices:
         assert payload["entity_count"] == 1
         assert "api_key" not in payload
         assert "response_body" not in payload
+
+    def test_intel_cache_and_rate_decode_failures_log_safe_warnings(self):
+        from services.intel import cache, rate_limiter
+
+        redis = process._FakeRedisClient()
+        redis.set(cache.cache_key("fofa", "domain", "secret.example"), "{not-json")
+        redis.set(cache.quota_cache_key("tok_cache_decode", "fofa"), "{not-json")
+        redis.set("intel:rate:tok_cache_decode:fofa", "{not-json")
+
+        with mock.patch.object(cache.log, "warning") as cache_warning:
+            assert cache.get_cached_response("fofa", "domain", "secret.example", redis_client=redis) is None
+            assert cache.get_quota_exhausted("tok_cache_decode", "fofa", redis_client=redis) is None
+
+        cache_events = {call.args[0]: call.kwargs["extra"] for call in cache_warning.call_args_list}
+        assert cache_events["INTEL_CACHE_DECODE_FAILED"]["provider"] == "fofa"
+        assert cache_events["INTEL_CACHE_DECODE_FAILED"]["entity_type"] == "domain"
+        assert "secret.example" not in json.dumps(cache_events)
+        assert cache_events["INTEL_QUOTA_CACHE_DECODE_FAILED"]["session"] == "tok_cach********"
+
+        with mock.patch.object(rate_limiter.log, "warning") as rate_warning:
+            assert rate_limiter.check_rate_limit(
+                "tok_cache_decode",
+                "fofa",
+                cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 10},
+                redis_client=redis,
+                now=100.0,
+            ).allowed is True
+
+        rate_warning.assert_called_once()
+        assert rate_warning.call_args.args == ("INTEL_RATE_BUCKET_DECODE_FAILED",)
+        assert rate_warning.call_args.kwargs["extra"]["provider"] == "fofa"
+        assert rate_warning.call_args.kwargs["extra"]["session"] == "tok_cach********"
 
     def test_json_api_client_uses_system_ca_bundle_for_https(self, monkeypatch):
         from services.intel import clients
@@ -7753,19 +9636,31 @@ class TestIntelServices:
         assert clients._default_ssl_context() == "ctx"
         assert contexts == [{"cafile": "/custom/ca.pem", "capath": "/custom/certs"}]
 
+    def test_tls_certificate_client_uses_observation_only_context(self):
+        from services.intel import clients
+
+        context = clients._tls_observation_context()
+
+        assert context.check_hostname is False
+        assert context.verify_mode == clients.ssl.CERT_NONE
+
     def test_provider_modules_read_secret_at_call_time_and_normalize_payloads(self):
         from services.intel.abuseipdb import AbuseIpdbProvider
         from services.intel.base import ProviderApiError
         from services.intel.censys import CensysProvider
         from services.intel.crtsh import CrtshProvider
+        from services.intel.fofa import FofaProvider
         from services.intel.greynoise import GreyNoiseProvider
         from services.intel.hibp import HibpPwnedPasswordsProvider
         from services.intel.ipinfo import IpinfoProvider
         from services.intel.nvd import NvdProvider
         from services.intel.otx import OtxProvider
         from services.intel.shodan import ShodanProvider
+        from services.intel.shodan_internetdb import ShodanInternetDbProvider
         from services.intel.teamcymru import TeamCymruProvider
+        from services.intel.tls_certificate import TlsCertificateProvider
         from services.intel.virustotal import VirusTotalProvider
+        from services.intel.zoomeye import ZoomEyeProvider
 
         class FakeIntelClient:
             last_status = 200
@@ -7806,6 +9701,16 @@ class TestIntelServices:
                     "last_update": "2026-05-14T00:00:00Z",
                 }
 
+            def lookup_internetdb_ip(self, value):
+                self.calls.append(("internetdb-ip", value))
+                return {
+                    "ports": [443, "80", "bad"],
+                    "cpes": ["cpe:/a:openbsd:openssh:9.0"],
+                    "hostnames": ["dns.google"],
+                    "tags": ["cdn"],
+                    "vulns": ["cve-2024-12345"],
+                }
+
             def lookup_host(self, value, *, api_key, organization_id=""):
                 self.calls.append(("censys-host", value, api_key, organization_id))
                 return {
@@ -7837,11 +9742,15 @@ class TestIntelServices:
                             "name_value": "www.example.test\n*.Example.TEST",
                             "issuer_name": "Test CA",
                             "not_before": "2026-01-02T00:00:00",
+                            "not_after": "2026-04-02T00:00:00",
+                            "id": 11,
                         },
                         {
                             "name_value": "api.example.test",
                             "issuer_name": "Test CA",
                             "not_before": "2026-01-01T00:00:00",
+                            "not_after": "2026-04-01T00:00:00",
+                            "min_cert_id": 10,
                         },
                     ]
                 self.calls.append(("domain", value, api_key))
@@ -7915,6 +9824,37 @@ class TestIntelServices:
                     },
                 }
 
+            def search(self, query, *, email, api_key, size=10):
+                self.calls.append(("fofa", query, email, api_key, size))
+                return {
+                    "size": 1,
+                    "results": [[
+                        "https://example.test",
+                        "8.8.8.8",
+                        "443",
+                        "https",
+                        "Example",
+                        "nginx",
+                        "United States",
+                        "Google LLC",
+                    ]],
+                }
+
+            def search_hosts(self, query, *, api_key, size=10):
+                self.calls.append(("zoomeye", query, api_key, size))
+                return {
+                    "total": 1,
+                    "matches": [{
+                        "hostname": "example.test",
+                        "ip": "8.8.8.8",
+                        "port": 443,
+                        "service": {"name": "https", "app": "nginx"},
+                        "title": "Example",
+                        "geoinfo": {"country": "United States", "city": "Mountain View"},
+                        "asn": {"organization": "Google LLC"},
+                    }],
+                }
+
         secrets = {
             ("session-1", "SHODAN_API_KEY"): "shodan-key",
             ("session-1", "CENSYS_PAT"): "censys-token",
@@ -7926,6 +9866,9 @@ class TestIntelServices:
             ("session-1", "OTX_API_KEY"): "otx-key",
             ("session-1", "ABUSEIPDB_API_KEY"): "abuse-key",
             ("session-1", "IPINFO_TOKEN"): "ipinfo-token",
+            ("session-1", "FOFA_KEY"): "fofa-key",
+            ("session-1", "FOFA_EMAIL"): "ops@example.test",
+            ("session-1", "ZOOMEYE_API_KEY"): "zoomeye-key",
         }
 
         def getter(session, env):
@@ -7933,6 +9876,7 @@ class TestIntelServices:
 
         client = FakeIntelClient()
         shodan_provider = ShodanProvider(secret_getter=getter, client=client)
+        internetdb_client = mock.Mock(last_status=200, lookup_ip=mock.Mock(side_effect=client.lookup_internetdb_ip))
 
         assert shodan_provider.cache_ttl("ip", cfg={"intel_cache_ttl_shodan_ip_seconds": 9}) == 9
         assert shodan_provider.rate_limit(
@@ -7941,6 +9885,10 @@ class TestIntelServices:
             redis_client=process._FakeRedisClient(),
         ).allowed is True
         shodan_result = shodan_provider.lookup_ip(
+            "8.8.8.8",
+            session_token="session-1",
+        )
+        internetdb_result = ShodanInternetDbProvider(client=internetdb_client).lookup_ip(
             "8.8.8.8",
             session_token="session-1",
         )
@@ -7984,6 +9932,19 @@ class TestIntelServices:
             ),
         ).lookup_ip("8.8.8.8", session_token="session-1")
         crtsh_result = CrtshProvider(client=client).lookup_domain("Example.TEST.", session_token="session-1")
+        tls_certificate_result = TlsCertificateProvider(client=mock.Mock(
+            last_status=200,
+            lookup_domain=mock.Mock(return_value={
+                "host": "example.test",
+                "port": 443,
+                "subject": "CN=example.test",
+                "issuer": "CN=Test CA",
+                "not_before": "2026-01-01T00:00:00Z",
+                "not_after": "2026-08-01T00:00:00Z",
+                "fingerprint_sha256": "a" * 64,
+                "names": ["example.test", "www.example.test"],
+            }),
+        )).lookup_domain("Example.TEST.", session_token="session-1")
         teamcymru_result = TeamCymruProvider(client=mock.Mock(
             last_status=200,
             lookup_ip=mock.Mock(return_value={
@@ -8007,9 +9968,19 @@ class TestIntelServices:
             "8.8.8.8",
             session_token="session-1",
         )
+        fofa_result = FofaProvider(secret_getter=getter, client=client).lookup_domain(
+            "Example.TEST.",
+            session_token="session-1",
+        )
+        zoomeye_result = ZoomEyeProvider(secret_getter=getter, client=client).lookup_url(
+            "https://Example.TEST/",
+            session_token="session-1",
+        )
 
         assert shodan_result.payload["providers"]["shodan"]["ports"] == [443]
         assert shodan_result.payload["providers"]["shodan"]["cves"] == ["CVE-2024-12345"]
+        assert internetdb_result.payload["providers"]["shodan_internetdb"]["ports"] == [80, 443]
+        assert internetdb_result.payload["providers"]["shodan_internetdb"]["hostnames"] == ["dns.google"]
         assert censys_result.payload["providers"]["censys"]["ports"] == [53, 443]
         assert censys_result.payload["providers"]["censys"]["protocols"] == ["dns", "https"]
         assert censys_result.payload["providers"]["censys"]["services"][0]["software"] == "Example nginx 1.2.3"
@@ -8030,6 +10001,29 @@ class TestIntelServices:
             "example.test",
             "api.example.test",
         ]
+        assert crtsh_result.payload["providers"]["crtsh"]["latest_expiry"] == "2026-04-02T00:00:00"
+        assert crtsh_result.payload["providers"]["crtsh"]["certificates"] == [
+            {
+                "id": "11",
+                "names": ["www.example.test", "example.test"],
+                "issuer": "Test CA",
+                "not_before": "2026-01-02T00:00:00",
+                "not_after": "2026-04-02T00:00:00",
+            },
+            {
+                "id": "10",
+                "names": ["api.example.test"],
+                "issuer": "Test CA",
+                "not_before": "2026-01-01T00:00:00",
+                "not_after": "2026-04-01T00:00:00",
+            },
+        ]
+        assert tls_certificate_result.payload["providers"]["tls_certificate"]["latest_expiry"] == "2026-08-01T00:00:00Z"
+        assert tls_certificate_result.payload["providers"]["tls_certificate"]["names"] == [
+            "example.test",
+            "www.example.test",
+        ]
+        assert tls_certificate_result.payload["providers"]["tls_certificate"]["certificates"][0]["issuer"] == "CN=Test CA"
         assert teamcymru_result.payload["providers"]["teamcymru"]["asn"] == "15169"
         assert hibp_result.payload["providers"]["hibp"]["pwned"] is True
         assert hibp_result.payload["providers"]["hibp"]["count"] == 7
@@ -8041,7 +10035,13 @@ class TestIntelServices:
         assert ipinfo_result.payload["providers"]["ipinfo"]["asn"] == "AS15169"
         assert ipinfo_result.payload["providers"]["ipinfo"]["org"] == "Google LLC"
         assert ipinfo_result.payload["providers"]["ipinfo"]["domain"] == "google.com"
+        assert fofa_result.payload["providers"]["fofa"]["results"][0]["host"] == "https://example.test"
+        assert fofa_result.payload["providers"]["fofa"]["results"][0]["port"] == 443
+        assert "organization" not in fofa_result.payload["providers"]["fofa"]["results"][0]
+        assert zoomeye_result.payload["providers"]["zoomeye"]["results"][0]["protocol"] == "https"
+        assert zoomeye_result.payload["providers"]["zoomeye"]["results"][0]["organization"] == "Google LLC"
         assert ("ip", "8.8.8.8", "shodan-key") in client.calls
+        assert ("internetdb-ip", "8.8.8.8") in client.calls
         assert ("censys-host", "8.8.8.8", "censys-token", "censys-org") in client.calls
         assert ("domain", "example.test", "vt-key") in client.calls
         assert ("hash", "a" * 64, "vt-key") in client.calls
@@ -8054,6 +10054,20 @@ class TestIntelServices:
         assert ("ip", "8.8.4.4", "greynoise-key") in client.calls
         assert ("ip", "8.8.4.5", "greynoise-empty-key") in client.calls
         assert ("ip", "8.8.8.8", "ipinfo-token") in client.calls
+        assert ("fofa", 'domain="example.test"', "ops@example.test", "fofa-key", 10) in client.calls
+        assert ("zoomeye", 'site:"example.test"', "zoomeye-key", 10) in client.calls
+
+    def test_crtsh_provider_reports_transient_upstream_failures(self):
+        from services.intel.base import ProviderApiError
+        from services.intel.crtsh import CrtshProvider
+
+        client = mock.Mock(last_status=503)
+        client.lookup_domain.side_effect = ProviderApiError("provider returned HTTP 503", status=503)
+
+        with pytest.raises(ProviderApiError, match="crt\\.sh is temporarily unavailable"):
+            CrtshProvider(client=client).lookup_domain("Example.TEST.", session_token="session-1")
+
+        client.lookup_domain.assert_called_once_with("example.test")
 
     def test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized(self):
         from services.intel.teamcymru import TeamCymruProvider
@@ -8076,15 +10090,67 @@ class TestIntelServices:
             "name": "GOOGLE, US",
         }
 
+    def test_fofa_accepts_api_key_alias_and_zoomeye_uses_regional_api_key_auth(self):
+        from services.intel.fofa import FofaProvider
+        from services.intel.zoomeye import ZoomEyeProvider
+
+        secrets = {
+            ("session-1", "FOFA_API_KEY"): "fofa-key",
+            ("session-1", "FOFA_EMAIL"): "ops@example.test",
+            ("session-1", "ZOOMEYE_API_KEY"): "plain-api-key",
+        }
+
+        def getter(session, env):
+            return secrets.get((session, env))
+
+        fofa_client = mock.Mock(
+            last_status=200,
+            search=mock.Mock(return_value={
+                "size": 1,
+                "results": [["https://example.test", "8.8.8.8", "443", "https"]],
+            }),
+        )
+        fofa = FofaProvider(secret_getter=getter, client=fofa_client).lookup_domain(
+            "example.test",
+            session_token="session-1",
+        )
+
+        assert fofa.payload["providers"]["fofa"]["results"][0]["port"] == 443
+        fofa_client.search.assert_called_once_with(
+            'domain="example.test"',
+            email="ops@example.test",
+            api_key="fofa-key",
+            size=10,
+        )
+
+        zoomeye_client = mock.Mock(
+            last_status=200,
+            search_hosts=mock.Mock(return_value={
+                "code": 60000,
+                "total": 1,
+                "matches": [{"ip": "8.8.8.8", "port": 443, "service": {"name": "https"}}],
+            }),
+        )
+        zoomeye = ZoomEyeProvider(secret_getter=getter, client=zoomeye_client).lookup_domain(
+            "example.test",
+            session_token="session-1",
+        )
+
+        assert zoomeye.payload["providers"]["zoomeye"]["results"][0]["protocol"] == "https"
+        zoomeye_client.search_hosts.assert_called_once_with('site:"example.test"', api_key="plain-api-key", size=10)
+
     def test_new_intel_provider_modules_normalize_payloads(self):
         from services.intel.clients import (
             CensysApiClient,
+            FofaApiClient,
             RouteViewsApiClient,
             SecurityTrailsApiClient,
+            ShodanInternetDbClient,
             ThreatFoxApiClient,
             UrlhausApiClient,
             UrlscanApiClient,
             VulnersApiClient,
+            ZoomEyeApiClient,
         )
         from services.intel.routeviews import RouteViewsProvider
         from services.intel.securitytrails import SecurityTrailsProvider
@@ -8216,6 +10282,39 @@ class TestIntelServices:
             }
         routeviews_request.assert_called_once_with("https://api.routeviews.org/prefix/8.8.8.8/32")
 
+        internetdb_client = ShodanInternetDbClient()
+        with mock.patch.object(internetdb_client, "_json_request", return_value={}) as internetdb_request:
+            internetdb_client.lookup_ip("8.8.8.8")
+        internetdb_request.assert_called_once_with("https://internetdb.shodan.io/8.8.8.8")
+
+        fofa_client = FofaApiClient()
+        with mock.patch.object(fofa_client, "_json_request", return_value={}) as fofa_request:
+            fofa_client.search('domain="example.test"', email="ops@example.test", api_key="fofa-key", size=50)
+        fofa_url = fofa_request.call_args.args[0]
+        assert fofa_url.startswith("https://fofa.info/api/v1/search/all?")
+        assert "email=ops%40example.test" in fofa_url
+        assert "key=fofa-key" in fofa_url
+        assert "fields=host%2Cip%2Cport%2Cprotocol%2Ctitle%2Cserver%2Ccountry_name" in fofa_url
+        assert "as_organization" not in fofa_url
+        assert "size=10" in fofa_url
+        assert "qbase64=ZG9tYWluPSJleGFtcGxlLnRlc3Qi" in fofa_url
+
+        zoomeye_client = ZoomEyeApiClient()
+        with mock.patch.object(zoomeye_client, "_json_post", return_value={}) as zoomeye_post:
+            zoomeye_client.search_hosts('site:"example.test"', api_key="zoomeye-key", size=50)
+        zoomeye_post.assert_called_once_with(
+            "https://api.zoomeye.ai/v2/search",
+            {
+                "qbase64": "c2l0ZToiZXhhbXBsZS50ZXN0Ig==",
+                "sub_type": "all",
+                "page": 1,
+                "facets": "",
+                "fields": "ip,port,service,app,os,device,city,country,asn,organization",
+                "pagesize": 10,
+            },
+            headers={"API-KEY": "zoomeye-key", "Accept": "application/json"},
+        )
+
         secrets = {
             ("session-1", "URLHAUS_AUTH_KEY"): "urlhaus-key",
             ("session-1", "THREATFOX_AUTH_KEY"): "threatfox-key",
@@ -8328,6 +10427,7 @@ class TestIntelServices:
             )
             return mock.Mock(returncode=0, stdout=stdout, stderr="")
 
+        monkeypatch.setattr(clients.shutil, "which", lambda name: "/usr/bin/dig" if name == "dig" else None)
         monkeypatch.setattr(clients.subprocess, "run", fake_run)
 
         result = clients.TeamCymruDnsClient().lookup_ip("8.8.8.8")
@@ -8337,8 +10437,8 @@ class TestIntelServices:
             "asn_records": ['"15169 | US | arin | 2000-03-30 | GOOGLE, US"'],
         }
         assert calls == [
-            ["dig", "+short", "TXT", "8.8.8.8.origin.asn.cymru.com"],
-            ["dig", "+short", "TXT", "AS15169.asn.cymru.com"],
+            ["/usr/bin/dig", "+short", "TXT", "8.8.8.8.origin.asn.cymru.com"],
+            ["/usr/bin/dig", "+short", "TXT", "AS15169.asn.cymru.com"],
         ]
 
     def test_provider_missing_secret_blocks_lookup_before_client_call(self):
@@ -8380,6 +10480,51 @@ class TestIntelServices:
         assert result.providers[0].status == "missing_secret"
         assert result.providers[0].result is None
         provider.client.lookup_ip.assert_not_called()
+
+    def test_lookup_entity_preflights_fofa_email_before_rate_limit_and_client_call(self):
+        from services.intel.fofa import FofaProvider
+        from services.intel.lookup import lookup_entity
+
+        redis = process._FakeRedisClient()
+        secrets = {("session-1", "FOFA_KEY"): "fofa-key"}
+
+        def getter(session, env):
+            return secrets.get((session, env))
+
+        client = mock.Mock()
+        client.last_status = 200
+        client.search.return_value = {
+            "size": 1,
+            "results": [["https://example.test", "8.8.8.8", "443", "https", "Example", "nginx", "US"]],
+        }
+
+        missing = lookup_entity(
+            "domain",
+            "example.test",
+            session_id="session-1",
+            provider_factories=[lambda: FofaProvider(secret_getter=getter, client=client)],
+            cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 600},
+            redis_client=redis,
+        )
+
+        assert missing.providers[0].status == "missing_secret"
+        assert missing.providers[0].message == "FOFA_EMAIL is not configured"
+        client.search.assert_not_called()
+
+        secrets[("session-1", "FOFA_EMAIL")] = "ops@example.test"
+        found = lookup_entity(
+            "domain",
+            "example.test",
+            session_id="session-1",
+            provider_factories=[lambda: FofaProvider(secret_getter=getter, client=client)],
+            cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 600},
+            redis_client=redis,
+        )
+
+        assert found.providers[0].status == "ok"
+        assert found.providers[0].result is not None
+        assert found.providers[0].result.payload["providers"]["fofa"]["result_count"] == 1
+        client.search.assert_called_once()
 
     def test_lookup_entity_skips_cached_provider_response_when_ttl_is_zero(self):
         from services.intel import cache
@@ -8497,6 +10642,23 @@ class TestIntelServices:
                     "hostname": "dns.google",
                     "timezone": "America/Los_Angeles",
                 },
+                "shodan_internetdb": {
+                    "ports": [80, 443],
+                    "cpes": ["cpe:/a:openbsd:openssh:9.0"],
+                    "hostnames": ["dns.google"],
+                    "tags": ["cdn"],
+                    "cves": ["CVE-2024-12345"],
+                },
+                "fofa": {
+                    "result_count": 1,
+                    "results": [{"host": "https://example.test", "port": 443, "protocol": "https", "title": "Example"}],
+                    "has_more": False,
+                },
+                "zoomeye": {
+                    "result_count": 1,
+                    "results": [{"host": "example.test", "port": 443, "protocol": "https", "app": "nginx"}],
+                    "has_more": False,
+                },
             },
             "summary": {"has_intel": True},
         }
@@ -8512,6 +10674,18 @@ class TestIntelServices:
                 ProviderLookup(
                     "ipinfo",
                     result=IntelResult("ipinfo", "ip", "8.8.8.8", payload),
+                ),
+                ProviderLookup(
+                    "shodan_internetdb",
+                    result=IntelResult("shodan_internetdb", "ip", "8.8.8.8", payload),
+                ),
+                ProviderLookup(
+                    "fofa",
+                    result=IntelResult("fofa", "ip", "8.8.8.8", payload),
+                ),
+                ProviderLookup(
+                    "zoomeye",
+                    result=IntelResult("zoomeye", "ip", "8.8.8.8", payload),
                 ),
             ],
         )
@@ -8534,6 +10708,12 @@ class TestIntelServices:
         assert "AS15169" in text
         assert "Google LLC" in text
         assert "Mountain View, California" in text
+        assert "Shodan InternetDB results - retrieved and cached:" in text
+        assert "cpe:/a:openbsd:openssh:9.0" in text
+        assert "FOFA results - retrieved and cached:" in text
+        assert "ZoomEye results - retrieved and cached:" in text
+        assert "https://example.test:443 https - Example" in text
+        assert "example.test:443 https - nginx" in text
         assert any(line.get("cls") == "builtin-spacer" for line in lines)
 
     def test_builtin_intel_ip_formats_censys_provider_results(self):
@@ -8635,6 +10815,94 @@ class TestIntelServices:
         assert "NVD results - retrieved and cached:" in text
         assert "severity" in text
         assert "HIGH" in text
+
+    def test_builtin_intel_persists_snapshot_for_existing_atlas_entity(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        session_id = "intel-snapshot-session-" + uuid.uuid4().hex
+        run_id = "run-intel-snapshot-" + uuid.uuid4().hex
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                (run_id, session_id, "httpx darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                session_id,
+                run_id,
+                [{
+                    "text": "darklab.sh",
+                    "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                }],
+                seen_at="2026-05-14T00:00:01+00:00",
+            )
+            conn.commit()
+        entity_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        payload = {
+            "providers": {
+                "crtsh": {
+                    "certificate_count": 2,
+                    "names": ["darklab.sh"],
+                    "latest_expiry": "2026-08-16T03:29:30",
+                },
+            },
+            "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+        }
+        lookup = IntelLookupResult(
+            "domain",
+            "darklab.sh",
+            [ProviderLookup("crtsh", result=IntelResult("crtsh", "domain", "darklab.sh", payload))],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            lines, exit_code = builtin_commands.execute_builtin_command("intel domain darklab.sh", session_id)
+
+        assert exit_code == 0
+        assert any("crt.sh results" in str(line.get("text", "")) for line in lines)
+        with database.db_connect() as conn:
+            row = conn.execute(
+                "SELECT entity_id, provider, status, summary, data_json FROM entity_intel_snapshots "
+                "WHERE session_id = ? AND entity_id = ?",
+                (session_id, entity_id),
+            ).fetchone()
+        assert row is not None
+        assert row["provider"] == "crtsh"
+        assert row["status"] == "ok"
+        assert row["summary"] == "data available"
+        assert json.loads(row["data_json"])["providers"]["crtsh"]["certificate_count"] == 2
+
+    def test_builtin_intel_does_not_create_atlas_entity_for_lookup_only_value(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        session_id = "intel-lookup-only-session-" + uuid.uuid4().hex
+        payload = {
+            "providers": {"crtsh": {"certificate_count": 1}},
+            "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+        }
+        lookup = IntelLookupResult(
+            "domain",
+            "lookup-only.example",
+            [ProviderLookup("crtsh", result=IntelResult("crtsh", "domain", "lookup-only.example", payload))],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            _, exit_code = builtin_commands.execute_builtin_command("intel domain lookup-only.example", session_id)
+
+        assert exit_code == 0
+        with database.db_connect() as conn:
+            entity_row = conn.execute(
+                "SELECT id FROM entities WHERE session_id = ? AND canonical_value = ?",
+                (session_id, "lookup-only.example"),
+            ).fetchone()
+            snapshot_row = conn.execute(
+                "SELECT id FROM entity_intel_snapshots WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        assert entity_row is None
+        assert snapshot_row is None
 
     def test_builtin_intel_rejects_private_ip_without_override(self):
         with mock.patch("services.commands.builtins_intel.lookup_entity") as lookup:
@@ -8926,6 +11194,37 @@ class TestSessionWorkspace:
             }
             assert list_workspace_files("session-1", cfg) == []
             assert workspace_usage("session-1", cfg).file_count == 0
+
+    def test_move_cleans_partial_destination_before_scanner_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "source.txt", "moved\n", cfg)
+            create_workspace_directory("session-1", "archive", cfg)
+            source = resolve_workspace_path("session-1", "source.txt", cfg)
+            destination = resolve_workspace_path("session-1", "archive/source.txt", cfg, ensure_parent=True)
+
+            def fake_shutil_move(source_arg, destination_arg):
+                assert Path(source_arg) == source
+                partial = Path(destination_arg)
+                partial.write_text("partial\n", encoding="utf-8")
+                raise PermissionError("sticky source unlink denied")
+
+            def fake_scanner_move(command, **_kwargs):
+                assert command[-2:] == [str(source), str(destination)]
+                assert not destination.exists()
+                source.rename(destination)
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch("services.workspace.files.shutil.move", side_effect=fake_shutil_move), \
+                    mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
+                    mock.patch("services.workspace.files.subprocess.run", side_effect=fake_scanner_move):
+                moved = workspace_module.move_workspace_path("session-1", "source.txt", "archive", cfg)
+
+            assert moved.source == "source.txt"
+            assert moved.destination == "archive/source.txt"
+            assert not source.exists()
+            assert destination.read_text(encoding="utf-8") == "moved\n"
 
     def test_workspace_glob_pattern_matches_one_path_segment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -9824,6 +12123,17 @@ class TestDerivedCommandRegistry:
                 "requires_secret": True,
             },
             {
+                "id": "fofa",
+                "label": "FOFA",
+                "entity_types": ["domain"],
+                "uses": ["intel domain"],
+                "secret_env": "FOFA_KEY",
+                "secret_env_aliases": ["FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN"],
+                "required_secret_envs": ["FOFA_EMAIL"],
+                "secret_env_names": ["FOFA_KEY", "FOFA_API_KEY", "FOFA_APIKEY", "FOFA_TOKEN", "FOFA_EMAIL"],
+                "requires_secret": True,
+            },
+            {
                 "id": "chaos",
                 "label": "ProjectDiscovery Chaos",
                 "entity_types": ["domain"],
@@ -9836,6 +12146,8 @@ class TestDerivedCommandRegistry:
         stored_secrets = [
             {"name": "SHODAN_API_KEY", "consumer_envs": ["SHODAN_API_KEY"]},
             {"name": "VTCLI_APIKEY", "consumer_envs": ["VTCLI_APIKEY"]},
+            {"name": "FOFA_API_KEY", "consumer_envs": ["FOFA_API_KEY"]},
+            {"name": "FOFA_EMAIL", "consumer_envs": ["FOFA_EMAIL"]},
         ]
 
         with (
@@ -9849,7 +12161,7 @@ class TestDerivedCommandRegistry:
         assert exit_code == 0
         assert alias_exit_code == 0
         assert "Provider status:" in text
-        assert "4 usable · 2 not configured" in text
+        assert "5 usable · 2 not configured" in text
         assert "Usable providers:" in text
         assert "Shodan" in text
         assert "configured · intel ip · SHODAN_API_KEY" in text
@@ -9859,6 +12171,8 @@ class TestDerivedCommandRegistry:
         assert "available · intel ip, ipinfo CLI · IPINFO_TOKEN" in text
         assert "VirusTotal" in text
         assert "configured · intel domain, intel hash · VT_API_KEY" in text
+        assert "FOFA" in text
+        assert "configured · intel domain · FOFA_KEY + FOFA_EMAIL" in text
         assert "Not configured:" in text
         assert "Censys" in text
         assert "not configured · intel ip · CENSYS_PAT" in text
@@ -10173,6 +12487,39 @@ class TestDerivedCommandRegistry:
         assert is_command_allowed("shodan stats apache")[0]
         assert is_command_allowed("shodan scan submit 8.8.8.8")[0]
         assert not is_command_allowed("shodan scan submit 127.0.0.1")[0]
+        tlsx = by_root["tlsx"]
+        assert "tlsx -update" in tlsx["policy"]["deny"]
+        assert "tlsx -dashboard-upload" in tlsx["policy"]["deny"]
+        assert is_command_allowed("tlsx -u ip.darklab.sh -json -silent")[0]
+        assert not is_command_allowed("tlsx -u ip.darklab.sh -update")[0]
+        cdncheck = by_root["cdncheck"]
+        assert "cdncheck -update" in cdncheck["policy"]["deny"]
+        assert is_command_allowed("cdncheck -i ip.darklab.sh -jsonl -silent")[0]
+        assert not is_command_allowed("cdncheck -i ip.darklab.sh -update")[0]
+        trufflehog = by_root["trufflehog"]
+        assert "trufflehog filesystem --directory" in trufflehog["policy"]["allow"]
+        assert "trufflehog git" in trufflehog["policy"]["allow"]
+        assert "trufflehog git file://" in trufflehog["policy"]["deny"]
+        assert trufflehog["runtime_adaptations"]["inject_flags"][0]["flags"] == ["--json"]
+        assert is_command_allowed("trufflehog --help")[0]
+        assert is_command_allowed("trufflehog git https://github.com/trufflesecurity/test_keys --json")[0]
+        assert not is_command_allowed("trufflehog filesystem secrets --json")[0]
+        assert not is_command_allowed("trufflehog git file:///tmp/repo --json")[0]
+        assert not is_command_allowed("trufflehog git ssh://git@example.com/repo.git --json")[0]
+        assert not is_command_allowed("trufflehog git local-repo --json")[0]
+        assert not is_command_allowed("trufflehog github --repo darklab/shell")[0]
+        puredns = by_root["puredns"]
+        assert "puredns resolve" in puredns["policy"]["deny"]
+        assert "puredns --bin" in puredns["policy"]["deny"]
+        assert is_command_allowed("puredns -h")[0]
+        allowed, reason = is_command_allowed(
+            "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+            "darklab.sh"
+        )
+        assert not allowed
+        assert reason == "puredns bruteforce requires --resolvers with a session resolver file."
+        assert not is_command_allowed("puredns resolve domains.txt")[0]
+        assert not is_command_allowed("puredns bruteforce domains.txt darklab.sh")[0]
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -10182,7 +12529,7 @@ class TestDerivedCommandRegistry:
                 "workspace_root": tmp,
                 "workspace_quota_mb": 50,
                 "workspace_max_file_mb": 1,
-                "workspace_max_files": 40,
+                "workspace_max_files": 80,
                 "workspace_inactivity_ttl_hours": 1,
             }
             session_id = "registry-workspace-flags"
@@ -10206,6 +12553,12 @@ class TestDerivedCommandRegistry:
                 "subfinder-provider-config.yaml": "github: []\n",
                 "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
                 "nmap-script-args.txt": "http.useragent=darklab\n",
+                "trufflehog-include.txt": ".*\n",
+                "trufflehog-exclude.txt": "node_modules\n",
+                "puredns-resolvers.txt": "1.1.1.1\n",
+                "puredns-trusted-resolvers.txt": "8.8.8.8\n",
+                "puredns-domains.txt": "darklab.sh\n",
+                "secrets/readme.txt": "no secrets here\n",
             }.items():
                 write_workspace_text_file(session_id, path, text, cfg)
 
@@ -10235,6 +12588,15 @@ class TestDerivedCommandRegistry:
                 "amass track -d darklab.sh": ([], ["tools/amass"]),
                 "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "tools/amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
+                "tlsx -l tls-targets.txt -json -silent -o tlsx-results.json": (
+                    ["tls-targets.txt"], ["tlsx-results.json"],
+                ),
+                "tlsx -u ip.darklab.sh -config subfinder-config.yaml -r resolvers.txt -cc ca.pem": (
+                    ["subfinder-config.yaml", "resolvers.txt", "ca.pem"], [],
+                ),
+                "cdncheck -i ip.darklab.sh -jsonl -silent -r resolvers.txt -o cdncheck-results.jsonl": (
+                    ["resolvers.txt"], ["cdncheck-results.jsonl"],
+                ),
                 "httpx -rr request.txt -status-code -o httpx-raw.txt": (
                     ["request.txt"], ["httpx-raw.txt"],
                 ),
@@ -10287,6 +12649,33 @@ class TestDerivedCommandRegistry:
                 "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh": (
                     ["nmap-script-args.txt"], [],
                 ),
+                (
+                    "trufflehog filesystem --directory secrets --include-paths trufflehog-include.txt "
+                    "--exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "trufflehog git https://github.com/trufflesecurity/test_keys "
+                    "--include-paths trufflehog-include.txt --exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+                    "darklab.sh --resolvers puredns-resolvers.txt "
+                    "--resolvers-trusted puredns-trusted-resolvers.txt --write puredns-results.txt "
+                    "--write-massdns puredns.massdns --write-wildcards puredns-wildcards.txt"
+                ): (
+                    ["puredns-resolvers.txt", "puredns-trusted-resolvers.txt"],
+                    ["puredns-results.txt", "puredns.massdns", "puredns-wildcards.txt"],
+                ),
+                (
+                    "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+                    "-d puredns-domains.txt --resolvers puredns-resolvers.txt --write puredns-results.txt"
+                ): (
+                    ["puredns-domains.txt", "puredns-resolvers.txt"], ["puredns-results.txt"],
+                ),
                 "shodan download shodan-apache apache": ([], ["shodan-apache"]),
                 "wget --server-response https://ip.darklab.sh": ([], []),
                 "wget -P downloads https://ip.darklab.sh": ([], ["downloads"]),
@@ -10331,6 +12720,17 @@ class TestDerivedCommandRegistry:
                         if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
                             continue
                         assert original not in exec_tokens
+
+                for command in (
+                    "tlsx -u ip.darklab.sh -json -silent",
+                    "cdncheck -i ip.darklab.sh -jsonl -silent",
+                ):
+                    rewritten, notice = commands.rewrite_command(command, session_id=session_id, cfg=cfg)
+                    assert notice is None
+                    exec_tokens = commands.split_command_argv(rewritten)
+                    assert exec_tokens[0] == "env"
+                    assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
+                    assert exec_tokens[2] == command.split()[0]
 
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",
@@ -11057,6 +13457,12 @@ class TestCommandKnowledgeNormalization:
         assert "grep" in roots
         assert "head" in roots
         assert "tail" in roots
+        jq = next(pipe for pipe in pipes if pipe["root"] == "jq")
+        assert jq["description"] == "Select fields from JSON or JSONL"
+        flags = cast(list, jq["flags"])
+        assert {"value": "-r", "description": "Print scalar values as text"} in flags
+        arguments = cast(list, jq["arguments"])
+        assert arguments[0]["value"] == "<selector>"
 
     def test_pipe_catalog_entry_has_no_feature_required_when_absent(self):
         pipes = pipe_catalog_from_registry()
@@ -13999,6 +16405,13 @@ class TestOutputSignals:
         assert extract_target("ipinfo 107.178.109.44") == "107.178.109.44"
         assert extract_target("openssl s_client -connect ip.darklab.sh:443 -showcerts") == "ip.darklab.sh:443"
         assert extract_target("ffuf -u https://tor-stats.darklab.sh/FUZZ -w common.txt") == "tor-stats.darklab.sh"
+        assert extract_target("tlsx -u ip.darklab.sh -json -silent") == "ip.darklab.sh"
+        assert extract_target("cdncheck -i ip.darklab.sh -jsonl -silent") == "ip.darklab.sh"
+        assert extract_target(
+            "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+            "darklab.sh --resolvers resolvers.txt"
+        ) == "darklab.sh"
+        assert extract_target("trufflehog git https://github.com/trufflesecurity/test_keys --json") == "github.com"
         assert extract_target("nikto -h ip.darklab.sh -p 80") == "ip.darklab.sh"
         assert extract_target("nmap -script http-title,http-headers,http-enum -p 80 churchint.org") == "churchint.org"
 
@@ -14449,6 +16862,173 @@ class TestOutputSignals:
         assert nuclei_status["noise_reason"] == "nuclei:status"
         assert "signals" not in nuclei_status
         assert "noise_kind" not in nuclei_result
+        assert nuclei_result["source_detail"] == {
+            "adapter": "nuclei",
+            "template_id": "tls-version",
+            "template_provenance": {
+                "schema_version": 1,
+                "tool": "nuclei",
+                "source_kind": "managed_cache",
+                "source_label": "Managed /tmp/nuclei-templates cache",
+                "update_directory": "/tmp/nuclei-templates",
+            },
+        }
+
+        workspace_template = OutputSignalClassifier(
+            "nuclei -u https://ip.darklab.sh -t custom/nuclei/http.yaml"
+        ).classify_line("[custom-check] [http] [medium] https://ip.darklab.sh")
+        workspace_provenance = cast("dict[str, object]", workspace_template["template_provenance"])
+        assert workspace_provenance["source_kind"] == "workspace_templates"
+        assert workspace_provenance["template_paths"] == ["custom/nuclei/http.yaml"]
+
+        managed_relative_template = OutputSignalClassifier(
+            "nuclei -u https://ip.darklab.sh -t http/"
+        ).classify_line("[http-check] [http] [medium] https://ip.darklab.sh")
+        managed_relative_provenance = cast("dict[str, object]", managed_relative_template["template_provenance"])
+        assert managed_relative_provenance["source_kind"] == "managed_cache"
+        assert managed_relative_provenance["template_paths"] == ["http/"]
+
+        pinned_template = OutputSignalClassifier(
+            "nuclei -u https://ip.darklab.sh -t /opt/nuclei-templates/v10.2.0/http"
+        ).classify_line("[pinned-check] [http] [medium] https://ip.darklab.sh")
+        pinned_provenance = cast("dict[str, object]", pinned_template["template_provenance"])
+        assert pinned_provenance["source_kind"] == "pinned_clone"
+
+        updated_templates = OutputSignalClassifier(
+            "nuclei -update-templates -u https://ip.darklab.sh"
+        ).classify_line("[updated-check] [http] [medium] https://ip.darklab.sh")
+        updated_provenance = cast("dict[str, object]", updated_templates["template_provenance"])
+        assert updated_provenance["source_kind"] == "operator_updated"
+
+        tlsx_line = json.dumps({
+            "host": "ip.darklab.sh",
+            "ip": "107.178.109.44",
+            "tls_version": "tls13",
+            "cipher": "TLS_AES_128_GCM_SHA256",
+            "subject_an": ["ip.darklab.sh"],
+            "fingerprint_hash": {
+                "sha1": "c60e09aff9a4570d8d4efd455d552ea051818950",
+                "sha256": "115c2f245eedd44a93182adcfe5a2c7200910e7db057e36697c084e5b6d23089",
+            },
+        })
+        tlsx_metadata = OutputSignalClassifier("tlsx -u ip.darklab.sh -json -silent").classify_line(tlsx_line)
+        assert tlsx_metadata["signals"] == ["findings"]
+        tlsx_entities = cast("list[dict[str, object]]", tlsx_metadata["entities"])
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in tlsx_entities
+        } == {
+            ("domain", "ip.darklab.sh"),
+            ("ip", "107.178.109.44"),
+            ("hash", "sha1:c60e09aff9a4570d8d4efd455d552ea051818950"),
+            ("hash", "sha256:115c2f245eedd44a93182adcfe5a2c7200910e7db057e36697c084e5b6d23089"),
+        }
+        assert classify_line(
+            json.dumps({"host": "expired.darklab.sh", "probe_status": False, "expired": True}),
+            command="tlsx -u expired.darklab.sh -json -silent",
+        ) == ["findings", "warnings"]
+
+        cdncheck_line = json.dumps({
+            "host": "ip.darklab.sh",
+            "ip": "107.178.109.44",
+            "cdn": True,
+            "cdn_name": "cloudflare",
+        })
+        cdncheck_metadata = OutputSignalClassifier("cdncheck -i ip.darklab.sh -jsonl -silent").classify_line(cdncheck_line)
+        assert cdncheck_metadata["signals"] == ["summaries"]
+        cdncheck_entities = cast("list[dict[str, object]]", cdncheck_metadata["entities"])
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cdncheck_entities
+        } == {("domain", "ip.darklab.sh"), ("ip", "107.178.109.44")}
+
+        trufflehog_line = json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": "AKIAQYLPMN5HHHFPZAM2",
+            "RawV2": "AKIAQYLPMN5HHHFPZAM2:secret",
+            "Redacted": "AKIAQYLPMN5HHHFPZAM2",
+        })
+        trufflehog_metadata = OutputSignalClassifier(
+            "trufflehog git https://github.com/trufflesecurity/test_keys --json"
+        ).classify_line(trufflehog_line)
+        assert trufflehog_metadata["signals"] == ["findings"]
+        trufflehog_entities = cast("list[dict[str, object]]", trufflehog_metadata["entities"])
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in trufflehog_entities
+        } == {("domain", "github.com")}
+
+        puredns_metadata = OutputSignalClassifier(
+            "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+            "darklab.sh --resolvers resolvers.txt"
+        ).classify_line("www.darklab.sh")
+        assert puredns_metadata["signals"] == ["findings"]
+        puredns_entities = cast("list[dict[str, object]]", puredns_metadata["entities"])
+        assert puredns_entities[0]["canonical_value"] == "www.darklab.sh"
+        assert classify_line("wildcard detected for *.darklab.sh", command="puredns bruteforce words.txt darklab.sh") == [
+            "warnings",
+        ]
+
+    def test_structured_output_parse_misses_log_safe_diagnostics(self):
+        import core.output_signals as output_signals
+
+        with mock.patch.object(output_signals.log, "debug") as debug:
+            metadata = OutputSignalClassifier("tlsx -u secret.example -json -silent").classify_line(
+                '{"host": "secret.example",'
+            )
+
+        assert "signals" not in metadata
+        debug.assert_called_once()
+        assert debug.call_args.args == ("OUTPUT_SIGNAL_JSON_PARSE_MISS",)
+        extra = debug.call_args.kwargs["extra"]
+        assert extra == {
+            "command_root": "tlsx",
+            "line_index": 0,
+            "line_length": len('{"host": "secret.example",'),
+            "looks_json": True,
+        }
+        assert "secret.example" not in json.dumps(extra)
+
+    def test_nuclei_provenance_logs_safe_fallback_and_classification(self):
+        from services.nuclei import provenance
+
+        with mock.patch.object(provenance.log, "warning") as warning:
+            tokens = provenance.tokenize_command("nuclei -u https://darklab.sh 'unterminated")
+
+        assert tokens == ["nuclei", "-u", "https://darklab.sh", "'unterminated"]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("NUCLEI_PROVENANCE_TOKENIZE_FALLBACK",)
+        warning_extra = warning.call_args.kwargs["extra"]
+        assert warning_extra["command_root"] == "nuclei"
+        assert warning_extra["command_length"] == len("nuclei -u https://darklab.sh 'unterminated")
+        assert "darklab.sh" not in json.dumps(warning_extra)
+
+        with mock.patch.object(provenance.log, "debug") as debug:
+            result = provenance.nuclei_template_provenance(
+                "nuclei -u https://darklab.sh -t custom/nuclei/http.yaml -update-templates"
+            )
+
+        assert result["source_kind"] == "workspace_templates"
+        debug.assert_called_once()
+        assert debug.call_args.args == ("NUCLEI_TEMPLATE_PROVENANCE_CLASSIFIED",)
+        debug_extra = debug.call_args.kwargs["extra"]
+        assert debug_extra == {
+            "source_kind": "workspace_templates",
+            "template_path_count": 1,
+            "operator_updated": True,
+            "has_custom_update_directory": False,
+        }
+        assert "custom/nuclei/http.yaml" not in json.dumps(debug_extra)
 
     def test_classifies_scanner_progress_lines_as_progress_role(self):
         from blueprints.run import _capture_event_with_signals
@@ -15071,6 +17651,57 @@ class TestRunOutputCapture:
         assert events[0].target == "ip.darklab.sh"
         assert events[0].entities[0].canonical_value == "ip.darklab.sh"
 
+    def test_nuclei_source_detail_round_trips_through_run_output_and_package_entries(self):
+        import services.projects.package_rendering as package_rendering
+
+        source_detail = {
+            "adapter": "nuclei",
+            "template_id": "custom-check",
+            "template_provenance": {
+                "schema_version": 1,
+                "tool": "nuclei",
+                "source_kind": "workspace_templates",
+                "operator_updated": True,
+            },
+        }
+        capture = RunOutputCapture(
+            "test-run-output-nuclei-provenance",
+            preview_limit=5,
+            persist_full_output=True,
+            full_output_max_bytes=0,
+        )
+        capture.add_event(LineEvent(
+            "[custom-check] [http] [medium] https://darklab.sh",
+            signals=(LineSignal.findings,),
+            line_index=0,
+            command_root="nuclei",
+            target="https://darklab.sh",
+            source_detail=source_detail,
+        ))
+        capture.finalize()
+
+        assert capture.preview_lines[0]["source_detail"] == source_detail
+        assert capture.artifact_rel_path is not None
+        assert load_full_output_entries(capture.artifact_rel_path)[0]["source_detail"] == source_detail
+        events = load_full_output_events(capture.artifact_rel_path)
+        assert events[0].source_detail == source_detail
+
+        package_entries, companion_entries, cap_notice = cast(
+            "tuple[list[dict[str, object]], list[dict[str, object]], object]",
+            package_rendering._package_run_output_entries(
+                {
+                    "id": "test-run-output-nuclei-provenance",
+                    "output_preview": json.dumps(list(capture.preview_lines)),
+                    "full_output_available": False,
+                    "preview_truncated": False,
+                },
+                include_companion=True,
+            ),
+        )
+        assert package_entries[0]["source_detail"] == source_detail
+        assert companion_entries == []
+        assert cap_notice is None
+
     def test_add_event_preserves_legacy_output_shape(self):
         capture = RunOutputCapture("test-run-output-event", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
         capture.add_event(LineEvent(
@@ -15477,6 +18108,7 @@ class TestAutocompleteContextLoading:
                 "examples": [
                     {"value": "dig darklab.sh A", "description": "A lookup"},
                     {"value": "dig darklab.sh MX", "description": "MX lookup"},
+                    {"value": "dig darklab.sh TXT", "description": "Manual lookup", "smoke": {"profile": "manual"}},
                 ]
             },
             "curl": {
@@ -15516,6 +18148,28 @@ class TestAutocompleteContextLoading:
             "host darklab.sh",
             "wget -S --spider https://darklab.sh",
         ]
+
+    def test_external_tool_docker_pins_have_container_smoke_expectations(self):
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        expectations = json.loads(
+            (REPO_ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json")
+            .read_text(encoding="utf-8")
+        )
+        smoke_commands = {
+            str(record.get("command") or "")
+            for record in expectations["records"]
+            if isinstance(record, dict)
+        }
+
+        for arg_name, version, smoke_command in (
+            ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
+            ("CDNCHECK_VERSION", "v1.2.40", "cdncheck -h"),
+            ("TRUFFLEHOG_VERSION", "v3.95.5", "trufflehog --help"),
+            ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
+            ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
+        ):
+            assert f"ARG {arg_name}={version}" in dockerfile
+            assert smoke_command in smoke_commands
 
     def test_container_smoke_test_commands_spread_sensitive_roots(self):
         registry_context = {
@@ -17097,6 +19751,7 @@ class TestDatabaseInit:
             "projects",
             "project_links",
             "project_auto_promote_rules",
+            "project_digest_settings",
             "entities",
             "entity_run_links",
             "entity_intel_snapshots",
@@ -17776,6 +20431,7 @@ class TestDatabaseInit:
         payload = "\n".join((
             json.dumps({
                 "template-id": "ssl/expired-cert",
+                "template-path": "/tmp/nuclei-templates/ssl/expired-cert.yaml",
                 "matched-at": "https://darklab.sh",
                 "info": {
                     "name": "Expired TLS certificate",
@@ -17802,6 +20458,9 @@ class TestDatabaseInit:
         assert result.findings[0].external_id == "ssl/expired-cert"
         assert result.findings[0].severity == "high"
         assert result.findings[0].source_detail["template_id"] == "ssl/expired-cert"
+        assert result.findings[0].source_detail["template_path"] == "/tmp/nuclei-templates/ssl/expired-cert.yaml"
+        assert result.findings[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
+        assert result.entities[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
         assert result.warnings == []
 
     def test_atlas_import_parser_streams_nessus_xml_and_extracts_cves(self):
@@ -18128,6 +20787,63 @@ SQL syntax error near q</response>
         assert entity_count == 0
         assert link_count == 0
 
+    def test_materializes_new_external_tool_entities_from_classifier_metadata(self):
+        tlsx_line = json.dumps({
+            "host": "ip.darklab.sh",
+            "ip": "107.178.109.44",
+            "tls_version": "tls13",
+            "fingerprint_hash": {"sha1": "c60e09aff9a4570d8d4efd455d552ea051818950"},
+        })
+        cdncheck_line = json.dumps({
+            "host": "cdn.darklab.sh",
+            "ip": "104.21.4.35",
+            "cdn": True,
+            "cdn_name": "cloudflare",
+        })
+        rows = [
+            ("run-atlas-tlsx", "tlsx -u ip.darklab.sh -json -silent", tlsx_line),
+            ("run-atlas-cdncheck", "cdncheck -i cdn.darklab.sh -jsonl -silent", cdncheck_line),
+            (
+                "run-atlas-puredns",
+                "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
+                "darklab.sh --resolvers resolvers.txt",
+                "www.darklab.sh",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            for run_id, command, line in rows:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                    (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
+                )
+                classifier = OutputSignalClassifier(command)
+                materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    run_id,
+                    [{"text": line, **classifier.classify_line(line)}],
+                    seen_at="2026-05-14T00:00:01+00:00",
+                )
+            conn.commit()
+            entity_rows = conn.execute(
+                "SELECT type, canonical_value, occurrence_count FROM entities ORDER BY type, canonical_value"
+            ).fetchall()
+            conn.close()
+
+        assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
+            ("domain", "cdn.darklab.sh", 1),
+            ("domain", "ip.darklab.sh", 1),
+            ("domain", "www.darklab.sh", 1),
+            ("hash", "sha1:c60e09aff9a4570d8d4efd455d552ea051818950", 1),
+            ("ip", "104.21.4.35", 1),
+            ("ip", "107.178.109.44", 1),
+        }
+
     def test_materializer_deduplicates_team_entities_across_members(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -18282,6 +20998,158 @@ SQL syntax error near q</response>
         assert {(row["type"], row["canonical_value"]) for row in entity_rows} == {("ip", "192.168.1.5")}
         assert {row["entity_id"] for row in rows} == {entity_rows[0]["id"]}
         assert {row["subject_key"] for row in rows} == {"nmap-service:192.168.1.5:139 samba"}
+
+    def test_record_run_findings_redacts_trufflehog_secret_values(self):
+        from blueprints.run import _TruffleHogOutputFilter
+        from services.projects.findings import record_run_findings
+
+        raw_secret = "AKIAQYLPMN5HHHFPZAM2"
+        raw_secret_v2 = f"{raw_secret}:raw-secret-value"
+        line = json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": raw_secret,
+            "RawV2": raw_secret_v2,
+            "Redacted": raw_secret,
+        })
+        output_filter = _TruffleHogOutputFilter("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+        filtered_line = output_filter.process_output_line(f"{line}\n")
+        filtered_payload = json.loads(filtered_line)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+                "VALUES ('run-trufflehog', 'sess-trufflehog', 'external', "
+                "'trufflehog git https://github.com/trufflesecurity/test_keys --json', ?, ?, 0)",
+                ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
+            )
+            classifier = OutputSignalClassifier("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+            entry = {"text": filtered_line, **classifier.classify_line(filtered_line)}
+            recorded = record_run_findings(conn, "sess-trufflehog", "run-trufflehog", [entry])
+            conn.commit()
+            finding = conn.execute("SELECT title, raw_line, severity FROM findings").fetchone()
+            entity = conn.execute("SELECT type, canonical_value FROM entities").fetchone()
+            conn.close()
+
+        assert len(recorded) == 1
+        assert filtered_payload["Raw"] == "[redacted]"
+        assert filtered_payload["RawV2"] == "[redacted]"
+        assert filtered_payload["Redacted"] == raw_secret
+        assert raw_secret not in filtered_payload["Raw"]
+        assert "raw-secret-value" not in filtered_line
+        assert finding["severity"] == "high"
+        assert finding["title"].startswith("TruffleHog verified AWS secret")
+        assert "https://github.com/trufflesecurity/test_keys:keys:line 2" in finding["raw_line"]
+        assert raw_secret not in finding["raw_line"]
+        assert raw_secret_v2 not in finding["raw_line"]
+        assert "raw-secret-value" not in finding["raw_line"]
+        assert dict(entity) == {"type": "domain", "canonical_value": "github.com"}
+
+    def test_record_run_findings_uses_generic_trufflehog_redaction_hint(self):
+        from blueprints.run import _TruffleHogOutputFilter
+        from services.projects.findings import record_run_findings
+
+        raw_secret = "AKIAQYLPMN5HHHFPZAM2"
+        raw_secret_v2 = f"{raw_secret}:raw-secret-value"
+        provider_redacted = "AKIAQYLPMN5HHHFP****"
+        line = json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": raw_secret,
+            "RawV2": raw_secret_v2,
+            "Redacted": provider_redacted,
+        })
+        output_filter = _TruffleHogOutputFilter("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+        filtered_line = output_filter.process_output_line(f"{line}\n")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+                "VALUES ('run-trufflehog-safe-hint', 'sess-trufflehog', 'external', "
+                "'trufflehog git https://github.com/trufflesecurity/test_keys --json', ?, ?, 0)",
+                ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
+            )
+            classifier = OutputSignalClassifier("trufflehog git https://github.com/trufflesecurity/test_keys --json")
+            entry = {"text": filtered_line, **classifier.classify_line(filtered_line)}
+            record_run_findings(conn, "sess-trufflehog", "run-trufflehog-safe-hint", [entry])
+            conn.commit()
+            finding = conn.execute("SELECT title, raw_line FROM findings").fetchone()
+            conn.close()
+
+        persisted = json.dumps(dict(finding))
+        assert "redacted=[redacted]" in finding["raw_line"]
+        assert raw_secret not in persisted
+        assert raw_secret_v2 not in persisted
+        assert provider_redacted not in persisted
+        assert "raw-secret-value" not in persisted
+
+    def test_trufflehog_safe_finding_text_does_not_trust_redacted_equal_to_raw(self):
+        from services.projects.findings import _trufflehog_safe_finding_text
+
+        raw_secret = "AKIAQYLPMN5HHHFPZAM2"
+        raw_secret_v2 = f"{raw_secret}:raw-secret-value"
+        text = _trufflehog_safe_finding_text(json.dumps({
+            "SourceMetadata": {
+                "Data": {
+                    "Git": {
+                        "repository": "https://github.com/trufflesecurity/test_keys",
+                        "file": "keys",
+                        "line": 2,
+                    }
+                }
+            },
+            "DetectorName": "AWS",
+            "Verified": True,
+            "Raw": raw_secret,
+            "RawV2": raw_secret_v2,
+            "Redacted": raw_secret,
+        }))
+
+        assert "redacted=[redacted]" not in text
+        assert raw_secret not in text
+        assert raw_secret_v2 not in text
+        assert "raw-secret-value" not in text
+
+    def test_trufflehog_redaction_fallback_logs_without_raw_line(self):
+        from services.projects import findings
+
+        raw_line = '{"Raw": "raw-secret-value"'
+
+        with mock.patch.object(findings.log, "warning") as warning:
+            text = findings._trufflehog_safe_finding_text(raw_line)
+
+        assert text == raw_line
+        warning.assert_called_once()
+        assert warning.call_args.args == ("TRUFFLEHOG_FINDING_REDACTION_FALLBACK",)
+        extra = warning.call_args.kwargs["extra"]
+        assert extra == {"line_length": len(raw_line), "looks_json": True}
+        assert "raw-secret-value" not in json.dumps(extra)
 
     def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -19577,6 +22445,179 @@ SQL syntax error near q</response>
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()  # second call
+
+    def test_init_upgrades_old_schedule_owner_kind_constraints_for_project_digests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE schedules (
+                    id TEXT PRIMARY KEY,
+                    session_token TEXT NOT NULL,
+                    owner_kind TEXT NOT NULL DEFAULT 'user',
+                    owner_id TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'command',
+                    command_text TEXT NOT NULL,
+                    cron_expr TEXT NOT NULL,
+                    cadence_preset TEXT,
+                    timezone TEXT NOT NULL DEFAULT 'UTC',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    next_run_at TEXT NOT NULL DEFAULT '',
+                    last_run_at TEXT NOT NULL DEFAULT '',
+                    last_run_id TEXT NOT NULL DEFAULT '',
+                    overlap_policy TEXT NOT NULL DEFAULT 'skip',
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    label TEXT NOT NULL DEFAULT '',
+                    paused_reason TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created TEXT NOT NULL,
+                    updated TEXT NOT NULL,
+                    CHECK (owner_kind IN ('user', 'watcher')),
+                    CHECK (kind IN ('command')),
+                    CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
+                    CHECK (overlap_policy IN ('skip'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE schedule_fires (
+                    id TEXT PRIMARY KEY,
+                    schedule_id TEXT NOT NULL,
+                    owner_kind TEXT NOT NULL,
+                    owner_id TEXT NOT NULL DEFAULT '',
+                    fired_at TEXT NOT NULL,
+                    run_id TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    CHECK (owner_kind IN ('user', 'watcher')),
+                    CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO schedules "
+                "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, "
+                "timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy, consecutive_failures, "
+                "label, paused_reason, last_error, created, updated) "
+                "VALUES ('sch_old', 'tok_old', 'watcher', 'wtr_old', 'command', 'echo ok', '0 * * * *', "
+                "'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, 'Old', '', '', "
+                "'2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO schedule_fires "
+                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+                "VALUES ('sfire_old', 'sch_old', 'watcher', 'wtr_old', '2026-06-20T05:00:00+00:00', "
+                "'run_old', 'fired', '')"
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            schedules_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
+            ).fetchone()[0]
+            fires_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedule_fires'"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO schedules "
+                "(id, session_token, team_id, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, "
+                "timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy, consecutive_failures, "
+                "label, paused_reason, last_error, created, updated) "
+                "VALUES ('sch_digest', 'tok_old', '', 'project_digest', 'prj_old', 'command', 'project digest prj_old', "
+                "'0 * * * *', 'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, "
+                "'Digest', '', '', '2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
+            )
+            preserved = conn.execute(
+                "SELECT team_id, owner_kind FROM schedules WHERE id = 'sch_old'"
+            ).fetchone()
+            preserved_fire = conn.execute(
+                "SELECT team_id, owner_kind FROM schedule_fires WHERE id = 'sfire_old'"
+            ).fetchone()
+            conn.close()
+
+        assert "project_digest" in schedules_sql
+        assert "project_digest" in fires_sql
+        assert preserved == ("", "watcher")
+        assert preserved_fire == ("", "watcher")
+
+    def test_init_upgrades_old_notification_event_trigger_constraints_for_project_digests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE notification_events (
+                    id TEXT PRIMARY KEY,
+                    session_token TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    trigger TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT NOT NULL DEFAULT '',
+                    last_attempt_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    run_id TEXT NOT NULL DEFAULT '',
+                    created TEXT NOT NULL,
+                    dead_at TEXT NOT NULL DEFAULT '',
+                    CHECK (
+                        trigger IN (
+                            'run_complete',
+                            'pty_session_ended',
+                            'watcher_changed',
+                            'watcher_error',
+                            'watcher_recovered',
+                            'scheduled_run_failed',
+                            'test'
+                        )
+                    ),
+                    CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES ('nte_old', 'tok_old', 'ntc_old', 'run_complete', '{}', 'sent', 1, '', "
+                "'2026-06-20T05:01:00+00:00', '', 'run_old', '2026-06-20T05:00:00+00:00', '')"
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            events_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_events'"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES ('nte_digest', 'tok_old', '', 'ntc_old', 'project_digest', '{}', 'pending', 0, '', "
+                "'', '', '', '2026-06-20T06:00:00+00:00', '')"
+            )
+            preserved = conn.execute(
+                "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_old'"
+            ).fetchone()
+            digest_row = conn.execute(
+                "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_digest'"
+            ).fetchone()
+            conn.close()
+
+        assert "project_digest" in events_sql
+        assert preserved == ("", "run_complete", "sent")
+        assert digest_row == ("", "project_digest", "pending")
 
     def test_retention_prunes_old_runs(self):
         with tempfile.TemporaryDirectory() as tmp:

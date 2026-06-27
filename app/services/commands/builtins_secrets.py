@@ -44,6 +44,13 @@ def _provider_secret_names(provider: dict[str, Any]) -> list[str]:
 
 def _provider_display_secret_names(provider: dict[str, Any]) -> str:
     primary = str(provider.get("secret_env") or "").strip().upper()
+    required = [
+        str(name or "").strip().upper()
+        for name in provider.get("required_secret_envs") or []
+        if str(name or "").strip()
+    ]
+    if primary and required:
+        return " + ".join([primary, *required])
     if primary:
         return primary
     return "No secret needed"
@@ -82,6 +89,25 @@ def _provider_intel_subcommands(provider: dict[str, Any]) -> str:
 
 def _provider_status(provider: dict[str, Any], stored_secret_names: set[str]) -> tuple[bool, str]:
     secret_names = _provider_secret_names(provider)
+    primary = str(provider.get("secret_env") or "").strip().upper()
+    required = [
+        str(name or "").strip().upper()
+        for name in provider.get("required_secret_envs") or []
+        if str(name or "").strip()
+    ]
+    if required:
+        aliases = [
+            str(name or "").strip().upper()
+            for name in provider.get("secret_env_aliases") or []
+            if str(name or "").strip()
+        ]
+        primary_candidates = [name for name in [primary, *aliases] if name]
+        primary_ok = not primary_candidates or any(name in stored_secret_names for name in primary_candidates)
+        if primary_ok and all(name in stored_secret_names for name in required):
+            return True, "configured"
+        if provider.get("optional_secret"):
+            return True, "available"
+        return False, "not configured"
     if any(name in stored_secret_names for name in secret_names):
         return True, "configured"
     needs_secret = bool(provider.get("requires_secret") or secret_names)

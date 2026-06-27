@@ -10,7 +10,7 @@ from urllib.parse import parse_qs
 
 from services.notifications.base import Channel, registered_channels
 from services.notifications.channels import register_builtin_channels
-from services.notifications.channels._format import format_summary_fields
+from services.notifications.channels._format import format_plain_text, format_summary_fields, notification_title
 from services.notifications.channels.discord import DiscordChannel
 from services.notifications.channels.pushover import PushoverChannel
 from services.notifications.channels.slack import SlackChannel
@@ -140,6 +140,46 @@ def test_summary_fields_format_structured_count_maps_as_text():
 
     assert ("Output Entity Type Counts", "domain 2, ip 2") in fields
     assert ("Output Signal Counts", "findings 2, summaries 1") in fields
+
+
+def test_project_digest_payload_formats_for_chat_push_and_email_surfaces():
+    payload = {
+        "trigger": "project_digest",
+        "app_name": "Test Shell",
+        "project_name": "External Edge",
+        "occurred_at": "2026-05-20T11:00:00+00:00",
+        "top_changes": [{
+            "severity": "critical",
+            "fire_kind": "changed",
+            "watcher_label": "Internet Edge",
+            "label": "New open port 443/tcp https",
+        }],
+        "summary_fields": {
+            "project": "External Edge",
+            "window": "2026-05-20T10:00:00+00:00 to 2026-05-20T11:00:00+00:00",
+            "changed": 1,
+            "recovered": 0,
+            "failed": 0,
+            "highest_severity": "critical",
+            "quiet": "no",
+            "monitoring_link": "/projects/prj_digest/monitoring",
+        },
+    }
+
+    fields = format_summary_fields(payload)
+    plain_text = format_plain_text(payload)
+
+    assert notification_title(payload) == "Test Shell project digest: External Edge"
+    assert fields[:4] == [
+        ("Project", "External Edge"),
+        ("Window", "2026-05-20T10:00:00+00:00 to 2026-05-20T11:00:00+00:00"),
+        ("Changed", "1"),
+        ("Recovered", "0"),
+    ]
+    assert ("Monitoring", "/projects/prj_digest/monitoring") in fields
+    assert ("Top Change 1", "critical: New open port 443/tcp https (Internet Edge)") in fields
+    assert "Test Shell project digest: External Edge" in plain_text
+    assert "Top Change 1: critical: New open port 443/tcp https (Internet Edge)" in plain_text
 
 
 def test_discord_channel_formats_embed(monkeypatch):

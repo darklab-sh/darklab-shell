@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 
 
@@ -144,6 +145,80 @@ def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, s
     return None, "Synthetic uniq supports only -c."
 
 
+def _json_selector_path(value: str) -> list[str]:
+    return [part for part in str(value or "").split(".") if part]
+
+
+def _parse_json_selector_expression(expression: str) -> dict | None:
+    text = str(expression or "").strip()
+    if not text or len(text) > 160:
+        return None
+    if re.search(r"[`;{}$\\]", text):
+        return None
+
+    has_match = re.fullmatch(r'select\(has\("([A-Za-z_][A-Za-z0-9_-]*)"\)\)', text)
+    if has_match:
+        return {"op": "filter_has", "path": [has_match.group(1)]}
+
+    eq_match = re.fullmatch(r'select\(\.([A-Za-z_][A-Za-z0-9_.-]*)\s*==\s*"([^"]{0,200})"\)', text)
+    if eq_match:
+        return {"op": "filter_eq", "path": _json_selector_path(eq_match.group(1)), "value": eq_match.group(2)}
+
+    contains_match = re.fullmatch(
+        r'select\(\.([A-Za-z_][A-Za-z0-9_.-]*)\s+contains\s+"([^"]{0,200})"\)',
+        text,
+    )
+    if contains_match:
+        return {
+            "op": "filter_contains",
+            "path": _json_selector_path(contains_match.group(1)),
+            "value": contains_match.group(2),
+        }
+
+    if text == ".":
+        return {"op": "identity"}
+    if text == ".[]":
+        return {"op": "iterate", "path": []}
+
+    field_match = re.fullmatch(r"\.([A-Za-z_][A-Za-z0-9_.-]*)(\[\])?", text)
+    if field_match:
+        path = _json_selector_path(field_match.group(1))
+        if not path:
+            return None
+        return {"op": "iterate" if field_match.group(2) else "field", "path": path}
+
+    return None
+
+
+def _parse_synthetic_jq_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    stage_tokens = [_unquote_token(token) for token in stage_tokens]
+    if stage_tokens[0].lower() != "jq":
+        return None, None
+    raw = False
+    compact = False
+    expression = None
+    index = 1
+    while index < len(stage_tokens):
+        token = stage_tokens[index]
+        if token in {"-r", "--raw-output"}:
+            raw = True
+            index += 1
+            continue
+        if token in {"-c", "--compact-output"}:
+            compact = True
+            index += 1
+            continue
+        if expression is not None:
+            return None, "Synthetic jq supports a single selector expression."
+        expression = token
+        index += 1
+
+    selector = _parse_json_selector_expression(expression or "")
+    if not selector:
+        return None, "Synthetic jq supports only field selectors, array iteration, and simple select filters."
+    return {"kind": "jq", "selector": selector, "raw": raw, "compact": compact}, None
+
+
 def _parse_synthetic_postfilter_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
     for parser in (
         _parse_synthetic_grep_stage,
@@ -151,6 +226,7 @@ def _parse_synthetic_postfilter_stage(stage_tokens: list[str]) -> tuple[dict | N
         _parse_synthetic_wc_stage,
         _parse_synthetic_sort_stage,
         _parse_synthetic_uniq_stage,
+        _parse_synthetic_jq_stage,
     ):
         spec, error = parser(stage_tokens)
         if spec or error:

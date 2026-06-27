@@ -19,8 +19,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
-  - [Attack-surface delta digest notifications](#attack-surface-delta-digest-notifications)
-  - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
 - [Architecture](#architecture)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
@@ -33,17 +31,17 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 No open TODOs are currently tracked.
 
+---
+
 ## Known Issues
 
-No known issues are currently tracked.
+No open Known Issues are currently tracked.
 
 ---
 
 ## Technical Debt
 
-- **Project Monitoring summary route has no consumer yet.**
-  - `GET /projects/<id>/monitoring/summary` and `get_project_monitoring_summary` ship a digest-ready payload, but no browser, CLI, or notification worker consumes it yet.
-  - Keep it documented as forward API surface if the attack-surface digest work is still planned; otherwise remove or hide it until a digest producer lands.
+No open Technical Debt items are currently tracked.
 
 ---
 
@@ -78,8 +76,6 @@ No research items are currently tracked.
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
-
-- **External tool integration candidates:** add the strongest reviewed tool gaps when they fit the sandboxed registry, findings, Atlas, and provenance model. High-value candidates are ProjectDiscovery's `tlsx` for TLS/certificate metadata and `cdncheck` for CDN/WAF classification, plus `trufflehog` or `gitleaks` for exposed-secret findings from repos and files. Medium candidates are resolver-backed brute-force DNS tools such as `puredns` or `shuffledns`, Shodan InternetDB as a free/no-key IP context provider, optional FOFA/ZoomEye providers for users with keys, and a `nuclei` template management or pinning surface so scan provenance can explain which template set produced a result. A lower-risk app-native `jq`-style JSON/JSONL selector could also extend safe post-filtering without exposing real shell pipes.
 
 ### Workflows v2 — playbooks with parameters
 - Evolve workflows from saved command lists into reusable runbooks.
@@ -145,16 +141,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Tune artifact embedding/listing once provenance and report-created run links are available; screenshot galleries and richer binary handling can stay later work.
   - Run a browser Print/PDF fidelity pass across Chrome, Safari, and Firefox for page breaks, headers/footers, and fonts. If the browser print path cannot produce a consistent customer-grade PDF, revisit a server-side PDF renderer with its Docker/dependency cost documented.
   - Consider saved report versions, richer in-UI template customization, arbitrary custom sections, approvals, and shareable report permalinks after the one-current-draft workflow has real usage.
-
-### Attack-surface delta digest notifications
-- Send scheduled project summaries such as "since last week: 3 new subdomains, 2 new open ports, 1 certificate expiring soon" through the existing notification channels.
-- Build the digest from watcher diffs, run-comparison classifiers, Atlas entity counts, and provider-enriched target context instead of inventing a separate reporting path.
-- Let operators tune cadence and scope per project so noisy scan projects can stay quiet while recurring monitoring projects stay visible.
-
-### Project-scoped target intelligence overview
-- Add a project overview surface that rolls up hosts, ports, services, cert expirations, top findings by severity, and provider-enriched context for each target.
-- Treat the overview as an engagement console: enough context to understand the current attack surface before drilling into individual runs, targets, Atlas rows, or findings.
-- Reuse existing project summaries, Atlas materialization, target relationships, findings, and intel provider snapshots so the overview stays consistent with the rest of the workspace.
 
 ### Native ticketing integrations
 - From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.

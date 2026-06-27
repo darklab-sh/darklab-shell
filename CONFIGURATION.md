@@ -99,6 +99,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages. Values longer than 20 visible characters are shortened at startup |
+| `app_public_base_url` | _(empty)_ | Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their own session |
 | `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
@@ -161,6 +162,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `team_write_rate_limit_per_minute` | `30` | Max team-management write requests per minute for create, join, invite, membership, archive/reactivate, leave, and recovery-code changes |
 | `intel_cache_ttl_shodan_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Shodan IP responses |
 | `intel_cache_ttl_shodan_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Shodan search responses |
+| `intel_cache_ttl_shodan_internetdb_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Shodan InternetDB IP responses |
 | `intel_cache_ttl_censys_host_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Censys host responses |
 | `intel_cache_ttl_virustotal_domain_seconds` | `21600` | Server-side only. Default cache lifetime for normalized VirusTotal domain responses |
 | `intel_cache_ttl_virustotal_file_seconds` | `86400` | Server-side only. Default cache lifetime for normalized VirusTotal file or hash responses |
@@ -169,6 +171,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_cache_ttl_abuseipdb_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized AbuseIPDB IP responses |
 | `intel_cache_ttl_ipinfo_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized IPinfo IP responses |
 | `intel_cache_ttl_teamcymru_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Team Cymru IP ownership responses |
+| `intel_cache_ttl_tls_certificate_domain_seconds` | `21600` | Server-side only. Default cache lifetime for live TLS certificate domain responses |
 | `intel_cache_ttl_crtsh_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized crt.sh domain responses |
 | `intel_cache_ttl_hibp_password_seconds` | `604800` | Server-side only. Default cache lifetime for HIBP Pwned Passwords SHA1 range responses |
 | `intel_cache_ttl_nvd_cve_seconds` | `86400` | Server-side only. Default cache lifetime for normalized NVD CVE responses |
@@ -182,8 +185,12 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_cache_ttl_threatfox_hash_seconds` | `86400` | Server-side only. Default cache lifetime for normalized ThreatFox hash responses |
 | `intel_cache_ttl_securitytrails_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized SecurityTrails domain responses |
 | `intel_cache_ttl_routeviews_prefix_seconds` | `21600` | Server-side only. Default cache lifetime for normalized RouteViews prefix responses |
+| `intel_cache_ttl_fofa_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized FOFA search responses |
+| `intel_cache_ttl_zoomeye_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized ZoomEye search responses |
 | `intel_rate_limit_shodan_bucket` | `5` | Server-side only. Token-bucket size for Shodan lookups per session |
 | `intel_rate_limit_shodan_refill_seconds` | `1` | Server-side only. Seconds between Shodan token refills |
+| `intel_rate_limit_shodan_internetdb_bucket` | `30` | Server-side only. Token-bucket size for Shodan InternetDB lookups per session |
+| `intel_rate_limit_shodan_internetdb_refill_seconds` | `2` | Server-side only. Seconds between Shodan InternetDB token refills |
 | `intel_rate_limit_censys_bucket` | `10` | Server-side only. Token-bucket size for Censys lookups per session |
 | `intel_rate_limit_censys_refill_seconds` | `6` | Server-side only. Seconds between Censys token refills |
 | `intel_rate_limit_virustotal_public_bucket` | `4` | Server-side only. Token-bucket size for VirusTotal Public API lookups per session |
@@ -200,6 +207,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_rate_limit_ipinfo_refill_seconds` | `2` | Server-side only. Seconds between IPinfo token refills |
 | `intel_rate_limit_teamcymru_bucket` | `30` | Server-side only. Token-bucket size for Team Cymru lookups per session |
 | `intel_rate_limit_teamcymru_refill_seconds` | `2` | Server-side only. Seconds between Team Cymru token refills |
+| `intel_rate_limit_tls_certificate_bucket` | `20` | Server-side only. Token-bucket size for live TLS certificate lookups per session |
+| `intel_rate_limit_tls_certificate_refill_seconds` | `3` | Server-side only. Seconds between live TLS certificate token refills |
 | `intel_rate_limit_crtsh_bucket` | `10` | Server-side only. Token-bucket size for crt.sh lookups per session |
 | `intel_rate_limit_crtsh_refill_seconds` | `6` | Server-side only. Seconds between crt.sh token refills |
 | `intel_rate_limit_hibp_bucket` | `10` | Server-side only. Token-bucket size for HIBP Pwned Passwords lookups per session |
@@ -218,6 +227,10 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_rate_limit_securitytrails_refill_seconds` | `6` | Server-side only. Seconds between SecurityTrails token refills |
 | `intel_rate_limit_routeviews_bucket` | `20` | Server-side only. Token-bucket size for RouteViews lookups per session |
 | `intel_rate_limit_routeviews_refill_seconds` | `3` | Server-side only. Seconds between RouteViews token refills |
+| `intel_rate_limit_fofa_bucket` | `10` | Server-side only. Token-bucket size for FOFA lookups per session |
+| `intel_rate_limit_fofa_refill_seconds` | `6` | Server-side only. Seconds between FOFA token refills |
+| `intel_rate_limit_zoomeye_bucket` | `10` | Server-side only. Token-bucket size for ZoomEye lookups per session |
+| `intel_rate_limit_zoomeye_refill_seconds` | `6` | Server-side only. Seconds between ZoomEye token refills |
 | `intel_negative_cache_virustotal_quota_seconds` | `21600` | Server-side only. Fallback cache window for VirusTotal quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_censys_quota_seconds` | `21600` | Server-side only. Fallback cache window for Censys quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_otx_quota_seconds` | `21600` | Server-side only. Fallback cache window for AlienVault OTX quota-exhausted responses when no reset time is available |
@@ -228,6 +241,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_negative_cache_urlscan_quota_seconds` | `21600` | Server-side only. Fallback cache window for urlscan.io quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_threatfox_quota_seconds` | `21600` | Server-side only. Fallback cache window for ThreatFox quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_securitytrails_quota_seconds` | `21600` | Server-side only. Fallback cache window for SecurityTrails quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_fofa_quota_seconds` | `21600` | Server-side only. Fallback cache window for FOFA quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_zoomeye_quota_seconds` | `21600` | Server-side only. Fallback cache window for ZoomEye quota-exhausted responses when no reset time is available |
 | `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
 | `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
 | `interactive_pty_resize_rate_limit_per_minute` | `600` | Max interactive PTY resize requests per minute per IP. This is separate from `/runs` because normal browser layout changes can produce short resize bursts |
@@ -303,6 +318,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `scheduler.default_timezone` | `UTC` | Default IANA timezone used when a schedule does not set its own timezone |
 | `watchers` | see nested defaults | Server-side only. Change-detection monitor limits. Watchers use scheduler-owned cadence rows and notification triggers |
 | `watchers.max_per_session` | `32` | Maximum change-detection watchers a durable session token can own |
+| `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
+| `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
+| `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
@@ -422,7 +440,7 @@ commands:
           description: Service/version detection
 ```
 
-`help.flags` marks invocations whose output should stay visible but should not create findings or Atlas entities. Help invocations also bypass required-secret preflight for that command root, so users can run safe `--help` commands before configuring provider keys. An example can opt into the default container smoke corpus with `smoke.profile: unauthenticated` when it is safe to run without provider credentials or workspace setup.
+`help.flags` marks invocations whose output should stay visible but should not create findings or Atlas entities. Help invocations also bypass required-secret preflight for that command root, so users can run safe `--help` commands before configuring provider keys. An example can opt into the default container smoke corpus with `smoke.profile: unauthenticated` when it is safe to run without provider credentials or workspace setup. Use `smoke.profile: manual` for useful examples that should stay visible to users but are too network-dependent, noisy, or data-sensitive for the default smoke corpus.
 
 `requires_secrets` names encrypted secrets from the active personal or team scope that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 

@@ -14,7 +14,7 @@ from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_ru
 log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
@@ -152,6 +152,7 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab_shell",
+        "app_public_base_url":        "",
         "prompt_username":            split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[0],
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
@@ -213,6 +214,7 @@ def load_config(conf_dir=None):
         "team_write_rate_limit_per_minute": 30,
         "intel_cache_ttl_shodan_ip_seconds": 86400,
         "intel_cache_ttl_shodan_search_seconds": 21600,
+        "intel_cache_ttl_shodan_internetdb_ip_seconds": 86400,
         "intel_cache_ttl_censys_host_seconds": 21600,
         "intel_cache_ttl_virustotal_domain_seconds": 21600,
         "intel_cache_ttl_virustotal_file_seconds": 86400,
@@ -221,6 +223,7 @@ def load_config(conf_dir=None):
         "intel_cache_ttl_abuseipdb_ip_seconds": 21600,
         "intel_cache_ttl_ipinfo_ip_seconds": 21600,
         "intel_cache_ttl_teamcymru_ip_seconds": 86400,
+        "intel_cache_ttl_tls_certificate_domain_seconds": 21600,
         "intel_cache_ttl_crtsh_domain_seconds": 86400,
         "intel_cache_ttl_hibp_password_seconds": 604800,
         "intel_cache_ttl_nvd_cve_seconds": 86400,
@@ -234,8 +237,12 @@ def load_config(conf_dir=None):
         "intel_cache_ttl_threatfox_hash_seconds": 86400,
         "intel_cache_ttl_securitytrails_domain_seconds": 86400,
         "intel_cache_ttl_routeviews_prefix_seconds": 21600,
+        "intel_cache_ttl_fofa_search_seconds": 21600,
+        "intel_cache_ttl_zoomeye_search_seconds": 21600,
         "intel_rate_limit_shodan_bucket": 5,
         "intel_rate_limit_shodan_refill_seconds": 1,
+        "intel_rate_limit_shodan_internetdb_bucket": 30,
+        "intel_rate_limit_shodan_internetdb_refill_seconds": 2,
         "intel_rate_limit_censys_bucket": 10,
         "intel_rate_limit_censys_refill_seconds": 6,
         "intel_rate_limit_virustotal_public_bucket": 4,
@@ -252,6 +259,8 @@ def load_config(conf_dir=None):
         "intel_rate_limit_ipinfo_refill_seconds": 2,
         "intel_rate_limit_teamcymru_bucket": 30,
         "intel_rate_limit_teamcymru_refill_seconds": 2,
+        "intel_rate_limit_tls_certificate_bucket": 20,
+        "intel_rate_limit_tls_certificate_refill_seconds": 3,
         "intel_rate_limit_crtsh_bucket": 10,
         "intel_rate_limit_crtsh_refill_seconds": 6,
         "intel_rate_limit_hibp_bucket": 10,
@@ -270,6 +279,10 @@ def load_config(conf_dir=None):
         "intel_rate_limit_securitytrails_refill_seconds": 6,
         "intel_rate_limit_routeviews_bucket": 20,
         "intel_rate_limit_routeviews_refill_seconds": 3,
+        "intel_rate_limit_fofa_bucket": 10,
+        "intel_rate_limit_fofa_refill_seconds": 6,
+        "intel_rate_limit_zoomeye_bucket": 10,
+        "intel_rate_limit_zoomeye_refill_seconds": 6,
         "intel_negative_cache_virustotal_quota_seconds": 21600,
         "intel_negative_cache_censys_quota_seconds": 21600,
         "intel_negative_cache_otx_quota_seconds": 21600,
@@ -280,6 +293,8 @@ def load_config(conf_dir=None):
         "intel_negative_cache_urlscan_quota_seconds": 21600,
         "intel_negative_cache_threatfox_quota_seconds": 21600,
         "intel_negative_cache_securitytrails_quota_seconds": 21600,
+        "intel_negative_cache_fofa_quota_seconds": 21600,
+        "intel_negative_cache_zoomeye_quota_seconds": 21600,
         "max_output_lines":           5000,
         "high_volume_output_line_threshold": 50000,
         "high_volume_output_status_interval_lines": 50000,
@@ -364,6 +379,10 @@ def load_config(conf_dir=None):
         },
         "watchers": {
             "max_per_session": 32,
+        },
+        "project_digests": {
+            "default_cadence_preset": "daily",
+            "first_send_lookback_hours": 24,
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,

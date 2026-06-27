@@ -14,10 +14,15 @@ ARG HTTPX_VERSION=v1.9.0
 ARG DNSX_VERSION=v1.2.3
 ARG NAABU_VERSION=v2.6.1
 ARG KATANA_VERSION=v1.6.1
+ARG TLSX_VERSION=v1.2.2
+ARG CDNCHECK_VERSION=v1.2.40
 ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
 ARG FFUF_VERSION=v2.1.0
+ARG TRUFFLEHOG_VERSION=v3.95.5
+ARG MASSDNS_VERSION=v1.1.0
+ARG PUREDNS_VERSION=v2.1.1
 ARG TESTSSL_VERSION=v3.2.3
 ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
@@ -102,12 +107,28 @@ RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}
 RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}
 RUN go install -v github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}
+RUN go install -v github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}
+RUN go install -v github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}
 RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}
 
 # Install additional reconnaissance binaries via Go.
 RUN go install github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}
 RUN go install github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
 RUN go install github.com/ffuf/ffuf/v2@${FFUF_VERSION}
+# hadolint ignore=DL3062
+RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog \
+    && go -C /tmp/trufflehog install \
+    && rm -rf /tmp/trufflehog
+
+# Install massdns from a pinned upstream release for resolver-backed DNS tooling.
+WORKDIR /tmp
+RUN git clone --depth 1 --branch "${MASSDNS_VERSION}" https://github.com/blechschmidt/massdns.git /tmp/massdns && \
+    make -C /tmp/massdns -j"$(nproc)" && \
+    cp /tmp/massdns/bin/massdns /usr/local/bin/massdns && \
+    rm -rf /tmp/massdns
+
+# Install puredns after massdns so the runtime dependency is available.
+RUN go install -v github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}
 
 # Install the SecLists wordlist collection.
 RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/wordlists/seclists && \

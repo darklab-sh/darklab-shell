@@ -35,6 +35,8 @@ from services.projects.contracts import (
     ProjectWorkspaceNotFound,
     ProjectWorkspaceQuotaExceeded,
 )
+from services.notifications.channels_store import list_notification_channels
+from services.notifications.models import is_durable_session_token
 from services.projects.active import clear_active_project, get_active_project, set_active_project
 from services.projects.auto_promote import (
     apply_stored_rule as apply_auto_promote_rule,
@@ -46,6 +48,7 @@ from services.projects.auto_promote import (
     update_rule as update_auto_promote_rule,
 )
 from services.projects.crud import create_project, delete_project, update_project
+from services.projects import digests as project_digests
 from services.projects.findings import (
     bulk_update_project_finding_review_states,
     list_project_findings,
@@ -81,6 +84,7 @@ from services.projects.monitoring import (
     get_project_monitoring_summary,
     update_project_monitoring_fire_ack,
 )
+from services.projects.overview import get_project_intel_overview
 from services.projects.package_archive import (
     build_evidence_package_archive,
     create_evidence_package,
@@ -130,7 +134,7 @@ from services.reports.storage import (
     save_report_draft,
 )
 from services.reports.templates import list_report_templates
-from services.teams.capabilities import Capability, require_capability
+from services.teams.capabilities import Capability, require_capability, role_can
 from services.teams.contracts import TeamPermissionDenied
 from services.workspace.files import (
     InvalidWorkspacePath,
@@ -180,6 +184,22 @@ def _parse_int(value, default, *, minimum=0, maximum=100):
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _parse_optional_iso_datetime(value, *, name: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    if "T" not in normalized and " " not in normalized:
+        raise BadRequest(f"{name} must be an ISO 8601 datetime such as 2026-05-19T00:00:00Z.")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise BadRequest(f"{name} must be an ISO 8601 datetime such as 2026-05-19T00:00:00Z.") from exc
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat()
 
 
 def _project_auto_promote_match_limit(value, key, default, *, hard_max):
@@ -291,6 +311,44 @@ def _project_owner(required_capability=None):
         except TeamPermissionDenied as exc:
             return session_id, "", _team_permission_error_response(exc)
     return session_id, scope.team_id, None
+
+
+def _project_owner_any_capability(capabilities):
+    session_id = get_session_id()
+    if not requested_team_id(request):
+        return session_id, "", None
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        payload, status = scope_error_payload(exc)
+        return session_id, "", (jsonify(payload), status)
+    role = str((scope.member or {}).get("role") or "")
+    if any(role_can(role, capability) for capability in capabilities):
+        return session_id, scope.team_id, None
+    try:
+        require_capability(role, capabilities[0])
+    except TeamPermissionDenied as exc:
+        return session_id, "", _team_permission_error_response(exc)
+    return session_id, scope.team_id, None
+
+
+def _can_manage_project_digest_settings(session_id, team_id):
+    if not is_durable_session_token(session_id):
+        return False
+    if not team_id:
+        return True
+    try:
+        scope = current_request_scope(session_id, request)
+    except RequestScopeError:
+        return False
+    role = str((scope.member or {}).get("role") or "")
+    return role_can(role, Capability.MANAGE_AUTOMATION) or role_can(role, Capability.MANAGE_NOTIFICATIONS)
+
+
+def _project_notification_channels(session_id, team_id):
+    if not is_durable_session_token(session_id):
+        return []
+    return list_notification_channels(session_id, team_id=team_id)
 
 
 def _project_ticket_error_response(exc):
@@ -636,6 +694,58 @@ def projects_summary(project_id):
     return _project_json_or_404(summary)
 
 
+@projects_bp.route("/projects/<project_id>/overview")
+def projects_overview(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    started = time.perf_counter()
+    window_start = _parse_optional_iso_datetime(request.args.get("window_start"), name="window_start")
+    window_end = _parse_optional_iso_datetime(request.args.get("window_end"), name="window_end")
+    windowed = bool(window_start or window_end)
+    try:
+        overview = get_project_intel_overview(
+            session_id,
+            project_id,
+            team_id=team_id,
+            window_start=window_start,
+            window_end=window_end,
+        )
+    except Exception:
+        log.error("PROJECT_OVERVIEW_FAILED", exc_info=True, extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "windowed": windowed,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+        })
+        raise
+    if overview is None:
+        log.debug("PROJECT_OVERVIEW_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "route": "project_overview",
+            "windowed": windowed,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+        })
+        return _project_not_found()
+    rollups = overview.get("rollups") or {}
+    log.info("PROJECT_OVERVIEW_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "target_count": int(rollups.get("target_count") or 0),
+        "recent_change_state": str(rollups.get("recent_change_state") or ""),
+        "windowed": windowed,
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+    })
+    return jsonify(overview)
+
+
 @projects_bp.route("/projects/<project_id>/activity")
 def projects_activity(project_id):
     session_id, _team_id, error_response = _project_owner()
@@ -688,6 +798,10 @@ def projects_monitoring(project_id):
             "route": "project_monitoring",
         })
         return _project_not_found()
+    digest_settings = project_digests.get_digest_settings(session_id, project_id, team_id=team_id)
+    payload["digest_settings"] = digest_settings or {}
+    payload["notification_channels"] = _project_notification_channels(session_id, team_id)
+    payload["can_manage_digest_settings"] = _can_manage_project_digest_settings(session_id, team_id)
     counts = payload.get("counts") or {}
     summary = payload.get("summary") or {}
     log.info("PROJECT_MONITORING_VIEWED", extra={
@@ -705,17 +819,75 @@ def projects_monitoring(project_id):
     return _project_json_or_404(payload)
 
 
+@projects_bp.route("/projects/<project_id>/digest-settings", methods=["GET"])
+def projects_digest_settings_get(project_id):
+    session_id, team_id, error_response = _project_owner()
+    if error_response:
+        return error_response
+    settings = project_digests.get_digest_settings(session_id, project_id, team_id=team_id)
+    if settings is None:
+        return _project_not_found()
+    return jsonify({
+        "digest_settings": settings,
+        "notification_channels": _project_notification_channels(session_id, team_id),
+        "can_manage_digest_settings": _can_manage_project_digest_settings(session_id, team_id),
+    })
+
+
+@projects_bp.route("/projects/<project_id>/digest-settings", methods=["PATCH"])
+@limiter.limit(_project_write_limit)
+def projects_digest_settings_update(project_id):
+    capabilities = (Capability.MANAGE_AUTOMATION, Capability.MANAGE_NOTIFICATIONS)
+    session_id, team_id, error_response = _project_owner_any_capability(capabilities)
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise BadRequest("digest settings payload must be a JSON object")
+    try:
+        settings = project_digests.save_digest_settings(session_id, project_id, data, team_id=team_id)
+    except ProjectWorkspaceError as exc:
+        log.warning("PROJECT_DIGEST_SETTINGS_REJECTED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "status": _project_error_status(exc),
+            "reason": str(exc),
+        })
+        return _project_json_error(str(exc), _project_error_status(exc))
+    log.info("PROJECT_DIGEST_SETTINGS_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "enabled": bool(settings.get("enabled")),
+        "cadence_preset": str(settings.get("cadence_preset") or ""),
+        "channel_count": len(settings.get("channel_ids") or []),
+        "quiet_no_change": bool(settings.get("quiet_no_change")),
+    })
+    return jsonify({
+        "digest_settings": settings,
+        "notification_channels": _project_notification_channels(session_id, team_id),
+        "can_manage_digest_settings": _can_manage_project_digest_settings(session_id, team_id),
+    })
+
+
 @projects_bp.route("/projects/<project_id>/monitoring/summary")
 def projects_monitoring_summary(project_id):
     session_id, team_id, error_response = _project_owner()
     if error_response:
         return error_response
     fire_limit = _parse_int(request.args.get("fire_limit"), 8, minimum=1, maximum=25)
+    window_start = _parse_optional_iso_datetime(request.args.get("window_start"), name="window_start")
+    window_end = _parse_optional_iso_datetime(request.args.get("window_end"), name="window_end")
     payload = get_project_monitoring_summary(
         session_id,
         project_id,
         team_id=team_id,
         fire_limit=fire_limit,
+        window_start=window_start,
+        window_end=window_end,
     )
     if payload is None:
         log.debug("PROJECT_MONITORING_MISS", extra={
@@ -727,6 +899,8 @@ def projects_monitoring_summary(project_id):
         })
         return _project_not_found()
     summary = payload.get("summary") or {}
+    window_summary = payload.get("window_summary") or {}
+    windowed = bool(window_start or window_end)
     log.info("PROJECT_MONITORING_SUMMARY_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -737,6 +911,13 @@ def projects_monitoring_summary(project_id):
         "failed_count": int(summary.get("failed_monitor_count") or 0),
         "highest_severity": str(summary.get("highest_severity") or ""),
         "top_change_count": len(summary.get("top_changes") or []),
+        "windowed": windowed,
+        "window_changed_count": int(window_summary.get("changed_monitor_count") or 0) if windowed else 0,
+        "window_recovered_count": int(window_summary.get("recovered_monitor_count") or 0) if windowed else 0,
+        "window_failed_count": int(window_summary.get("failed_monitor_count") or 0) if windowed else 0,
+        "window_highest_severity": str(window_summary.get("highest_severity") or "") if windowed else "",
+        "window_top_change_count": len(window_summary.get("top_changes") or []) if windowed else 0,
+        "window_fire_count": int((payload.get("digest_window") or {}).get("fire_count") or 0) if windowed else 0,
     })
     return _project_json_or_404(payload)
 

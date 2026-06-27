@@ -5,6 +5,8 @@ Project finding query and row helpers.
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import re
 import shlex
 from typing import Any
@@ -175,7 +177,10 @@ def _project_finding_page_payload(
             "collapsed_group_counts": collapsed_group_counts if isinstance(collapsed_group_counts, dict) else {},
             "group_order": group_order if isinstance(group_order, list) else [],
         },
-    )
+)
+
+
+log = logging.getLogger("shell")
 
 
 def _project_finding_source_exists_sql():
@@ -770,6 +775,14 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
 
 def _finding_severity_from_text(text):
     raw_text = str(text or "")
+    trufflehog_match = re.search(r"^TruffleHog\s+(verified|unknown|unverified)\s+", raw_text, re.I)
+    if trufflehog_match:
+        state = trufflehog_match.group(1).lower()
+        if state == "verified":
+            return "high"
+        if state == "unknown":
+            return "medium"
+        return "low"
     bracket_match = re.search(r"\[(info|low|medium|high|critical)\]", raw_text, re.I)
     if bracket_match:
         return bracket_match.group(1).lower()
@@ -1018,6 +1031,63 @@ def _normalize_finding_signal_key(text):
     return re.sub(r"\s+", " ", strip_ansi_codes(str(text or ""))).strip().lower()[:512]
 
 
+def _json_object(value: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(str(value or ""))
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _nested_json_object(value: object, *keys: str) -> dict[str, Any]:
+    current = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def _trufflehog_safe_finding_text(raw_line: str) -> str:
+    data = _json_object(strip_ansi_codes(raw_line).strip())
+    if not data:
+        cleaned = strip_ansi_codes(raw_line).strip()
+        log.warning("TRUFFLEHOG_FINDING_REDACTION_FALLBACK", extra={
+            "line_length": len(str(raw_line or "")),
+            "looks_json": cleaned.lstrip().startswith("{"),
+        })
+        return strip_ansi_codes(raw_line).strip()
+    detector = str(data.get("DetectorName") or data.get("DetectorType") or "secret").strip() or "secret"
+    verified = data.get("Verified")
+    verification = "verified" if verified is True else "unknown" if verified is None else "unverified"
+    redacted = str(data.get("Redacted") or "").strip()
+    git_data = _nested_json_object(data.get("SourceMetadata"), "Data", "Git")
+    repo = str(git_data.get("repository") or "").strip()
+    file_path = str(git_data.get("file") or "").strip()
+    line = str(git_data.get("line") or "").strip()
+    location_parts = []
+    if repo:
+        location_parts.append(repo)
+    if file_path:
+        location_parts.append(file_path)
+    if line:
+        location_parts.append(f"line {line}")
+    location = " at " + ":".join(location_parts) if location_parts else ""
+    raw_values = {
+        str(data.get(key) or "").strip()
+        for key in ("Raw", "RawV2")
+        if str(data.get(key) or "").strip()
+    }
+    secret_hint = " redacted=[redacted]" if redacted and redacted not in raw_values else ""
+    return f"TruffleHog {verification} {detector} secret{location}{secret_hint}".strip()
+
+
+def _finding_text_for_persistence(tool_root: str, raw_line: str) -> str:
+    if tool_root == "trufflehog":
+        return _trufflehog_safe_finding_text(raw_line)
+    return strip_ansi_codes(raw_line).strip()
+
+
 def _nmap_service_subject_from_entry(entry: dict[str, Any], tool_root: str) -> str:
     if tool_root != "nmap":
         return ""
@@ -1112,7 +1182,7 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
         kind = str(entry.get("kind") or "")
         if "findings" not in signal_values and kind != "error":
             continue
-        raw_line = strip_ansi_codes(str(entry.get("text") or "")).strip()
+        raw_line = _finding_text_for_persistence(tool_root, str(entry.get("text") or ""))
         if not raw_line:
             continue
         line_index = entry.get("line_index")

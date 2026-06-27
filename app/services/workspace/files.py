@@ -249,10 +249,12 @@ def touch_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) 
 
 
 def _validate_relative_path(relative_path: str) -> PurePosixPath:
-    raw = str(relative_path or "").strip()
+    raw = str(relative_path or "")
     if not raw:
         raise InvalidWorkspacePath("file name is required")
-    if "\x00" in raw or "\\" in raw:
+    if raw != raw.strip():
+        raise InvalidWorkspacePath("file name cannot start or end with whitespace")
+    if any(ord(char) < 32 for char in raw) or "\\" in raw:
         raise InvalidWorkspacePath("file name contains unsupported characters")
     path = PurePosixPath(raw)
     if path.is_absolute():
@@ -1238,13 +1240,30 @@ def _move_workspace_path_direct(source: Path, destination: Path) -> None:
         sudo_bin = _sudo_bin()
         if not sudo_bin or not _scanner_user_exists():
             raise
-        subprocess.run(
-            [sudo_bin, "-u", "scanner", "-g", "appuser", "mv", "--", str(source), str(destination)],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
+        _remove_partial_move_destination(source, destination)
+        try:
+            subprocess.run(
+                [sudo_bin, "-u", "scanner", "-g", "appuser", "mv", "--", str(source), str(destination)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            _remove_partial_move_destination(source, destination)
+            raise WorkspacePermissionDenied("workspace path could not be moved") from exc
+
+
+def _remove_partial_move_destination(source: Path, destination: Path) -> None:
+    if not source.exists() or not destination.exists():
+        return
+    try:
+        if destination.is_dir() and not destination.is_symlink():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    except OSError as exc:
+        raise WorkspacePermissionDenied("workspace path could not be moved") from exc
 
 
 def move_owner_workspace_path(
@@ -1263,7 +1282,7 @@ def move_owner_workspace_path(
     root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
     source_path = resolve_owner_workspace_path(owner, source_relative_path, cfg)
     source_normalized = _validate_relative_path(source_relative_path).as_posix()
-    raw_destination = str(destination_relative_path or "").strip()
+    raw_destination = str(destination_relative_path or "")
     kind, file_count = _workspace_path_kind_and_count(source_path)
     _reject_symlinks_under(source_path)
 

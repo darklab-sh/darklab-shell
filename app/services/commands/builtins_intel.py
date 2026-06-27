@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import Any
 
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
+from services.atlas.intel_bridge import persist_lookup_for_existing_entity
+from core.helpers import get_log_session_id
 from services.intel.canonical import CanonicalizationError
 from services.intel.lookup import IntelLookupResult, ProviderLookup, lookup_entity
 from services.intel.registry import provider_label
+
+
+log = logging.getLogger("shell")
 
 
 def run_builtin_intel(command: str, session_id: str, *, team_id: str = "") -> tuple[list[dict[str, object]], int]:
@@ -38,9 +44,23 @@ def run_builtin_intel(command: str, session_id: str, *, team_id: str = "") -> tu
         message = "Hash must be hex MD5/SHA1/SHA256" if entity_type == "hash" else str(exc)
         return [output_line(f"intel: {message}")], 1
 
+    _persist_lookup_snapshot(result, session_id, team_id=team_id)
     lines = _format_lookup_result(result)
     exit_code = 0 if result.success_count or result.configured_count else 1
     return lines, exit_code
+
+
+def _persist_lookup_snapshot(result: IntelLookupResult, session_id: str, *, team_id: str = "") -> None:
+    if result.success_count <= 0:
+        return
+    try:
+        persist_lookup_for_existing_entity(session_id, result, team_id=team_id)
+    except Exception:
+        log.exception("INTEL_LOOKUP_SNAPSHOT_PERSIST_FAILED", extra={
+            "session": get_log_session_id(session_id),
+            "entity_type": result.entity_type,
+            "team_id": team_id,
+        })
 
 
 def _intel_usage() -> list[dict[str, object]]:
@@ -103,6 +123,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         return [*lines, output_line("  no provider data returned", "builtin-note")]
     if entity_type == "ip" and provider.provider == "shodan":
         lines.extend(_format_shodan(provider_payload))
+    elif entity_type == "ip" and provider.provider == "shodan_internetdb":
+        lines.extend(_format_shodan_internetdb(provider_payload))
     elif entity_type == "ip" and provider.provider == "censys":
         lines.extend(_format_censys(provider_payload))
     elif entity_type == "ip" and provider.provider == "greynoise":
@@ -121,10 +143,14 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_threatfox(provider_payload))
     elif entity_type == "ip" and provider.provider == "routeviews":
         lines.extend(_format_routeviews(provider_payload))
+    elif entity_type == "ip" and provider.provider in {"fofa", "zoomeye"}:
+        lines.extend(_format_search_rows(provider_payload))
     elif entity_type == "domain" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_domain(provider_payload))
     elif entity_type == "domain" and provider.provider == "otx":
         lines.extend(_format_otx(provider_payload))
+    elif entity_type == "domain" and provider.provider == "tls_certificate":
+        lines.extend(_format_tls_certificate(provider_payload))
     elif entity_type == "domain" and provider.provider == "crtsh":
         lines.extend(_format_crtsh(provider_payload))
     elif entity_type == "domain" and provider.provider == "urlhaus":
@@ -135,6 +161,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_urlscan(provider_payload))
     elif entity_type == "domain" and provider.provider == "securitytrails":
         lines.extend(_format_securitytrails(provider_payload))
+    elif entity_type == "domain" and provider.provider in {"fofa", "zoomeye"}:
+        lines.extend(_format_search_rows(provider_payload))
     elif entity_type == "hash" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_hash(provider_payload))
     elif entity_type == "hash" and provider.provider == "otx":
@@ -155,6 +183,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_threatfox(provider_payload))
     elif entity_type == "url" and provider.provider == "urlscan":
         lines.extend(_format_urlscan(provider_payload))
+    elif entity_type == "url" and provider.provider in {"fofa", "zoomeye"}:
+        lines.extend(_format_search_rows(provider_payload))
     else:
         lines.append(output_line("  no formatter for provider data", "builtin-note"))
     return lines
@@ -195,6 +225,38 @@ def _format_shodan(payload: dict[str, Any]) -> list[dict[str, object]]:
             data = _truncate(str(row.get("data") or "").strip().replace("\n", " "), 96)
             summary = " - ".join(part for part in (product, data) if part)
             lines.append(output_line(f"  {port}/{transport} {summary}".rstrip(), "builtin-kv"))
+    return lines
+
+
+def _format_shodan_internetdb(payload: dict[str, Any]) -> list[dict[str, object]]:
+    return [
+        output_line(format_native_record("ports", _join_values(payload.get("ports")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("cves", _join_values(payload.get("cves")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("hostnames", _join_values(payload.get("hostnames")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("cpes", _join_values(payload.get("cpes")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("tags", _join_values(payload.get("tags")) or "none", 14), "builtin-kv"),
+    ]
+
+
+def _format_search_rows(payload: dict[str, Any]) -> list[dict[str, object]]:
+    lines = [
+        output_line(format_native_record("results", str(payload.get("result_count") or 0), 14), "builtin-kv"),
+    ]
+    rows = payload.get("results")
+    if isinstance(rows, list) and rows:
+        lines.append(output_line("matches:", "builtin-subsection"))
+        for row in rows[:5]:
+            if not isinstance(row, dict):
+                continue
+            host = str(row.get("host") or row.get("ip") or "-")
+            port = str(row.get("port") or "").strip()
+            protocol = str(row.get("protocol") or "").strip()
+            title = _truncate(str(row.get("title") or row.get("app") or row.get("server") or "").strip(), 72)
+            endpoint = f"{host}:{port}" if port else host
+            suffix = " - ".join(part for part in (protocol, title) if part)
+            lines.append(output_line(f"  {endpoint} {suffix}".rstrip(), "builtin-kv"))
+    if payload.get("has_more"):
+        lines.append(output_line("more results available from provider", "builtin-note"))
     return lines
 
 
@@ -329,6 +391,7 @@ def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, object]]:
         output_line(format_native_record("certificates", str(payload.get("certificate_count") or 0), 14), "builtin-kv"),
         output_line(format_native_record("first seen", str(payload.get("first_seen") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("last seen", str(payload.get("last_seen") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("latest expiry", str(payload.get("latest_expiry") or "-"), 14), "builtin-kv"),
     ]
     names = payload.get("names")
     if isinstance(names, list) and names:
@@ -338,6 +401,27 @@ def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, object]]:
     issuers = payload.get("issuers")
     if isinstance(issuers, list) and issuers:
         lines.append(output_line(format_native_record("issuers", _join_values(issuers) or "none", 14), "builtin-kv"))
+    return lines
+
+
+def _format_tls_certificate(payload: dict[str, Any]) -> list[dict[str, object]]:
+    lines = [
+        output_line(format_native_record("host", str(payload.get("host") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("port", str(payload.get("port") or 443), 14), "builtin-kv"),
+        output_line(format_native_record("not before", str(payload.get("first_seen") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("not after", str(payload.get("latest_expiry") or "-"), 14), "builtin-kv"),
+    ]
+    issuer = str(payload.get("issuers", [""])[0] if isinstance(payload.get("issuers"), list) and payload.get("issuers") else "")
+    if issuer:
+        lines.append(output_line(format_native_record("issuer", _truncate(issuer, 110), 14), "builtin-kv"))
+    fingerprint = str(payload.get("fingerprint_sha256") or "").strip()
+    if fingerprint:
+        lines.append(output_line(format_native_record("sha256", fingerprint, 14), "builtin-kv"))
+    names = payload.get("names")
+    if isinstance(names, list) and names:
+        lines.append(output_line("names:", "builtin-subsection"))
+        for name in names[:8]:
+            lines.append(output_line(f"  {name}", "builtin-kv"))
     return lines
 
 
