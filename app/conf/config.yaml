@@ -625,6 +625,7 @@
 # intel_cache_ttl_abuseipdb_ip_seconds: 21600
 # intel_cache_ttl_ipinfo_ip_seconds: 21600
 # intel_cache_ttl_teamcymru_ip_seconds: 86400
+# intel_cache_ttl_tls_certificate_domain_seconds: 21600
 # intel_cache_ttl_crtsh_domain_seconds: 86400
 # intel_cache_ttl_hibp_password_seconds: 604800
 # intel_cache_ttl_nvd_cve_seconds: 86400
@@ -685,6 +686,8 @@
 # intel_rate_limit_ipinfo_refill_seconds: 2
 # intel_rate_limit_teamcymru_bucket: 30
 # intel_rate_limit_teamcymru_refill_seconds: 2
+# intel_rate_limit_tls_certificate_bucket: 20
+# intel_rate_limit_tls_certificate_refill_seconds: 3
 # intel_rate_limit_crtsh_bucket: 10
 # intel_rate_limit_crtsh_refill_seconds: 6
 # intel_rate_limit_hibp_bucket: 10

@@ -16096,7 +16096,14 @@ class TestWorkspaceRoutes:
         client = get_client()
         session = "workspace-paths-" + uuid.uuid4().hex[:8]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
-            for bad_path in ("../escape.txt", "/tmp/escape.txt", "a\\b.txt"):
+            for bad_path in (
+                "../escape.txt",
+                "/tmp/escape.txt",
+                "a\\b.txt",
+                " dataperk.com",
+                "dataperk.com ",
+                "\n  dataperk.com",
+            ):
                 resp = client.post(
                     "/workspace/files",
                     headers={"X-Session-ID": session},

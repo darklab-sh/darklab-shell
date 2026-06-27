@@ -69,6 +69,7 @@ import {
   finalizeClosingTab as importedFinalizeClosingTab,
 } from './features/tabs/tab_close_lifecycle.js';
 import {
+  createWorkspaceDirectory as importedCreateWorkspaceDirectory,
   moveWorkspacePath as importedMoveWorkspacePath,
   openWorkspaceEditorFromCommand as importedOpenWorkspaceEditorFromCommand,
   readWorkspaceFile as importedReadWorkspaceFile,
@@ -305,7 +306,11 @@ var _runnerCopyTextToClipboardAdapter = (...args) => {
   const fn = _runnerFn('copyTextToClipboard', importedCopyTextToClipboard);
   return typeof fn === 'function' ? fn(...args) : Promise.reject(new Error('clipboard unavailable'));
 };
-var createWorkspaceDirectory = (...args) => _runnerFn('createWorkspaceDirectory')?.(...args);
+var createWorkspaceDirectory = (...args) => {
+  const fn = _runnerFn('createWorkspaceDirectory', importedCreateWorkspaceDirectory);
+  if (typeof fn !== 'function') throw new Error('workspace folder creation is unavailable');
+  return fn(...args);
+};
 var dismissMobileKeyboardAfterSubmit = (...args) => {
   const fn = (
     typeof importedHasMobileShellLayoutHandler === 'function'

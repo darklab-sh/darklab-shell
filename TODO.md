@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Project-scoped target intelligence overview](#project-scoped-target-intelligence-overview)
-- [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
@@ -250,23 +249,6 @@ Data sources to join (all already present):
   underlying Atlas, finding, intel snapshot, and monitoring data.
 - Official docs describe the Overview tab and endpoint as current behavior, and test counts
   stay in sync after coverage lands.
-
-## Known Issues
-
-- **Replace crt.sh as the primary certificate intel source.**
-  - crt.sh is useful when it responds, but the public JSON endpoint is too prone to timeouts
-    and 5xx responses to be the only source behind Project Overview certificate status.
-  - Find a more reliable provider or app-native collection path for certificate expiry,
-    issuer, subject/SAN, and observed-at data. Candidate directions include reusing
-    `tlsx`/TLS scan output already collected by operators, another passive certificate
-    transparency provider with better availability, or a hybrid where crt.sh is retained as
-    a best-effort enrichment source instead of the primary status source.
-  - Success criteria: Project Overview certificate badges should not depend on crt.sh
-    availability, missing provider data must still render as `unknown` rather than healthy,
-    and provider failures should remain visible as degraded intel instead of silently looking
-    like no certificate data exists.
-
----
 
 ## Technical Debt
 

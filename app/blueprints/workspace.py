@@ -434,7 +434,7 @@ def workspace_files_write():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    path = str(data.get("path") or "").strip()
+    path = str(data.get("path") or "")
     text = data.get("text", "")
     if not isinstance(text, str):
         return jsonify({"error": "text must be a string"}), 400
@@ -475,7 +475,7 @@ def workspace_directories_create():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    path = str(data.get("path") or "").strip()
+    path = str(data.get("path") or "")
     try:
         directory_info = create_owner_workspace_directory(scope.context, path)
         log.info("WORKSPACE_DIRECTORY_CREATE", extra={
@@ -587,8 +587,8 @@ def workspace_files_move():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    source = str(data.get("source") or "").strip()
-    destination = str(data.get("destination") or "").strip()
+    source = str(data.get("source") or "")
+    destination = str(data.get("destination") or "")
     try:
         metadata_paths = _workspace_file_metadata_paths(scope, source)
         moved = move_owner_workspace_path(scope.context, source, destination)
@@ -669,7 +669,7 @@ def workspace_files_download_ticket():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    path = str(data.get("path") or "").strip()
+    path = str(data.get("path") or "")
     try:
         with open_owner_workspace_file_for_download(scope.context, path):
             pass

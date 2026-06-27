@@ -37,6 +37,7 @@ from services.intel.clients import (
     ShodanInternetDbClient,
     TeamCymruDnsClient,
     ThreatFoxApiClient,
+    TlsCertificateClient,
     UrlhausApiClient,
     UrlscanApiClient,
     VirusTotalApiClient,
@@ -59,6 +60,7 @@ from services.intel.shodan import ShodanProvider
 from services.intel.shodan_internetdb import ShodanInternetDbProvider
 from services.intel.teamcymru import TeamCymruProvider
 from services.intel.threatfox import ThreatFoxProvider
+from services.intel.tls_certificate import TlsCertificateProvider
 from services.intel.urlhaus import UrlhausProvider
 from services.intel.urlscan import UrlscanProvider
 from services.intel.virustotal import VirusTotalProvider
@@ -125,6 +127,8 @@ def _provider_factory(provider_id: str) -> ProviderFactory | None:
         return lambda: IpinfoProvider(client=IpinfoApiClient())
     if provider_id == "teamcymru":
         return lambda: TeamCymruProvider(client=TeamCymruDnsClient())
+    if provider_id == "tls_certificate":
+        return lambda: TlsCertificateProvider(client=TlsCertificateClient())
     if provider_id == "crtsh":
         return lambda: CrtshProvider(client=CrtshApiClient())
     if provider_id == "hibp":

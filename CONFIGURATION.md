@@ -171,6 +171,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_cache_ttl_abuseipdb_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized AbuseIPDB IP responses |
 | `intel_cache_ttl_ipinfo_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized IPinfo IP responses |
 | `intel_cache_ttl_teamcymru_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Team Cymru IP ownership responses |
+| `intel_cache_ttl_tls_certificate_domain_seconds` | `21600` | Server-side only. Default cache lifetime for live TLS certificate domain responses |
 | `intel_cache_ttl_crtsh_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized crt.sh domain responses |
 | `intel_cache_ttl_hibp_password_seconds` | `604800` | Server-side only. Default cache lifetime for HIBP Pwned Passwords SHA1 range responses |
 | `intel_cache_ttl_nvd_cve_seconds` | `86400` | Server-side only. Default cache lifetime for normalized NVD CVE responses |
@@ -206,6 +207,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_rate_limit_ipinfo_refill_seconds` | `2` | Server-side only. Seconds between IPinfo token refills |
 | `intel_rate_limit_teamcymru_bucket` | `30` | Server-side only. Token-bucket size for Team Cymru lookups per session |
 | `intel_rate_limit_teamcymru_refill_seconds` | `2` | Server-side only. Seconds between Team Cymru token refills |
+| `intel_rate_limit_tls_certificate_bucket` | `20` | Server-side only. Token-bucket size for live TLS certificate lookups per session |
+| `intel_rate_limit_tls_certificate_refill_seconds` | `3` | Server-side only. Seconds between live TLS certificate token refills |
 | `intel_rate_limit_crtsh_bucket` | `10` | Server-side only. Token-bucket size for crt.sh lookups per session |
 | `intel_rate_limit_crtsh_refill_seconds` | `6` | Server-side only. Seconds between crt.sh token refills |
 | `intel_rate_limit_hibp_bucket` | `10` | Server-side only. Token-bucket size for HIBP Pwned Passwords lookups per session |

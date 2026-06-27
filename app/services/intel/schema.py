@@ -55,6 +55,15 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
     "domain": {
         "virustotal": {"reputation": None, "last_analysis_stats": {}, "recent_urls": [], "whois": ""},
         "otx": {"pulse_count": 0, "reputation": None, "pulses": [], "tags": []},
+        "tls_certificate": {
+            "certificate_count": 0,
+            "names": [],
+            "issuers": [],
+            "first_seen": "",
+            "last_seen": "",
+            "latest_expiry": "",
+            "certificates": [],
+        },
         "crtsh": {"certificate_count": 0, "names": [], "issuers": [], "first_seen": "", "last_seen": ""},
         "urlhaus": {"query_status": "", "url_count": 0, "payload_count": 0, "urls": [], "payloads": []},
         "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},

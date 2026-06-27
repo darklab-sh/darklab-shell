@@ -129,6 +129,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_virustotal_domain(provider_payload))
     elif entity_type == "domain" and provider.provider == "otx":
         lines.extend(_format_otx(provider_payload))
+    elif entity_type == "domain" and provider.provider == "tls_certificate":
+        lines.extend(_format_tls_certificate(provider_payload))
     elif entity_type == "domain" and provider.provider == "crtsh":
         lines.extend(_format_crtsh(provider_payload))
     elif entity_type == "domain" and provider.provider == "urlhaus":
@@ -379,6 +381,27 @@ def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, object]]:
     issuers = payload.get("issuers")
     if isinstance(issuers, list) and issuers:
         lines.append(output_line(format_native_record("issuers", _join_values(issuers) or "none", 14), "builtin-kv"))
+    return lines
+
+
+def _format_tls_certificate(payload: dict[str, Any]) -> list[dict[str, object]]:
+    lines = [
+        output_line(format_native_record("host", str(payload.get("host") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("port", str(payload.get("port") or 443), 14), "builtin-kv"),
+        output_line(format_native_record("not before", str(payload.get("first_seen") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("not after", str(payload.get("latest_expiry") or "-"), 14), "builtin-kv"),
+    ]
+    issuer = str(payload.get("issuers", [""])[0] if isinstance(payload.get("issuers"), list) and payload.get("issuers") else "")
+    if issuer:
+        lines.append(output_line(format_native_record("issuer", _truncate(issuer, 110), 14), "builtin-kv"))
+    fingerprint = str(payload.get("fingerprint_sha256") or "").strip()
+    if fingerprint:
+        lines.append(output_line(format_native_record("sha256", fingerprint, 14), "builtin-kv"))
+    names = payload.get("names")
+    if isinstance(names, list) and names:
+        lines.append(output_line("names:", "builtin-subsection"))
+        for name in names[:8]:
+            lines.append(output_line(f"  {name}", "builtin-kv"))
     return lines
 
 

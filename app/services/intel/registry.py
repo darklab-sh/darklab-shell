@@ -210,6 +210,24 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
         },
         access_note="Free public lookup",
     ),
+    "tls_certificate": IntelProviderDefinition(
+        id="tls_certificate",
+        label="TLS Certificate",
+        entity_types=("domain",),
+        cache_scopes={"domain": "domain"},
+        cache_ttls={
+            "domain": CacheTtlSetting("intel_cache_ttl_tls_certificate_domain_seconds", 21600),
+        },
+        rate_limits={
+            "": RateLimitSetting(
+                "intel_rate_limit_tls_certificate_bucket",
+                "intel_rate_limit_tls_certificate_refill_seconds",
+                20,
+                3,
+            ),
+        },
+        access_note="Direct TLS lookup; no account required",
+    ),
     "crtsh": IntelProviderDefinition(
         id="crtsh",
         label="crt.sh",

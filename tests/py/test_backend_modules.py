@@ -2435,6 +2435,7 @@ class TestLoadConfig:
         assert cfg["intel_cache_ttl_abuseipdb_ip_seconds"] == 21600
         assert cfg["intel_cache_ttl_ipinfo_ip_seconds"] == 21600
         assert cfg["intel_cache_ttl_teamcymru_ip_seconds"] == 86400
+        assert cfg["intel_cache_ttl_tls_certificate_domain_seconds"] == 21600
         assert cfg["intel_cache_ttl_crtsh_domain_seconds"] == 86400
         assert cfg["intel_cache_ttl_hibp_password_seconds"] == 604800
         assert cfg["intel_cache_ttl_nvd_cve_seconds"] == 86400
@@ -2462,6 +2463,8 @@ class TestLoadConfig:
         assert cfg["intel_rate_limit_ipinfo_refill_seconds"] == 2
         assert cfg["intel_rate_limit_teamcymru_bucket"] == 30
         assert cfg["intel_rate_limit_teamcymru_refill_seconds"] == 2
+        assert cfg["intel_rate_limit_tls_certificate_bucket"] == 20
+        assert cfg["intel_rate_limit_tls_certificate_refill_seconds"] == 3
         assert cfg["intel_rate_limit_crtsh_bucket"] == 10
         assert cfg["intel_rate_limit_crtsh_refill_seconds"] == 6
         assert cfg["intel_rate_limit_hibp_bucket"] == 10
@@ -8766,6 +8769,7 @@ class TestIntelServices:
         assert [item.id for item in registry.providers_for_entity_type("domain")] == [
             "virustotal",
             "otx",
+            "tls_certificate",
             "crtsh",
             "urlscan",
             "urlhaus",
@@ -9177,6 +9181,14 @@ class TestIntelServices:
         assert clients._default_ssl_context() == "ctx"
         assert contexts == [{"cafile": "/custom/ca.pem", "capath": "/custom/certs"}]
 
+    def test_tls_certificate_client_uses_observation_only_context(self):
+        from services.intel import clients
+
+        context = clients._tls_observation_context()
+
+        assert context.check_hostname is False
+        assert context.verify_mode == clients.ssl.CERT_NONE
+
     def test_provider_modules_read_secret_at_call_time_and_normalize_payloads(self):
         from services.intel.abuseipdb import AbuseIpdbProvider
         from services.intel.base import ProviderApiError
@@ -9191,6 +9203,7 @@ class TestIntelServices:
         from services.intel.shodan import ShodanProvider
         from services.intel.shodan_internetdb import ShodanInternetDbProvider
         from services.intel.teamcymru import TeamCymruProvider
+        from services.intel.tls_certificate import TlsCertificateProvider
         from services.intel.virustotal import VirusTotalProvider
         from services.intel.zoomeye import ZoomEyeProvider
 
@@ -9464,6 +9477,19 @@ class TestIntelServices:
             ),
         ).lookup_ip("8.8.8.8", session_token="session-1")
         crtsh_result = CrtshProvider(client=client).lookup_domain("Example.TEST.", session_token="session-1")
+        tls_certificate_result = TlsCertificateProvider(client=mock.Mock(
+            last_status=200,
+            lookup_domain=mock.Mock(return_value={
+                "host": "example.test",
+                "port": 443,
+                "subject": "CN=example.test",
+                "issuer": "CN=Test CA",
+                "not_before": "2026-01-01T00:00:00Z",
+                "not_after": "2026-08-01T00:00:00Z",
+                "fingerprint_sha256": "a" * 64,
+                "names": ["example.test", "www.example.test"],
+            }),
+        )).lookup_domain("Example.TEST.", session_token="session-1")
         teamcymru_result = TeamCymruProvider(client=mock.Mock(
             last_status=200,
             lookup_ip=mock.Mock(return_value={
@@ -9537,6 +9563,12 @@ class TestIntelServices:
                 "not_after": "2026-04-01T00:00:00",
             },
         ]
+        assert tls_certificate_result.payload["providers"]["tls_certificate"]["latest_expiry"] == "2026-08-01T00:00:00Z"
+        assert tls_certificate_result.payload["providers"]["tls_certificate"]["names"] == [
+            "example.test",
+            "www.example.test",
+        ]
+        assert tls_certificate_result.payload["providers"]["tls_certificate"]["certificates"][0]["issuer"] == "CN=Test CA"
         assert teamcymru_result.payload["providers"]["teamcymru"]["asn"] == "15169"
         assert hibp_result.payload["providers"]["hibp"]["pwned"] is True
         assert hibp_result.payload["providers"]["hibp"]["count"] == 7
@@ -9940,6 +9972,7 @@ class TestIntelServices:
             )
             return mock.Mock(returncode=0, stdout=stdout, stderr="")
 
+        monkeypatch.setattr(clients.shutil, "which", lambda name: "/usr/bin/dig" if name == "dig" else None)
         monkeypatch.setattr(clients.subprocess, "run", fake_run)
 
         result = clients.TeamCymruDnsClient().lookup_ip("8.8.8.8")
@@ -9949,8 +9982,8 @@ class TestIntelServices:
             "asn_records": ['"15169 | US | arin | 2000-03-30 | GOOGLE, US"'],
         }
         assert calls == [
-            ["dig", "+short", "TXT", "8.8.8.8.origin.asn.cymru.com"],
-            ["dig", "+short", "TXT", "AS15169.asn.cymru.com"],
+            ["/usr/bin/dig", "+short", "TXT", "8.8.8.8.origin.asn.cymru.com"],
+            ["/usr/bin/dig", "+short", "TXT", "AS15169.asn.cymru.com"],
         ]
 
     def test_provider_missing_secret_blocks_lookup_before_client_call(self):
@@ -10618,6 +10651,37 @@ class TestSessionWorkspace:
             }
             assert list_workspace_files("session-1", cfg) == []
             assert workspace_usage("session-1", cfg).file_count == 0
+
+    def test_move_cleans_partial_destination_before_scanner_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "source.txt", "moved\n", cfg)
+            create_workspace_directory("session-1", "archive", cfg)
+            source = resolve_workspace_path("session-1", "source.txt", cfg)
+            destination = resolve_workspace_path("session-1", "archive/source.txt", cfg, ensure_parent=True)
+
+            def fake_shutil_move(source_arg, destination_arg):
+                assert Path(source_arg) == source
+                partial = Path(destination_arg)
+                partial.write_text("partial\n", encoding="utf-8")
+                raise PermissionError("sticky source unlink denied")
+
+            def fake_scanner_move(command, **_kwargs):
+                assert command[-2:] == [str(source), str(destination)]
+                assert not destination.exists()
+                source.rename(destination)
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch("services.workspace.files.shutil.move", side_effect=fake_shutil_move), \
+                    mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
+                    mock.patch("services.workspace.files.subprocess.run", side_effect=fake_scanner_move):
+                moved = workspace_module.move_workspace_path("session-1", "source.txt", "archive", cfg)
+
+            assert moved.source == "source.txt"
+            assert moved.destination == "archive/source.txt"
+            assert not source.exists()
+            assert destination.read_text(encoding="utf-8") == "moved\n"
 
     def test_workspace_glob_pattern_matches_one_path_segment(self):
         with tempfile.TemporaryDirectory() as tmp:

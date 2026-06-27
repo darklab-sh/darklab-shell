@@ -7,11 +7,18 @@ import base64
 import json
 import logging
 import os
+import shutil
+import socket
 import ssl
-import subprocess
+# Team Cymru TXT lookups use dig without shell access.
+import subprocess  # nosec B404
 import time
 from typing import Any
 from urllib.parse import quote, urlencode, urljoin, urlsplit
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.x509.oid import NameOID
 
 from services.intel.base import ProviderApiError
 
@@ -331,6 +338,93 @@ class CrtshApiClient(JsonApiClient):
         return loaded if isinstance(loaded, list) else []
 
 
+class TlsCertificateClient:
+    timeout_seconds = 5
+    last_status: int | None = None
+
+    def lookup_domain(self, value: str, *, port: int = 443) -> dict[str, Any]:
+        host = str(value or "").strip().rstrip(".")
+        if not host:
+            raise ProviderApiError("domain is required for TLS certificate lookup")
+        context = _tls_observation_context()
+        try:
+            with socket.create_connection((host, int(port)), timeout=self.timeout_seconds) as sock:
+                with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+                    der = tls_sock.getpeercert(binary_form=True)
+        except (TimeoutError, socket.timeout) as exc:
+            raise ProviderApiError("TLS certificate lookup timed out") from exc
+        except ssl.SSLError as exc:
+            raise ProviderApiError(f"TLS certificate handshake failed: {exc}") from exc
+        except OSError as exc:
+            raise ProviderApiError(f"TLS certificate lookup failed: {exc}") from exc
+        if not der:
+            raise ProviderApiError("TLS certificate lookup returned no peer certificate")
+        self.last_status = 200
+        cert = x509.load_der_x509_certificate(der)
+        return _normalize_tls_certificate(cert, host=host, port=int(port))
+
+
+def _tls_observation_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # This client observes certificate metadata only. It does not make a trust
+    # decision, so expired or self-signed certificates must still be readable.
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _cert_time(value) -> str:
+    if value is None:
+        return ""
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _cert_name_attributes(cert: x509.Certificate, oid) -> list[str]:
+    values: list[str] = []
+    for item in cert.subject.get_attributes_for_oid(oid):
+        rendered = str(item.value or "").strip()
+        if rendered and rendered not in values:
+            values.append(rendered)
+    return values
+
+
+def _normalize_tls_certificate(cert: x509.Certificate, *, host: str, port: int) -> dict[str, Any]:
+    names: list[str] = []
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        for name in san.get_values_for_type(x509.DNSName):
+            normalized = str(name or "").strip().lower().lstrip("*.").rstrip(".")
+            if normalized and normalized not in names:
+                names.append(normalized)
+    except x509.ExtensionNotFound:
+        pass
+    for common_name in _cert_name_attributes(cert, NameOID.COMMON_NAME):
+        normalized = common_name.lower().lstrip("*.").rstrip(".")
+        if normalized and normalized not in names:
+            names.append(normalized)
+    if host and host not in names:
+        names.insert(0, host)
+    try:
+        not_before = cert.not_valid_before_utc
+        not_after = cert.not_valid_after_utc
+    except AttributeError:
+        not_before = cert.not_valid_before
+        not_after = cert.not_valid_after
+    issuer = cert.issuer.rfc4514_string()
+    subject = cert.subject.rfc4514_string()
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+    return {
+        "host": host,
+        "port": port,
+        "subject": subject,
+        "issuer": issuer,
+        "not_before": _cert_time(not_before),
+        "not_after": _cert_time(not_after),
+        "fingerprint_sha256": fingerprint,
+        "names": names[:50],
+    }
+
+
 class HibpPwnedPasswordsClient(JsonApiClient):
     base_url = "https://api.pwnedpasswords.com"
 
@@ -532,9 +626,13 @@ class TeamCymruDnsClient:
         return {"records": records, "asn_records": asn_records}
 
     def _lookup_txt(self, query: str) -> list[str]:
+        dig_bin = shutil.which("dig")
+        if not dig_bin:
+            raise ProviderApiError("dig is not available for Team Cymru DNS lookup")
         try:
-            proc = subprocess.run(
-                ["dig", "+short", "TXT", query],
+            # Fixed argv, no shell, and the query comes from the Team Cymru helper.
+            proc = subprocess.run(  # nosec B603
+                [dig_bin, "+short", "TXT", query],
                 capture_output=True,
                 check=False,
                 text=True,

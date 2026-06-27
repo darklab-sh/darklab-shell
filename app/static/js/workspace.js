@@ -1854,6 +1854,7 @@ if (typeof window !== 'undefined') {
 
 export {
   closeWorkspace,
+  createWorkspaceDirectory,
   hideWorkspaceEditor,
   hideWorkspaceViewer,
   moveWorkspacePath,

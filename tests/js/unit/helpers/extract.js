@@ -217,6 +217,7 @@ const WINDOW_GLOBAL_RESET_KEYS = [
   'AnsiUp',
   'appendLines',
   'confirmClearSessionToken',
+  'createWorkspaceDirectory',
   'downloadWorkspaceFile',
   'getWorkspaceAutocompleteDirectoryHints',
   'getWorkspaceAutocompleteFileHints',

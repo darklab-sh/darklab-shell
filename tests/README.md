@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,821
+- behavior tests: 3,824
 - docs/inventory meta-tests: 40
-- `pytest`: 2169 (2134 behavior + 35 meta)
-- `vitest`: 1424 (1419 behavior + 5 meta)
+- `pytest`: 2171 (2136 behavior + 35 meta)
+- `vitest`: 1425 (1420 behavior + 5 meta)
 - `playwright`: 268 behavior
-- total: 3,861
+- total: 3,864
 
 This document is organized in two parts:
 
@@ -636,6 +636,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_json_api_client_uses_system_ca_bundle_for_https` | Verifies app-native intel HTTPS clients prefer the system CA bundle when no explicit CA env is set. |
 | `TestIntelServices.test_json_api_client_rejects_cross_origin_redirects_before_forwarding_secrets` | Verifies app-native intel HTTPS clients stop cross-origin redirects before provider API-key headers can be forwarded. |
 | `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
+| `TestIntelServices.test_tls_certificate_client_uses_observation_only_context` | Verifies live TLS certificate intel can observe expired or self-signed certificates without treating the result as a trust decision. |
 | `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
 | `TestIntelServices.test_crtsh_provider_reports_transient_upstream_failures` | Verifies crt.sh 5xx and timeout-style failures are surfaced as temporary upstream outages. |
 | `TestIntelServices.test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized` | Verifies Team Cymru DNS origin and ASN-description records normalize into rendered ownership fields. |
@@ -670,6 +671,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
 | `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders, recursive folder delete removes nested files and directories, and manual delete metrics are recorded. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
+| `TestSessionWorkspace.test_move_cleans_partial_destination_before_scanner_fallback` | Verifies that workspace moves remove a partial copied destination before retrying through the scanner fallback path. |
 | `TestSessionWorkspace.test_workspace_glob_pattern_matches_one_path_segment` | Verifies that workspace glob expansion matches `*` within one path segment without crossing into nested folders. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
 | `TestSessionWorkspace.test_allows_hidden_files_that_are_listed_by_workspace` | Verifies that hidden session file paths can be resolved so listed tool artifacts remain accessible. |
@@ -3431,6 +3433,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `lists workspace folders in long format with ll` | Verifies that `ll` shows the long workspace listing with aligned metadata columns. |
 | `pipes short ls output to grep as one workspace entry per line` | Verifies that compact `ls` display output feeds pipe helpers as one logical workspace entry per line. |
 | `creates workspace directories with mkdir and file add-dir` | Verifies that `mkdir` and `file add-dir` create folders through the workspace directory route. |
+| `fails visibly when the workspace directory creator is unavailable` | Verifies that terminal folder creation reports a visible error instead of claiming success when the workspace handler is missing. |
 | `moves workspace files and folders from file move and mv commands` | Verifies that `file move` and `mv` resolve tab-relative workspace paths and move entries through the Files route. |
 | `moves every workspace file matched by a glob pattern into an existing folder` | Verifies that `mv <pattern> <folder>` expands matching workspace entries and moves each one into an existing destination folder. |
 | `blocks terminal workspace write commands when Files are read-only in team scope` | Verifies that terminal `mkdir`, `file move`, `file add`, and `rm` commands respect read-only team Files capability checks before writing. |
