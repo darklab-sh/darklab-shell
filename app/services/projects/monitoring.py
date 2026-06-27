@@ -386,6 +386,26 @@ def _top_change_label(fire: dict[str, Any]) -> str:
     return f"{kind.title()} event"
 
 
+def _fire_linked_targets(fire: dict[str, Any]) -> list[dict[str, str]]:
+    raw_targets = fire.get("linked_targets")
+    targets = raw_targets if isinstance(raw_targets, list) else []
+    rendered = []
+    seen_ids = set()
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        target_id = str(target.get("id") or "").strip()
+        if not target_id or target_id in seen_ids:
+            continue
+        seen_ids.add(target_id)
+        rendered.append({
+            "id": target_id,
+            "type": str(target.get("type") or ""),
+            "value": str(target.get("value") or ""),
+        })
+    return rendered
+
+
 def _project_summary(
     project_id: str,
     counts: dict[str, int],
@@ -427,6 +447,7 @@ def _project_summary(
         fire_kind = str(fire.get("fire_kind") or WATCHER_FIRE_KIND_UNCLASSIFIED)
         if severity == SEVERITY_NONE and fire_kind not in {"failed", "recovered"}:
             continue
+        linked_targets = _fire_linked_targets(fire)
         top_changes.append({
             "fire_id": str(fire.get("id") or ""),
             "watcher_id": str(fire.get("watcher_id") or ""),
@@ -440,6 +461,8 @@ def _project_summary(
             "baseline_run_id": str(fire.get("baseline_run_id") or ""),
             "run_available": bool(fire.get("run_available")),
             "baseline_run_available": bool(fire.get("baseline_run_available")),
+            "target_ids": [target["id"] for target in linked_targets],
+            "linked_targets": linked_targets,
         })
         if len(top_changes) >= SUMMARY_TOP_CHANGE_LIMIT:
             break

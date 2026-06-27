@@ -16,9 +16,31 @@ test.describe('source-mode lazy ESM surfaces', () => {
   })
 
   test('opens high-risk lazy app surfaces through user controls', async ({ page }) => {
+    const overviewProjectId = await page.evaluate(async () => {
+      const resp = await apiFetch('/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `Source Overview ${Date.now()}` }),
+      })
+      if (!resp.ok) throw new Error(`project create failed: ${resp.status}`)
+      const project = (await resp.json()).project
+      const activeResp = await apiFetch('/projects/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: project.id }),
+      })
+      if (!activeResp.ok) throw new Error(`active project failed: ${activeResp.status}`)
+      return project.id
+    })
+
     await openRailAction(page, 'projects')
     await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+    await page.locator('[data-project-tab="overview"]').click()
+    await expect(page.locator('[data-project-tab="overview"]')).toHaveClass(/\bis-active\b/)
+    await expect(page.locator(`.project-overview-root[data-project-overview-root="${overviewProjectId}"]`))
+      .toBeVisible()
+    await expect(page.locator('.project-overview-root')).toContainText('No project targets yet.')
     await page.locator('.project-workspace-close').click()
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
 

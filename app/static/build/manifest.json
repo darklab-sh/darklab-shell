@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.e4aa2442c6d3.css",
-      "hash": "e4aa2442c6d3923d951834ece7b94ef7627723414b09967f649fdd79c182a588",
+      "path": "/static/build/app.49bbab9f1635.css",
+      "hash": "49bbab9f16351bd2fc490cb2c298a0a921c1ff171a121770f4204296c8f66b26",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -36,7 +36,7 @@
         "/static/css/welcome.css": "5cdb6be8622e40fd25261ce6eca5c40b0453e039333038aeef63e361d85b325f",
         "/static/css/shell-chrome.css": "04a9131c01be1c8555006a8df822969921c319569c8188973fa13da2b58ce12e",
         "/static/css/mobile.css": "081679f8720be4a712eb53921244277e1d5392f667d2727df0d632426bb5e266",
-        "/static/css/features/projects.css": "2960dfe276b8903c93847c330bf903cdc63caee12acc3ca132cc7da70621bad7",
+        "/static/css/features/projects.css": "cb834e35b48fbaf15ac21207d3e131aa5687e1389382f27f930b6642ddb04cc4",
         "/static/css/features/atlas.css": "3eb83165fe37ea04c23ba7d29d317832ea29ed1a3b087134fe2505045bb96f26",
         "/static/css/features/atlas-mobile.css": "493f398b53a464a6027ed4b761b3e3174f2cf675d2913bfb2af6d1457aa11511",
         "/static/css/features/command-registry.css": "d45f7d3fa1709d60236f0c9932e63d8c8ac1d3df18387640773164dd2d8a5a54",
@@ -580,8 +580,8 @@
       "hash": "8823b0d1a70ee3dda755589caee8f338869d64cc74f30fd80f50e266ad5f9bec"
     },
     "/static/js/features/projects/project_overview.js": {
-      "path": "/static/build/static-project-overview.e441168c7aa6.js",
-      "hash": "e441168c7aa61acbf9e35893c7862095709aeed2a77c7d7ff2f3182c4285cd74"
+      "path": "/static/build/static-project-overview.16e575298214.js",
+      "hash": "16e5752982144d6f6dde8638188ff1cb3faf14238097cd737cffb5fb518a366e"
     },
     "/static/js/features/projects/project_packages.js": {
       "path": "/static/build/static-project-packages.6e29d40a4217.js",

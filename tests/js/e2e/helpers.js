@@ -266,6 +266,78 @@ print(json.dumps({
   return JSON.parse(result.stdout)
 }
 
+export function seedProjectOverviewFixture(testInfo, { sessionId, projectId, targetId, targetValue }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sqlite3
+import sys
+
+data_dir, session_id, project_id, target_id, target_value = sys.argv[1:6]
+now = datetime.now(timezone.utc).replace(microsecond=0)
+expires_at = now + timedelta(days=21)
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    conn.execute(
+        "INSERT OR REPLACE INTO entity_intel_snapshots "
+        "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+        "VALUES (?, ?, ?, 'tls_certificate', 'ok', ?, ?, ?, ?)",
+        (
+            "snap_e2e_overview_" + target_id,
+            session_id,
+            target_id,
+            "TLS certificate summary",
+            json.dumps({
+                "providers": {
+                    "tls_certificate": {
+                        "ports": [443],
+                        "services": ["https"],
+                        "certificate": {"not_after": expires_at.isoformat()},
+                    },
+                },
+                "summary": {"has_intel": True, "providers_with_data": ["tls_certificate"]},
+            }),
+            now.isoformat(),
+            expires_at.isoformat(),
+        ),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO findings "
+        "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, title, created, last_seen_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'high', 'new', ?, ?, ?)",
+        (
+            "finding_e2e_overview_" + target_id,
+            session_id,
+            target_id,
+            target_id,
+            "overview:" + target_value,
+            "sig_e2e_overview_" + target_id,
+            "Real Overview filtered finding",
+            now.isoformat(),
+            now.isoformat(),
+        ),
+    )
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({"targetId": target_id}))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, projectId, targetId, targetValue],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed project overview fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 export function seedProjectActivityFixture(testInfo, { sessionId, projectId }) {
   const dataDir = e2eDataDirForProject(testInfo)
   const script = String.raw`

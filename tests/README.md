@@ -18,16 +18,16 @@ The suites are layered on purpose:
 
 Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
 
-Project workspace behavior follows the same split: pytest owns project routes, schema, migration, monitoring payloads, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, monitoring tab rendering, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
+Project workspace behavior follows the same split: pytest owns project routes, schema, migration, overview and monitoring payloads, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, Overview and Monitoring tab rendering, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
 
 Current totals:
 
-- behavior tests: 3,824
+- behavior tests: 3,840
 - docs/inventory meta-tests: 40
-- `pytest`: 2171 (2136 behavior + 35 meta)
-- `vitest`: 1425 (1420 behavior + 5 meta)
-- `playwright`: 268 behavior
-- total: 3,864
+- `pytest`: 2179 (2144 behavior + 35 meta)
+- `vitest`: 1432 (1427 behavior + 5 meta)
+- `playwright`: 269 behavior
+- total: 3,880
 
 This document is organized in two parts:
 
@@ -514,7 +514,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestProjectOverviewContract.test_target_identity_uses_existing_atlas_entity_contract` | Verifies overview target identity follows the existing Atlas entity contract and host-to-domain/IP canonicalization. |
 | `TestProjectOverviewContract.test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects` | Verifies overview recent-change states and deep-link hints use existing monitoring and filter contracts. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, and deep-link rollups. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_marks_stale_provider_data` | Verifies Project Overview marks fully expired provider snapshots as stale while keeping mixed fresh/stale provider data fresh. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate` | Verifies Project Overview ignores stale expired provider certificate data when a fresh provider snapshot is available for the same target. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_logs_build_and_truncation_context` | Verifies Project Overview aggregation emits bounded build logs and warns when target rows exceed the overview limit. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_logs_degraded_source_data` | Verifies Project Overview logs dropped recent-change target references, malformed certificate dates, and malformed provider payloads without raw target data. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_marks_recent_changes_from_monitoring_targets` | Verifies Project Overview marks recently changed targets from decorated monitoring fire target matches. |
 | `TestProjectOverviewContract.test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows` | Verifies Project Overview certificate status uses crt.sh's latest expiry instead of old historical certificate rows. |
+| `TestProjectOverviewContract.test_project_intel_overview_parses_rfc_certificate_dates` | Verifies Project Overview classifies RFC/OpenSSL-style certificate dates instead of treating them as unknown. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_respects_scope_and_suppression` | Verifies the Project overview aggregator excludes suppressed targets and does not expose out-of-scope Project data. |
 | `TestReportTemplateCatalog.test_default_report_template_sections_match_plan` | Verifies the shipped report template catalog keeps the configured report section order. |
 | `TestReportTemplateCatalog.test_report_template_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator report template overrides log a warning and fall back to the shipped catalog. |
@@ -1620,7 +1626,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
 | `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses, removes all channel-owned vault secrets, and records a config-change audit row without secret values. |
 | `TestProjectRoutes.test_project_overview_route_returns_empty_contract_and_404_for_foreign_project` | Verifies the Project overview route returns an empty overview contract for in-scope Projects and 404s out-of-scope Projects. |
+| `TestProjectRoutes.test_project_overview_route_logs_aggregator_failures` | Verifies Project Overview route failures emit structured route context before the exception propagates. |
 | `TestProjectRoutes.test_project_overview_route_returns_target_rollup_and_existing_filter_hints` | Verifies the Project overview route returns target rollups and deep-link hints that round-trip through existing Entities and Findings filters. |
+| `TestProjectRoutes.test_project_overview_route_forwards_digest_window_params_to_recent_changes` | Verifies the Project overview route accepts digest window parameters and limits recent-change markers to the requested window. |
 | `TestProjectRoutes.test_project_package_and_link_routes_record_audit_events` | Verifies project link/unlink and package create/delete routes record bounded audit events. |
 | `TestProjectRoutes.test_project_activity_route_lists_personal_safe_events_and_filters` | Verifies personal Project Activity returns scoped, filtered, user-safe audit rows without leaking matching team rows. |
 | `TestProjectRoutes.test_project_monitoring_route_returns_scoped_watchers_and_missing_run_state` | Verifies the Project Monitoring route returns scoped watcher cards and marks missing baseline runs without breaking timeline rows. |
@@ -3242,8 +3250,15 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `loads and renders bounded target overview rows with rollups` | Verifies Project Overview loads the scoped endpoint and renders target rollups, ports, services, certificate badges, severity chips, and provider highlights. |
+| `renders the empty target state from an empty overview payload` | Verifies Project Overview renders the no-targets empty state when the overview payload contains no target rows. |
+| `renders unknown certificate, no-intel, and not-monitored states neutrally` | Verifies Project Overview renders unknown certificates, missing intel, and unmonitored recent-change state with neutral labels and muted badge styling. |
 | `uses existing Project filters when target actions open Entities and Findings` | Verifies Project Overview target actions switch to existing Entities/Findings tabs while applying the backend-provided filter hints through the current Project filter sets. |
+| `clears stale filters when Findings hints only include a target` | Verifies Project Overview clears old target, run, severity, and review-state filters before applying a target-only Findings hint. |
+| `applies run and review-state hints through existing filter sets` | Verifies Project Overview applies target, run, severity, review-state, and orphan hints through the existing Entities and Findings filter sets. |
+| `settles into an error state after overview load failures without retry looping` | Verifies Project Overview shows a stable error panel after load failures instead of repeatedly retrying the failed request. |
+| `logs unexpected render-triggered load rejections` | Verifies Project Overview logs unexpected lazy render-load failures with error-level client details. |
 | `renders mobile overview rows and re-renders mobile detail when actions use hints` | Verifies Project Overview renders the mobile stacked layout and keeps target action deep-links on the mobile detail surface with the same backend-provided filter hints. |
+| `applies Findings hints from mobile overview rows` | Verifies Project Overview applies Findings target/severity/orphan hints from the mobile Overview row and refreshes the mobile detail sheet. |
 
 #### `project_report.test.js`
 
@@ -4282,6 +4297,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | Test | Description |
 | --- | --- |
 | `renders a populated desktop Overview and deep-links to filtered Findings` | Verifies that the Project Overview tab renders rollups, target chips, highlights, and sends the existing target/severity filters when opening Findings. |
+| `uses the real Overview endpoint and filters Findings by backend target id` | Verifies that a real Project Overview endpoint response renders in the browser and that its Findings action sends the backend target filter to the real Findings route. |
 | `renders the Overview tab inside the mobile project detail sheet` | Verifies that the mobile Projects detail sheet can render the Overview tab with the same target chips and target action controls. |
 
 #### `rate-limit.spec.js`
@@ -4382,7 +4398,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 
 | Test | Description |
 | --- | --- |
-| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls. |
+| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects including the lazy Overview tab, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls. |
 | `does not publish Playwright-only hooks when webdriver is unavailable` | Verifies a normal browser context does not receive Playwright-only helper globals. |
 
 #### `tabs.spec.js`

@@ -58,9 +58,23 @@ let exportedDarklabProjectOverview = null;
       return new Error(fallback);
     }
 
+    function logLevelForStatus(status) {
+      const code = Number(status || 0);
+      if (!code || code >= 500) return 'error';
+      return 'warn';
+    }
+
     function logClientEvent(eventName, err, details = {}) {
       if (typeof ctx.logClientError !== 'function') return;
-      ctx.logClientError(`${eventName} ${JSON.stringify({ page: 'project_overview', ...details })}`, err);
+      const payload = { page: 'project_overview', ...details };
+      ctx.logClientError(`${eventName} ${JSON.stringify(payload)}`, err, {
+        event: eventName,
+        level: payload.level || 'warn',
+        page: 'project_overview',
+        phase: payload.phase || '',
+        selection_key: payload.selection_key || '',
+        status: payload.status || 0,
+      });
     }
 
     async function load(projectId, options = {}) {
@@ -76,15 +90,22 @@ let exportedDarklabProjectOverview = null;
           `/projects/${encodeURIComponent(normalized)}/overview`,
           { cache: 'no-store' },
         );
-        if (!resp.ok) throw await responseError(resp, 'Could not load project overview.');
+        if (!resp.ok) {
+          const err = await responseError(resp, 'Could not load project overview.');
+          err.status = Number(resp.status || 0);
+          throw err;
+        }
         const payload = await resp.json();
         st.payload = payload && typeof payload === 'object' ? payload : {};
         st.loaded = true;
       } catch (err) {
+        const status = Number(err?.status || err?.statusCode || 0);
         st.error = err && err.message ? err.message : 'Could not load project overview.';
         logClientEvent('PROJECT_OVERVIEW_CLIENT_LOAD_FAILED', err, {
+          level: logLevelForStatus(status),
           phase: 'load',
           selection_key: `project:${normalized}`,
+          status,
         });
       } finally {
         st.loading = false;
@@ -185,9 +206,9 @@ let exportedDarklabProjectOverview = null;
       grid.append(
         summaryCard('Targets', formatCount(source.target_count), `${formatCount(source.provider_count)} providers`),
         summaryCard('Ports', formatCount(source.open_port_count), `${formatCount(source.service_count)} services`),
-        summaryCard('Finding signal', formatCount(highSignal), 'critical/high', highSignal ? 'attention' : ''),
+        summaryCard('High-risk targets', formatCount(highSignal), 'critical/high finding', highSignal ? 'attention' : ''),
         summaryCard('Certificates', formatCount(certAttention), 'expired or expiring', certAttention ? 'attention' : ''),
-        summaryCard('Recent changes', recentLabels[recentState] || readableToken(recentState), '', recentState),
+        summaryCard('Recent changes', recentLabels[recentState] || readableToken(recentState)),
       );
       return grid;
     }
@@ -313,7 +334,14 @@ let exportedDarklabProjectOverview = null;
       if (target?.source_flags?.has_recent_changes) {
         chips.push(badge('Changed', 'badge-tone-cyan', 'project-overview-chip'));
       }
-      if (!target?.source_flags?.has_intel) {
+      if (target?.source_flags?.has_stale_intel) {
+        chips.push(badge(
+          'Intel: Stale',
+          'badge-tone-amber',
+          'project-overview-chip',
+          'Cached provider data for this target is past its refresh window',
+        ));
+      } else if (!target?.source_flags?.has_intel) {
         chips.push(badge(
           'Intel: None',
           'badge-tone-muted',
@@ -390,7 +418,15 @@ let exportedDarklabProjectOverview = null;
     function renderOverview(container, projectId, _summary, { mobile = false } = {}) {
       const normalized = String(projectId || '');
       const st = stateFor(normalized);
-      if (!st.loaded && !st.loading) load(normalized).catch(() => {});
+      if (!st.loaded && !st.loading && !st.error) {
+        load(normalized).catch((err) => {
+          logClientEvent('PROJECT_OVERVIEW_CLIENT_RENDER_LOAD_FAILED', err, {
+            level: 'error',
+            phase: 'render-load',
+            selection_key: `project:${normalized}`,
+          });
+        });
+      }
       if (st.loading && !st.loaded) {
         container.replaceChildren(ctx.emptyProjectPanel?.('Loading project overview...') || document.createTextNode('Loading project overview...'));
         return;

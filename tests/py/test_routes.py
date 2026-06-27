@@ -5796,14 +5796,16 @@ class TestProjectRoutes:
         project = self._create_project(client, session_id, name="Overview Empty")
         foreign_project = self._create_project(client, foreign_session, name="Overview Foreign")
 
-        resp = client.get(
-            f"/projects/{project['id']}/overview",
-            headers={"X-Session-ID": session_id},
-        )
-        foreign_resp = client.get(
-            f"/projects/{foreign_project['id']}/overview",
-            headers={"X-Session-ID": session_id},
-        )
+        with mock.patch.object(project_routes.log, "debug") as debug_log, \
+             mock.patch.object(project_routes.log, "info") as info_log:
+            resp = client.get(
+                f"/projects/{project['id']}/overview",
+                headers={"X-Session-ID": session_id},
+            )
+            foreign_resp = client.get(
+                f"/projects/{foreign_project['id']}/overview",
+                headers={"X-Session-ID": session_id},
+            )
 
         assert resp.status_code == 200
         payload = resp.get_json()
@@ -5815,6 +5817,55 @@ class TestProjectRoutes:
         assert payload["rollups"]["recent_change_state"] == "not-monitored"
         assert payload["recent_changes"] == []
         assert foreign_resp.status_code == 404
+        viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_OVERVIEW_VIEWED",))
+        assert viewed.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_count": 0,
+            "recent_change_state": "not-monitored",
+            "windowed": False,
+            "duration_ms": mock.ANY,
+        }
+        miss = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_MISS",))
+        assert miss.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": foreign_project["id"],
+            "route": "project_overview",
+            "windowed": False,
+            "duration_ms": mock.ANY,
+        }
+
+    def test_project_overview_route_logs_aggregator_failures(self):
+        client = get_client()
+        session_id = self._session_id("project-overview-error")
+        project = self._create_project(client, session_id, name="Overview Error")
+
+        with mock.patch.object(
+            project_routes,
+            "get_project_intel_overview",
+            side_effect=RuntimeError("overview exploded"),
+        ), mock.patch.object(project_routes.log, "error") as error_log:
+            with pytest.raises(RuntimeError, match="overview exploded"):
+                client.get(
+                    f"/projects/{project['id']}/overview?window_start=2026-01-01T00:00:00Z",
+                    headers={"X-Session-ID": session_id},
+                )
+
+        error_log.assert_called_once()
+        assert error_log.call_args.args == ("PROJECT_OVERVIEW_FAILED",)
+        assert error_log.call_args.kwargs["exc_info"] is True
+        assert error_log.call_args.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "windowed": True,
+            "duration_ms": mock.ANY,
+        }
 
     def test_project_overview_route_returns_target_rollup_and_existing_filter_hints(self):
         client = get_client()
@@ -5906,6 +5957,90 @@ class TestProjectRoutes:
         assert [item["id"] for item in entities_resp.get_json()["entities"]] == [target["id"]]
         assert findings_resp.status_code == 200
         assert [item["id"] for item in findings_resp.get_json()["findings"]] == [finding_id]
+
+    def test_project_overview_route_forwards_digest_window_params_to_recent_changes(self):
+        from services.watchers import service as watcher_service
+
+        client = get_client()
+        session_id = "tok_project_overview_window_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Overview Windowed")
+        target = self._create_target(client, session_id, project["id"], value="api.example.com")
+        old_run_id = self._seed_run(session_id, "nmap -sV api.example.com")
+        window_run_id = self._seed_run(session_id, "nmap -sV api.example.com")
+        with db_connect() as conn:
+            watcher = watcher_service.create_watcher(
+                session_id,
+                command_text="nmap -sV api.example.com",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            old_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=old_run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "22/tcp", "state": "open", "service": "ssh"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            window_fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id=window_run_id,
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{"key": "443/tcp", "state": "open", "service": "https"}],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id=window_run_id,
+                conn=conn,
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T08:00:00+00:00", old_fire.id),
+            )
+            conn.execute(
+                "UPDATE watcher_fires SET created = ? WHERE id = ?",
+                ("2026-05-20T09:30:00+00:00", window_fire.id),
+            )
+            conn.commit()
+
+        resp = client.get(
+            f"/projects/{project['id']}/overview"
+            "?window_start=2026-05-20T09:00:00Z&window_end=2026-05-20T10:00:00Z",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["rollups"]["recent_change_state"] == "windowed"
+        assert payload["recent_changes"] == [{
+            "fire_id": window_fire.id,
+            "watcher_id": watcher.id,
+            "severity": "critical",
+            "state": "changed",
+            "target_ids": [target["id"]],
+            "created": "2026-05-20T09:30:00+00:00",
+        }]
+        assert old_fire.id not in json.dumps(payload["recent_changes"])
+        assert payload["targets"][0]["source_flags"]["has_recent_changes"] is True
+        assert payload["targets"][0]["recent_change_markers"][0]["fire_id"] == window_fire.id
 
     def test_project_package_and_link_routes_record_audit_events(self):
         client = get_client()

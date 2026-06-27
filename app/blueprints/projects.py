@@ -699,8 +699,51 @@ def projects_overview(project_id):
     session_id, team_id, error_response = _project_owner()
     if error_response:
         return error_response
-    overview = get_project_intel_overview(session_id, project_id, team_id=team_id)
-    return _project_json_or_404(overview)
+    started = time.perf_counter()
+    window_start = _parse_optional_iso_datetime(request.args.get("window_start"), name="window_start")
+    window_end = _parse_optional_iso_datetime(request.args.get("window_end"), name="window_end")
+    windowed = bool(window_start or window_end)
+    try:
+        overview = get_project_intel_overview(
+            session_id,
+            project_id,
+            team_id=team_id,
+            window_start=window_start,
+            window_end=window_end,
+        )
+    except Exception:
+        log.error("PROJECT_OVERVIEW_FAILED", exc_info=True, extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "windowed": windowed,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+        })
+        raise
+    if overview is None:
+        log.debug("PROJECT_OVERVIEW_MISS", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "route": "project_overview",
+            "windowed": windowed,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+        })
+        return _project_not_found()
+    rollups = overview.get("rollups") or {}
+    log.info("PROJECT_OVERVIEW_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "target_count": int(rollups.get("target_count") or 0),
+        "recent_change_state": str(rollups.get("recent_change_state") or ""),
+        "windowed": windowed,
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+    })
+    return jsonify(overview)
 
 
 @projects_bp.route("/projects/<project_id>/activity")

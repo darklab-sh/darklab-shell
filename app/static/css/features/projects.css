@@ -2694,7 +2694,7 @@
 
 
 .project-overview-summary-card.is-attention {
-  border-color: color-mix(in srgb, var(--warning, #f4c430) 55%, var(--theme-chrome-border));
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--theme-chrome-border));
 }
 
 

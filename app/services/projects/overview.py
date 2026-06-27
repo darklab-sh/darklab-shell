@@ -4,15 +4,19 @@ Project overview contract helpers.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from core.database import db_connect
-from services.atlas.lookup import _row_to_intel_snapshot, summarize_intel_snapshots
+from core.helpers import get_log_session_id
+from services.atlas.lookup import _row_to_intel_snapshot, _snapshot_has_intel, summarize_intel_snapshots
 from services.atlas.scope import metadata_owner_id
 from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES
+from services.projects.metadata import _metadata_owner_where
 from services.projects.models import row_to_project, row_to_target
 from services.projects.monitoring import get_project_monitoring_summary
 from services.projects.queries import _project_atlas_entity_select_sql, _project_entity_owner_clause
@@ -62,6 +66,8 @@ _TARGET_ENTITY_TYPES = {"domain", "ip", "url"}
 _PORT_LIST_LIMIT = 24
 _SERVICE_LIST_LIMIT = 24
 _RECENT_CHANGE_LIMIT = 10
+
+log = logging.getLogger("shell")
 
 
 def overview_payload_contract(project: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -207,8 +213,21 @@ def target_deep_link_hints(
     return hints
 
 
-def get_project_intel_overview(session_id: str, project_id: str, *, team_id: str = "") -> dict[str, Any] | None:
+def get_project_intel_overview(
+    session_id: str,
+    project_id: str,
+    *,
+    team_id: str = "",
+    window_start: str = "",
+    window_end: str = "",
+) -> dict[str, Any] | None:
     """Return the Project-scoped target intelligence overview payload."""
+    log_context = _overview_log_context(session_id, team_id, project_id)
+    log.debug("PROJECT_OVERVIEW_BUILD_STARTED", extra={
+        **log_context,
+        "target_limit": OVERVIEW_TARGET_LIMIT,
+        "windowed": bool(window_start or window_end),
+    })
     with db_connect() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project_row = conn.execute(
@@ -216,9 +235,17 @@ def get_project_intel_overview(session_id: str, project_id: str, *, team_id: str
             (*owner_params, project_id),
         ).fetchone()
         if not project_row:
+            log.debug("PROJECT_OVERVIEW_BUILD_MISS", extra={
+                **log_context,
+                "reason": "project_not_found",
+            })
             return None
         project = row_to_project(project_row)
         if project is None:
+            log.debug("PROJECT_OVERVIEW_BUILD_MISS", extra={
+                **log_context,
+                "reason": "project_decode_failed",
+            })
             return None
         metadata_session = metadata_owner_id(session_id, team_id)
         entity_owner_sql, entity_owner_params = _project_entity_owner_clause(session_id, team_id)
@@ -231,17 +258,31 @@ def get_project_intel_overview(session_id: str, project_id: str, *, team_id: str
                 metadata_session,
                 project_id,
                 *entity_owner_params,
-                OVERVIEW_TARGET_LIMIT
+                OVERVIEW_TARGET_LIMIT + 1
             ),
         ).fetchall()
         targets = [target for row in target_rows if (target := row_to_target(row)) is not None]
+        target_truncated = len(targets) > OVERVIEW_TARGET_LIMIT
+        if target_truncated:
+            log.warning("PROJECT_OVERVIEW_TARGET_LIMIT_REACHED", extra={
+                **log_context,
+                "target_limit": OVERVIEW_TARGET_LIMIT,
+                "loaded_target_count": len(targets),
+            })
+            targets = targets[:OVERVIEW_TARGET_LIMIT]
         target_ids = [str(target["id"]) for target in targets if target.get("id")]
         snapshots_by_entity = _overview_snapshots_by_entity(conn, metadata_session, target_ids)
         findings_by_entity = _overview_findings_by_entity(conn, session_id, team_id, target_ids)
 
-    monitoring_payload = get_project_monitoring_summary(session_id, project_id, team_id=team_id)
+    monitoring_payload = get_project_monitoring_summary(
+        session_id,
+        project_id,
+        team_id=team_id,
+        window_start=window_start,
+        window_end=window_end,
+    )
     recent_change_state = classify_recent_change_state(monitoring_payload)
-    recent_changes = _overview_recent_changes(monitoring_payload, target_ids)
+    recent_changes = _overview_recent_changes(monitoring_payload, target_ids, log_context=log_context)
 
     payload = overview_payload_contract(project)
     payload["generated_at"] = _now()
@@ -250,10 +291,29 @@ def get_project_intel_overview(session_id: str, project_id: str, *, team_id: str
         snapshots_by_entity,
         findings_by_entity,
         recent_changes,
+        log_context=log_context,
     )
     payload["recent_changes"] = recent_changes[:_RECENT_CHANGE_LIMIT]
     payload["rollups"] = _overview_rollups(payload["targets"], recent_change_state)
+    log.debug("PROJECT_OVERVIEW_PAYLOAD_BUILT", extra={
+        **log_context,
+        "target_count": len(targets),
+        "snapshot_entity_count": len(snapshots_by_entity),
+        "finding_entity_count": len(findings_by_entity),
+        "recent_change_state": recent_change_state,
+        "recent_change_count": len(recent_changes),
+        "payload_target_count": len(payload["targets"]),
+        "target_truncated": target_truncated,
+    })
     return payload
+
+
+def _overview_log_context(session_id: str, team_id: str, project_id: str) -> dict[str, Any]:
+    return {
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+    }
 
 
 def _overview_snapshots_by_entity(conn, metadata_session: str, target_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -284,6 +344,7 @@ def _overview_findings_by_entity(
     placeholders = ",".join("?" for _ in target_ids)
     finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND COALESCE(f.team_id, '') = '' "
     finding_owner_params = (team_id,) if team_id else (session_id,)
+    triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
     rows = conn.execute(
         "SELECT f.id, COALESCE(f.entity_id, f.target_id) AS entity_id, f.target_id, "
         "COALESCE(NULLIF(f.severity, ''), 'info') AS severity, "
@@ -292,12 +353,12 @@ def _overview_findings_by_entity(
         "COALESCE(ftd.verification_status, 'not_started') AS verification_status, "
         "f.title, f.last_seen_at, f.created "
         "FROM findings f "
-        "LEFT JOIN finding_triage_details ftd ON ftd.finding_id = f.id "
+        "LEFT JOIN finding_triage_details ftd ON ftd.finding_id = f.id AND " + triage_owner_sql + " "  # nosec
         "WHERE (COALESCE(f.entity_id, f.target_id) IN (" + placeholders + ") "  # nosec
         "OR f.target_id IN (" + placeholders + ")) "  # nosec
         + finding_owner_sql
         + "ORDER BY f.last_seen_at DESC, f.created DESC",
-        (*target_ids, *target_ids, *finding_owner_params),
+        (*triage_owner_params, *target_ids, *target_ids, *finding_owner_params),
     ).fetchall()
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -324,6 +385,8 @@ def _overview_target_rows(
     snapshots_by_entity: dict[str, list[dict[str, Any]]],
     findings_by_entity: dict[str, list[dict[str, Any]]],
     recent_changes: list[dict[str, Any]],
+    *,
+    log_context: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     recent_targets = {target_id for change in recent_changes for target_id in change.get("target_ids", [])}
     rows = []
@@ -332,7 +395,9 @@ def _overview_target_rows(
         entity_type = str(target.get("type") or "")
         snapshots = snapshots_by_entity.get(entity_id, [])
         intel_summary = summarize_intel_snapshots(entity_type, snapshots)
-        intel_extract = _overview_intel_extract(snapshots)
+        intel_extract = _overview_intel_extract(snapshots, entity_id=entity_id, log_context=log_context)
+        has_intel = str(intel_summary.get("status") or "") == "available"
+        has_stale_intel = has_intel and _overview_snapshots_are_stale(snapshots)
         findings = findings_by_entity.get(entity_id, [])
         top_severity = highest_actionable_finding_severity(findings)
         hints = target_deep_link_hints(
@@ -349,7 +414,8 @@ def _overview_target_rows(
             "target_review_state": str(target.get("review_state") or "confirmed"),
             "source_flags": {
                 "project_target": True,
-                "has_intel": bool(snapshots),
+                "has_intel": has_intel,
+                "has_stale_intel": has_stale_intel,
                 "has_findings": bool(findings),
                 "has_recent_changes": entity_id in recent_targets,
             },
@@ -369,6 +435,18 @@ def _overview_target_rows(
         })
     rows.sort(key=_overview_target_sort_key)
     return rows
+
+
+def _overview_snapshots_are_stale(snapshots: list[dict[str, Any]]) -> bool:
+    usable_snapshots = [snapshot for snapshot in snapshots if _snapshot_has_intel(snapshot)]
+    if not usable_snapshots:
+        return False
+    expired_snapshots = [
+        snapshot
+        for snapshot in usable_snapshots
+        if _is_past_datetime(snapshot.get("expires_at"))
+    ]
+    return bool(expired_snapshots) and len(expired_snapshots) == len(usable_snapshots)
 
 
 def _overview_display_label(target: Mapping[str, Any]) -> str:
@@ -420,7 +498,12 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
     }
 
 
-def _overview_recent_changes(monitoring_payload: Mapping[str, Any] | None, target_ids: list[str]) -> list[dict[str, Any]]:
+def _overview_recent_changes(
+    monitoring_payload: Mapping[str, Any] | None,
+    target_ids: list[str],
+    *,
+    log_context: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(monitoring_payload, Mapping):
         return []
     target_id_set = set(target_ids)
@@ -434,32 +517,47 @@ def _overview_recent_changes(monitoring_payload: Mapping[str, Any] | None, targe
     for change in changes:
         if not isinstance(change, Mapping):
             continue
-        ids = [
-            str(item or "")
-            for item in change.get("target_ids", [])
-            if str(item or "") in target_id_set
-        ] if isinstance(change.get("target_ids"), list) else []
+        raw_target_ids = change.get("target_ids")
+        if isinstance(raw_target_ids, list):
+            normalized_ids = [str(item or "") for item in raw_target_ids if str(item or "")]
+            ids = [item for item in normalized_ids if item in target_id_set]
+            dropped_count = len(normalized_ids) - len(ids)
+            if dropped_count > 0:
+                log.warning("PROJECT_OVERVIEW_RECENT_CHANGE_TARGETS_DROPPED", extra={
+                    **dict(log_context or {}),
+                    "fire_id": str(change.get("fire_id") or change.get("id") or ""),
+                    "dropped_target_count": dropped_count,
+                    "matched_target_count": len(ids),
+                })
+        else:
+            ids = []
         result.append({
             "fire_id": str(change.get("fire_id") or change.get("id") or ""),
             "watcher_id": str(change.get("watcher_id") or ""),
             "severity": str(change.get("severity") or ""),
-            "state": str(change.get("state") or change.get("status") or ""),
+            "state": str(change.get("state") or change.get("status") or change.get("fire_kind") or ""),
             "target_ids": ids,
             "created": str(change.get("created") or ""),
         })
     return result
 
 
-def _overview_intel_extract(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+def _overview_intel_extract(
+    snapshots: list[dict[str, Any]],
+    *,
+    entity_id: str = "",
+    log_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     open_ports: list[int] = []
     services: list[str] = []
     cert_expires_at = ""
     cert_days: int | None = None
     has_cert_data = False
     latest_fetched = ""
-    for snapshot in snapshots:
+    invalid_cert_dates: dict[str, int] = defaultdict(int)
+    for snapshot in _overview_extraction_snapshots(snapshots):
         latest_fetched = max(latest_fetched, str(snapshot.get("fetched_at") or ""))
-        for payload in _provider_payloads(snapshot):
+        for provider, payload in _provider_payloads(snapshot, entity_id=entity_id, log_context=log_context):
             for port in _payload_ports(payload):
                 if port not in open_ports:
                     open_ports.append(port)
@@ -469,9 +567,20 @@ def _overview_intel_extract(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
             expiry = _certificate_expiry_from_payload(payload)
             if expiry:
                 has_cert_data = True
+                days_until = _days_until(expiry)
+                if days_until is None:
+                    invalid_cert_dates[provider] += 1
+                    continue
                 if not cert_expires_at or expiry < cert_expires_at:
                     cert_expires_at = expiry
-                    cert_days = _days_until(expiry)
+                    cert_days = days_until
+    for provider, invalid_count in invalid_cert_dates.items():
+        log.warning("PROJECT_OVERVIEW_CERT_DATE_PARSE_FAILED", extra={
+            **dict(log_context or {}),
+            "entity_id": entity_id,
+            "provider": provider,
+            "invalid_cert_date_count": invalid_count,
+        })
     open_ports.sort()
     services.sort(key=str.lower)
     return {
@@ -486,10 +595,85 @@ def _overview_intel_extract(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _provider_payloads(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _latest_snapshots_by_provider(snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_by_provider: dict[str, dict[str, Any]] = {}
+    for snapshot in snapshots:
+        provider = str(snapshot.get("provider") or "").strip().lower()
+        if not provider:
+            provider = str(snapshot.get("id") or "")
+        current = latest_by_provider.get(provider)
+        if current is None or str(snapshot.get("fetched_at") or "") > str(current.get("fetched_at") or ""):
+            latest_by_provider[provider] = snapshot
+    return sorted(
+        latest_by_provider.values(),
+        key=lambda snapshot: (str(snapshot.get("fetched_at") or ""), str(snapshot.get("provider") or "")),
+        reverse=True,
+    )
+
+
+def _overview_extraction_snapshots(snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_snapshots = _latest_snapshots_by_provider(snapshots)
+    fresh_snapshots = [
+        snapshot for snapshot in latest_snapshots
+        if _snapshot_has_intel(snapshot) and not _is_past_datetime(snapshot.get("expires_at"))
+    ]
+    return fresh_snapshots or latest_snapshots
+
+
+def _provider_payloads(
+    snapshot: Mapping[str, Any],
+    *,
+    entity_id: str = "",
+    log_context: Mapping[str, Any] | None = None,
+) -> list[tuple[str, dict[str, Any]]]:
     data = snapshot.get("data") if isinstance(snapshot.get("data"), Mapping) else {}
     providers = data.get("providers") if isinstance(data, Mapping) else {}
-    return [payload for payload in providers.values() if isinstance(payload, dict)] if isinstance(providers, dict) else []
+    if not isinstance(providers, dict):
+        _log_skipped_provider_payload(
+            snapshot,
+            entity_id,
+            provider="",
+            payload=providers,
+            log_context=log_context,
+        )
+        return []
+    payloads = []
+    for provider, payload in providers.items():
+        provider_id = str(provider or "")
+        if isinstance(payload, dict):
+            payloads.append((provider_id, payload))
+        else:
+            _log_skipped_provider_payload(
+                snapshot,
+                entity_id,
+                provider=provider_id,
+                payload=payload,
+                log_context=log_context,
+            )
+    return payloads
+
+
+def _log_skipped_provider_payload(
+    snapshot: Mapping[str, Any],
+    entity_id: str,
+    *,
+    provider: str,
+    payload: object,
+    log_context: Mapping[str, Any] | None = None,
+) -> None:
+    status = str(snapshot.get("status") or "")
+    event_extra = {
+        **dict(log_context or {}),
+        "entity_id": entity_id,
+        "snapshot_id": str(snapshot.get("id") or ""),
+        "provider": provider,
+        "status": status,
+        "shape": type(payload).__name__,
+    }
+    if status == "ok":
+        log.warning("PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED", extra=event_extra)
+    else:
+        log.debug("PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED", extra=event_extra)
 
 
 def _payload_ports(payload: Mapping[str, Any]) -> list[int]:
@@ -560,14 +744,32 @@ def _clean_date(value: object) -> str:
 
 
 def _days_until(value: str) -> int | None:
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
+    parsed = _parse_overview_datetime(value)
+    if parsed is None:
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
     delta = parsed - datetime.now(timezone.utc)
     return delta.days
+
+
+def _is_past_datetime(value: object) -> bool:
+    parsed = _parse_overview_datetime(value)
+    return parsed is not None and parsed < datetime.now(timezone.utc)
+
+
+def _parse_overview_datetime(value: object) -> datetime | None:
+    rendered = _clean_date(value)
+    if not rendered:
+        return None
+    try:
+        parsed = datetime.fromisoformat(rendered)
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(rendered)
+        except (TypeError, ValueError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _int_value(value: object) -> int | None:

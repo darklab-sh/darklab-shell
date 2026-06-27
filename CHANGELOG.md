@@ -14,11 +14,11 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Overview rows use existing Atlas `entity_id` values as their merge/filter identity, keep `host` targets mapped through the current domain/IP canonicalization path, and keep fallback `type:value` strings display-only.
   - Certificate status keeps `unknown` separate from healthy, finding rollups use the same severity order as the Project workspace UI, and deep-link hints use existing Entities/Findings query params instead of a new filter dialect.
   - The backend overview aggregator returns bounded target rows with open ports, services, certificate status, provider highlights, finding counts, top actionable severity, recent-change markers, and deep-link hints while preserving personal/team scope.
-  - `GET /projects/<project_id>/overview` exposes the overview payload with the same Project owner/team scoping as the existing summary and workspace routes.
-  - The Projects modal now includes an Overview tab that lazily loads the overview payload, shows target/port/service/finding/certificate rollups, keeps unknown certificates visually distinct from healthy certificates, and opens existing Entities/Findings tabs with backend-provided filter hints.
+  - `GET /projects/<project_id>/overview` exposes the overview payload with the same Project owner/team scoping as the existing summary and workspace routes, accepts digest-window parameters when users need the same bounded recent-change view as a notification, ignores stale expired provider certificate data when fresh provider intel is available for the same target, and emits bounded structured logs for successful views, scoped misses, route failures, overview truncation, degraded source data, and browser-side load failures.
+  - The Projects modal now includes an Overview tab that lazily loads the overview payload, shows target/port/service/finding/certificate rollups, keeps unknown certificates visually distinct from healthy certificates, labels stale cached provider data separately from missing intel, and opens existing Entities/Findings tabs with backend-provided filter hints.
   - Live TLS certificate intel now checks the served certificate on port 443 without an API key, giving Project Overview a current certificate-expiry source that does not depend on crt.sh availability.
   - crt.sh intel snapshots still preserve bounded certificate rows and expiry dates when the public service responds, while temporary crt.sh timeouts and 5xx responses are surfaced as upstream outages instead of implying a target has no certificate data.
-  - **Tests:** focused backend, route, browser-module, and Playwright coverage verifies the payload skeleton, host-to-domain/IP mapping, Atlas entity identity, review/suppression/verification rollups, certificate status buckets, recent-change states, deep-link hint shape, populated target rollups, route-level 404s, team-scope access, Overview tab rendering, desktop/mobile Overview smoke paths, deep-link filter actions, suppressed-target exclusion, and cross-scope protection.
+  - **Tests:** focused backend, route, browser-module, and Playwright coverage verifies the payload skeleton, host-to-domain/IP mapping, Atlas entity identity, review/suppression/verification rollups, certificate status buckets, RFC/OpenSSL-style certificate dates, stale provider data, fresh-vs-stale certificate selection, recent-change states, monitoring-target change markers, deep-link hint shape, populated and empty target rollups, neutral unknown-cert/no-intel/not-monitored UI states, route-level 404s, structured route/build logs, degraded-source warning logs, browser load-failure levels, stable load-error rendering, team-scope access, Overview tab rendering, desktop/mobile Overview smoke paths, source-mode Overview lazy loading, real Overview endpoint browser loading, deep-link filter actions, filter reset behavior, run/review-state hints, mobile Findings hints, suppressed-target exclusion, and cross-scope protection.
 
 - **Workspace file operations are stricter and more reliable** — Terminal folder creation and app-mediated moves now fail clearly instead of reporting false success or leaving partial files behind.
   - `mkdir` and `file add-dir` now use the ESM-exported workspace directory creator directly, and missing workspace handlers return a visible terminal error instead of printing a fake success line.
@@ -96,6 +96,23 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **External tool integration has a phased implementation plan** — the TODO list now lays out Dockerfile installs, command-registry work, output/finding/Atlas capture, app-native InternetDB/FOFA/ZoomEye providers, the safe JSON/JSONL selector, Nuclei template provenance, documentation, and verification in separate shippable phases.
   - Completed Docker image tooling and command-registry phases stay in the TODO plan as historical reference points so the remaining phases can be compared against the shipped implementation without renumbering drift.
+
+### Fixed
+
+- **Project Overview handles common certificate date formats** — Certificate expiry parsing now accepts RFC/OpenSSL-style dates such as `Jun 25 12:00:00 2026 GMT` in addition to ISO timestamps, so provider data with that format no longer falls back to `Cert: Unknown`.
+  - **Tests:** focused backend coverage verifies Project Overview classifies an RFC/OpenSSL-style certificate expiry as healthy when it is still in the future.
+
+- **Project Overview summary wording is clearer** — The finding rollup card now reads `High-risk targets` instead of `Finding signal`, making it clear the count is targets with critical/high top severity rather than a raw finding total.
+
+- **Project Overview labels stale provider data** — Targets whose usable cached provider snapshots are all past their refresh window now show `Intel: Stale` instead of looking the same as fresh intel or missing intel.
+  - **Tests:** focused backend coverage verifies stale-only provider snapshots set the stale flag while mixed fresh/stale snapshots stay fresh, and browser-module coverage verifies the stale intel chip renders.
+
+- **Project Overview recent-change cards avoid unused state classes** — The Recent changes summary card now stays neutral while the dedicated recent-state badge carries the Windowed, Watcher context, or Not monitored styling, keeping the Overview markup aligned with the visible UI.
+
+- **Project Overview attention cards use the theme caution color** — Overview summary cards now use the shared amber semantic token instead of an undefined warning token with a hard-coded fallback, keeping the styling consistent across themes.
+
+- **Project Overview finding rollups stay owner-scoped** — Overview finding counts and verification totals now join finding triage rows through the same personal/team owner filter as the rest of Projects, so a finding with both personal and team triage metadata is counted once in the active scope.
+  - **Tests:** focused backend coverage seeds a foreign team triage row for the same finding and verifies the personal Overview rollup keeps review and verification counts scoped correctly.
 
 ## [2.2] — 2026-06-16
 

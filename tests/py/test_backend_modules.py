@@ -3045,6 +3045,20 @@ class TestProjectOverviewContract:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (f"triage-{finding_id}", "tok_overview_rollup", finding_id, verification, now, now),
                 )
+            conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, team_id, finding_id, verification_status, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "triage-overview-foreign-team",
+                    "tok_overview_foreign",
+                    "team-overview-foreign",
+                    "finding-overview-high",
+                    "verified",
+                    now,
+                    now,
+                ),
+            )
             conn.commit()
 
         overview = project_workspace.get_project_intel_overview("tok_overview_rollup", project["id"])
@@ -3062,13 +3076,406 @@ class TestProjectOverviewContract:
         assert target_row["services"] == ["http", "https"]
         assert target_row["certificate"]["status"] == "healthy"
         assert target_row["top_finding_severity"] == "high"
+        assert target_row["finding_counts"]["by_review_state"]["new"] == 1
         assert target_row["finding_counts"]["by_review_state"]["false_positive"] == 1
         assert target_row["finding_counts"]["suppressed"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["not_started"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["verified"] == 1
         assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 1
         assert target_row["intel_summary"]["providers_with_data"] == ["censys"]
         assert target_row["deep_link_hints"]["findings"]["target_id"] == target["id"]
         assert quiet_row["certificate"]["status"] == "unknown"
         assert quiet_row["source_flags"]["has_intel"] is False
+
+    def test_get_project_intel_overview_marks_stale_provider_data(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_stale", {"name": "Overview Stale"})
+        assert project is not None
+        stale_target = project_workspace.add_project_target(
+            "tok_overview_stale",
+            project["id"],
+            {"type": "domain", "value": "stale.example.com"},
+        )
+        assert stale_target is not None
+        mixed_target = project_workspace.add_project_target(
+            "tok_overview_stale",
+            project["id"],
+            {"type": "domain", "value": "mixed.example.com"},
+        )
+        assert mixed_target is not None
+        now = datetime.now(timezone.utc)
+        expired_at = (now - timedelta(days=1)).isoformat()
+        fresh_at = (now + timedelta(days=1)).isoformat()
+        with database.db_connect() as conn:
+            for snapshot_id, target_id, provider, expires_at in (
+                ("snap-overview-stale", stale_target["id"], "censys", expired_at),
+                ("snap-overview-mixed-stale", mixed_target["id"], "censys", expired_at),
+                ("snap-overview-mixed-fresh", mixed_target["id"], "shodan", fresh_at),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_intel_snapshots "
+                    "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                    "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                    (
+                        snapshot_id,
+                        "tok_overview_stale",
+                        target_id,
+                        provider,
+                        f"{provider} summary",
+                        json.dumps({
+                            "providers": {provider: {"ports": [443]}},
+                            "summary": {"has_intel": True, "providers_with_data": [provider]},
+                        }),
+                        now.isoformat(),
+                        expires_at,
+                    ),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_stale", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        stale_row = rows_by_id[stale_target["id"]]
+        mixed_row = rows_by_id[mixed_target["id"]]
+        assert stale_row["source_flags"]["has_intel"] is True
+        assert stale_row["source_flags"]["has_stale_intel"] is True
+        assert mixed_row["source_flags"]["has_intel"] is True
+        assert mixed_row["source_flags"]["has_stale_intel"] is False
+
+    def test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_multi_snapshot", {"name": "Overview Multi Snapshot"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_multi_snapshot",
+            project["id"],
+            {"type": "domain", "value": "multi-snapshot.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        older_fetched = (now - timedelta(days=3)).isoformat()
+        newer_fetched = (now - timedelta(hours=1)).isoformat()
+        old_expiry = (now - timedelta(days=20)).isoformat()
+        latest_expiry = (now + timedelta(days=45)).isoformat()
+        with database.db_connect() as conn:
+            for snapshot_id, provider, fetched_at, expires_at, ports in (
+                ("snap-overview-old-expired", "censys", older_fetched, old_expiry, [80]),
+                ("snap-overview-new-healthy", "tls_certificate", newer_fetched, latest_expiry, [443]),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_intel_snapshots "
+                    "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                    "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                    (
+                        snapshot_id,
+                        "tok_overview_multi_snapshot",
+                        target["id"],
+                        provider,
+                        "Censys multi snapshot",
+                        json.dumps({
+                            "providers": {
+                                provider: {
+                                    "ports": ports,
+                                    "services": ["https" if 443 in ports else "http"],
+                                    "certificate": {"not_after": expires_at},
+                                },
+                            },
+                            "summary": {"has_intel": True, "providers_with_data": [provider]},
+                        }),
+                        fetched_at,
+                        expires_at,
+                    ),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_multi_snapshot", project["id"])
+
+        assert overview is not None
+        target_row = overview["targets"][0]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["certificate"]["expires_at"] == latest_expiry
+        assert target_row["certificate"]["days_until_expiry"] is not None
+        assert target_row["certificate"]["days_until_expiry"] > 30
+        assert target_row["certificate"]["last_checked_at"] == newer_fetched
+        assert target_row["open_ports"] == [443]
+        assert target_row["services"] == ["https"]
+        assert target_row["source_flags"]["has_stale_intel"] is False
+
+    def test_get_project_intel_overview_logs_build_and_truncation_context(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
+        from services.projects import overview as overview_service
+
+        self._project_db(monkeypatch, tmp_path)
+        monkeypatch.setattr(overview_service, "OVERVIEW_TARGET_LIMIT", 2)
+        project = project_workspace.create_project("tok_overview_logs", {"name": "Overview Logs"})
+        assert project is not None
+        for index in range(overview_service.OVERVIEW_TARGET_LIMIT + 1):
+            created = project_workspace.add_project_target(
+                "tok_overview_logs",
+                project["id"],
+                {"type": "domain", "value": f"target-{index}.example.com"},
+            )
+            assert created is not None
+
+        with mock.patch.object(overview_service.log, "debug") as debug_log, \
+             mock.patch.object(overview_service.log, "warning") as warning_log:
+            overview = project_workspace.get_project_intel_overview("tok_overview_logs", project["id"])
+
+        assert overview is not None
+        assert overview["rollups"]["target_count"] == overview_service.OVERVIEW_TARGET_LIMIT
+        started = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_BUILD_STARTED",))
+        assert started.kwargs["extra"] == {
+            "session": get_log_session_id("tok_overview_logs"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_limit": overview_service.OVERVIEW_TARGET_LIMIT,
+            "windowed": False,
+        }
+        limit_reached = next(
+            call for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_TARGET_LIMIT_REACHED",)
+        )
+        assert limit_reached.kwargs["extra"] == {
+            "session": get_log_session_id("tok_overview_logs"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_limit": overview_service.OVERVIEW_TARGET_LIMIT,
+            "loaded_target_count": overview_service.OVERVIEW_TARGET_LIMIT + 1,
+        }
+        built = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_PAYLOAD_BUILT",))
+        assert built.kwargs["extra"] == {
+            "session": get_log_session_id("tok_overview_logs"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_count": overview_service.OVERVIEW_TARGET_LIMIT,
+            "snapshot_entity_count": 0,
+            "finding_entity_count": 0,
+            "recent_change_state": "not-monitored",
+            "recent_change_count": 0,
+            "payload_target_count": overview_service.OVERVIEW_TARGET_LIMIT,
+            "target_truncated": True,
+        }
+
+    def test_get_project_intel_overview_logs_degraded_source_data(self, monkeypatch, tmp_path):
+        from core.helpers import get_log_session_id
+        from services.projects import overview as overview_service
+
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_degraded", {"name": "Overview Degraded"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_degraded",
+            project["id"],
+            {"type": "domain", "value": "degraded.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-degraded-ok",
+                    "tok_overview_degraded",
+                    target["id"],
+                    "badshape",
+                    "Bad shape summary",
+                    json.dumps({
+                        "providers": {
+                            "badshape": ["not", "a", "payload"],
+                            "baddate": {"latest_expiry": "not a date"},
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["badshape", "baddate"]},
+                    }),
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'error', ?, ?, ?, ?)",
+                (
+                    "snap-overview-degraded-error",
+                    "tok_overview_degraded",
+                    target["id"],
+                    "nonfatal",
+                    "Nonfatal summary",
+                    json.dumps({"providers": {"nonfatal": "not a payload"}}),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        monitoring_payload = {
+            "summary": {
+                "top_changes": [{
+                    "fire_id": "fire-overview-dropped",
+                    "watcher_id": "watch-overview-dropped",
+                    "severity": "critical",
+                    "state": "changed",
+                    "target_ids": [target["id"], "ent_deleted_target"],
+                    "created": now,
+                }]
+            },
+            "monitors": [{"id": "watch-overview-dropped"}],
+            "timeline": [],
+        }
+        monkeypatch.setattr(overview_service, "get_project_monitoring_summary", lambda *args, **kwargs: monitoring_payload)
+
+        with mock.patch.object(overview_service.log, "warning") as warning_log, \
+             mock.patch.object(overview_service.log, "debug") as debug_log:
+            overview = project_workspace.get_project_intel_overview("tok_overview_degraded", project["id"])
+
+        assert overview is not None
+        assert overview["recent_changes"][0]["target_ids"] == [target["id"]]
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["PROJECT_OVERVIEW_RECENT_CHANGE_TARGETS_DROPPED"] == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "fire_id": "fire-overview-dropped",
+            "dropped_target_count": 1,
+            "matched_target_count": 1,
+        }
+        assert warning_events["PROJECT_OVERVIEW_CERT_DATE_PARSE_FAILED"] == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_id": target["id"],
+            "provider": "baddate",
+            "invalid_cert_date_count": 1,
+        }
+        skipped_warnings = [
+            call.kwargs["extra"] for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED",)
+        ]
+        assert skipped_warnings == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_id": target["id"],
+            "snapshot_id": "snap-overview-degraded-ok",
+            "provider": "badshape",
+            "status": "ok",
+            "shape": "list",
+        }]
+        skipped_debug = [
+            call.kwargs["extra"] for call in debug_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED",)
+        ]
+        assert skipped_debug == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_id": target["id"],
+            "snapshot_id": "snap-overview-degraded-error",
+            "provider": "nonfatal",
+            "status": "error",
+            "shape": "str",
+        }]
+
+    def test_get_project_intel_overview_marks_recent_changes_from_monitoring_targets(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        db_path = self._project_db(monkeypatch, tmp_path)
+        monkeypatch.setattr(database, "CFG", {
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+            "watchers": {"max_per_session": 32},
+        })
+        project = project_workspace.create_project("tok_overview_recent", {"name": "Overview Recent"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_recent",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        quiet_target = project_workspace.add_project_target(
+            "tok_overview_recent",
+            project["id"],
+            {"type": "domain", "value": "quiet.example.com"},
+        )
+        assert quiet_target is not None
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_overview_recent", "2026-05-20T10:00:00+00:00", ""),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run_overview_recent",
+                    "tok_overview_recent",
+                    "nmap -sV api.example.com",
+                    "2026-05-20T10:00:00+00:00",
+                    "2026-05-20T10:00:01+00:00",
+                    0,
+                    json.dumps(["443/tcp open https api.example.com"]),
+                    1,
+                ),
+            )
+            watcher = watcher_service.create_watcher(
+                "tok_overview_recent",
+                command_text="nmap -sV api.example.com",
+                project_id=project["id"],
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            fire = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_overview_recent",
+                diff_summary={
+                    "classifier": "ports",
+                    "added_port_count": 1,
+                    "added_ports": [{
+                        "key": "443/tcp",
+                        "port": "443",
+                        "proto": "tcp",
+                        "state": "open",
+                        "service": "https",
+                    }],
+                },
+                diff_kind="signal",
+                state_at_fire="changed",
+                state_reason="diff_detected",
+                fire_kind="changed",
+            )
+            watcher_service.set_watcher_state(
+                watcher.id,
+                state="changed",
+                state_reason="diff_detected",
+                last_run_id="run_overview_recent",
+                consecutive_changed=1,
+                conn=conn,
+            )
+            conn.commit()
+
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        overview = project_workspace.get_project_intel_overview("tok_overview_recent", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        target_row = rows_by_id[target["id"]]
+        quiet_row = rows_by_id[quiet_target["id"]]
+        assert overview["rollups"]["recent_change_state"] == "watcher-context-only"
+        assert overview["recent_changes"][0]["fire_id"] == fire.id
+        assert overview["recent_changes"][0]["target_ids"] == [target["id"]]
+        assert target_row["source_flags"]["has_recent_changes"] is True
+        assert target_row["recent_change_markers"][0]["fire_id"] == fire.id
+        assert target_row["recent_change_markers"][0]["target_ids"] == [target["id"]]
+        assert quiet_row["source_flags"]["has_recent_changes"] is False
+        assert quiet_row["recent_change_markers"] == []
 
     def test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -3121,6 +3528,53 @@ class TestProjectOverviewContract:
         target_row = overview["targets"][0]
         assert target_row["certificate"]["status"] == "healthy"
         assert target_row["certificate"]["expires_at"] == latest_expiry
+        assert target_row["certificate"]["days_until_expiry"] is not None
+
+    def test_project_intel_overview_parses_rfc_certificate_dates(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_cert_rfc", {"name": "Overview Cert RFC"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_cert_rfc",
+            project["id"],
+            {"type": "domain", "value": "rfc.example.com"},
+        )
+        assert target is not None
+        rfc_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).strftime("%b %d %H:%M:%S %Y GMT")
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
+                (
+                    "snap-overview-rfc-cert",
+                    "tok_overview_cert_rfc",
+                    target["id"],
+                    "tls_certificate",
+                    "TLS certificate summary",
+                    json.dumps({
+                        "providers": {
+                            "tls_certificate": {
+                                "certificate_count": 1,
+                                "latest_expiry": rfc_expiry,
+                                "certificates": [{"not_after": rfc_expiry, "names": ["rfc.example.com"]}],
+                            },
+                        },
+                        "summary": {"has_intel": True, "providers_with_data": ["tls_certificate"]},
+                    }),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_cert_rfc", project["id"])
+
+        assert overview is not None
+        target_row = overview["targets"][0]
+        assert target_row["certificate"]["status"] == "healthy"
+        assert target_row["certificate"]["expires_at"] == rfc_expiry
         assert target_row["certificate"]["days_until_expiry"] is not None
 
     def test_get_project_intel_overview_respects_scope_and_suppression(self, monkeypatch, tmp_path):

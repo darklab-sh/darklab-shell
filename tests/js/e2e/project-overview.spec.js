@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady } from './helpers.js'
+import { browserSessionId, ensurePromptReady, seedProjectOverviewFixture } from './helpers.js'
 
 const PROJECT_ID = 'project-overview'
 const TARGET_ID = 'ent_overview_1'
@@ -204,6 +204,44 @@ async function openMobileProjects(page) {
   await expect(page.locator('#project-mobile-body')).not.toContainText('Loading projects...')
 }
 
+async function createRealOverviewProject(page, testInfo) {
+  const projectName = `Real Overview ${Date.now()}`
+  const targetValue = `overview-${Date.now()}.example.com`
+  await page.goto('/')
+  await ensurePromptReady(page)
+  const sessionId = await browserSessionId(page)
+  const created = await page.evaluate(async ({ name, value }) => {
+    const projectResp = await apiFetch('/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!projectResp.ok) throw new Error(`project create failed: ${projectResp.status}`)
+    const project = (await projectResp.json()).project
+    const activeResp = await apiFetch('/projects/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: project.id }),
+    })
+    if (!activeResp.ok) throw new Error(`active project failed: ${activeResp.status}`)
+    const targetResp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/targets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'domain', value }),
+    })
+    if (!targetResp.ok) throw new Error(`target create failed: ${targetResp.status}`)
+    const target = (await targetResp.json()).target
+    return { project, target }
+  }, { name: projectName, value: targetValue })
+  seedProjectOverviewFixture(testInfo, {
+    sessionId,
+    projectId: created.project.id,
+    targetId: created.target.id,
+    targetValue,
+  })
+  return { projectId: created.project.id, targetId: created.target.id, targetValue }
+}
+
 test.describe('project overview browser contract', () => {
   test('renders a populated desktop Overview and deep-links to filtered Findings', async ({ page }) => {
     await installProjectOverviewFixture(page)
@@ -233,6 +271,42 @@ test.describe('project overview browser contract', () => {
         && path.includes('severity=high')
       ))
     }, { targetId: TARGET_ID })).toBe(true)
+  })
+
+  test('uses the real Overview endpoint and filters Findings by backend target id', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    const fixture = await createRealOverviewProject(page, testInfo)
+    const overviewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${fixture.projectId}/overview`
+    })
+    await page.locator('.rail-nav [data-action="projects"]').click()
+    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+
+    const overviewTab = page.locator('[data-project-tab="overview"]')
+    await overviewTab.click()
+    expect((await overviewResponse).ok()).toBe(true)
+
+    const overview = page.locator('.project-overview-root')
+    await expect(overview.locator('.project-overview-target-title')).toHaveText(fixture.targetValue)
+    await expect(overview.locator('.project-overview-target-detail')).toContainText('443')
+    await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
+    await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
+
+    const findingsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${fixture.projectId}/findings`
+        && url.searchParams.get('target_id') === fixture.targetId
+        && url.searchParams.get('severity') === 'high'
+    })
+    await overview.locator('[data-project-overview-action="findings"]').click()
+    expect((await findingsResponse).ok()).toBe(true)
+    await expect(page.locator('[data-project-tab="findings"]')).toHaveClass(/\bis-active\b/)
+    await expect(page.locator('.project-explorer-item-title')).toContainText('Real Overview filtered finding')
+    await expect(page.locator('#project-explorer-body')).not.toContainText('No findings')
   })
 })
 
