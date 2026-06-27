@@ -9,6 +9,7 @@ import {
   activateTab as importedActivateTab,
   clearTab as importedClearTab,
   createTab as importedCreateTab,
+  _getTabPanelEl as importedGetTabPanelEl,
   getOutput as importedGetOutput,
   setTabLabel as importedSetTabLabel,
   setTabRunningCommand as importedSetTabRunningCommand,
@@ -19,6 +20,11 @@ import {
   appendCommandEcho as importedAppendCommandEcho,
   confirmKill as importedConfirmKill,
 } from './runner.js';
+import {
+  _readRunErrorMessage as importedReadRunErrorMessage,
+  _sseMessageFromChunk as importedSseMessageFromChunk,
+} from './runner_bridge.js';
+import { getClientId as importedGetClientId } from './session.js';
 import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from './features/workspace/workspace_autocomplete_cache.js';
 import { _workspaceCwd as importedWorkspaceCwd } from './features/runner/runner_workspace.js';
 import { addToRecentPreview as importedAddToRecentPreview } from './features/history/history_recall.js';
@@ -180,12 +186,14 @@ function _ptySetRunButtonDisabled(disabled) {
 }
 
 function _ptyReadRunErrorMessage(resp) {
-  const read = _ptyGlobalFunction('_readRunErrorMessage');
+  const read = (typeof importedReadRunErrorMessage === 'function' && importedReadRunErrorMessage)
+    || _ptyGlobalFunction('_readRunErrorMessage');
   return read ? read(resp) : Promise.resolve('');
 }
 
 function _ptySseMessageFromChunk(part) {
-  const parse = _ptyGlobalFunction('_sseMessageFromChunk');
+  const parse = (typeof importedSseMessageFromChunk === 'function' && importedSseMessageFromChunk)
+    || _ptyGlobalFunction('_sseMessageFromChunk');
   if (parse) return parse(part);
   let eventId = '';
   const dataLines = [];
@@ -681,6 +689,7 @@ function _ptySendInput(runId, data, tabId = '') {
 }
 
 function _ptyCurrentClientId() {
+  if (typeof importedGetClientId === 'function') return String(importedGetClientId() || '');
   return String(_ptyGlobalValue('CLIENT_ID') || '');
 }
 
@@ -805,7 +814,8 @@ function _ptySessionForOverlay(overlay) {
 
 function _ptyPanelForTab(tabId) {
   if (!tabId) return null;
-  const getPanel = _ptyGlobalFunction('getTabPanel');
+  const getPanel = (typeof importedGetTabPanelEl === 'function' && importedGetTabPanelEl)
+    || _ptyGlobalFunction('getTabPanel');
   if (getPanel) return getPanel(tabId);
   return Array.from(document.querySelectorAll('.tab-panel'))
     .find(panel => panel.dataset && panel.dataset.id === String(tabId)) || null;

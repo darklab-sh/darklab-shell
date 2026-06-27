@@ -15,6 +15,15 @@ import {
   toggleHistoryPanelSurface as importedToggleHistoryPanelSurface,
 } from './controller.js';
 import { openWorkspace as importedOpenWorkspace } from './workspace.js';
+import {
+  loadAtlasOverlay as importedLoadAtlasOverlay,
+  loadCommandRegistry as importedLoadCommandRegistry,
+  loadFindingsBoard as importedLoadFindingsBoard,
+  loadSchedulesModal as importedLoadSchedulesModal,
+  loadWatchersModal as importedLoadWatchersModal,
+} from './core/lazy_assets.js';
+import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
+import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js';
 import { setProjectContextHandlers as importedSetProjectContextHandlers } from './features/projects/project_context_bridge.js';
 import { setProjectHudHandlers as importedSetProjectHudHandlers } from './features/projects/project_hud_bridge.js';
 import { DarklabProjectActiveContext as importedProjectActiveContext } from './features/projects/project_active_context.js';
@@ -54,6 +63,7 @@ import {
   logClientError as importedLogClientError,
   maskSessionToken as importedMaskSessionToken,
 } from './session.js';
+import { openStatusMonitor as importedRuntimeOpenStatusMonitor } from './runtime_bridge.js';
 import { confirmKill as importedConfirmKill } from './runner_bridge.js';
 import {
   getHudClockPreference as importedGetHudClockPreference,
@@ -80,12 +90,7 @@ import {
 } from './ui/ui_helpers.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
 
-let importedOpenAtlas;
-let importedOpenFindingsBoard;
-let importedOpenCommandRegistry;
-let importedOpenSchedulesModal;
-let importedOpenStatusMonitor;
-let importedOpenWatchersModal;
+let importedOpenStatusMonitor = importedRuntimeOpenStatusMonitor;
 let importedProjectActivity;
 let importedProjectArtifacts;
 let importedProjectDetails;
@@ -155,6 +160,41 @@ let importedProjectWorkspaceShell;
   };
   const _shellEmitUiEvent = (...args) => _shellFn('emitUiEvent', importedEmitUiEvent)?.(...args);
   const _shellOnUiEvent = (...args) => _shellFn('onUiEvent', importedOnUiEvent)?.(...args);
+
+  async function _shellLoadLazyModal(importedLoader, globalLoaderName) {
+    const loader = _shellFn(globalLoaderName, importedLoader);
+    return typeof loader === 'function' ? loader() : null;
+  }
+
+  async function _shellOpenAtlas(...args) {
+    const atlas = await _shellLoadLazyModal(importedLoadAtlasOverlay, 'loadAtlasOverlay');
+    const open = atlas?.openAtlas || _shellFn('openAtlas', importedOpenAtlas);
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenCommandRegistry(...args) {
+    const registry = await _shellLoadLazyModal(importedLoadCommandRegistry, 'loadCommandRegistry');
+    const open = registry?.openCommandRegistry || _shellFn('openCommandRegistry', importedOpenCommandRegistry);
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenFindingsBoard(...args) {
+    const board = await _shellLoadLazyModal(importedLoadFindingsBoard, 'loadFindingsBoard');
+    const open = board?.openFindingsBoard || _shellFn('openFindingsBoard');
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenSchedulesModal(...args) {
+    const schedules = await _shellLoadLazyModal(importedLoadSchedulesModal, 'loadSchedulesModal');
+    const open = schedules?.openSchedulesModal || _shellFn('openSchedulesModal');
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenWatchersModal(...args) {
+    const watchers = await _shellLoadLazyModal(importedLoadWatchersModal, 'loadWatchersModal');
+    const open = watchers?.openWatchersModal || _shellFn('openWatchersModal');
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
 
   function _shellActiveTeamScopeCan(capability) {
     const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan) || null;
@@ -659,6 +699,46 @@ let importedProjectWorkspaceShell;
     }
   }
 
+  function openStatusMonitorFromHud(source) {
+    const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
+    if (typeof openStatusMonitor !== 'function') return;
+    void openStatusMonitor({ source });
+  }
+
+  function makeHudCellOpenStatusMonitor(cell, source, label) {
+    if (!cell || cell.dataset.statusMonitorTrigger === '1') return;
+    cell.dataset.statusMonitorTrigger = '1';
+    cell.classList.add('hud-cell-clickable', 'hud-action-cell');
+    cell.setAttribute('role', 'button');
+    cell.setAttribute('tabindex', '0');
+    cell.setAttribute('aria-haspopup', 'dialog');
+    cell.setAttribute('aria-label', label);
+    cell.addEventListener('click', () => openStatusMonitorFromHud(source));
+    cell.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openStatusMonitorFromHud(source);
+    });
+  }
+
+  function bindHudStatusMonitorTriggers() {
+    makeHudCellOpenStatusMonitor(
+      document.getElementById('hud-status-cell'),
+      'status',
+      'Open status monitor from status',
+    );
+    makeHudCellOpenStatusMonitor(
+      document.getElementById('hud-last-exit-cell') || document.getElementById('hud-last-exit')?.closest('.hud-cell'),
+      'last-exit',
+      'Open status monitor from last exit',
+    );
+    makeHudCellOpenStatusMonitor(
+      document.getElementById('hud-tabs-cell') || document.getElementById('hud-tabs')?.closest('.hud-cell'),
+      'tabs',
+      'Open status monitor from tabs',
+    );
+  }
+
   railNav?.addEventListener('click', e => {
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
@@ -677,34 +757,29 @@ let importedProjectWorkspaceShell;
       importedToggleHistoryPanelSurface();
       return;
     }
-    const openAtlas = _shellFn('openAtlas', importedOpenAtlas);
-    const openFindingsBoard = _shellFn('openFindingsBoard', importedOpenFindingsBoard);
     const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
-    const openCommandRegistry = _shellFn('openCommandRegistry', importedOpenCommandRegistry);
-    const openSchedulesModal = _shellFn('openSchedulesModal', importedOpenSchedulesModal);
-    const openWatchersModal = _shellFn('openWatchersModal', importedOpenWatchersModal);
-    if (action === 'atlas' && typeof openAtlas === 'function') {
-      void openAtlas({ source: 'rail' });
+    if (action === 'atlas') {
+      void _shellOpenAtlas({ source: 'rail' });
       return;
     }
-    if (action === 'findings-board' && typeof openFindingsBoard === 'function') {
-      void openFindingsBoard({ source: 'rail' });
+    if (action === 'findings-board') {
+      void _shellOpenFindingsBoard({ source: 'rail' });
       return;
     }
     if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
       void openStatusMonitor({ source: 'rail' });
       return;
     }
-    if (action === 'command-registry' && typeof openCommandRegistry === 'function') {
-      openCommandRegistry();
+    if (action === 'command-registry') {
+      void _shellOpenCommandRegistry();
       return;
     }
-    if (action === 'schedules' && typeof openSchedulesModal === 'function') {
-      void openSchedulesModal();
+    if (action === 'schedules') {
+      void _shellOpenSchedulesModal();
       return;
     }
-    if (action === 'watchers' && typeof openWatchersModal === 'function') {
-      void openWatchersModal();
+    if (action === 'watchers') {
+      void _shellOpenWatchersModal();
       return;
     }
     if (action === 'projects') {
@@ -1670,7 +1745,7 @@ let importedProjectWorkspaceShell;
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
       downloadUrlAsAttachment: _downloadUrlAsAttachment,
       closeProjectWorkspace,
-      openAtlas: _shellFn('openAtlas', importedOpenAtlas),
+      openAtlas: _shellOpenAtlas,
       projectDisplayName: _projectDisplayName,
       setWorkspaceTab: projectWorkspaceState.setTab,
     });
@@ -2743,7 +2818,7 @@ let importedProjectWorkspaceShell;
       mobileView: () => _projectMobileShellController().currentView(),
       openProjectEntityEditor: _openProjectEntityEditor,
       openProjectEntityInAtlas: _openProjectEntityInAtlas,
-      openFindingsBoard: _shellFn('openFindingsBoard'),
+      openFindingsBoard: _shellOpenFindingsBoard,
       openProjectEntityPicker: _openProjectEntityPicker,
       openProjectMobileActionSheet: _openProjectMobileActionSheet,
       openProjectMobileCompareSheet: _openProjectMobileCompareSheet,
@@ -4309,6 +4384,7 @@ let importedProjectWorkspaceShell;
   applyWidth();
   applySectionsState();
   renderRailRecent();
+  bindHudStatusMonitorTriggers();
   const ensureWorkflowCatalogLoadedFn = (
     typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('ensureWorkflowCatalogLoaded')
   ) ? importedEnsureWorkflowCatalogLoaded : _shellFn('ensureWorkflowCatalogLoaded');

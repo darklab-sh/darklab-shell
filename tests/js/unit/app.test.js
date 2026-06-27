@@ -12,6 +12,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
+const APP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/app.js'), 'utf8')
 const THEME_META_KEYS = new Set(['label', 'group', 'sort'])
 const THEME_BASE_KEYS = new Set([
   'bg',
@@ -349,6 +350,17 @@ function shippedThemeRegistry() {
 }
 
 describe('app helpers', () => {
+  it('keeps app function resolution import-first while APP_CONFIG remains global-backed', () => {
+    expect(APP_SRC).toContain(`function _appFn(name, imported = null) {
+  if (typeof imported === 'function') return imported;
+  const fn = APP_GLOBAL && APP_GLOBAL[name];
+  if (typeof fn === 'function') return fn;
+  return null;
+}`)
+    expect(APP_SRC).toContain("const globalConfig = _appValue('APP_CONFIG');")
+    expect(APP_SRC).toContain("const config = _appFn('getAppConfig', importedGetAppConfig)?.();")
+  })
+
   it('selects JSON object fields and array values with the app-native jq pipe helper', () => {
     const fieldSpec = parseSyntheticPostFilterCommand('cat ffuf.json | jq -r .host')
     expect(fieldSpec.kind).toBe('jq')
@@ -1767,6 +1779,24 @@ describe('app helpers', () => {
     setComposerPromptMode(null)
 
     expect(mobileCmd.placeholder).toBe('.../nuclei-output · type command')
+  })
+
+  it('refreshes the visible prompt path when workspace cwd changes', async () => {
+    let workspaceCwd = ''
+    const { syncShellPrompt } = await loadAppFns({
+      workspaceCwd: () => workspaceCwd,
+    })
+    const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix')
+    const mobileCmd = document.getElementById('mobile-cmd')
+
+    expect(promptPrefix.textContent).toBe('anon@darklab.sh:/ $')
+    expect(mobileCmd.placeholder).toBe('/ · type command')
+
+    workspaceCwd = 'reports/nuclei'
+    syncShellPrompt()
+
+    expect(promptPrefix.textContent).toBe('anon@darklab.sh:/reports/nuclei $')
+    expect(mobileCmd.placeholder).toBe('/reports/nuclei · type command')
   })
 
   it('_setTsMode updates body classes and button labels', async () => {
@@ -6926,6 +6956,8 @@ describe('app helpers', () => {
     expect(faqOverlay.classList.contains('open')).toBe(true)
     const button = document.querySelector('.faq-tour-open')
     expect(button).not.toBeNull()
+    delete window.hideFaqOverlay
+    delete globalThis.hideFaqOverlay
     button.click()
 
     expect(openTourModal).toHaveBeenCalledWith({

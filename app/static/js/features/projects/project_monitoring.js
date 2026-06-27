@@ -1,5 +1,11 @@
-import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_modal_state_bridge.js';
-import { fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison } from '../run-comparison/history_compare_bridge.js';
+import {
+  hasHistoryRunModalStateHandler as importedHasHistoryRunModalStateHandler,
+  openHistoryRunDetails as importedOpenHistoryRunDetails,
+} from '../history/history_run_modal_state_bridge.js';
+import {
+  fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
+  hasHistoryCompareHandler as importedHasHistoryCompareHandler,
+} from '../run-comparison/history_compare_bridge.js';
 
 let exportedDarklabProjectMonitoring = null;
 
@@ -882,22 +888,31 @@ let exportedDarklabProjectMonitoring = null;
       return renderLoaded(projectId, st, { mobile: true });
     }
 
-    function openRunDetails(runId) {
+    async function openRunDetails(runId) {
       const normalizedRunId = String(runId || '').trim();
       if (!normalizedRunId) return false;
-      const openDetails = typeof importedOpenHistoryRunDetails === 'function'
+      const hasImportedHandler = typeof importedHasHistoryRunModalStateHandler === 'function'
+        && importedHasHistoryRunModalStateHandler('openHistoryRunDetails');
+      const openDetails = hasImportedHandler && typeof importedOpenHistoryRunDetails === 'function'
         ? importedOpenHistoryRunDetails
         : (typeof global.openHistoryRunDetails === 'function' ? global.openHistoryRunDetails : null);
       if (typeof openDetails !== 'function') return false;
-      openDetails({ id: normalizedRunId });
-      return true;
+      try {
+        const result = await openDetails({ id: normalizedRunId });
+        return result !== false;
+      } catch (err) {
+        ctx.logClientError?.('project monitoring run details unavailable', err);
+        return false;
+      }
     }
 
-    function compareRuns(projectId, runId, baselineRunId) {
+    async function compareRuns(projectId, runId, baselineRunId) {
       const left = String(runId || '').trim();
       const right = String(baselineRunId || '').trim();
       if (!left || !right || left === right) return false;
-      const compareFn = typeof importedFetchAndRenderHistoryComparison === 'function'
+      const hasImportedHandler = typeof importedHasHistoryCompareHandler === 'function'
+        && importedHasHistoryCompareHandler('fetchAndRenderHistoryComparison');
+      const compareFn = hasImportedHandler && typeof importedFetchAndRenderHistoryComparison === 'function'
         ? importedFetchAndRenderHistoryComparison
         : (typeof global.fetchAndRenderHistoryComparison === 'function' ? global.fetchAndRenderHistoryComparison : null);
       if (typeof compareFn !== 'function') return false;
@@ -906,8 +921,13 @@ let exportedDarklabProjectMonitoring = null;
         right,
         project_id: String(projectId || ''),
       });
-      compareFn(left, right, { url: `/history/compare?${params.toString()}` });
-      return true;
+      try {
+        const result = await compareFn(left, right, { url: `/history/compare?${params.toString()}` });
+        return result !== false;
+      } catch (err) {
+        ctx.logClientError?.('project monitoring run comparison unavailable', err);
+        return false;
+      }
     }
 
     async function monitoringRequest(url, options = {}) {
@@ -1044,13 +1064,13 @@ let exportedDarklabProjectMonitoring = null;
         return true;
       }
       if (name === 'details') {
-        if (!openRunDetails(action.dataset.runId)) {
+        if (!await openRunDetails(action.dataset.runId)) {
           ctx.setProjectWorkspaceMessage?.('Run details are unavailable.', { error: true });
         }
         return true;
       }
       if (name === 'compare') {
-        if (!compareRuns(projectId, action.dataset.runId, action.dataset.baselineRunId)) {
+        if (!await compareRuns(projectId, action.dataset.runId, action.dataset.baselineRunId)) {
           ctx.setProjectWorkspaceMessage?.('Run comparison is unavailable.', { error: true });
         }
         return true;

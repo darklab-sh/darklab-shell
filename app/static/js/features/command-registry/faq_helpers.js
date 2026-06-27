@@ -10,14 +10,20 @@ import {
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
 import {
   getVisibleComposerInput as importedGetVisibleComposerInput,
+  hideFaqOverlay as importedHideFaqOverlay,
   isFaqOverlayOpen as importedIsFaqOverlayOpen,
+  isActiveTabRunning as importedIsActiveTabRunning,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
 } from '../../ui/ui_helpers.js';
 import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
 import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
-import { openCommandRegistry as importedOpenCommandRegistry } from './command_registry_bridge.js';
+import {
+  getAllowedCommandsFaqData as importedGetAllowedCommandsFaqData,
+  openCommandRegistry as importedOpenCommandRegistry,
+  setAllowedCommandsFaqData as importedSetAllowedCommandsFaqData,
+} from './command_registry_bridge.js';
 
 var allowedCommandsFaqData = null;
 let faqHandleRegistry = [];
@@ -64,51 +70,52 @@ function _faqSetAutocompleteState(next) {
 }
 
 function _faqAcHide() {
-  const hide = _faqGlobalFunction('acHide')
-    || (typeof importedAcHide === 'function' ? importedAcHide : null);
+  const hide = (typeof importedAcHide === 'function' ? importedAcHide : null)
+    || _faqGlobalFunction('acHide');
   if (hide) hide();
 }
 
 function _faqAcShow(items) {
-  const show = _faqGlobalFunction('acShow')
-    || (typeof importedAcShow === 'function' ? importedAcShow : null);
+  const show = (typeof importedAcShow === 'function' ? importedAcShow : null)
+    || _faqGlobalFunction('acShow');
   if (show) show(items);
 }
 
 function _faqIsActiveTabRunning() {
-  const isRunning = _faqGlobalFunction('isActiveTabRunning');
+  const isRunning = (typeof importedIsActiveTabRunning === 'function' && importedIsActiveTabRunning)
+    || _faqGlobalFunction('isActiveTabRunning');
   return !!(isRunning && isRunning());
 }
 
 function _faqGetVisibleComposerInput() {
-  const getInput = _faqGlobalFunction('getVisibleComposerInput')
-    || (typeof importedGetVisibleComposerInput === 'function' ? importedGetVisibleComposerInput : null);
+  const getInput = (typeof importedGetVisibleComposerInput === 'function' ? importedGetVisibleComposerInput : null)
+    || _faqGlobalFunction('getVisibleComposerInput');
   return getInput ? getInput() : null;
 }
 
 function _faqGetAutocompleteMatches(value, cursor) {
-  const getMatches = _faqGlobalFunction('getAutocompleteMatches')
-    || (typeof importedGetAutocompleteMatches === 'function' ? importedGetAutocompleteMatches : null);
+  const getMatches = (typeof importedGetAutocompleteMatches === 'function' ? importedGetAutocompleteMatches : null)
+    || _faqGlobalFunction('getAutocompleteMatches');
   return getMatches ? getMatches(value, cursor) : [];
 }
 
 function _faqLimitAutocompleteMatchesForDisplay(matches, limit) {
-  const limitMatches = _faqGlobalFunction('limitAutocompleteMatchesForDisplay')
-    || (typeof importedLimitAutocompleteMatchesForDisplay === 'function'
+  const limitMatches = (typeof importedLimitAutocompleteMatchesForDisplay === 'function'
       ? importedLimitAutocompleteMatchesForDisplay
-      : null);
+      : null)
+    || _faqGlobalFunction('limitAutocompleteMatchesForDisplay');
   return limitMatches ? limitMatches(matches, limit) : matches.slice(0, limit);
 }
 
 function _faqSetComposerValue(value, start, end, options) {
-  const setValue = _faqGlobalFunction('setComposerValue')
-    || (typeof importedSetComposerValue === 'function' ? importedSetComposerValue : null);
+  const setValue = (typeof importedSetComposerValue === 'function' ? importedSetComposerValue : null)
+    || _faqGlobalFunction('setComposerValue');
   if (setValue) setValue(value, start, end, options);
 }
 
 function _faqRefocusComposerAfterAction(options) {
-  const refocus = _faqGlobalFunction('refocusComposerAfterAction')
-    || (typeof importedRefocusComposerAfterAction === 'function' ? importedRefocusComposerAfterAction : null);
+  const refocus = (typeof importedRefocusComposerAfterAction === 'function' ? importedRefocusComposerAfterAction : null)
+    || _faqGlobalFunction('refocusComposerAfterAction');
   if (refocus) refocus(options);
 }
 
@@ -124,6 +131,13 @@ function _faqIsOverlayOpen() {
     ? importedIsFaqOverlayOpen
     : _faqGlobalFunction('isFaqOverlayOpen');
   return !!(isOpen && isOpen());
+}
+
+function _faqHideOverlay() {
+  const hideFaq = typeof importedHideFaqOverlay === 'function'
+    ? importedHideFaqOverlay
+    : _faqGlobalFunction('hideFaqOverlay');
+  if (hideFaq) hideFaq();
 }
 
 function _faqOpenTourModal(options) {
@@ -294,9 +308,15 @@ function renderFaqLimits(cfg) {
 
 function setAllowedCommandsFaqData(data) {
   allowedCommandsFaqData = data;
+  if (typeof importedSetAllowedCommandsFaqData === 'function') {
+    importedSetAllowedCommandsFaqData(data);
+  }
 }
 
 function getAllowedCommandsFaqData() {
+  if (typeof importedGetAllowedCommandsFaqData === 'function') {
+    return importedGetAllowedCommandsFaqData() || allowedCommandsFaqData;
+  }
   return allowedCommandsFaqData;
 }
 
@@ -409,8 +429,7 @@ function appendVisualTourFaqLink() {
     const opened = _faqOpenTourModal({ source: 'faq' });
     if (opened && _faqIsOverlayOpen()) {
       clearFaqHash();
-      const hideFaq = _faqGlobalFunction('hideFaqOverlay');
-      if (hideFaq) hideFaq();
+      _faqHideOverlay();
     }
   };
   if (_faqBindPressable(button, {
@@ -550,6 +569,7 @@ export {
   applyFaqHashTarget,
   clearFaqHash,
   openAutocompleteForVisibleComposer,
+  getAllowedCommandsFaqData,
   renderAllowedCommandsFaq,
   renderFaqItems,
   renderFaqLimits,

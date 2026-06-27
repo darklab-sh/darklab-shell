@@ -2412,6 +2412,35 @@ describe('runner helpers', () => {
     expect(loaded.tabs[0].historyRunId).toBe('run-man')
   })
 
+  it('runCommand uses live config for preview truncation notices after config reloads', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-live-config"}',
+        'data: {"type":"output","text":"line 1"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":2048,"full_output_available":true}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-live-config' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'man curl',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appConfig: { max_output_lines: 5000 },
+      apiFetch,
+      appendLine,
+    })
+    window.APP_CONFIG = { max_output_lines: 1234 }
+
+    loaded.runCommand()
+    await flushPromises()
+
+    expect(appendLine).toHaveBeenCalledWith(
+      "[preview truncated — only the last 1234 lines are shown here, but the full output had 2048 lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]",
+      'notice',
+      'tab-1',
+    )
+  })
+
   it('runCommand refreshes and broadcasts project context after successful project built-ins', async () => {
     const refreshActiveProjectContext = vi.fn(() => Promise.resolve())
     const apiFetch = brokerApiFetch(
@@ -2497,6 +2526,36 @@ describe('runner helpers', () => {
       apiFetch,
       appendLine,
     })
+
+    loaded.runCommand()
+    await flushPromises()
+
+    expect(appendLine).toHaveBeenCalledWith(
+      'streamed',
+      '',
+      'tab-1',
+      expect.objectContaining({ live_output: true }),
+    )
+  })
+
+  it('uses live config for high-volume output metadata after config reloads', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-live-config-stream"}',
+        'data: {"type":"output","text":"streamed"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-live-config-stream' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'printf streamed',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appConfig: {},
+      apiFetch,
+      appendLine,
+    })
+    window.APP_CONFIG = { high_volume_output_line_threshold: 50000 }
 
     loaded.runCommand()
     await flushPromises()

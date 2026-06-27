@@ -549,6 +549,7 @@ describe('history panel actions', () => {
     submitComposerCommandImpl = vi.fn(() => true),
     activeTeamScopeCanImpl = () => true,
     teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
+    scriptPaths = HISTORY_WITH_UTILS_SCRIPT_PATHS,
   } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
@@ -766,7 +767,7 @@ describe('history panel actions', () => {
 
     return {
       ...fromDomScripts(
-        HISTORY_WITH_UTILS_SCRIPT_PATHS,
+        scriptPaths,
         {
           document,
           localStorage: new MemoryStorage(),
@@ -3143,6 +3144,58 @@ describe('history panel actions', () => {
     expect(document.querySelector('.history-compare-run-card')?.textContent).toContain('nmap darklab.sh')
     bindDismissible.mock.calls[0][1].onClose()
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('keeps the history drawer open when compare launcher is unavailable', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [{
+                id: 'run-new',
+                type: 'run',
+                command: 'nmap darklab.sh',
+                started: '2026-01-01T00:00:04Z',
+                exit_code: 0,
+              }],
+              runs: [],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
+    })
+    const scriptPaths = HISTORY_WITH_UTILS_SCRIPT_PATHS
+      .filter(path => path !== 'app/static/js/features/run-comparison/history_compare_launcher.js')
+    const unavailableCompare = vi.fn()
+    unavailableCompare.hasHandler = () => false
+    const originalCompare = window.openHistoryCompareLauncher
+    const originalGlobalCompare = globalThis.openHistoryCompareLauncher
+    try {
+      window.openHistoryCompareLauncher = unavailableCompare
+      globalThis.openHistoryCompareLauncher = unavailableCompare
+      const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch, scriptPaths })
+      const historyPanel = document.getElementById('history-panel')
+      historyPanel.classList.add('open')
+
+      refreshHistoryPanel()
+      await new Promise((resolve) => setImmediate(resolve))
+      document
+        .querySelector('#history-list .history-entry [data-action="compare"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+
+      expect(unavailableCompare).not.toHaveBeenCalled()
+      expect(apiFetch).not.toHaveBeenCalledWith('/history/run-new/compare-candidates')
+      expect(document.getElementById('history-compare-overlay')).toBeNull()
+      expect(historyPanel.classList.contains('open')).toBe(true)
+    } finally {
+      if (originalCompare) window.openHistoryCompareLauncher = originalCompare
+      else delete window.openHistoryCompareLauncher
+      if (originalGlobalCompare) globalThis.openHistoryCompareLauncher = originalGlobalCompare
+      else delete globalThis.openHistoryCompareLauncher
+    }
   })
 
   it('replaces manual comparison choices when searching the compare launcher', async () => {

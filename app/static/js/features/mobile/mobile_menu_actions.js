@@ -60,18 +60,18 @@ function _mobileMenuActiveTabId() {
 }
 
 function _mobileMenuBlurComposer() {
-  const blurComposer = _mobileMenuGlobalFunction('blurVisibleComposerInputIfMobile')
-    || (typeof importedBlurVisibleComposerInputIfMobile === 'function'
+  const blurComposer = (typeof importedBlurVisibleComposerInputIfMobile === 'function'
       ? importedBlurVisibleComposerInputIfMobile
-      : null);
+      : null)
+    || _mobileMenuGlobalFunction('blurVisibleComposerInputIfMobile');
   if (blurComposer) blurComposer();
 }
 
 function _mobileMenuRefocusComposer(options = { defer: true }) {
-  const refocusComposer = _mobileMenuGlobalFunction('refocusComposerAfterAction')
-    || (typeof importedRefocusComposerAfterAction === 'function'
+  const refocusComposer = (typeof importedRefocusComposerAfterAction === 'function'
       ? importedRefocusComposerAfterAction
-      : null);
+      : null)
+    || _mobileMenuGlobalFunction('refocusComposerAfterAction');
   if (refocusComposer) refocusComposer(options);
 }
 

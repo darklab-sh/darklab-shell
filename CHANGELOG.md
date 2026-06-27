@@ -6,6 +6,28 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.3.1] — Unreleased
+
+### Fixed
+
+- **Workspace file operations are stricter and more reliable** — Terminal folder creation and app-mediated moves now fail clearly instead of reporting false success or leaving partial files behind.
+  - `mkdir` and `file add-dir` now use the ESM-exported workspace directory creator directly, and missing workspace handlers return a visible terminal error instead of printing a fake success line.
+  - The live terminal prompt now refreshes its workspace path whenever the current workspace folder changes, so `cd` keeps the prompt label and mobile placeholder aligned with `pwd` and relative file commands.
+  - Workspace create/write/move routes now reject control characters and leading/trailing whitespace in paths, so visually confusing names such as newline-prefixed folders are not created.
+  - Workspace moves clean up partial copy destinations before scanner/appuser fallback moves, preventing sticky-directory ownership mismatches from leaving duplicate files or returning an unhandled 500.
+  - **Tests:** focused Vitest and backend/route coverage verifies terminal handler failures, directory creation calls, prompt CWD refreshes, unsafe path rejection, and partial-move cleanup.
+
+- **Lazy ESM bridge actions work before their old globals exist** — UI actions that moved behind lazy ESM modules now use real import-backed bridges, check whether lazy handlers are ready, and fail visibly when an action is unavailable instead of silently no-oping or closing the wrong panel.
+  - STATUS, LAST EXIT, and TABS HUD cells now open Status Monitor on the first click, before the rail menu or keyboard shortcut has loaded the monitor module.
+  - Project Monitoring and Project Runs compare/details actions now distinguish between a loaded bridge wrapper and a registered lazy handler, fall back to valid legacy globals when needed, and show an unavailable message when neither path is ready.
+  - History drawer and mobile Recents compare actions no longer close their surfaces unless the compare launcher actually opens.
+  - Output entity chips can open Atlas through the imported Atlas bridge without requiring `window.openAtlas`, and shell rail/project callbacks now use lazy loader wrappers for Atlas, Findings Board, Command Registry, Schedules, and Watchers instead of pulling those feature implementations into the bootstrap bundle.
+  - Autocomplete and output prompt helpers now read the imported workspace CWD helper instead of a dead `_workspaceCwd` global, `app.js` resolves imported functions before stale globals while keeping `APP_CONFIG` global-backed, `runner.js` reads live config for truncation/high-volume output behavior, and output command-summary preferences follow the same import-first pattern.
+  - Autocomplete, FAQ, Tour, History restore, Run comparison, Tab export, mobile menu, and runtime-context helpers now prefer their ESM imports before legacy globals, closing the remaining fallback paths that could mask missing browser globals after the migration.
+  - **Tests:** focused Vitest and asset-pipeline coverage verifies bridge readiness, lazy-handler fallbacks, unavailable-action messaging, HUD Status Monitor launch, Project Monitoring and Project Runs compare behavior, History drawer/mobile Recents compare behavior, Atlas chip opening without a global opener, workspace CWD helper use, import-first resolver guards, live runner config reads, output command-summary behavior, shell launcher wiring, shell-bootstrap lazy-boundary protection, and the frontend global inventory.
+
+---
+
 ## [2.3] — 2026-06-27
 
 ### Added
@@ -20,12 +42,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Certificate rollups can use current live-provider data or bounded crt.sh snapshots when those sources respond. Temporary crt.sh timeouts and 5xx responses are surfaced as upstream outages instead of implying a target has no certificate data.
   - Overview summary and attention cards use the shared theme tokens, including the caution color for high-risk target attention states.
   - **Tests:** focused backend, route, browser-module, and Playwright coverage verifies the payload skeleton, host-to-domain/IP mapping, Atlas entity identity, review/suppression/verification rollups, certificate status buckets, RFC/OpenSSL-style certificate dates, stale provider data, fresh-vs-stale certificate selection, recent-change states, monitoring-target change markers, deep-link hint shape, populated and empty target rollups, neutral unknown-cert/no-intel/not-monitored UI states, route-level 404s, structured route/build logs, degraded-source warning logs, browser load-failure levels, stable load-error rendering, team-scope access, Overview tab rendering, desktop/mobile Overview smoke paths, source-mode Overview lazy loading, real Overview endpoint browser loading, deep-link filter actions, filter reset behavior, run/review-state hints, mobile Findings hints, suppressed-target exclusion, and cross-scope protection.
-
-- **Workspace file operations are stricter and more reliable** — Terminal folder creation and app-mediated moves now fail clearly instead of reporting false success or leaving partial files behind.
-  - `mkdir` and `file add-dir` now use the ESM-exported workspace directory creator directly, and missing workspace handlers return a visible terminal error instead of printing a fake success line.
-  - Workspace create/write/move routes now reject control characters and leading/trailing whitespace in paths, so visually confusing names such as newline-prefixed folders are not created.
-  - Workspace moves clean up partial copy destinations before scanner/appuser fallback moves, preventing sticky-directory ownership mismatches from leaving duplicate files or returning an unhandled 500.
-  - **Tests:** focused Vitest and backend/route coverage verifies terminal handler failures, directory creation calls, unsafe path rejection, and partial-move cleanup.
 
 - **Attack-surface digest notifications** — Projects can now send scheduled attack-surface digest notifications through explicitly selected existing notification channels.
   - Project Monitoring summaries support bounded `window_start` / `window_end` views with digest-window metadata, changed/recovered/failed counts, severity, top-change, and link fields so scheduled sends report only the selected window while the dashboard summary remains current-state.

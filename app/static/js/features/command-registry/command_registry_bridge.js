@@ -2,6 +2,7 @@
 
 const COMMAND_REGISTRY_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 const commandRegistryBridgeState = COMMAND_REGISTRY_BRIDGE_GLOBAL.__darklabCommandRegistryBridge || {
+  allowedCommandsFaqData: null,
   openCommandRegistryHandler: null,
   closeCommandRegistryHandler: null,
   commandRegistryBridgeData: null,
@@ -41,6 +42,10 @@ function getCommandRegistryData() {
   return commandRegistryBridgeState.commandRegistryBridgeData;
 }
 
+function getAllowedCommandsFaqData() {
+  return commandRegistryBridgeState.allowedCommandsFaqData;
+}
+
 function isCommandRegistryOverlayOpen(...args) {
   return typeof commandRegistryBridgeState.isCommandRegistryOverlayOpenHandler === 'function'
     ? !!commandRegistryBridgeState.isCommandRegistryOverlayOpenHandler(...args)
@@ -58,12 +63,19 @@ function setCommandRegistryData(data) {
   return commandRegistryBridgeState.commandRegistryBridgeData;
 }
 
+function setAllowedCommandsFaqData(data) {
+  commandRegistryBridgeState.allowedCommandsFaqData = data || null;
+  return commandRegistryBridgeState.allowedCommandsFaqData;
+}
+
 export {
   closeCommandRegistry,
+  getAllowedCommandsFaqData,
   getCommandRegistryData,
   isCommandRegistryOverlayOpen,
   openCommandRegistry,
   renderCommandRegistry,
+  setAllowedCommandsFaqData,
   setCommandRegistryData,
   setCommandRegistryHandlers,
 };

@@ -2,6 +2,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
+import { DarklabProjectMonitoring as esmProjectMonitoring } from '../../../app/static/js/features/projects/project_monitoring.js'
+import {
+  setHistoryRunModalStateHandlers,
+} from '../../../app/static/js/features/history/history_run_modal_state_bridge.js'
+import {
+  setHistoryCompareHandlers,
+} from '../../../app/static/js/features/run-comparison/history_compare_bridge.js'
 
 function apiResponse(payload = {}, { ok = true } = {}) {
   return {
@@ -273,10 +280,14 @@ describe('project monitoring controller', () => {
     delete globalThis.openWatchersModal
     delete globalThis.showConfirm
     delete window.showConfirm
+    setHistoryRunModalStateHandlers({ openHistoryRunDetails: null })
+    setHistoryCompareHandlers({ fetchAndRenderHistoryComparison: null })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    setHistoryRunModalStateHandlers({ openHistoryRunDetails: null })
+    setHistoryCompareHandlers({ fetchAndRenderHistoryComparison: null })
   })
 
   it('renders project monitoring counts monitors and disables missing-run comparisons', async () => {
@@ -552,6 +563,60 @@ describe('project monitoring controller', () => {
     const newMonitor = container.querySelector('[data-project-monitoring-action="new-monitor"]')
     await controller.handleClick({ target: newMonitor, preventDefault: vi.fn(), stopPropagation: vi.fn() })
     expect(globalThis.openWatchersModal).toHaveBeenCalledWith({ projectId: 'prj_1', newWatcher: true })
+  })
+
+  it('falls back to lazy globals when ESM bridge handlers are not registered', async () => {
+    globalThis.openHistoryRunDetails = vi.fn()
+    globalThis.fetchAndRenderHistoryComparison = vi.fn()
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse(monitoringPayload))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = esmProjectMonitoring.createProjectMonitoringController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+
+    const details = container.querySelector('[data-project-monitoring-action="details"][data-run-id="run_current"]')
+    await controller.handleClick({ target: details, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+    expect(globalThis.openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run_current' })
+    expect(ctx.setProjectWorkspaceMessage).not.toHaveBeenCalledWith(
+      'Run details are unavailable.',
+      { error: true },
+    )
+
+    const compare = container.querySelector('[data-project-monitoring-action="compare"][data-run-id="run_current"]')
+    await controller.handleClick({ target: compare, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+    expect(globalThis.fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
+      'run_current',
+      'run_base',
+      { url: '/history/compare?left=run_current&right=run_base&project_id=prj_1' },
+    )
+    expect(ctx.setProjectWorkspaceMessage).not.toHaveBeenCalledWith(
+      'Run comparison is unavailable.',
+      { error: true },
+    )
+  })
+
+  it('reports unavailable actions when neither ESM bridges nor lazy globals are ready', async () => {
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse(monitoringPayload))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = esmProjectMonitoring.createProjectMonitoringController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+
+    const details = container.querySelector('[data-project-monitoring-action="details"][data-run-id="run_current"]')
+    await controller.handleClick({ target: details, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Run details are unavailable.',
+      { error: true },
+    )
+
+    const compare = container.querySelector('[data-project-monitoring-action="compare"][data-run-id="run_current"]')
+    await controller.handleClick({ target: compare, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Run comparison is unavailable.',
+      { error: true },
+    )
   })
 
   it('confirms before accepting a watcher baseline from monitoring', async () => {

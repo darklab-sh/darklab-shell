@@ -9,8 +9,10 @@
 const RUNNER_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 const warnedMissingRunnerHandlers = new Set();
 const runnerHandlers = RUNNER_BRIDGE_GLOBAL.__darklabRunnerHandlers || {
+  _readRunErrorMessage: null,
   _recordSuccessfulLocalCommand: null,
   _seedLocalStorageStarsToServer: null,
+  _sseMessageFromChunk: null,
   appendCommandEcho: null,
   attachActiveRunFromMonitor: null,
   cancelPendingTerminalConfirm: null,
@@ -97,7 +99,7 @@ function _criticalRunnerHandlerLevel(name) {
 }
 
 function _runnerFallbackType(name) {
-  if (name === '_seedLocalStorageStarsToServer') return 'resolved_promise';
+  if (name === '_readRunErrorMessage' || name === '_seedLocalStorageStarsToServer') return 'resolved_promise';
   if (name === 'hasPendingTerminalConfirm' || name.startsWith('submit')) return 'boolean';
   return 'undefined';
 }
@@ -108,8 +110,10 @@ function _callRunnerHandler(name, fallback, args) {
   return fallback;
 }
 
+function _readRunErrorMessage(...args) { return _callRunnerHandler('_readRunErrorMessage', Promise.resolve(''), args); }
 function _recordSuccessfulLocalCommand(...args) { return _callRunnerHandler('_recordSuccessfulLocalCommand', undefined, args); }
 function _seedLocalStorageStarsToServer(...args) { return _callRunnerHandler('_seedLocalStorageStarsToServer', Promise.resolve(), args); }
+function _sseMessageFromChunk(...args) { return _callRunnerHandler('_sseMessageFromChunk', null, args); }
 function appendCommandEcho(...args) { return _callRunnerHandler('appendCommandEcho', undefined, args); }
 function attachActiveRunFromMonitor(...args) { return _callRunnerHandler('attachActiveRunFromMonitor', undefined, args); }
 function cancelPendingTerminalConfirm(...args) { return _callRunnerHandler('cancelPendingTerminalConfirm', undefined, args); }
@@ -129,8 +133,10 @@ function submitVisibleComposerCommand(...args) { return _callRunnerHandler('subm
 
 if (RUNNER_BRIDGE_GLOBAL) {
   RUNNER_BRIDGE_GLOBAL.DarklabRunner = {
+    _readRunErrorMessage,
     _recordSuccessfulLocalCommand,
     _seedLocalStorageStarsToServer,
+    _sseMessageFromChunk,
     appendCommandEcho,
     attachActiveRunFromMonitor,
     cancelPendingTerminalConfirm,
@@ -153,8 +159,10 @@ if (RUNNER_BRIDGE_GLOBAL) {
 }
 
 export {
+  _readRunErrorMessage,
   _recordSuccessfulLocalCommand,
   _seedLocalStorageStarsToServer,
+  _sseMessageFromChunk,
   appendCommandEcho,
   attachActiveRunFromMonitor,
   cancelPendingTerminalConfirm,

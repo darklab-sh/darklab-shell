@@ -421,11 +421,16 @@ var _runnerWorkspaceCanWriteAdapter = (...args) => {
 };
 var acSpecialCommands = _runnerValue('acSpecialCommands') || {};
 var pendingKillTabId = _runnerValue('pendingKillTabId') || null;
-var APP_CONFIG = _runnerValue('APP_CONFIG') || {};
 var CLIENT_ID = _runnerValue('CLIENT_ID') || '';
 var SESSION_ID = (typeof importedGetSessionId === 'function' && importedGetSessionId())
   || _runnerValue('SESSION_ID')
   || '';
+
+function _runnerAppConfig() {
+  const config = _runnerValue('APP_CONFIG');
+  return config && typeof config === 'object' && !Array.isArray(config) ? config : {};
+}
+
 function _runnerCore() {
   return (typeof importedRunnerCore !== 'undefined' && importedRunnerCore)
     || null;
@@ -703,8 +708,11 @@ function _shouldSuppressStreamOutputLine(tab, line) {
 // every caller having to wire the two pills up separately. Callers that have
 // a real exit code (the SSE exit handler, kill) override afterwards.
 function setStatus(s) {
-  status.className = 'status-pill ' + s;
-  status.textContent = s === 'running' ? 'RUNNING' : 'IDLE';
+  status = status || _runnerEl('status', importedStatus);
+  if (status) {
+    status.className = 'status-pill ' + s;
+    status.textContent = s === 'running' ? 'RUNNING' : 'IDLE';
+  }
   if (typeof emitUiEvent === 'function') {
     emitUiEvent('app:status-changed', { status: s });
     if (s === 'ok') emitUiEvent('app:last-exit-changed', { value: 0 });
@@ -1341,7 +1349,7 @@ function _workspaceTerminalDeniedMessage(action = 'change Files') {
 }
 
 function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
-  const shown = APP_CONFIG.max_output_lines || outputLineCount || 0;
+  const shown = _runnerAppConfig().max_output_lines || outputLineCount || 0;
   const total = outputLineCount || shown;
   if (fullOutputAvailable) {
     return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]`;
@@ -1425,7 +1433,7 @@ function _typedRunStreamLineMessage(msg, streamState) {
 
 function _appendStreamLine(text, cls, tabId, msg, options = {}) {
   let metadata = _streamOutputMetadata(msg);
-  if (options.liveOutput && APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+  if (options.liveOutput && _runnerAppConfig().high_volume_output_line_threshold) {
     metadata = metadata || {};
     metadata.live_output = true;
   }
@@ -1457,7 +1465,7 @@ function _batchedStreamLineEntry(msg, lineText, streamState) {
     type: 'output',
     text: lineText,
   }, streamState);
-  if (APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+  if (_runnerAppConfig().high_volume_output_line_threshold) {
     lineMsg.live_output = true;
   }
   return lineMsg;
@@ -3875,8 +3883,10 @@ function runCommand() {
 
 if (typeof importedSetRunnerHandlers === 'function') {
   importedSetRunnerHandlers({
+    _readRunErrorMessage,
     _recordSuccessfulLocalCommand,
     _seedLocalStorageStarsToServer,
+    _sseMessageFromChunk,
     appendCommandEcho,
     attachActiveRunFromMonitor,
     cancelPendingTerminalConfirm,
@@ -3901,8 +3911,10 @@ export {
   _handleRunStreamMessage,
   _markTabRunStarted,
   _persistClientSideRun,
+  _readRunErrorMessage,
   _recordSuccessfulLocalCommand,
   _seedLocalStorageStarsToServer,
+  _sseMessageFromChunk,
   _setPendingTerminalConfirm,
   appendCommandEcho,
   appendPromptNewline,

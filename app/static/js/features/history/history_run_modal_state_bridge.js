@@ -6,22 +6,47 @@ let closeHistoryRunOverlayHandler = null;
 let isHistoryRunOverlayOpenHandler = null;
 let cycleHistoryRunOverlayTabHandler = null;
 
+function hasOwnHandler(handlers, name) {
+  return Object.prototype.hasOwnProperty.call(handlers, name);
+}
+
 function setHistoryRunModalStateHandlers(handlers = {}) {
-  if (typeof handlers.getHistoryRunModalState === 'function') {
+  if (hasOwnHandler(handlers, 'getHistoryRunModalState') && handlers.getHistoryRunModalState === null) {
+    getHistoryRunModalStateHandler = null;
+  } else if (typeof handlers.getHistoryRunModalState === 'function') {
     getHistoryRunModalStateHandler = handlers.getHistoryRunModalState;
   }
-  if (typeof handlers.openHistoryRunDetails === 'function') {
+  if (hasOwnHandler(handlers, 'openHistoryRunDetails') && handlers.openHistoryRunDetails === null) {
+    openHistoryRunDetailsHandler = null;
+  } else if (typeof handlers.openHistoryRunDetails === 'function') {
     openHistoryRunDetailsHandler = handlers.openHistoryRunDetails;
   }
-  if (typeof handlers.closeHistoryRunOverlay === 'function') {
+  if (hasOwnHandler(handlers, 'closeHistoryRunOverlay') && handlers.closeHistoryRunOverlay === null) {
+    closeHistoryRunOverlayHandler = null;
+  } else if (typeof handlers.closeHistoryRunOverlay === 'function') {
     closeHistoryRunOverlayHandler = handlers.closeHistoryRunOverlay;
   }
-  if (typeof handlers.isHistoryRunOverlayOpen === 'function') {
+  if (hasOwnHandler(handlers, 'isHistoryRunOverlayOpen') && handlers.isHistoryRunOverlayOpen === null) {
+    isHistoryRunOverlayOpenHandler = null;
+  } else if (typeof handlers.isHistoryRunOverlayOpen === 'function') {
     isHistoryRunOverlayOpenHandler = handlers.isHistoryRunOverlayOpen;
   }
-  if (typeof handlers.cycleHistoryRunOverlayTab === 'function') {
+  if (hasOwnHandler(handlers, 'cycleHistoryRunOverlayTab') && handlers.cycleHistoryRunOverlayTab === null) {
+    cycleHistoryRunOverlayTabHandler = null;
+  } else if (typeof handlers.cycleHistoryRunOverlayTab === 'function') {
     cycleHistoryRunOverlayTabHandler = handlers.cycleHistoryRunOverlayTab;
   }
+}
+
+function hasHistoryRunModalStateHandler(name) {
+  const handlers = {
+    closeHistoryRunOverlay: closeHistoryRunOverlayHandler,
+    cycleHistoryRunOverlayTab: cycleHistoryRunOverlayTabHandler,
+    getHistoryRunModalState: getHistoryRunModalStateHandler,
+    isHistoryRunOverlayOpen: isHistoryRunOverlayOpenHandler,
+    openHistoryRunDetails: openHistoryRunDetailsHandler,
+  };
+  return typeof handlers[name] === 'function';
 }
 
 function getHistoryRunModalState() {
@@ -35,6 +60,7 @@ function openHistoryRunDetails(...args) {
     ? openHistoryRunDetailsHandler(...args)
     : undefined;
 }
+openHistoryRunDetails.hasHandler = () => hasHistoryRunModalStateHandler('openHistoryRunDetails');
 
 function closeHistoryRunOverlay(...args) {
   return typeof closeHistoryRunOverlayHandler === 'function'
@@ -58,6 +84,7 @@ export {
   closeHistoryRunOverlay,
   cycleHistoryRunOverlayTab,
   getHistoryRunModalState,
+  hasHistoryRunModalStateHandler,
   isHistoryRunOverlayOpen,
   openHistoryRunDetails,
   setHistoryRunModalStateHandlers,

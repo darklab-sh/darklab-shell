@@ -316,9 +316,12 @@ function _historyRunRenderAnsiWithEntityTokens(content, text, entities, tabId) {
 }
 
 function _historyRunSubmitComposerCommand(command, options) {
-  const submit = _historyRunGlobalFunction('submitComposerCommand')
-    || (typeof importedBridgeSubmitComposerCommand !== 'undefined' && importedBridgeSubmitComposerCommand)
-    || (typeof importedSubmitComposerCommand !== 'undefined' && importedSubmitComposerCommand);
+  if (typeof importedBridgeSubmitComposerCommand === 'function') {
+    const result = importedBridgeSubmitComposerCommand(command, options);
+    if (result !== false) return result;
+  }
+  const submit = (typeof importedSubmitComposerCommand !== 'undefined' && importedSubmitComposerCommand)
+    || _historyRunGlobalFunction('submitComposerCommand');
   return typeof submit === 'function' ? submit(command, options) : null;
 }
 

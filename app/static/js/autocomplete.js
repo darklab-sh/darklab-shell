@@ -18,11 +18,13 @@ import {
   getComposerValue as importedGetComposerValue,
   getVisibleComposerInput as importedGetVisibleComposerInput,
   hideAcDropdown as importedHideAcDropdown,
+  isActiveTabRunning as importedIsActiveTabRunning,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
   showAcDropdown as importedShowAcDropdown,
 } from './ui/ui_helpers.js';
 import { _autocompleteTokenContext as importedAutocompleteTokenContext } from './features/autocomplete/suggestions.js';
+import { hasPendingTerminalConfirm as importedHasPendingTerminalConfirm } from './runner_bridge.js';
 
 const AUTOCOMPLETE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -57,73 +59,75 @@ const _autocompleteDom = {
 };
 
 function _autocompleteGetState() {
-  const readState = _autocompleteGlobalFunction('getAutocompleteState')
-    || (typeof importedGetAutocompleteState !== 'undefined' && importedGetAutocompleteState);
+  const readState = (typeof importedGetAutocompleteState !== 'undefined' && importedGetAutocompleteState)
+    || _autocompleteGlobalFunction('getAutocompleteState');
   return typeof readState === 'function' ? readState() : {};
 }
 
 function _autocompleteSetState(next) {
-  const writeState = _autocompleteGlobalFunction('setAutocompleteState')
-    || (typeof importedSetAutocompleteState !== 'undefined' && importedSetAutocompleteState);
+  const writeState = (typeof importedSetAutocompleteState !== 'undefined' && importedSetAutocompleteState)
+    || _autocompleteGlobalFunction('setAutocompleteState');
   if (typeof writeState === 'function') writeState(next);
 }
 
 function _autocompleteComposerState() {
-  const readState = _autocompleteGlobalFunction('getComposerState')
-    || (typeof importedGetComposerState !== 'undefined' && importedGetComposerState);
+  const readState = (typeof importedGetComposerState !== 'undefined' && importedGetComposerState)
+    || _autocompleteGlobalFunction('getComposerState');
   return typeof readState === 'function' ? readState() : {};
 }
 
 function _autocompleteComposerValue() {
-  const readValue = _autocompleteGlobalFunction('getComposerValue')
-    || (typeof importedGetComposerValue !== 'undefined' && importedGetComposerValue);
+  const readValue = (typeof importedGetComposerValue !== 'undefined' && importedGetComposerValue)
+    || _autocompleteGlobalFunction('getComposerValue');
   if (typeof readValue === 'function') return readValue();
   return _autocompleteDom.cmdInput ? _autocompleteDom.cmdInput.value : '';
 }
 
 function _autocompleteSetComposerValue(value, start = null, end = null) {
-  const writeValue = _autocompleteGlobalFunction('setComposerValue')
-    || (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue);
+  const writeValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue)
+    || _autocompleteGlobalFunction('setComposerValue');
   if (typeof writeValue === 'function') writeValue(value, start, end);
 }
 
 function _autocompleteVisibleInput() {
-  const readInput = _autocompleteGlobalFunction('getVisibleComposerInput')
-    || (typeof importedGetVisibleComposerInput !== 'undefined' && importedGetVisibleComposerInput);
+  const readInput = (typeof importedGetVisibleComposerInput !== 'undefined' && importedGetVisibleComposerInput)
+    || _autocompleteGlobalFunction('getVisibleComposerInput');
   return typeof readInput === 'function' ? readInput() : _autocompleteDom.cmdInput;
 }
 
 function _autocompleteHideDropdown() {
-  const hideDropdown = _autocompleteGlobalFunction('hideAcDropdown')
-    || (typeof importedHideAcDropdown !== 'undefined' && importedHideAcDropdown);
+  const hideDropdown = (typeof importedHideAcDropdown !== 'undefined' && importedHideAcDropdown)
+    || _autocompleteGlobalFunction('hideAcDropdown');
   if (typeof hideDropdown === 'function') hideDropdown();
 }
 
 function _autocompleteShowDropdown() {
-  const showDropdown = _autocompleteGlobalFunction('showAcDropdown')
-    || (typeof importedShowAcDropdown !== 'undefined' && importedShowAcDropdown);
+  const showDropdown = (typeof importedShowAcDropdown !== 'undefined' && importedShowAcDropdown)
+    || _autocompleteGlobalFunction('showAcDropdown');
   if (typeof showDropdown === 'function') showDropdown();
 }
 
 function _autocompleteRefocusComposer() {
-  const refocus = _autocompleteGlobalFunction('refocusComposerAfterAction')
-    || (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction);
+  const refocus = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction)
+    || _autocompleteGlobalFunction('refocusComposerAfterAction');
   if (typeof refocus === 'function') refocus({ preventScroll: true });
 }
 
 function _autocompleteEscapeHtml(value) {
-  const escape = _autocompleteGlobalFunction('escapeHtml')
-    || (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml);
+  const escape = (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml)
+    || _autocompleteGlobalFunction('escapeHtml');
   return typeof escape === 'function' ? escape(value) : String(value || '');
 }
 
 function _isAutocompleteBlockedByTerminalConfirm() {
-  const hasPending = _autocompleteGlobalFunction('hasPendingTerminalConfirm');
+  const hasPending = (typeof importedHasPendingTerminalConfirm === 'function' && importedHasPendingTerminalConfirm)
+    || _autocompleteGlobalFunction('hasPendingTerminalConfirm');
   return typeof hasPending === 'function' && hasPending();
 }
 
 function _isAutocompleteBlockedByActiveRun() {
-  const isRunning = _autocompleteGlobalFunction('isActiveTabRunning');
+  const isRunning = (typeof importedIsActiveTabRunning === 'function' && importedIsActiveTabRunning)
+    || _autocompleteGlobalFunction('isActiveTabRunning');
   return typeof isRunning === 'function' && isRunning();
 }
 
@@ -432,8 +436,6 @@ function acExpandSharedPrefix(items) {
 function _scheduleAutocompleteRefreshAfterAccept(insertValue) {
   if (!String(insertValue || '').endsWith('/')) return;
   setTimeout(() => {
-    const openAutocomplete = _autocompleteGlobalFunction('openAutocompleteForVisibleComposer');
-    if (openAutocomplete && openAutocomplete()) return;
     const input = _autocompleteVisibleInput();
     if (input && typeof input.dispatchEvent === 'function') {
       input.dispatchEvent(new Event('input'));

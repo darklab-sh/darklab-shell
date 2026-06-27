@@ -126,9 +126,10 @@ let importedIsCommandRegistryOverlayOpen;
 const APP_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
 function _appFn(name, imported = null) {
+  if (typeof imported === 'function') return imported;
   const fn = APP_GLOBAL && APP_GLOBAL[name];
   if (typeof fn === 'function') return fn;
-  return typeof imported === 'function' ? imported : null;
+  return null;
 }
 
 function _appValue(name, imported = undefined) {
@@ -140,8 +141,12 @@ function _appEl(name, imported = undefined) {
 }
 
 function _appConfig() {
+  const globalConfig = _appValue('APP_CONFIG');
+  if (globalConfig && typeof globalConfig === 'object' && !Array.isArray(globalConfig)) {
+    return globalConfig;
+  }
   const config = _appFn('getAppConfig', importedGetAppConfig)?.();
-  return config || _appValue('APP_CONFIG') || {};
+  return config || {};
 }
 
 function _appState() {
@@ -348,6 +353,25 @@ function _applyComposerPromptMode() {
   }
 }
 
+function _syncDesktopPromptPrefix() {
+  const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
+    ? shellPromptWrap.querySelector('.prompt-prefix')
+    : null;
+  if (!promptPrefix) return;
+  const defaultPromptLabel = typeof _appBuildPromptLabelAdapter === 'function'
+    ? _appBuildPromptLabelAdapter()
+    : (_defaultDesktopPromptLabel || 'anon@darklab.sh:~ $');
+  promptPrefix.textContent = _composerPromptMode === 'confirm' ? '[yes/no]:' : defaultPromptLabel;
+  if (
+    _composerPromptMode !== 'confirm'
+    && _appConfig().workspace_enabled === true
+    && typeof mobileCmdInput !== 'undefined'
+    && mobileCmdInput
+  ) {
+    mobileCmdInput.placeholder = _mobileComposerPlaceholder();
+  }
+}
+
 function setComposerPromptMode(mode = null) {
   _composerPromptMode = mode === 'confirm' ? 'confirm' : null;
   if (typeof window !== 'undefined')  _applyComposerPromptMode();
@@ -358,6 +382,7 @@ function syncShellPrompt() {
   // the hidden input directly, so selection/caret state stays correct across
   // desktop/mobile and while welcome owns the tab.
   if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
+  _syncDesktopPromptPrefix();
   if (
     typeof document !== 'undefined'
     && typeof _appSyncFocusedComposerStateAdapter === 'function'

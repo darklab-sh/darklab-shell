@@ -242,7 +242,24 @@ var _historyCopySnapshotLinkAdapter = (...args) => _historyFn('copySnapshotLink'
 var _historyOpenSnapshotLinkAdapter = (...args) => _historyFn('openSnapshotLink', importedOpenSnapshotLink)?.(...args);
 var _historyGetActiveProjectContextAdapter = (...args) => _historyFn('getActiveProjectContext')?.(...args);
 var _historyOpenAtlasAdapter = (...args) => _historyFn('openAtlas', importedOpenAtlas)?.(...args);
-var _historyOpenCompareLauncherAdapter = (...args) => _historyFn('openHistoryCompareLauncher', importedOpenHistoryCompareLauncher)?.(...args);
+function _historyOpenCompareLauncherAdapter(...args) {
+  const importedReady = typeof importedOpenHistoryCompareLauncher === 'function'
+    && (
+      typeof importedOpenHistoryCompareLauncher.hasHandler !== 'function'
+      || importedOpenHistoryCompareLauncher.hasHandler()
+    );
+  const launcher = importedReady
+    ? importedOpenHistoryCompareLauncher
+    : _historyFn('openHistoryCompareLauncher');
+  if (typeof launcher !== 'function') return false;
+  if (typeof launcher.hasHandler === 'function' && !launcher.hasHandler()) return false;
+  try {
+    const result = launcher(...args);
+    return result !== false;
+  } catch (_) {
+    return false;
+  }
+}
 var _historyOpenRunDetailsAdapter = (...args) => _historyFn('openHistoryRunDetails')?.(...args);
 var _historyOpenSchedulesModalAdapter = (...args) => _historyFn('openSchedulesModal')?.(...args);
 var _historyOpenWatchersModalAdapter = (...args) => _historyFn('openWatchersModal')?.(...args);
@@ -2070,7 +2087,11 @@ function _historyRenderPanelData(data) {
         refocusComposer: false,
         onActivate: () => {
           _historyCloseActionMenusAdapter();
-          _historyOpenCompareLauncherAdapter(run);
+          const opened = _historyOpenCompareLauncherAdapter(run);
+          if (!opened) {
+            _historyShowToastAdapter('Run comparison is not available.', 'error');
+            return;
+          }
           if (!_historyActionKeepsPanelOpenAdapter('compare')) _historyHidePanelAdapter();
         },
       });

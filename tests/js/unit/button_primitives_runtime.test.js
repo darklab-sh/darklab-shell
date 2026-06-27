@@ -155,6 +155,8 @@ function mountMobileHarness({
   openHistoryWithFilters = undefined,
   resetHistoryMobileFilters = undefined,
   dispatchMobileMenuAction = undefined,
+  openHistoryCompareLauncher = undefined,
+  openHistoryRunDetails = vi.fn(),
   activeTeamScopeCan = undefined,
 } = {}) {
   document.body.className = 'mobile-terminal-mode'
@@ -241,7 +243,8 @@ function mountMobileHarness({
     openHistoryWithFilters,
     resetHistoryMobileFilters,
     dispatchMobileMenuAction,
-    openHistoryRunDetails: vi.fn(),
+    openHistoryCompareLauncher,
+    openHistoryRunDetails,
     activeTeamScopeCan,
     bindPressable,
   }
@@ -256,6 +259,8 @@ function mountMobileHarness({
   window.restoreHistoryRunIntoTab = globals.restoreHistoryRunIntoTab
   window.shareUrl = globals.shareUrl
   window.copyTextToClipboard = globals.copyTextToClipboard
+  if (openHistoryCompareLauncher) window.openHistoryCompareLauncher = openHistoryCompareLauncher
+  else delete window.openHistoryCompareLauncher
   window.openHistoryRunDetails = globals.openHistoryRunDetails
   window.getTabs = globals.getTabs
   window.getActiveTabId = globals.getActiveTabId
@@ -334,6 +339,39 @@ describe('runtime button primitive contract', () => {
       document.getElementById('mobile-recents-pagination-controls'),
       'mobile recents pagination',
     )
+  })
+
+  it('mobile recents compare only closes after a compare launcher opens', async () => {
+    const openHistoryCompareLauncher = vi.fn()
+    const unavailable = mountMobileHarness({ openHistoryCompareLauncher: undefined })
+
+    unavailable.mobileRecentPeek.click()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document.querySelector('.sheet-item-action-menu-trigger')?.click()
+    Array.from(document.querySelectorAll('.sheet-item-action-menu .dropdown-item'))
+      .find(item => item.textContent === 'compare')
+      ?.click()
+
+    expect(document.getElementById('mobile-recents-sheet')?.classList.contains('u-hidden')).toBe(false)
+    expect(unavailable.showToast).toHaveBeenCalledWith('Run comparison is not available.', 'error')
+
+    const available = mountMobileHarness({ openHistoryCompareLauncher })
+    available.mobileRecentPeek.click()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document.querySelector('.sheet-item-action-menu-trigger')?.click()
+    Array.from(document.querySelectorAll('.sheet-item-action-menu .dropdown-item'))
+      .find(item => item.textContent === 'compare')
+      ?.click()
+
+    expect(openHistoryCompareLauncher).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'run-1',
+      command: 'ping darklab.sh',
+    }))
+    expect(document.getElementById('mobile-recents-sheet')?.classList.contains('u-hidden')).toBe(true)
   })
 
   it('mobile history surface opens without forcing a run-only type filter', () => {

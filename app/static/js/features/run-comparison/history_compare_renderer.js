@@ -282,29 +282,30 @@ function _historyCompareRendererMaybeLauncher() {
 }
 
 function _historyCompareRendererTabs() {
-  const getTabsFn = _historyCompareRendererGlobalFunction('getTabs');
+  const getTabsFn = typeof importedGetTabs === 'function'
+    ? importedGetTabs
+    : _historyCompareRendererGlobalFunction('getTabs');
   if (typeof getTabsFn === 'function') return getTabsFn();
-  if (typeof importedGetTabs === 'function') return importedGetTabs();
   const stateTabs = HISTORY_COMPARE_RENDERER_GLOBAL.tabs;
   if (Array.isArray(stateTabs)) return stateTabs;
   return [];
 }
 
 function _historyCompareRendererCreateTab(label) {
-  const create = _historyCompareRendererGlobalFunction('createTab')
-    || (typeof importedCreateTab !== 'undefined' && importedCreateTab);
+  const create = (typeof importedCreateTab !== 'undefined' && importedCreateTab)
+    || _historyCompareRendererGlobalFunction('createTab');
   return typeof create === 'function' ? create(label) : null;
 }
 
 function _historyCompareRendererActivateTab(tabId, options) {
-  const activate = _historyCompareRendererGlobalFunction('activateTab')
-    || (typeof importedActivateTab !== 'undefined' && importedActivateTab);
+  const activate = (typeof importedActivateTab !== 'undefined' && importedActivateTab)
+    || _historyCompareRendererGlobalFunction('activateTab');
   if (typeof activate === 'function') activate(tabId, options);
 }
 
 function _historyCompareRendererRestoreRun(run, options) {
-  const restore = _historyCompareRendererGlobalFunction('restoreHistoryRunIntoTab')
-    || (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab);
+  const restore = (typeof importedRestoreHistoryRunIntoTab !== 'undefined' && importedRestoreHistoryRunIntoTab)
+    || _historyCompareRendererGlobalFunction('restoreHistoryRunIntoTab');
   return typeof restore === 'function'
     ? restore(run, options)
     : Promise.reject(new Error('history restore unavailable'));

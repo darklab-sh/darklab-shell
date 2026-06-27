@@ -536,10 +536,12 @@ test.describe('history drawer', () => {
           },
         },
       })
-      window.submitComposerCommand = (cmd, options) => {
+      window.DarklabRunner.setRunnerHandlers({
+        submitComposerCommand: (cmd, options) => {
         window.__ranAiSuggestions.push({ cmd, options })
         return 'settle'
-      }
+        },
+      })
     })
 
     await openHistory(page)

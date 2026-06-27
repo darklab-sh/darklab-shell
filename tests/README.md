@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,842
+- behavior tests: 3,860
 - docs/inventory meta-tests: 40
 - `pytest`: 2181 (2146 behavior + 35 meta)
-- `vitest`: 1432 (1427 behavior + 5 meta)
+- `vitest`: 1450 (1445 behavior + 5 meta)
 - `playwright`: 269 behavior
-- total: 3,882
+- total: 3,900
 
 This document is organized in two parts:
 
@@ -2431,6 +2431,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 
 | Test | Description |
 | --- | --- |
+| `keeps app function resolution import-first while APP_CONFIG remains global-backed` | Verifies app helpers prefer ESM imports for function lookups while still reading live APP_CONFIG globals. |
 | `selects JSON object fields and array values with the app-native jq pipe helper` | Verifies that the app-native jq pipe helper selects object fields, pretty-prints identity output, iterates arrays, and supports raw scalar output. |
 | `filters JSONL rows by key existence, equality, and contains selectors` | Verifies that JSONL rows can be filtered by key existence, equality, and substring matches. |
 | `parses the same jq selector fixture set as the server-side parser` | Verifies that the browser-side jq selector parser accepts and rejects the same parity fixture set as pytest. |
@@ -2457,6 +2458,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `applies the saved prompt username preference to the live prompt` | Verifies that the saved prompt username option updates the live shell prompt and persists through the session preference path. |
 | `shows live validation for invalid prompt username input without saving it` | Verifies that invalid prompt username characters show an inline Options error and do not overwrite the saved prompt username. |
 | `uses a compact cwd placeholder instead of the mobile prompt label` | Verifies that the mobile composer hides the full prompt label during normal command entry and uses a compact cwd-aware placeholder instead. |
+| `refreshes the visible prompt path when workspace cwd changes` | Verifies that the live prompt prefix follows workspace directory changes after commands such as `cd`. |
 | `_setTsMode updates body classes and button labels` | _setTsMode updates body classes and button labels. |
 | `_setLnMode updates body classes and button labels` | _setLnMode updates body classes and button labels. |
 | `allows timestamps and line numbers to be enabled at the same time` | Verifies that allows timestamps and line numbers to be enabled at the same time. |
@@ -2749,6 +2751,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `shows starter values together with placeholders and then leaves only the placeholder while typing` | Verifies that starter values like `https://` can appear alongside a `<url>` placeholder at the argument slot, and that the placeholder remains once the typed token no longer matches the starter value. |
 | `honors ordered positional hints one argument slot at a time` | Verifies that ordered positional placeholders expose only the current argument slot, such as host before port. |
 | `stops suggesting more positional arguments after reaching argument_limit, but still allows flags` | Verifies that `argument_limit` suppresses further positional guidance once the configured number of positional arguments is filled, while still allowing flag suggestions in a later flag slot. |
+| `uses bridged allowed-command FAQ data for command lookup suggestions` | Verifies command lookup autocomplete reads allowed-command FAQ data through the Command Registry bridge when the old global is absent. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
 | `uses cwd-relative workspace file hints for external workspace read flags` | Verifies that workspace-aware external command input flags use CWD-relative suggestions and scoped folder-prefix completions. |
@@ -2807,12 +2810,11 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 
 #### `button_primitives_runtime.test.js`
 
-Runtime contract coverage for JS-rendered button surfaces that the static template scan cannot see. This suite mounts the live history/mobile pagination helpers and asserts that the generated controls still compose the shared button primitives rather than surface-specific classes.
-
 | Test | Description |
 | --- | --- |
 | `history pagination buttons render with allowed primitives` | Verifies that the desktop history pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
 | `mobile recents pagination buttons render with allowed primitives` | Verifies that the mobile recents sheet pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
+| `mobile recents compare only closes after a compare launcher opens` | Verifies mobile Recents stays open when compare launch is unavailable and closes only after a launcher opens. |
 | `mobile history surface opens without forcing a run-only type filter` | Verifies that the mobile History entry point opens the shared History panel without overriding the current `type` filter. |
 | `mobile recents hides write-only actions for view-only team scope` | Verifies that the mobile recents sheet hides delete-all plus run edit, project-write, and delete actions while keeping permalink, compare, and copy actions for view-only team scope. |
 
@@ -2853,8 +2855,13 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `exports representative core helpers as ESM APIs` | Verifies representative core helpers expose direct ESM imports. |
+| `distinguishes loaded bridge wrappers from registered lazy handlers` | Verifies lazy ESM bridges report handler readiness separately from the wrapper module being loaded. |
+| `keeps Project Runs compare honest when the ESM bridge handler is not ready` | Verifies Project Runs compare actions do not pretend to open when the ESM bridge handler has not registered yet. |
 | `exports representative owner APIs without requiring browser-global mirrors` | Verifies representative owner modules expose callable ESM APIs without relying on browser-global mirrors. |
 | `keeps mutable app state behind the explicit state API` | Verifies tab, composer, autocomplete, and welcome state mutations go through exported getter/setter helpers instead of assigning to read-only ESM value imports. |
+| `builds workspace prompt labels from ESM tab state without a global cwd reader` | Verifies workspace prompt labels read the current tab folder through ESM state instead of a legacy browser-global CWD helper. |
+| `builds autocomplete workspace cwd from the imported workspace helper` | Verifies autocomplete builds workspace cwd hints from the imported workspace helper instead of the removed global. |
+| `opens Atlas entity chips through the imported bridge without a global opener` | Verifies output entity chips can open Atlas through the imported bridge when the old global opener is absent. |
 | `loads session-scoped lazy data through imported runtime fetch without a global mirror` | Verifies session-scoped lazy fetches can load through the imported runtime bridge when no legacy `window.apiFetch` mirror exists. |
 | `returns loaded lazy module API objects through the runtime loader contract` | Verifies the lazy asset loader resolves configured module entries and returns the API object the runtime expects. |
 | `logs a bounded error when a lazy module API contract is missing` | Verifies missing lazy module exports reject with safe client-error context instead of leaking raw asset config. |
@@ -2989,6 +2996,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
 | `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
+| `keeps the history drawer open when compare launcher is unavailable` | Verifies the History drawer stays open and in context when compare launch cannot start. |
 | `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces the manual candidate list instead of merging stale suggested runs into the search results. |
 | `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
 | `preflights Restore Both tab capacity before creating either tab` | Verifies that Restore Both checks available tab capacity before creating comparison restore tabs. |
@@ -3119,6 +3127,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `isolates ANSI parser state between tabs` | Verifies that unterminated ANSI color or style state in one tab does not affect output rendered in another tab. |
 | `resets ANSI parser state before replaying restored output` | Verifies that restored transcript replay starts with fresh ANSI parser state for the target tab. |
 | `renders shell as a normal workspace folder in the prompt` | Verifies that a workspace folder named `shell` is displayed normally in the prompt instead of being treated as a mount prefix. |
+| `exposes live tab-session restore state through the output bridge` | Verifies the output bridge reports live tab-session restore state instead of a stale global snapshot. |
 | `falls back to plain-text rendering when AnsiUp is unavailable` | Verifies that falls back to plain-text rendering when AnsiUp is unavailable. |
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
 | `renders builtin help and FAQ rows as structured terminal content` | Verifies that help rows render plain command/description columns and FAQ rows render stable question/answer markers with inline code. |
@@ -3242,6 +3251,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders triage controls once and only for actionable timeline fires` | Verifies Project Monitoring keeps monitor-card latest fires read-only, renders a single timeline triage widget for changed fires, omits triage controls for no-change fires, and marks the timeline with the shared `.nice-scroll` primitive. |
 | `requires the shared button factory for action buttons` | Verifies Project Monitoring fails clearly instead of rendering bare fallback buttons when the shared shell button factory is unavailable. |
 | `opens run details and compares available monitoring runs from action buttons` | Verifies Project Monitoring action buttons open Run Details and launch the shared comparison flow for available current/baseline runs. |
+| `falls back to lazy globals when ESM bridge handlers are not registered` | Verifies Project Monitoring can still use valid lazy globals while bridge handlers are not registered. |
+| `reports unavailable actions when neither ESM bridges nor lazy globals are ready` | Verifies Project Monitoring shows an unavailable message when no bridge or lazy global can handle an action. |
 | `confirms before accepting a watcher baseline from monitoring` | Verifies Accept baseline routes through the shared confirmation primitive, cancels without posting, and posts only after the operator confirms. |
 | `runs pause resume and run-now watcher actions from monitoring cards` | Verifies Project Monitoring pause, resume, and run-now actions send the expected watcher requests and surface action failures safely. |
 | `resets monitoring filters and retries after load errors` | Verifies Project Monitoring reset and retry controls clear filter/error state and reload dashboard data after a failed request. |
@@ -3303,6 +3314,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `lets Ctrl+C flow through xterm as native PTY input` | Verifies that Ctrl+C inside the interactive PTY modal reaches the PTY as a native interrupt instead of opening the kill confirmation. |
 | `truncates PTY input by UTF-8 byte length and reports truncation before posting` | Verifies that large PTY input is capped by the server's byte limit before posting and surfaces a transcript notice when truncation happens. |
 | `batches rapid PTY input chunks into one request` | Verifies that bursty terminal input chunks are coalesced into one PTY input request. |
+| `reads failed PTY input messages through the runner bridge without a legacy global` | Verifies that PTY input failures use the runner bridge to show the backend error message after the legacy global parser is removed. |
 | `reattaches an active PTY from a snapshot and follows the live stream` | Verifies that PTY reattach writes the plain-text snapshot to a fresh xterm and resumes streaming from the supplied event id. |
 | `does not create a PTY reattach tab when the snapshot is unavailable` | Verifies that failed PTY snapshot fetches report the error without consuming a new tab. |
 | `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
@@ -3406,9 +3418,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
+| `runCommand uses live config for preview truncation notices after config reloads` | Verifies runCommand reads current config when building preview truncation notices after a reload. |
 | `runCommand refreshes and broadcasts project context after successful project built-ins` | Verifies that successful terminal project commands refresh local project context and notify passive same-session tabs. |
 | `runCommand preserves output classes and blank streamed lines` | Verifies that runCommand preserves output classes and blank streamed lines. |
 | `marks brokered output as live when high-volume output handling is configured` | Verifies that brokered stream output carries the live-output marker used by high-volume browser rendering. |
+| `uses live config for high-volume output metadata after config reloads` | Verifies high-volume output metadata uses current config after runtime config reloads. |
 | `runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result` | Verifies that `nc` reverse-DNS warning noise is filtered while the meaningful open-port line remains visible. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |
 | `returns true on empty input (blank Enter)` | Verifies that returns true on empty input (blank Enter). |
@@ -3566,7 +3580,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
+| `keeps rail modal launchers wired to ESM imports instead of dead placeholders` | Verifies shell rail modal launchers call imported ESM openers instead of stale placeholder globals. |
 | `opens Status Monitor and Findings Board from the desktop rail nav item` | Verifies that the desktop rail exposes Status Monitor and the Findings Board as first-class navigation items. |
+| `opens Status Monitor from the HUD before the monitor module binds its own triggers` | Verifies that the desktop HUD STATUS pill opens the lazy Status Monitor on the first click before the monitor module installs its own HUD handlers. |
 | `keeps the default split when workflows is closed and reopened before resizing` | Verifies that the desktop rail preserves the default Recents/Workflows split when Workflows is collapsed before the user drags the splitter. |
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |

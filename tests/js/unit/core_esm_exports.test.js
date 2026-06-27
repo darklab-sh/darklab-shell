@@ -71,11 +71,17 @@ import {
   normalizeSignals,
 } from '../../../app/static/js/core/output_core.js'
 import { setRuntimeHandlers } from '../../../app/static/js/runtime_bridge.js'
-import { loadSessionVariables } from '../../../app/static/js/features/autocomplete/runtime_context.js'
+import {
+  _runtimeWorkspaceCwd,
+  loadSessionVariables,
+} from '../../../app/static/js/features/autocomplete/runtime_context.js'
 import {
   appendLine,
   appendLines,
+  buildPromptLabel as outputBuildPromptLabel,
   createAnsiUpRenderer,
+  currentPromptWorkspacePath,
+  _renderAnsiWithEntityTokens,
   renderRestoredTabOutput,
 } from '../../../app/static/js/output.js'
 import {
@@ -259,6 +265,17 @@ import { _renderHistoryCompareNav } from '../../../app/static/js/features/run-co
 import { closeHistoryCompareOverlay } from '../../../app/static/js/features/run-comparison/history_compare_overlay.js'
 import { fetchAndRenderHistoryComparison } from '../../../app/static/js/features/run-comparison/history_compare_renderer.js'
 import {
+  fetchAndRenderHistoryComparison as bridgeFetchAndRenderHistoryComparison,
+  hasHistoryCompareHandler,
+  openHistoryCompareLauncher as bridgeOpenHistoryCompareLauncher,
+  setHistoryCompareHandlers,
+} from '../../../app/static/js/features/run-comparison/history_compare_bridge.js'
+import {
+  hasHistoryRunModalStateHandler,
+  openHistoryRunDetails as bridgeOpenHistoryRunDetails,
+  setHistoryRunModalStateHandlers,
+} from '../../../app/static/js/features/history/history_run_modal_state_bridge.js'
+import {
   activateOptionsTab,
   applyCompareContextPreference,
   applyCompareViewModePreference,
@@ -383,6 +400,7 @@ import {
   openAtlas,
   refreshAtlasOverlay,
 } from '../../../app/static/js/features/atlas/atlas_overlay.js'
+import { setAtlasHandlers } from '../../../app/static/js/features/atlas/atlas_bridge.js'
 import { DarklabAtlasMobile } from '../../../app/static/js/features/atlas/atlas_mobile.js'
 import { ProjectTargetValidation } from '../../../app/static/js/features/projects/project_target_validation.js'
 import { cycleProjectWorkspaceTab } from '../../../app/static/js/features/projects/project_context_bridge.js'
@@ -461,6 +479,70 @@ describe('core ESM exports', () => {
     expect(DarklabAutocompleteCore.filterItems).toBe(filterItems)
     expect(DarklabRunOutputModel.fromWireLineEvent).toBe(fromWireLineEvent)
     expect(DarklabSearchCore.formatFindingSummary).toBe(formatFindingSummary)
+  })
+
+  it('distinguishes loaded bridge wrappers from registered lazy handlers', () => {
+    const compareHandler = vi.fn(() => 'compare-opened')
+    const detailsHandler = vi.fn(() => 'details-opened')
+    try {
+      setHistoryCompareHandlers({
+        fetchAndRenderHistoryComparison: null,
+        openHistoryCompareLauncher: null,
+      })
+      setHistoryRunModalStateHandlers({ openHistoryRunDetails: null })
+
+      expect(bridgeFetchAndRenderHistoryComparison.hasHandler()).toBe(false)
+      expect(bridgeOpenHistoryCompareLauncher.hasHandler()).toBe(false)
+      expect(bridgeOpenHistoryRunDetails.hasHandler()).toBe(false)
+      expect(hasHistoryCompareHandler('fetchAndRenderHistoryComparison')).toBe(false)
+      expect(hasHistoryRunModalStateHandler('openHistoryRunDetails')).toBe(false)
+      expect(bridgeFetchAndRenderHistoryComparison('run-left', 'run-right')).toBeUndefined()
+      expect(bridgeOpenHistoryCompareLauncher({ id: 'run-left' })).toBeUndefined()
+      expect(bridgeOpenHistoryRunDetails({ id: 'run-left' })).toBeUndefined()
+
+      setHistoryCompareHandlers({
+        fetchAndRenderHistoryComparison: compareHandler,
+        openHistoryCompareLauncher: compareHandler,
+      })
+      setHistoryRunModalStateHandlers({ openHistoryRunDetails: detailsHandler })
+
+      expect(bridgeFetchAndRenderHistoryComparison.hasHandler()).toBe(true)
+      expect(bridgeOpenHistoryCompareLauncher.hasHandler()).toBe(true)
+      expect(bridgeOpenHistoryRunDetails.hasHandler()).toBe(true)
+      expect(bridgeFetchAndRenderHistoryComparison('run-left', 'run-right')).toBe('compare-opened')
+      expect(bridgeOpenHistoryCompareLauncher({ id: 'run-left' })).toBe('compare-opened')
+      expect(bridgeOpenHistoryRunDetails({ id: 'run-left' })).toBe('details-opened')
+    } finally {
+      setHistoryCompareHandlers({
+        fetchAndRenderHistoryComparison: null,
+        openHistoryCompareLauncher: null,
+      })
+      setHistoryRunModalStateHandlers({ openHistoryRunDetails: null })
+    }
+  })
+
+  it('keeps Project Runs compare honest when the ESM bridge handler is not ready', () => {
+    const bridgeGlobal = typeof window !== 'undefined' ? window : globalThis
+    const globals = snapshotGlobals(bridgeGlobal, ['fetchAndRenderHistoryComparison'])
+    const fallbackCompare = vi.fn()
+    try {
+      const controller = DarklabProjectRuns.createProjectRunsController({})
+      setHistoryCompareHandlers({ fetchAndRenderHistoryComparison: null })
+      bridgeGlobal.fetchAndRenderHistoryComparison = fallbackCompare
+
+      controller.compareRuns('project-1', 'run-1', 'run', 'run-2')
+
+      expect(fallbackCompare).toHaveBeenCalledWith('run-1', 'run-2', {
+        url: '/history/compare?left=run-1&project_id=project-1&right=run-2',
+      })
+
+      delete bridgeGlobal.fetchAndRenderHistoryComparison
+      expect(() => controller.compareRuns('project-1', 'run-1', 'run', 'run-2'))
+        .toThrow('Run comparison is not available.')
+    } finally {
+      setHistoryCompareHandlers({ fetchAndRenderHistoryComparison: null })
+      restoreGlobals(bridgeGlobal, globals)
+    }
   })
 
   it('exports representative owner APIs without requiring browser-global mirrors', async () => {
@@ -578,6 +660,104 @@ describe('core ESM exports', () => {
     }
   })
 
+  it('builds workspace prompt labels from ESM tab state without a global cwd reader', () => {
+    const originalTabs = getTabs()
+    const originalActiveTabId = getActiveTabId()
+    const originalConfig = getAppConfig()
+    const originalGlobalWorkspaceCwd = globalThis._workspaceCwd
+    const originalWindowWorkspaceCwd = typeof window !== 'undefined' ? window._workspaceCwd : undefined
+    try {
+      delete globalThis._workspaceCwd
+      if (typeof window !== 'undefined') delete window._workspaceCwd
+      setAppConfig({ ...originalConfig, workspace_enabled: true })
+      setTabs([{ id: 'prompt-esm-tab', workspaceCwd: 'reports/nuclei' }])
+      setActiveTabId('prompt-esm-tab')
+
+      expect(currentPromptWorkspacePath()).toBe('/reports/nuclei')
+      expect(outputBuildPromptLabel()).toContain(':/reports/nuclei $')
+    } finally {
+      setTabs(originalTabs)
+      setActiveTabId(originalActiveTabId)
+      setAppConfig(originalConfig)
+      if (typeof originalGlobalWorkspaceCwd === 'function') {
+        globalThis._workspaceCwd = originalGlobalWorkspaceCwd
+      }
+      if (typeof window !== 'undefined' && typeof originalWindowWorkspaceCwd === 'function') {
+        window._workspaceCwd = originalWindowWorkspaceCwd
+      }
+    }
+  })
+
+  it('builds autocomplete workspace cwd from the imported workspace helper', () => {
+    const originalTabs = getTabs()
+    const originalActiveTabId = getActiveTabId()
+    const originalGlobalWorkspaceCwd = globalThis._workspaceCwd
+    const originalWindowWorkspaceCwd = typeof window !== 'undefined' ? window._workspaceCwd : undefined
+    try {
+      delete globalThis._workspaceCwd
+      if (typeof window !== 'undefined') delete window._workspaceCwd
+      setTabs([{ id: 'autocomplete-esm-tab', workspaceCwd: ' reports / nuclei ' }])
+      setActiveTabId('autocomplete-esm-tab')
+
+      expect(_runtimeWorkspaceCwd()).toBe('reports/nuclei')
+    } finally {
+      setTabs(originalTabs)
+      setActiveTabId(originalActiveTabId)
+      if (typeof originalGlobalWorkspaceCwd === 'function') {
+        globalThis._workspaceCwd = originalGlobalWorkspaceCwd
+      }
+      if (typeof window !== 'undefined' && typeof originalWindowWorkspaceCwd === 'function') {
+        window._workspaceCwd = originalWindowWorkspaceCwd
+      }
+    }
+  })
+
+  it('opens Atlas entity chips through the imported bridge without a global opener', async () => {
+    const bridgeGlobal = typeof window !== 'undefined' ? window : globalThis
+    const globals = snapshotGlobals(bridgeGlobal, ['openAtlas'])
+    const originalBody = document.body.innerHTML
+    const openSpy = vi.fn()
+    try {
+      delete bridgeGlobal.openAtlas
+      setAtlasHandlers({ openAtlas: openSpy })
+
+      const line = document.createElement('div')
+      line.className = 'line'
+      const content = document.createElement('span')
+      content.className = 'line-content'
+      _renderAnsiWithEntityTokens(content, 'scan ip.darklab.sh', [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }], 'atlas-chip-tab')
+      line.appendChild(content)
+      document.body.appendChild(line)
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('.atlas-entity-token')).not.toBeNull()
+      })
+
+      document.querySelector('.atlas-entity-token')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+      expect(openSpy).toHaveBeenCalledWith({
+        source: 'output-entity',
+        tab: 'domain',
+        entityType: 'domain',
+        entityValue: 'ip.darklab.sh',
+        forceView: 'detail',
+        refreshIntel: false,
+        addActiveProject: false,
+      })
+    } finally {
+      setAtlasHandlers({ openAtlas })
+      document.body.innerHTML = originalBody
+      restoreGlobals(bridgeGlobal, globals)
+    }
+  })
+
   it('loads session-scoped lazy data through imported runtime fetch without a global mirror', async () => {
     const bridgeGlobal = typeof window !== 'undefined' ? window : globalThis
     const globals = snapshotGlobals(bridgeGlobal, [
@@ -604,6 +784,8 @@ describe('core ESM exports', () => {
         }
       : null
     const originalBody = document.body.innerHTML
+    const originalTabs = getTabs()
+    const originalActiveTabId = getActiveTabId()
     try {
       delete bridgeGlobal.apiFetch
       const fetch = vi.fn(async (url, options = {}) => ({
@@ -627,6 +809,10 @@ describe('core ESM exports', () => {
         <button id="options-secrets-refresh-btn"></button>
         <div id="options-secrets-msg"></div>
         <div id="options-secrets-list"></div>
+        <div id="tabs-bar"></div>
+        <div id="tab-panels"></div>
+        <input id="cmd" />
+        <span id="status"></span>
       `
 
       invalidateOptionsSecrets()
@@ -685,10 +871,9 @@ describe('core ESM exports', () => {
         { name: 'TARGET_HOST', value: 'darklab.sh' },
       ])
 
-      const restoredTab = { id: 'tab-restored' }
       bridgeGlobal.getTabs = vi.fn(() => [])
-      bridgeGlobal.getTab = vi.fn((tabId) => (tabId === restoredTab.id ? restoredTab : null))
-      bridgeGlobal.createTab = vi.fn(() => restoredTab.id)
+      bridgeGlobal.getTab = vi.fn(() => null)
+      bridgeGlobal.createTab = vi.fn(() => 'legacy-tab')
       bridgeGlobal.clearTab = vi.fn()
       bridgeGlobal.appendLine = vi.fn()
       bridgeGlobal.setTabStatus = vi.fn()
@@ -700,7 +885,9 @@ describe('core ESM exports', () => {
       await expect(restoreHistoryRunIntoTab({
         id: 'run-restored',
         full_output_available: true,
-      })).resolves.toBe(restoredTab.id)
+      })).resolves.toBe('tab-1')
+      expect(bridgeGlobal.createTab).not.toHaveBeenCalled()
+      expect(bridgeGlobal.getTab).not.toHaveBeenCalled()
 
       fetchAndRenderHistoryComparison('run-left', 'run-right')
       await Promise.resolve()
@@ -711,6 +898,8 @@ describe('core ESM exports', () => {
       expect(runtimeApiFetch).toHaveBeenCalledWith('/history/compare?left=run-left&right=run-right', undefined)
       expect(rawFetch).not.toHaveBeenCalled()
     } finally {
+      setTabs(originalTabs)
+      setActiveTabId(originalActiveTabId)
       document.body.innerHTML = originalBody
       if (runtimeHandlers && originalRuntimeHandlers) {
         runtimeHandlers.apiFetch = originalRuntimeHandlers.apiFetch

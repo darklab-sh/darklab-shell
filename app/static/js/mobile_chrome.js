@@ -117,6 +117,38 @@ import {
     if (typeof importedLogClientError === 'function') importedLogClientError(context, err);
   }
 
+  function _recentsOpenHistoryCompare(run) {
+    const hasImportedHandler = typeof openHistoryCompareLauncher?.hasHandler === 'function'
+      && openHistoryCompareLauncher.hasHandler();
+    const openCompare = hasImportedHandler || typeof openHistoryCompareLauncher?.hasHandler !== 'function'
+      ? openHistoryCompareLauncher
+      : null;
+    if (typeof openCompare !== 'function') return false;
+    try {
+      const result = openCompare(run);
+      return result !== false;
+    } catch (err) {
+      logMobileChromeError('mobile recents compare unavailable', err);
+      return false;
+    }
+  }
+
+  function _recentsOpenRunDetails(run) {
+    const hasImportedHandler = typeof openHistoryRunDetails?.hasHandler === 'function'
+      && openHistoryRunDetails.hasHandler();
+    const openDetails = hasImportedHandler || typeof openHistoryRunDetails?.hasHandler !== 'function'
+      ? openHistoryRunDetails
+      : null;
+    if (typeof openDetails !== 'function') return false;
+    try {
+      const result = openDetails(run);
+      return result !== false;
+    } catch (err) {
+      logMobileChromeError('mobile recents run details unavailable', err);
+      return false;
+    }
+  }
+
   // ── Elements ────────────────────────────────────────────────────
   const mobileShellChrome     = document.getElementById('mobile-shell-chrome');
   const mobileComposer        = document.getElementById('mobile-composer');
@@ -826,9 +858,10 @@ import {
       }
     });
     addItem('compare', () => {
-      if (typeof openHistoryCompareLauncher === 'function') {
-        openHistoryCompareLauncher(run);
+      if (_recentsOpenHistoryCompare(run)) {
         closeRecentsSheet();
+      } else if (showToast) {
+        showToast('Run comparison is not available.', 'error');
       }
     });
     if (_recentsCanManageHistory()) {
@@ -1053,8 +1086,7 @@ import {
           closeRecentsSheet();
           return;
         }
-        if (typeof openHistoryRunDetails === 'function') {
-          openHistoryRunDetails(run);
+        if (_recentsOpenRunDetails(run)) {
           closeRecentsSheet();
           return;
         }

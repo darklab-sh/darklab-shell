@@ -128,6 +128,12 @@ export async function loadAppFns({
     'getShareRedactionDefaultPreference',
     'syncOptionsControls',
     'DarklabTeamScope',
+    '__darklabCommandRegistryBridge',
+    'getAllowedCommandsFaqData',
+    'setAllowedCommandsFaqData',
+    'openCommandRegistry',
+    'closeCommandRegistry',
+    'isCommandRegistryOverlayOpen',
   ].forEach((name) => {
     try { delete window[name] } catch (_) {}
     try { delete globalThis[name] } catch (_) {}
@@ -728,7 +734,11 @@ export async function loadAppFns({
       getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride,
       getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride,
       ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
-      _workspaceCwd: () => workspaceCwdOverride,
+      _workspaceCwd: () => (
+        typeof workspaceCwdOverride === 'function'
+          ? workspaceCwdOverride()
+          : workspaceCwdOverride
+      ),
       workspaceDisplayPath: (path = '') => {
         const normalized = String(path || '').split('/').filter(Boolean).join('/')
         return normalized ? `/${normalized}` : '/'
