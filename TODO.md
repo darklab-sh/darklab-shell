@@ -41,17 +41,7 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-- **Unify terminal `intel` lookups with Atlas intel snapshots.**
-  - The terminal `intel <type> <value>` built-in currently calls provider lookup and renders
-    results, but it does not persist successful provider data into `entity_intel_snapshots`.
-    Atlas modal **Refresh intel** uses a separate persistence path, so Projects -> Overview
-    only sees updated provider data after a modal refresh.
-  - Add a shared persistence helper that can store lookup results for an existing matching
-    Atlas entity in the active personal/team scope. Keep casual terminal lookups from creating
-    new Atlas entities unexpectedly unless that behavior is explicitly designed later.
-  - Success criteria: when a terminal `intel` lookup succeeds for an entity that already
-    exists in Atlas, Atlas detail and Project Overview should show the refreshed provider data
-    without requiring a second manual refresh from the Atlas modal.
+No open Technical Debt items are currently tracked.
 
 ---
 

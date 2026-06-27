@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,840
+- behavior tests: 3,842
 - docs/inventory meta-tests: 40
-- `pytest`: 2179 (2144 behavior + 35 meta)
+- `pytest`: 2181 (2146 behavior + 35 meta)
 - `vitest`: 1432 (1427 behavior + 5 meta)
 - `playwright`: 269 behavior
-- total: 3,880
+- total: 3,882
 
 This document is organized in two parts:
 
@@ -659,6 +659,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_builtin_intel_ip_formats_censys_provider_results` | Verifies the `intel ip` built-in renders normalized Censys host ports, services, ownership, and names. |
 | `TestIntelServices.test_builtin_intel_reports_all_missing_provider_keys` | Verifies all-missing provider lookups exit with setup guidance instead of reporting success. |
 | `TestIntelServices.test_builtin_intel_formats_cve_provider_results` | Verifies the `intel cve` built-in renders normalized NVD provider results. |
+| `TestIntelServices.test_builtin_intel_persists_snapshot_for_existing_atlas_entity` | Verifies terminal `intel` lookups persist provider snapshots when the matching Atlas entity already exists. |
+| `TestIntelServices.test_builtin_intel_does_not_create_atlas_entity_for_lookup_only_value` | Verifies terminal `intel` lookups do not create Atlas entities just to store provider snapshots. |
 | `TestIntelServices.test_builtin_intel_rejects_private_ip_without_override` | Verifies `intel ip` blocks private or loopback addresses by default before provider lookup. |
 | `TestIntelServices.test_builtin_intel_hash_rejects_invalid_value` | Verifies `intel hash` rejects non-hex or unsupported hash lengths with the expected user-facing message. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |

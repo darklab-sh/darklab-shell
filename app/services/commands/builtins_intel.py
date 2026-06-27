@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import Any
 
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
+from services.atlas.intel_bridge import persist_lookup_for_existing_entity
+from core.helpers import get_log_session_id
 from services.intel.canonical import CanonicalizationError
 from services.intel.lookup import IntelLookupResult, ProviderLookup, lookup_entity
 from services.intel.registry import provider_label
+
+
+log = logging.getLogger("shell")
 
 
 def run_builtin_intel(command: str, session_id: str, *, team_id: str = "") -> tuple[list[dict[str, object]], int]:
@@ -38,9 +44,23 @@ def run_builtin_intel(command: str, session_id: str, *, team_id: str = "") -> tu
         message = "Hash must be hex MD5/SHA1/SHA256" if entity_type == "hash" else str(exc)
         return [output_line(f"intel: {message}")], 1
 
+    _persist_lookup_snapshot(result, session_id, team_id=team_id)
     lines = _format_lookup_result(result)
     exit_code = 0 if result.success_count or result.configured_count else 1
     return lines, exit_code
+
+
+def _persist_lookup_snapshot(result: IntelLookupResult, session_id: str, *, team_id: str = "") -> None:
+    if result.success_count <= 0:
+        return
+    try:
+        persist_lookup_for_existing_entity(session_id, result, team_id=team_id)
+    except Exception:
+        log.exception("INTEL_LOOKUP_SNAPSHOT_PERSIST_FAILED", extra={
+            "session": get_log_session_id(session_id),
+            "entity_type": result.entity_type,
+            "team_id": team_id,
+        })
 
 
 def _intel_usage() -> list[dict[str, object]]:

@@ -6,7 +6,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.3] - Unreleased
+## [2.3] — 2026-06-27
 
 ### Added
 
@@ -25,6 +25,11 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Workspace create/write/move routes now reject control characters and leading/trailing whitespace in paths, so visually confusing names such as newline-prefixed folders are not created.
   - Workspace moves clean up partial copy destinations before scanner/appuser fallback moves, preventing sticky-directory ownership mismatches from leaving duplicate files or returning an unhandled 500.
   - **Tests:** focused Vitest and backend/route coverage verifies terminal handler failures, directory creation calls, unsafe path rejection, and partial-move cleanup.
+
+- **Terminal intel lookups refresh Atlas snapshots** — `intel <type> <value>` now persists successful provider results into Atlas when the same entity already exists in the active personal or team scope.
+  - Terminal lookups reuse the Atlas intel snapshot writer, so Atlas detail and Project Overview can show fresh provider data without a second **Refresh intel** action in the Atlas modal.
+  - Lookup-only values still do not create new Atlas entities, keeping casual terminal checks separate from curated Atlas/project state.
+  - **Tests:** focused backend coverage verifies terminal intel updates existing Atlas snapshots and skips snapshot writes when no matching Atlas entity exists.
 
 - **Bounded change windows for Project digests** — Scheduled Project digest notifications now summarize only the monitoring changes in the selected digest window while keeping the current dashboard summary unchanged.
   - The summary route accepts `window_start` and `window_end` ISO datetimes and returns `digest_window` metadata plus changed, recovered, failed, severity, top-change, and link fields for only watcher fires in that window.

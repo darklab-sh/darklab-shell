@@ -30,6 +30,7 @@ import tempfile
 import textwrap
 import time
 import unittest.mock as mock
+import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -10814,6 +10815,94 @@ class TestIntelServices:
         assert "NVD results - retrieved and cached:" in text
         assert "severity" in text
         assert "HIGH" in text
+
+    def test_builtin_intel_persists_snapshot_for_existing_atlas_entity(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        session_id = "intel-snapshot-session-" + uuid.uuid4().hex
+        run_id = "run-intel-snapshot-" + uuid.uuid4().hex
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                (run_id, session_id, "httpx darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                session_id,
+                run_id,
+                [{
+                    "text": "darklab.sh",
+                    "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                }],
+                seen_at="2026-05-14T00:00:01+00:00",
+            )
+            conn.commit()
+        entity_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        payload = {
+            "providers": {
+                "crtsh": {
+                    "certificate_count": 2,
+                    "names": ["darklab.sh"],
+                    "latest_expiry": "2026-08-16T03:29:30",
+                },
+            },
+            "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+        }
+        lookup = IntelLookupResult(
+            "domain",
+            "darklab.sh",
+            [ProviderLookup("crtsh", result=IntelResult("crtsh", "domain", "darklab.sh", payload))],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            lines, exit_code = builtin_commands.execute_builtin_command("intel domain darklab.sh", session_id)
+
+        assert exit_code == 0
+        assert any("crt.sh results" in str(line.get("text", "")) for line in lines)
+        with database.db_connect() as conn:
+            row = conn.execute(
+                "SELECT entity_id, provider, status, summary, data_json FROM entity_intel_snapshots "
+                "WHERE session_id = ? AND entity_id = ?",
+                (session_id, entity_id),
+            ).fetchone()
+        assert row is not None
+        assert row["provider"] == "crtsh"
+        assert row["status"] == "ok"
+        assert row["summary"] == "data available"
+        assert json.loads(row["data_json"])["providers"]["crtsh"]["certificate_count"] == 2
+
+    def test_builtin_intel_does_not_create_atlas_entity_for_lookup_only_value(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        session_id = "intel-lookup-only-session-" + uuid.uuid4().hex
+        payload = {
+            "providers": {"crtsh": {"certificate_count": 1}},
+            "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+        }
+        lookup = IntelLookupResult(
+            "domain",
+            "lookup-only.example",
+            [ProviderLookup("crtsh", result=IntelResult("crtsh", "domain", "lookup-only.example", payload))],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            _, exit_code = builtin_commands.execute_builtin_command("intel domain lookup-only.example", session_id)
+
+        assert exit_code == 0
+        with database.db_connect() as conn:
+            entity_row = conn.execute(
+                "SELECT id FROM entities WHERE session_id = ? AND canonical_value = ?",
+                (session_id, "lookup-only.example"),
+            ).fetchone()
+            snapshot_row = conn.execute(
+                "SELECT id FROM entity_intel_snapshots WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        assert entity_row is None
+        assert snapshot_row is None
 
     def test_builtin_intel_rejects_private_ip_without_override(self):
         with mock.patch("services.commands.builtins_intel.lookup_entity") as lookup:
