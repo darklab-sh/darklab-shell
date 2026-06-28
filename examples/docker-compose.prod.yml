@@ -16,8 +16,8 @@ services:
     environment:
       - WEB_CONCURRENCY=${WEB_CONCURRENCY:-8}
       - WEB_THREADS=${WEB_THREADS:-4}
-      - VIRTUAL_HOST=shell.darklab.sh
-      - LETSENCRYPT_HOST=shell.darklab.sh
+      - VIRTUAL_HOST=shell.darklab.sh,sh.darklab.sh,shell.0g.gg,sh.0g.gg
+      - LETSENCRYPT_HOST=shell.darklab.sh,sh.darklab.sh,shell.0g.gg,sh.0g.gg
       # WORKSPACE_ROOT also overrides app-side workspace_root at runtime.
       - WORKSPACE_ROOT=/workspaces
     volumes:

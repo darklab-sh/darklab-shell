@@ -14,7 +14,12 @@ import {
 import { setHistoryRunModalStateHandlers as importedSetHistoryRunModalStateHandlers } from '../features/history/history_run_modal_state_bridge.js';
 import { setSecretsHandlers as importedSetSecretsHandlers } from '../features/preferences/secrets_bridge.js';
 
+let exportedLoadAtlasOverlay = null;
+let exportedLoadCommandRegistry = null;
+let exportedLoadFindingsBoard = null;
 let exportedLoadMobileRunningIndicator = null;
+let exportedLoadSchedulesModal = null;
+let exportedLoadWatchersModal = null;
 
 (function () {
   const _lazyAssetPromises = {};
@@ -399,7 +404,7 @@ let exportedLoadMobileRunningIndicator = null;
       ? await loadLazyAsset('atlas_mobile')
       : null;
     const DarklabAtlasOverlay = _requireLazyModuleExport(overlayModule, 'DarklabAtlasOverlay');
-    return {
+    const atlasApi = {
       DarklabAtlasTabs: _requireLazyModuleExport(tabsModule, 'DarklabAtlasTabs'),
       DarklabAtlasEntityRow: _requireLazyModuleExport(entityRowModule, 'DarklabAtlasEntityRow'),
       DarklabAtlasDetail: _requireLazyModuleExport(detailModule, 'DarklabAtlasDetail'),
@@ -413,6 +418,17 @@ let exportedLoadMobileRunningIndicator = null;
       refreshAtlasOverlay: overlayModule?.refreshAtlasOverlay || null,
       cycleAtlasTab: overlayModule?.cycleAtlasTab || null,
     };
+    if (typeof window !== 'undefined') {
+      if (typeof atlasApi.openAtlas === 'function') window.openAtlas = atlasApi.openAtlas;
+      if (typeof atlasApi.closeAtlas === 'function') window.closeAtlas = atlasApi.closeAtlas;
+      if (typeof atlasApi.isAtlasOverlayOpen === 'function') window.isAtlasOverlayOpen = atlasApi.isAtlasOverlayOpen;
+      if (typeof atlasApi.refreshAtlasOverlay === 'function') window.refreshAtlasOverlay = atlasApi.refreshAtlasOverlay;
+      if (typeof atlasApi.cycleAtlasTab === 'function') window.cycleAtlasTab = atlasApi.cycleAtlasTab;
+    }
+    if (typeof importedSetAtlasHandlers === 'function') {
+      importedSetAtlasHandlers(atlasApi);
+    }
+    return atlasApi;
   }
 
   async function loadWatchersModal() {
@@ -849,6 +865,14 @@ let exportedLoadMobileRunningIndicator = null;
     return false;
   }
 
+  function lazyIsFindingsBoardOpen() {
+    if (window.isFindingsBoardOpen === lazyIsFindingsBoardOpen) {
+      return !!document.getElementById('findings-board-overlay')?.classList.contains('open');
+    }
+    if (typeof window.isFindingsBoardOpen === 'function') return window.isFindingsBoardOpen();
+    return false;
+  }
+
   async function lazyOpenWatchersModal(options = {}) {
     const watchers = await loadWatchersModal();
     const open = watchers?.openWatchersModal;
@@ -1183,7 +1207,12 @@ let exportedLoadMobileRunningIndicator = null;
   window.loadTourModal = loadTourModal;
   window.loadStatusMonitor = loadStatusMonitor;
   window.loadMobileRunningIndicator = loadMobileRunningIndicator;
+  exportedLoadAtlasOverlay = loadAtlasOverlay;
+  exportedLoadCommandRegistry = loadCommandRegistry;
+  exportedLoadFindingsBoard = loadFindingsBoard;
   exportedLoadMobileRunningIndicator = loadMobileRunningIndicator;
+  exportedLoadSchedulesModal = loadSchedulesModal;
+  exportedLoadWatchersModal = loadWatchersModal;
   if (typeof window.openAtlas !== 'function') window.openAtlas = lazyOpenAtlas;
   if (typeof window.closeAtlas !== 'function') window.closeAtlas = lazyCloseAtlas;
   if (typeof window.isAtlasOverlayOpen !== 'function') window.isAtlasOverlayOpen = lazyIsAtlasOverlayOpen;
@@ -1198,6 +1227,7 @@ let exportedLoadMobileRunningIndicator = null;
   }
   if (typeof window.openFindingsBoard !== 'function') window.openFindingsBoard = lazyOpenFindingsBoard;
   if (typeof window.closeFindingsBoard !== 'function') window.closeFindingsBoard = lazyCloseFindingsBoard;
+  if (typeof window.isFindingsBoardOpen !== 'function') window.isFindingsBoardOpen = lazyIsFindingsBoardOpen;
   if (typeof window.openSchedulesModal !== 'function') window.openSchedulesModal = lazyOpenSchedulesModal;
   if (typeof window.closeSchedulesModal !== 'function') window.closeSchedulesModal = lazyCloseSchedulesModal;
   if (typeof window.isSchedulesOverlayOpen !== 'function') window.isSchedulesOverlayOpen = lazyIsSchedulesOverlayOpen;
@@ -1246,6 +1276,9 @@ let exportedLoadMobileRunningIndicator = null;
     importedSetCommandRegistryHandlers({
       openCommandRegistry: lazyOpenCommandRegistry,
       closeCommandRegistry: lazyCloseCommandRegistry,
+      closeCommandCatalogModal: () => {},
+      hideCommandCatalogOverlay: () => {},
+      isCommandCatalogOverlayOpen: () => false,
       isCommandRegistryOverlayOpen: lazyIsCommandRegistryOverlayOpen,
     });
   }
@@ -1277,12 +1310,47 @@ let exportedLoadMobileRunningIndicator = null;
   if (typeof window.attachInteractivePtyCommand !== 'function') window.attachInteractivePtyCommand = lazyAttachInteractivePtyCommand;
 })();
 
+function loadAtlasOverlay(...args) {
+  return typeof exportedLoadAtlasOverlay === 'function'
+    ? exportedLoadAtlasOverlay(...args)
+    : Promise.resolve(null);
+}
+
+function loadCommandRegistry(...args) {
+  return typeof exportedLoadCommandRegistry === 'function'
+    ? exportedLoadCommandRegistry(...args)
+    : Promise.resolve(null);
+}
+
+function loadFindingsBoard(...args) {
+  return typeof exportedLoadFindingsBoard === 'function'
+    ? exportedLoadFindingsBoard(...args)
+    : Promise.resolve(null);
+}
+
 function loadMobileRunningIndicator(...args) {
   return typeof exportedLoadMobileRunningIndicator === 'function'
     ? exportedLoadMobileRunningIndicator(...args)
     : Promise.resolve(null);
 }
 
+function loadSchedulesModal(...args) {
+  return typeof exportedLoadSchedulesModal === 'function'
+    ? exportedLoadSchedulesModal(...args)
+    : Promise.resolve(null);
+}
+
+function loadWatchersModal(...args) {
+  return typeof exportedLoadWatchersModal === 'function'
+    ? exportedLoadWatchersModal(...args)
+    : Promise.resolve(null);
+}
+
 export {
+  loadAtlasOverlay,
+  loadCommandRegistry,
+  loadFindingsBoard,
   loadMobileRunningIndicator,
+  loadSchedulesModal,
+  loadWatchersModal,
 };

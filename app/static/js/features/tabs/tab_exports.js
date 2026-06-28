@@ -49,26 +49,26 @@ function _tabExportConfig() {
 }
 
 function _tabExportGetTab(id) {
-  const getTabFn = _tabExportGlobalFunction('getTab')
-    || (typeof importedGetTab !== 'undefined' && importedGetTab);
+  const getTabFn = (typeof importedGetTab !== 'undefined' && importedGetTab)
+    || _tabExportGlobalFunction('getTab');
   return typeof getTabFn === 'function' ? getTabFn(id) : null;
 }
 
 function _tabExportShowToast(...args) {
-  const show = _tabExportGlobalFunction('showToast')
-    || (typeof importedShowToast !== 'undefined' && importedShowToast);
+  const show = (typeof importedShowToast !== 'undefined' && importedShowToast)
+    || _tabExportGlobalFunction('showToast');
   if (typeof show === 'function') show(...args);
 }
 
 function _tabExportRefocusComposer(options = { preventScroll: true }) {
-  const refocus = _tabExportGlobalFunction('refocusComposerAfterAction')
-    || (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction);
+  const refocus = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction)
+    || _tabExportGlobalFunction('refocusComposerAfterAction');
   if (typeof refocus === 'function') refocus(options);
 }
 
 function _tabExportCopyTextToClipboard(text) {
-  const copy = _tabExportGlobalFunction('copyTextToClipboard')
-    || (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard);
+  const copy = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard)
+    || _tabExportGlobalFunction('copyTextToClipboard');
   return typeof copy === 'function' ? copy(text) : Promise.reject(new Error('clipboard unavailable'));
 }
 
@@ -79,20 +79,20 @@ function _tabExportDownloadBlobAsAttachment(blob, filename) {
 }
 
 function _tabExportEscapeHtml(text) {
-  const escape = _tabExportGlobalFunction('escapeHtml')
-    || (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml);
+  const escape = (typeof importedEscapeHtml !== 'undefined' && importedEscapeHtml)
+    || _tabExportGlobalFunction('escapeHtml');
   return typeof escape === 'function' ? escape(text) : String(text ?? '');
 }
 
 function _tabExportRedactLineEntries(lines, rules) {
-  const redact = _tabExportGlobalFunction('redactLineEntries')
-    || (typeof importedRedactLineEntries !== 'undefined' && importedRedactLineEntries);
+  const redact = (typeof importedRedactLineEntries !== 'undefined' && importedRedactLineEntries)
+    || _tabExportGlobalFunction('redactLineEntries');
   return typeof redact === 'function' ? redact(lines, rules) : (Array.isArray(lines) ? lines : []);
 }
 
 function _tabExportOmitRawOnlyLineEntries(lines) {
-  const omit = _tabExportGlobalFunction('omitRawOnlyLineEntries')
-    || (typeof importedOmitRawOnlyLineEntries !== 'undefined' && importedOmitRawOnlyLineEntries);
+  const omit = (typeof importedOmitRawOnlyLineEntries !== 'undefined' && importedOmitRawOnlyLineEntries)
+    || _tabExportGlobalFunction('omitRawOnlyLineEntries');
   return typeof omit === 'function' ? omit(lines) : (Array.isArray(lines) ? lines : []);
 }
 
@@ -107,8 +107,8 @@ function _tabExportCommandOutcomeSummariesPreference() {
 }
 
 function _tabExportCreateAnsiUpRenderer() {
-  const createRenderer = _tabExportGlobalFunction('createAnsiUpRenderer')
-    || (typeof importedCreateAnsiUpRenderer !== 'undefined' && importedCreateAnsiUpRenderer);
+  const createRenderer = (typeof importedCreateAnsiUpRenderer !== 'undefined' && importedCreateAnsiUpRenderer)
+    || _tabExportGlobalFunction('createAnsiUpRenderer');
   return typeof createRenderer === 'function' ? createRenderer() : null;
 }
 
@@ -125,8 +125,8 @@ function _tabExportTeamScopeDeniedMessage(action) {
 }
 
 function _tabExportShareUrl(url) {
-  const share = _tabExportGlobalFunction('shareUrl')
-    || (typeof importedShareUrl !== 'undefined' && importedShareUrl);
+  const share = (typeof importedShareUrl !== 'undefined' && importedShareUrl)
+    || _tabExportGlobalFunction('shareUrl');
   return typeof share === 'function' ? share(url) : Promise.reject(new Error('share unavailable'));
 }
 
@@ -146,14 +146,14 @@ function _tabExportConfirmRedactionChoice() {
 }
 
 function _tabExportLineNumberMode() {
-  const readMode = _tabExportGlobalFunction('getLineNumberMode')
-    || (typeof importedGetLineNumberMode !== 'undefined' && importedGetLineNumberMode);
+  const readMode = (typeof importedGetLineNumberMode !== 'undefined' && importedGetLineNumberMode)
+    || _tabExportGlobalFunction('getLineNumberMode');
   return typeof readMode === 'function' ? readMode() : TAB_EXPORT_GLOBAL.lnMode;
 }
 
 function _tabExportTimestampMode() {
-  const readMode = _tabExportGlobalFunction('getTimestampMode')
-    || (typeof importedGetTimestampMode !== 'undefined' && importedGetTimestampMode);
+  const readMode = (typeof importedGetTimestampMode !== 'undefined' && importedGetTimestampMode)
+    || _tabExportGlobalFunction('getTimestampMode');
   return typeof readMode === 'function' ? readMode() : TAB_EXPORT_GLOBAL.tsMode;
 }
 

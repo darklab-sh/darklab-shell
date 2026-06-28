@@ -143,8 +143,8 @@ function _preferenceSyncShellPrompt() {
 }
 
 function _preferenceTimestampMode() {
-  const readTimestampMode = _preferenceGlobalFunction('getTimestampMode')
-    || (typeof getTimestampMode === 'function' ? getTimestampMode : null);
+  const readTimestampMode = (typeof getTimestampMode === 'function' ? getTimestampMode : null)
+    || _preferenceGlobalFunction('getTimestampMode');
   let mode = readTimestampMode
     ? readTimestampMode()
     : (typeof PREFERENCE_GLOBAL?.tsMode === 'string' ? PREFERENCE_GLOBAL.tsMode : 'off');

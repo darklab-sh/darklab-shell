@@ -36,6 +36,11 @@ import {
   _savedThemeName as importedSavedThemeName,
   applyThemeSelection as importedApplyThemeSelection,
 } from '../theme/theme.js';
+import {
+  _recordSuccessfulLocalCommand as importedRecordSuccessfulLocalCommand,
+  appendCommandEcho as importedAppendCommandEcho,
+  setStatus as importedSetStatus,
+} from '../../runner_bridge.js';
 
 const LOCAL_COMMAND_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -96,12 +101,22 @@ function _cliPreserveOutputTail(tabId = null, shouldPreserve = true) {
 }
 
 function _cliSetStatus(statusValue) {
-  const setStatus = _cliGlobalFunction('setStatus');
+  const setStatus = (typeof importedSetStatus === 'function' && importedSetStatus)
+    || _cliGlobalFunction('setStatus');
   if (setStatus) setStatus(statusValue);
 }
 
+function _cliAppendCommandEcho(command, tabId = null) {
+  const appendCommandEcho = (typeof importedAppendCommandEcho === 'function' && importedAppendCommandEcho)
+    || _cliGlobalFunction('appendCommandEcho');
+  if (appendCommandEcho) appendCommandEcho(command, tabId);
+}
+
 function _cliRecordSuccess(command) {
-  const recordSuccessfulLocalCommand = _cliGlobalFunction('_recordSuccessfulLocalCommand');
+  const recordSuccessfulLocalCommand = (typeof importedRecordSuccessfulLocalCommand === 'function'
+    ? importedRecordSuccessfulLocalCommand
+    : null)
+    || _cliGlobalFunction('_recordSuccessfulLocalCommand');
   if (recordSuccessfulLocalCommand) recordSuccessfulLocalCommand(command);
 }
 
@@ -207,8 +222,7 @@ function _cliThemeDescription(entry) {
 async function handleThemeCommand(cmd, tabId = null) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
-  const appendCommandEcho = _cliGlobalFunction('appendCommandEcho');
-  if (appendCommandEcho) appendCommandEcho(cmd, tabId);
+  _cliAppendCommandEcho(cmd, tabId);
 
   if (parts.length === 1 || sub === 'list') {
     const current = _cliCurrentThemeEntry();
@@ -592,8 +606,7 @@ async function handleConfigCommand(cmd, tabId = null) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
   const preserveTail = _cliShouldPreserveOutputTail(tabId);
-  const appendCommandEcho = _cliGlobalFunction('appendCommandEcho');
-  if (appendCommandEcho) appendCommandEcho(cmd, tabId);
+  _cliAppendCommandEcho(cmd, tabId);
 
   if (parts.length === 1 || sub === 'list') {
     _printCliConfigList(tabId);

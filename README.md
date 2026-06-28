@@ -898,6 +898,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── history_panel_bridge.js # History panel ESM bridge for lazy history UI wiring
 │   │       │   │   ├── history_project_actions.js # History project filter options and add-run-to-project flows
 │   │       │   │   ├── history_recall.js # Command recall history and prompt navigation helpers
+│   │       │   │   ├── history_recall_bridge.js # Command recall ESM bridge for shared UI helpers
 │   │       │   │   ├── history_restore.js # Restoring saved runs into terminal tabs and source-line highlighting
 │   │       │   │   ├── history_restore_bridge.js # History restore ESM bridge for saved-session hydration
 │   │       │   │   ├── history_rows.js # History drawer run/snapshot rows, metadata badges, and row action menus
@@ -1011,6 +1012,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── runner_bridge.js # Runner ESM bridge for command execution helpers
 │   │       ├── runtime_bridge.js # Runtime ESM bridge for shared browser compatibility APIs
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
+│   │       ├── search_bridge.js # Search ESM bridge for tab lifecycle updates
 │   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
 │   │       ├── shell_bootstrap.entry.js # Module entry for shell bootstrap controllers
 │   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller
@@ -1039,7 +1041,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   └── xterm.js            # xterm browser terminal for interactive PTY tabs
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
 │   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
-│   │       └── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
+│   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
+│   │       └── workspace_bridge.js # Files panel ESM bridge for lightweight shell close actions
 │   └── templates/
 │       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)

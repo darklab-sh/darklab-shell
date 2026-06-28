@@ -15,6 +15,7 @@ import {
   isHistSearchMode as importedIsHistSearchMode,
 } from './history_search.js';
 import { renderHistory as importedRenderHistory } from './history_panel_bridge.js';
+import { setHistoryRecallHandlers as importedSetHistoryRecallHandlers } from './history_recall_bridge.js';
 
 const HISTORY_RECALL_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -250,6 +251,10 @@ function hydrateCmdHistory(runs) {
 }
 
 if (typeof window !== 'undefined') {
+}
+
+if (typeof importedSetHistoryRecallHandlers === 'function') {
+  importedSetHistoryRecallHandlers({ resetCmdHistoryNav });
 }
 
 export {

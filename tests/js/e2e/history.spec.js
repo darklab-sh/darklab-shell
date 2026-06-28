@@ -312,7 +312,13 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   for (const response of await lineResponses) {
     expect(response.ok()).toBe(true)
   }
-  await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.commonFoldedText)
+  await expect(overlay.getByRole('button', { name: /Hide unchanged lines/ }).first()).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(
+    fixture.commonFoldedText,
+    { timeout: 10_000 },
+  )
 
   const expander = overlay.locator('.history-compare-line-expander').first()
   await expect(expander).toBeVisible()
@@ -536,10 +542,12 @@ test.describe('history drawer', () => {
           },
         },
       })
-      window.submitComposerCommand = (cmd, options) => {
+      window.DarklabRunner.setRunnerHandlers({
+        submitComposerCommand: (cmd, options) => {
         window.__ranAiSuggestions.push({ cmd, options })
         return 'settle'
-      }
+        },
+      })
     })
 
     await openHistory(page)

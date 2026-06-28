@@ -373,7 +373,7 @@ _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]
 _NMAP_ENTITY_NOISE_RE = re.compile(
     r"^(?:Starting Nmap\b.*\bhttps://nmap\.org\b|"
     r"Service detection performed\. Please report any incorrect results at https://nmap\.org/submit/ \.|"
-    r".*\bfollowing fingerprints at https://nmap\.org/cgi-bin/submit\.cgi\?new-service\b.*|"
+    r".*\bfollowing fingerprints? at https://nmap\.org/cgi-bin/submit\.cgi\?new-service\b.*|"
     r"SF:)",
     re.I,
 )
@@ -1297,6 +1297,8 @@ def _extract_entities_for_command(
         nmap_report_entities = _nmap_report_entities(stripped, source_line)
         if nmap_report_entities:
             return nmap_report_entities
+        if _NMAP_RDNS_RE.search(stripped):
+            return extract_entities(text, source_line=source_line, normalized_text=stripped)
         if _is_nmap_vulners_finding(stripped):
             entities = _nmap_target_entities(line_target or command_target or "", source_line)
             seen = _seen_entities(entities)
@@ -1309,6 +1311,7 @@ def _extract_entities_for_command(
                 seen.add(key)
                 entities.append(entity)
             return entities
+        return []
     if root == "tlsx":
         data = _json_object_line(stripped)
         return _tlsx_json_entities(data, source_line) if data else []

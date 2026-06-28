@@ -96,26 +96,26 @@ function _tourGetOutput(tabId) {
 }
 
 function _tourCreateTab() {
-  const create = _tourGlobalFunction('createTab')
-    || (typeof importedCreateTab !== 'undefined' && importedCreateTab);
+  const create = (typeof importedCreateTab !== 'undefined' && importedCreateTab)
+    || _tourGlobalFunction('createTab');
   return typeof create === 'function' ? create() : null;
 }
 
 function _tourActivateTab(tabId) {
-  const activate = _tourGlobalFunction('activateTab')
-    || (typeof importedActivateTab !== 'undefined' && importedActivateTab);
+  const activate = (typeof importedActivateTab !== 'undefined' && importedActivateTab)
+    || _tourGlobalFunction('activateTab');
   if (typeof activate === 'function') activate(tabId);
 }
 
 function _tourSetComposerValue(value, start, end, options) {
-  const setValue = _tourGlobalFunction('setComposerValue')
-    || (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue);
+  const setValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue)
+    || _tourGlobalFunction('setComposerValue');
   if (typeof setValue === 'function') setValue(value, start, end, options);
 }
 
 function _tourRefocusComposerAfterAction(options) {
-  const refocus = _tourGlobalFunction('refocusComposerAfterAction')
-    || (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction);
+  const refocus = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction)
+    || _tourGlobalFunction('refocusComposerAfterAction');
   if (typeof refocus === 'function') refocus(options);
 }
 

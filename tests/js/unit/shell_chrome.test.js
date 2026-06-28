@@ -6,6 +6,7 @@ import { stripEsmExports } from './helpers/extract.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const readScriptSource = relativePath => stripEsmExports(readFileSync(resolve(REPO_ROOT, relativePath), 'utf8'))
+const SHELL_CHROME_RAW_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 const ENTITY_METADATA_SRC = readScriptSource('app/static/js/ui/ui_entity_metadata.js')
 const UI_ACTION_SHEET_SRC = readScriptSource('app/static/js/ui/ui_action_sheet.js')
 const ATLAS_ENTITY_ROW_SRC = readScriptSource('app/static/js/features/atlas/atlas_entity_row.js')
@@ -605,6 +606,31 @@ function loadShellChrome({
 }
 
 describe('shell chrome rail sections', () => {
+  it('keeps rail modal launchers wired to ESM imports instead of dead placeholders', () => {
+    [
+      "loadAtlasOverlay as importedLoadAtlasOverlay",
+      "loadCommandRegistry as importedLoadCommandRegistry",
+      "loadFindingsBoard as importedLoadFindingsBoard",
+      "loadSchedulesModal as importedLoadSchedulesModal",
+      "loadWatchersModal as importedLoadWatchersModal",
+      "import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js'",
+      "import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js'",
+    ].forEach((snippet) => {
+      expect(SHELL_CHROME_RAW_SRC).toContain(snippet)
+    });
+    [
+      'importedLoadAtlasOverlay',
+      'importedLoadCommandRegistry',
+      'importedLoadFindingsBoard',
+      'importedLoadSchedulesModal',
+      'importedLoadWatchersModal',
+    ].forEach((name) => {
+      expect(SHELL_CHROME_RAW_SRC).not.toMatch(new RegExp(`\\blet\\s+${name}\\s*;`))
+    });
+    expect(SHELL_CHROME_RAW_SRC)
+      .toContain('openFindingsBoard: _shellOpenFindingsBoard')
+  })
+
   it('opens Status Monitor and Findings Board from the desktop rail nav item', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
     const apiFetch = vi.fn((url, options = {}) => {
@@ -684,6 +710,18 @@ describe('shell chrome rail sections', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await tick()
     expect(document.getElementById('findings-board-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('opens Status Monitor from the HUD before the monitor module binds its own triggers', () => {
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    loadShellChrome({ openStatusMonitor })
+
+    const statusCell = document.getElementById('hud-status-cell')
+    statusCell.click()
+
+    expect(statusCell.dataset.statusMonitorTrigger).toBe('1')
+    expect(statusCell.classList.contains('hud-action-cell')).toBe(true)
+    expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'status' })
   })
 
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {

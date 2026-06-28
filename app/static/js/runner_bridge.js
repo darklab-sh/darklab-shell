@@ -9,8 +9,11 @@
 const RUNNER_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 const warnedMissingRunnerHandlers = new Set();
 const runnerHandlers = RUNNER_BRIDGE_GLOBAL.__darklabRunnerHandlers || {
+  _readRunErrorMessage: null,
   _recordSuccessfulLocalCommand: null,
   _seedLocalStorageStarsToServer: null,
+  _setRunButtonDisabled: null,
+  _sseMessageFromChunk: null,
   appendCommandEcho: null,
   attachActiveRunFromMonitor: null,
   cancelPendingTerminalConfirm: null,
@@ -24,9 +27,13 @@ const runnerHandlers = RUNNER_BRIDGE_GLOBAL.__darklabRunnerHandlers || {
   resumeBackgroundRunStreamsAfterStatusMonitor: null,
   runCommand: null,
   setStatus: null,
+  startPollingActiveRunsAfterReload: null,
+  startTimer: null,
+  stopTimer: null,
   submitCommand: null,
   submitComposerCommand: null,
   submitVisibleComposerCommand: null,
+  syncActiveRunTimer: null,
 };
 
 if (RUNNER_BRIDGE_GLOBAL) {
@@ -97,7 +104,7 @@ function _criticalRunnerHandlerLevel(name) {
 }
 
 function _runnerFallbackType(name) {
-  if (name === '_seedLocalStorageStarsToServer') return 'resolved_promise';
+  if (name === '_readRunErrorMessage' || name === '_seedLocalStorageStarsToServer') return 'resolved_promise';
   if (name === 'hasPendingTerminalConfirm' || name.startsWith('submit')) return 'boolean';
   return 'undefined';
 }
@@ -108,8 +115,11 @@ function _callRunnerHandler(name, fallback, args) {
   return fallback;
 }
 
+function _readRunErrorMessage(...args) { return _callRunnerHandler('_readRunErrorMessage', Promise.resolve(''), args); }
 function _recordSuccessfulLocalCommand(...args) { return _callRunnerHandler('_recordSuccessfulLocalCommand', undefined, args); }
 function _seedLocalStorageStarsToServer(...args) { return _callRunnerHandler('_seedLocalStorageStarsToServer', Promise.resolve(), args); }
+function _setRunButtonDisabled(...args) { return _callRunnerHandler('_setRunButtonDisabled', undefined, args); }
+function _sseMessageFromChunk(...args) { return _callRunnerHandler('_sseMessageFromChunk', null, args); }
 function appendCommandEcho(...args) { return _callRunnerHandler('appendCommandEcho', undefined, args); }
 function attachActiveRunFromMonitor(...args) { return _callRunnerHandler('attachActiveRunFromMonitor', undefined, args); }
 function cancelPendingTerminalConfirm(...args) { return _callRunnerHandler('cancelPendingTerminalConfirm', undefined, args); }
@@ -123,14 +133,21 @@ function pauseBackgroundRunStreamsForStatusMonitor(...args) { return _callRunner
 function resumeBackgroundRunStreamsAfterStatusMonitor(...args) { return _callRunnerHandler('resumeBackgroundRunStreamsAfterStatusMonitor', undefined, args); }
 function runCommand(...args) { return _callRunnerHandler('runCommand', undefined, args); }
 function setStatus(...args) { return _callRunnerHandler('setStatus', undefined, args); }
+function startPollingActiveRunsAfterReload(...args) { return _callRunnerHandler('startPollingActiveRunsAfterReload', undefined, args); }
+function startTimer(...args) { return _callRunnerHandler('startTimer', undefined, args); }
+function stopTimer(...args) { return _callRunnerHandler('stopTimer', undefined, args); }
 function submitCommand(...args) { return _callRunnerHandler('submitCommand', false, args); }
 function submitComposerCommand(...args) { return _callRunnerHandler('submitComposerCommand', false, args); }
 function submitVisibleComposerCommand(...args) { return _callRunnerHandler('submitVisibleComposerCommand', false, args); }
+function syncActiveRunTimer(...args) { return _callRunnerHandler('syncActiveRunTimer', undefined, args); }
 
 if (RUNNER_BRIDGE_GLOBAL) {
   RUNNER_BRIDGE_GLOBAL.DarklabRunner = {
+    _readRunErrorMessage,
     _recordSuccessfulLocalCommand,
     _seedLocalStorageStarsToServer,
+    _setRunButtonDisabled,
+    _sseMessageFromChunk,
     appendCommandEcho,
     attachActiveRunFromMonitor,
     cancelPendingTerminalConfirm,
@@ -146,15 +163,22 @@ if (RUNNER_BRIDGE_GLOBAL) {
     runCommand,
     setRunnerHandlers,
     setStatus,
+    startPollingActiveRunsAfterReload,
+    startTimer,
+    stopTimer,
     submitCommand,
     submitComposerCommand,
     submitVisibleComposerCommand,
+    syncActiveRunTimer,
   };
 }
 
 export {
+  _readRunErrorMessage,
   _recordSuccessfulLocalCommand,
   _seedLocalStorageStarsToServer,
+  _setRunButtonDisabled,
+  _sseMessageFromChunk,
   appendCommandEcho,
   attachActiveRunFromMonitor,
   cancelPendingTerminalConfirm,
@@ -170,7 +194,11 @@ export {
   runCommand,
   setRunnerHandlers,
   setStatus,
+  startPollingActiveRunsAfterReload,
+  startTimer,
+  stopTimer,
   submitCommand,
   submitComposerCommand,
   submitVisibleComposerCommand,
+  syncActiveRunTimer,
 };

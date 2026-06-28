@@ -1,4 +1,4 @@
-import { MemoryStorage, fromDomScript, fromScript } from './helpers/extract.js'
+import { MemoryStorage, fromDomScript, fromDomScripts, fromScript } from './helpers/extract.js'
 
 const {
   attachInteractivePtyCommand,
@@ -647,6 +647,61 @@ describe('interactive PTY terminal', () => {
       const posted = JSON.parse(apiFetch.mock.calls[0][1].body)
       expect(posted.data).toBe('hello')
       expect(posted.tab_id).toBe('tab-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads failed PTY input messages through the runner bridge without a legacy global', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ message: 'PTY input closed' }),
+    }))
+    const fakeWindow = {
+      clearTimeout: (...args) => clearTimeout(...args),
+      setTimeout: (...args) => setTimeout(...args),
+    }
+
+    const { _ptySendInput: sendInput, setRunnerHandlers } = fromDomScripts(
+      [
+        'app/static/js/runner_bridge.js',
+        'app/static/js/pty.js',
+      ],
+      {
+        APP_CONFIG: {},
+        CustomEvent: window.CustomEvent,
+        document,
+        window: fakeWindow,
+        appendLine,
+        apiFetch,
+      },
+      '{ _ptySendInput, setRunnerHandlers }',
+    )
+
+    try {
+      setRunnerHandlers({
+        _readRunErrorMessage: async (res) => {
+          const data = await res.json()
+          return data.message || ''
+        },
+      })
+      delete globalThis._readRunErrorMessage
+      delete window._readRunErrorMessage
+
+      sendInput('run-1', 'q', 'tab-1')
+      await vi.advanceTimersByTimeAsync(20)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(apiFetch).toHaveBeenCalledTimes(1)
+      expect(appendLine).toHaveBeenCalledWith(
+        '[interactive PTY input ignored: PTY input closed]',
+        'notice',
+        'tab-1',
+      )
     } finally {
       vi.useRealTimers()
     }

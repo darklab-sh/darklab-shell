@@ -41,6 +41,7 @@ import {
   hasRuntimeHandler as importedHasRuntimeHandler,
   logClientError as importedLogClientError,
 } from './runtime_bridge.js';
+import { _workspaceCwd as importedWorkspaceCwd } from './features/runner/runner_workspace.js';
 
 function _outputGlobal() {
   return typeof window !== 'undefined' ? window : globalThis;
@@ -70,7 +71,7 @@ function _outputAppConfig() {
 
 function _outputAppState() {
   if (typeof importedGetAppState === 'function') return importedGetAppState();
-  return _outputGlobalValue('APP_STATE') || {};
+  return {};
 }
 
 function _outputActiveTabId() {
@@ -107,19 +108,24 @@ function _outputShellPromptWrap() {
 }
 
 function _outputWorkspaceCwd(tabId = _outputActiveTabId()) {
+  if (typeof importedWorkspaceCwd === 'function') return importedWorkspaceCwd(tabId);
   const workspaceCwd = _outputGlobalFunction('_workspaceCwd');
   return workspaceCwd ? workspaceCwd(tabId) : '';
 }
 
 function _outputWorkspaceDisplayPath(path = '') {
-  const displayPath = _outputGlobalFunction('workspaceDisplayPath');
-  return displayPath ? displayPath(path) : _outputCoreApi().workspaceDisplayPath(path);
+  return _outputCoreApi().workspaceDisplayPath(path);
 }
 
 function _outputOpenAtlas(options) {
   const openAtlas = (typeof importedOpenAtlas === 'function' && importedOpenAtlas)
     || _outputGlobalFunction('openAtlas');
   return openAtlas ? openAtlas(options) : null;
+}
+
+function _outputCanOpenAtlas() {
+  return typeof importedOpenAtlas === 'function'
+    || typeof _outputGlobalFunction('openAtlas') === 'function';
 }
 
 function _outputLogClientError(context, err, details = null) {
@@ -131,6 +137,16 @@ function _outputLogClientError(context, err, details = null) {
       : null
   ) || _outputGlobalFunction('logClientError');
   if (logClientError) logClientError(context, err, details);
+}
+
+function _outputIsTabSessionRestoreInProgress({ allowBridge = true } = {}) {
+  const bridgeRead = allowBridge && typeof importedIsTabSessionRestoreInProgress === 'function'
+    ? importedIsTabSessionRestoreInProgress
+    : null;
+  return !!(
+    (bridgeRead && bridgeRead())
+    || _outputGlobalValue('_tabSessionRestoreInProgress')
+  );
 }
 
 function _outputSearchRefresh(tabId) {
@@ -801,7 +817,7 @@ function _renderAnsiWithEntityTokens(content, text, entities, tabId) {
 }
 
 function _openAtlasForOutputEntity(token, options = {}) {
-  if (!token || typeof _outputGlobalFunction('openAtlas') !== 'function') return;
+  if (!token || !_outputCanOpenAtlas()) return;
   const entityType = String(token.dataset.atlasEntityType || '');
   const entityValue = String(token.dataset.atlasEntityValue || '');
   const tab = String(token.dataset.atlasEntityTab || _atlasTabForOutputEntity(entityType));
@@ -1566,9 +1582,9 @@ function _appendOutputSpan(out, span) {
 }
 
 function _commandOutcomeSummariesEnabled() {
-  const readPreference = _outputGlobalFunction('getCommandOutcomeSummariesPreference')
-    || (typeof importedGetCommandOutcomeSummariesPreference === 'function'
+  const readPreference = (typeof importedGetCommandOutcomeSummariesPreference === 'function'
     && importedGetCommandOutcomeSummariesPreference)
+    || _outputGlobalFunction('getCommandOutcomeSummariesPreference')
     || null;
   if (typeof readPreference === 'function') {
     return readPreference() !== 'off';
@@ -1913,9 +1929,7 @@ function _refreshFollowingOutputsAfterLayout() {
 function _maybeMountDeferredPrompt(tabId) {
   const tab = _outputGetTab(tabId);
   if (!tab || !tab.deferPromptMount || tab.st === 'running') return;
-  const restoreInProgress = (typeof importedIsTabSessionRestoreInProgress === 'function' && importedIsTabSessionRestoreInProgress())
-    || _outputGlobalValue('_tabSessionRestoreInProgress');
-  if (restoreInProgress) return;
+  if (_outputIsTabSessionRestoreInProgress()) return;
   const state = _pendingOutputBatches.get(tabId);
   if (state && (state.scheduled || state.items.length > 0 || state.rawLines.length > 0)) return;
   tab.deferPromptMount = false;
@@ -2101,7 +2115,7 @@ if (typeof window !== 'undefined') {
       _restoreOutputTailAfterLayout,
       appendLine,
       appendLines,
-      isTabSessionRestoreInProgress: () => !!_outputGlobalValue('_tabSessionRestoreInProgress'),
+      isTabSessionRestoreInProgress: () => _outputIsTabSessionRestoreInProgress({ allowBridge: false }),
     });
   }
 }

@@ -15,6 +15,17 @@ import {
   toggleHistoryPanelSurface as importedToggleHistoryPanelSurface,
 } from './controller.js';
 import { openWorkspace as importedOpenWorkspace } from './workspace.js';
+import {
+  loadAtlasOverlay as importedLoadAtlasOverlay,
+  loadCommandRegistry as importedLoadCommandRegistry,
+  loadFindingsBoard as importedLoadFindingsBoard,
+  loadSchedulesModal as importedLoadSchedulesModal,
+  loadWatchersModal as importedLoadWatchersModal,
+} from './core/lazy_assets.js';
+import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
+import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js';
+import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from './features/history/history_restore_bridge.js';
 import { setProjectContextHandlers as importedSetProjectContextHandlers } from './features/projects/project_context_bridge.js';
 import { setProjectHudHandlers as importedSetProjectHudHandlers } from './features/projects/project_hud_bridge.js';
 import { DarklabProjectActiveContext as importedProjectActiveContext } from './features/projects/project_active_context.js';
@@ -54,7 +65,11 @@ import {
   logClientError as importedLogClientError,
   maskSessionToken as importedMaskSessionToken,
 } from './session.js';
+import { openStatusMonitor as importedRuntimeOpenStatusMonitor } from './runtime_bridge.js';
 import { confirmKill as importedConfirmKill } from './runner_bridge.js';
+import { clearTab as importedClearTab } from './tabs_bridge.js';
+import { cancelWelcome as importedCancelWelcome } from './welcome_bridge.js';
+import { loadProjectAutocompleteTargets as importedLoadProjectAutocompleteTargets } from './features/autocomplete/suggestions.js';
 import {
   getHudClockPreference as importedGetHudClockPreference,
   getPreference as importedGetPreference,
@@ -80,12 +95,7 @@ import {
 } from './ui/ui_helpers.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
 
-let importedOpenAtlas;
-let importedOpenFindingsBoard;
-let importedOpenCommandRegistry;
-let importedOpenSchedulesModal;
-let importedOpenStatusMonitor;
-let importedOpenWatchersModal;
+let importedOpenStatusMonitor = importedRuntimeOpenStatusMonitor;
 let importedProjectActivity;
 let importedProjectArtifacts;
 let importedProjectDetails;
@@ -146,6 +156,7 @@ let importedProjectWorkspaceShell;
   const _shellMaskSessionToken = (token) => _shellFn('maskSessionToken', importedMaskSessionToken)?.(token) || token;
   const _shellShowConfirm = (...args) => _shellFn('showConfirm', importedShowConfirm)?.(...args);
   const _shellUseMobileTerminalViewportMode = () => !!_shellFn('useMobileTerminalViewportMode', importedUseMobileTerminalViewportMode)?.();
+  const _shellResetCmdHistoryNav = (...args) => _shellFn('resetCmdHistoryNav', importedResetCmdHistoryNav)?.(...args);
   const _shellGetActiveTabId = () => _shellFn('getActiveTabId', importedGetActiveTabId)?.() || null;
   const _shellGetAppState = () => _shellFn('getAppState', importedGetAppState)?.() || {};
   const _shellGetTab = (id) => _shellFn('getTab', importedGetTab)?.(id) || null;
@@ -155,6 +166,41 @@ let importedProjectWorkspaceShell;
   };
   const _shellEmitUiEvent = (...args) => _shellFn('emitUiEvent', importedEmitUiEvent)?.(...args);
   const _shellOnUiEvent = (...args) => _shellFn('onUiEvent', importedOnUiEvent)?.(...args);
+
+  async function _shellLoadLazyModal(importedLoader, globalLoaderName) {
+    const loader = _shellFn(globalLoaderName, importedLoader);
+    return typeof loader === 'function' ? loader() : null;
+  }
+
+  async function _shellOpenAtlas(...args) {
+    const atlas = await _shellLoadLazyModal(importedLoadAtlasOverlay, 'loadAtlasOverlay');
+    const open = atlas?.openAtlas || _shellFn('openAtlas', importedOpenAtlas);
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenCommandRegistry(...args) {
+    const registry = await _shellLoadLazyModal(importedLoadCommandRegistry, 'loadCommandRegistry');
+    const open = registry?.openCommandRegistry || _shellFn('openCommandRegistry', importedOpenCommandRegistry);
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenFindingsBoard(...args) {
+    const board = await _shellLoadLazyModal(importedLoadFindingsBoard, 'loadFindingsBoard');
+    const open = board?.openFindingsBoard || _shellFn('openFindingsBoard');
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenSchedulesModal(...args) {
+    const schedules = await _shellLoadLazyModal(importedLoadSchedulesModal, 'loadSchedulesModal');
+    const open = schedules?.openSchedulesModal || _shellFn('openSchedulesModal');
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
+  async function _shellOpenWatchersModal(...args) {
+    const watchers = await _shellLoadLazyModal(importedLoadWatchersModal, 'loadWatchersModal');
+    const open = watchers?.openWatchersModal || _shellFn('openWatchersModal');
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
 
   function _shellActiveTeamScopeCan(capability) {
     const can = (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan) || null;
@@ -222,6 +268,7 @@ let importedProjectWorkspaceShell;
   const projectMobileDetailTopbar = document.getElementById('project-mobile-detail-topbar');
   const projectMobileTabs = document.getElementById('project-mobile-tabs');
   const projectMobileDetailBody = document.getElementById('project-mobile-detail-body');
+  let projectWorkspaceOpenToken = 0;
   const projectTargetEditorOverlay = document.getElementById('project-target-editor-overlay');
   const projectTargetEditorTitle = document.getElementById('project-target-editor-title');
   const projectTargetCreateForm = document.getElementById('project-target-create-form');
@@ -538,7 +585,7 @@ let importedProjectWorkspaceShell;
       row.addEventListener('click', () => {
         _shellSetComposerValue(cmd, cmd.length, cmd.length);
         _shellRefocusComposer({ preventScroll: true });
-        _shellFn('resetCmdHistoryNav')?.();
+        _shellResetCmdHistoryNav();
       });
       railRecentBody.appendChild(row);
     });
@@ -659,6 +706,46 @@ let importedProjectWorkspaceShell;
     }
   }
 
+  function openStatusMonitorFromHud(source) {
+    const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
+    if (typeof openStatusMonitor !== 'function') return;
+    void openStatusMonitor({ source });
+  }
+
+  function makeHudCellOpenStatusMonitor(cell, source, label) {
+    if (!cell || cell.dataset.statusMonitorTrigger === '1') return;
+    cell.dataset.statusMonitorTrigger = '1';
+    cell.classList.add('hud-cell-clickable', 'hud-action-cell');
+    cell.setAttribute('role', 'button');
+    cell.setAttribute('tabindex', '0');
+    cell.setAttribute('aria-haspopup', 'dialog');
+    cell.setAttribute('aria-label', label);
+    cell.addEventListener('click', () => openStatusMonitorFromHud(source));
+    cell.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openStatusMonitorFromHud(source);
+    });
+  }
+
+  function bindHudStatusMonitorTriggers() {
+    makeHudCellOpenStatusMonitor(
+      document.getElementById('hud-status-cell'),
+      'status',
+      'Open status monitor from status',
+    );
+    makeHudCellOpenStatusMonitor(
+      document.getElementById('hud-last-exit-cell') || document.getElementById('hud-last-exit')?.closest('.hud-cell'),
+      'last-exit',
+      'Open status monitor from last exit',
+    );
+    makeHudCellOpenStatusMonitor(
+      document.getElementById('hud-tabs-cell') || document.getElementById('hud-tabs')?.closest('.hud-cell'),
+      'tabs',
+      'Open status monitor from tabs',
+    );
+  }
+
   railNav?.addEventListener('click', e => {
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
@@ -677,34 +764,29 @@ let importedProjectWorkspaceShell;
       importedToggleHistoryPanelSurface();
       return;
     }
-    const openAtlas = _shellFn('openAtlas', importedOpenAtlas);
-    const openFindingsBoard = _shellFn('openFindingsBoard', importedOpenFindingsBoard);
     const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
-    const openCommandRegistry = _shellFn('openCommandRegistry', importedOpenCommandRegistry);
-    const openSchedulesModal = _shellFn('openSchedulesModal', importedOpenSchedulesModal);
-    const openWatchersModal = _shellFn('openWatchersModal', importedOpenWatchersModal);
-    if (action === 'atlas' && typeof openAtlas === 'function') {
-      void openAtlas({ source: 'rail' });
+    if (action === 'atlas') {
+      void _shellOpenAtlas({ source: 'rail' });
       return;
     }
-    if (action === 'findings-board' && typeof openFindingsBoard === 'function') {
-      void openFindingsBoard({ source: 'rail' });
+    if (action === 'findings-board') {
+      void _shellOpenFindingsBoard({ source: 'rail' });
       return;
     }
     if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
       void openStatusMonitor({ source: 'rail' });
       return;
     }
-    if (action === 'command-registry' && typeof openCommandRegistry === 'function') {
-      openCommandRegistry();
+    if (action === 'command-registry') {
+      void _shellOpenCommandRegistry();
       return;
     }
-    if (action === 'schedules' && typeof openSchedulesModal === 'function') {
-      void openSchedulesModal();
+    if (action === 'schedules') {
+      void _shellOpenSchedulesModal();
       return;
     }
-    if (action === 'watchers' && typeof openWatchersModal === 'function') {
-      void openWatchersModal();
+    if (action === 'watchers') {
+      void _shellOpenWatchersModal();
       return;
     }
     if (action === 'projects') {
@@ -1267,9 +1349,9 @@ let importedProjectWorkspaceShell;
     hudActions.appendChild(_makeHudBtn('clear', 'clear', () => {
       const id = _currentTabId();
       if (!id) return;
-      const cancelWelcomeFn = _shellFn('cancelWelcome');
+      const cancelWelcomeFn = _shellFn('cancelWelcome', importedCancelWelcome);
       if (typeof cancelWelcomeFn === 'function') cancelWelcomeFn(id);
-      _shellFn('clearTab')?.(id, { preserveRunState: true });
+      _shellFn('clearTab', importedClearTab)?.(id, { preserveRunState: true });
     }, 'btn btn-secondary btn-compact', 'Clear active tab (Ctrl+L)'));
 
     _shellBindOutsideClickClose(saveWrap, {
@@ -1522,8 +1604,8 @@ let importedProjectWorkspaceShell;
       blurVisibleComposerInputIfMobile: () => {
         _shellFn('blurVisibleComposerInputIfMobile', importedBlurVisibleComposerInputIfMobile)?.();
       },
-      closeMajorOverlays: () => {
-        if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+      closeMajorOverlays: (options = {}) => {
+        if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays(options);
       },
       closeProjectEntityEditor: _closeProjectEntityEditor,
       closeProjectMobileActionSheet: _closeProjectMobileActionSheet,
@@ -1670,7 +1752,7 @@ let importedProjectWorkspaceShell;
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
       downloadUrlAsAttachment: _downloadUrlAsAttachment,
       closeProjectWorkspace,
-      openAtlas: _shellFn('openAtlas', importedOpenAtlas),
+      openAtlas: _shellOpenAtlas,
       projectDisplayName: _projectDisplayName,
       setWorkspaceTab: projectWorkspaceState.setTab,
     });
@@ -2421,7 +2503,7 @@ let importedProjectWorkspaceShell;
       loadProjectTargetPage: (projectId, options) => _projectDetailsController().loadTargetPage(projectId, options),
       renderProjectMobileDetail: _renderProjectMobileDetail,
       loadProjectAutocompleteTargets: () => {
-        _shellFn('loadProjectAutocompleteTargets')?.().catch(() => {});
+        importedLoadProjectAutocompleteTargets?.().catch(() => {});
       },
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       syncProjectWorkspaceNestedSuppression: _syncProjectWorkspaceNestedSuppression,
@@ -2726,7 +2808,6 @@ let importedProjectWorkspaceShell;
       filtersController: _projectFiltersController,
       findingGroupKey: _projectFindingGroupKey,
       findingSelectMode: projectWorkspaceState.findingSelectMode,
-      findingTriageEditor: _shellValue('DarklabFindingTriageEditor'),
       flushProjectNotesAutosave: _flushProjectNotesAutosave,
       invalidateProjectFindings: _invalidateProjectFindings,
       invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
@@ -2735,7 +2816,7 @@ let importedProjectWorkspaceShell;
       ensureProjectSummary: _ensureProjectSummary,
       loadProjectRuns: _loadProjectRuns,
       loadProjectAutocompleteTargets: () => {
-        _shellFn('loadProjectAutocompleteTargets')?.().catch(() => {});
+        importedLoadProjectAutocompleteTargets?.().catch(() => {});
       },
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
       loadProjectFindings: _loadProjectFindings,
@@ -2743,7 +2824,7 @@ let importedProjectWorkspaceShell;
       mobileView: () => _projectMobileShellController().currentView(),
       openProjectEntityEditor: _openProjectEntityEditor,
       openProjectEntityInAtlas: _openProjectEntityInAtlas,
-      openFindingsBoard: _shellFn('openFindingsBoard'),
+      openFindingsBoard: _shellOpenFindingsBoard,
       openProjectEntityPicker: _openProjectEntityPicker,
       openProjectMobileActionSheet: _openProjectMobileActionSheet,
       openProjectMobileCompareSheet: _openProjectMobileCompareSheet,
@@ -2809,7 +2890,7 @@ let importedProjectWorkspaceShell;
       setProjectRunCompareMode: _setProjectRunCompareMode,
       setSelectedProjectId: projectWorkspaceState.setSelectedId,
       setWorkspaceTab: projectWorkspaceState.setTab,
-      restoreHistoryRunIntoTab: _shellFn('restoreHistoryRunIntoTab'),
+      restoreHistoryRunIntoTab: _shellFn('restoreHistoryRunIntoTab', importedRestoreHistoryRunIntoTab),
       syncProjectRunCompareMode: _syncProjectRunCompareMode,
       toggleArtifactGroup: projectWorkspaceState.toggleArtifactGroup,
       toggleFindingGroup: projectWorkspaceState.toggleFindingGroup,
@@ -3977,6 +4058,7 @@ let importedProjectWorkspaceShell;
   _projectActiveContextController().bindTargetDiscoveryEvent();
 
   async function openProjectWorkspace() {
+    const openToken = ++projectWorkspaceOpenToken;
     if (!_projectWorkspaceModulesReady() && projectWorkspaceOverlay) {
       projectWorkspaceOverlay.classList.remove('u-hidden');
       projectWorkspaceOverlay.classList.add('open');
@@ -3990,7 +4072,13 @@ let importedProjectWorkspaceShell;
       _shellFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.('projects', projectWorkspaceOverlay, projectWorkspaceModal);
     }
     await _ensureProjectWorkspaceModules();
+    if (openToken !== projectWorkspaceOpenToken) return false;
     await _projectWorkspaceShellController().open();
+    if (openToken !== projectWorkspaceOpenToken) {
+      _projectWorkspaceShellController().close({ refocus: false });
+      return false;
+    }
+    return true;
   }
 
   function _autoPromoteProjectPickerContent(projects, preferredProjectId = '') {
@@ -4069,6 +4157,7 @@ let importedProjectWorkspaceShell;
   }
 
   function closeProjectWorkspace({ refocus = true } = {}) {
+    projectWorkspaceOpenToken += 1;
     if (!_projectWorkspaceModulesReady()) {
       if (!projectWorkspaceOverlay) return;
       projectWorkspaceOverlay.classList.add('u-hidden');
@@ -4309,6 +4398,7 @@ let importedProjectWorkspaceShell;
   applyWidth();
   applySectionsState();
   renderRailRecent();
+  bindHudStatusMonitorTriggers();
   const ensureWorkflowCatalogLoadedFn = (
     typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('ensureWorkflowCatalogLoaded')
   ) ? importedEnsureWorkflowCatalogLoaded : _shellFn('ensureWorkflowCatalogLoaded');
@@ -4350,6 +4440,7 @@ let importedProjectWorkspaceShell;
       cycleProjectWorkspaceTab,
       getActiveProjectContext: _activeProject,
       isProjectWorkspaceOpen,
+      notifyProjectWorkspaceChanged: _notifyProjectWorkspaceChanged,
       openEntityMetadataEditor,
       openProjectAutoPromoteRuleFromAtlas,
       openProjectWorkspace,

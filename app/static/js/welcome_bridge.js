@@ -1,10 +1,12 @@
 // Neutral Welcome boundary for eager modules that should not import welcome.js.
 
 let cancelWelcomeHandler = null;
+let requestWelcomeSettleHandler = null;
 let welcomeOwnsTabHandler = null;
 
 function setWelcomeHandlers(handlers = {}) {
   if (typeof handlers.cancelWelcome === 'function') cancelWelcomeHandler = handlers.cancelWelcome;
+  if (typeof handlers.requestWelcomeSettle === 'function') requestWelcomeSettleHandler = handlers.requestWelcomeSettle;
   if (typeof handlers.welcomeOwnsTab === 'function') welcomeOwnsTabHandler = handlers.welcomeOwnsTab;
 }
 
@@ -20,8 +22,15 @@ function welcomeOwnsTab(...args) {
     : false;
 }
 
+function requestWelcomeSettle(...args) {
+  return typeof requestWelcomeSettleHandler === 'function'
+    ? requestWelcomeSettleHandler(...args)
+    : undefined;
+}
+
 export {
   cancelWelcome,
+  requestWelcomeSettle,
   setWelcomeHandlers,
   welcomeOwnsTab,
 };

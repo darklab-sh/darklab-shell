@@ -308,7 +308,8 @@ function bindTabDragReorder(tab, id) {
   tab.addEventListener('touchstart', e => _startTouchTabDrag(tab, id, e), { passive: false });
 }
 
-if (typeof window !== 'undefined') {
+function tabDragSuppressClickUntil() {
+  return _tabDragSuppressClickUntil;
 }
 
 export {
@@ -327,4 +328,5 @@ export {
   _tabFromClientX,
   _touchDragAutoScroll,
   bindTabDragReorder,
+  tabDragSuppressClickUntil,
 };

@@ -259,10 +259,11 @@ function _handleSurfaceTabShortcut(e) {
   return true;
 }
 
-function handleTabShortcut(e) {
+function handleTabShortcut(e, options = {}) {
   if (shortcutAlreadyHandled(e)) return true;
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
   if (_handleSurfaceTabShortcut(e)) return true;
+  if (options && options.surfaceOnly) return false;
   if (shortcutCall('shouldIgnoreGlobalShortcutTarget', e.target)) return false;
   // Letter chords (T, W) require no Shift — Alt+Shift+T is the theme-selector
   // chrome shortcut and must fall through to handleChromeShortcut.

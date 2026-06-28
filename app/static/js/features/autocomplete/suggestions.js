@@ -2,6 +2,7 @@
 import { DarklabAutocompleteCore as importedAutocompleteCore } from '../../core/autocomplete_core.js';
 import { APP_STATE_API as importedAppStateApi, onUiEvent as importedOnUiEvent } from '../../core/state.js';
 import { hasPendingTerminalConfirm as importedHasPendingTerminalConfirm } from '../../runner_bridge.js';
+import { isActiveTabRunning as importedIsActiveTabRunning } from '../../ui/ui_helpers.js';
 import {
   apiFetch as importedApiFetch,
   getSessionId as importedGetSessionId,
@@ -61,7 +62,8 @@ function _isAutocompleteBlockedByTerminalConfirm() {
 }
 
 function _isAutocompleteBlockedByActiveRun() {
-  const isRunning = _autocompleteGlobalFunction('isActiveTabRunning');
+  const isRunning = (typeof importedIsActiveTabRunning === 'function' && importedIsActiveTabRunning)
+    || _autocompleteGlobalFunction('isActiveTabRunning');
   return typeof isRunning === 'function' && isRunning();
 }
 
@@ -1608,6 +1610,7 @@ export {
   flushRecentValues,
   getAutocompleteMatches,
   limitAutocompleteMatchesForDisplay,
+  loadProjectAutocompleteTargets,
   loadScheduleAutocompleteHints,
   loadRecentValues,
   loadWatcherAutocompleteHints,

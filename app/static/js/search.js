@@ -19,6 +19,7 @@ import {
 import { escapeRegex as importedEscapeRegex } from './core/utils.js';
 import { appendLine as importedAppendLine } from './output.js';
 import { getOutput as importedGetOutput, updateTabbarChromeFit as importedUpdateTabbarChromeFit } from './tabs.js';
+import { setSearchHandlers as importedSetSearchHandlers } from './search_bridge.js';
 import { isSearchBarOpen as importedIsSearchBarOpen } from './ui/ui_helpers.js';
 import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
 
@@ -54,7 +55,7 @@ let _terminalSearchLazyMode = false;
 function _stateValue(name, fallback = undefined) {
   const state = typeof importedGetAppState === 'function'
     ? importedGetAppState()
-    : (_searchGlobalValue('APP_STATE') || null);
+    : null;
   if (state && Object.prototype.hasOwnProperty.call(state, name)) return state[name];
   if (SEARCH_GLOBAL && Object.prototype.hasOwnProperty.call(SEARCH_GLOBAL, name)) return SEARCH_GLOBAL[name];
   return fallback;
@@ -63,7 +64,7 @@ function _stateValue(name, fallback = undefined) {
 function _setStateValue(name, value) {
   const state = typeof importedGetAppState === 'function'
     ? importedGetAppState()
-    : (_searchGlobalValue('APP_STATE') || null);
+    : null;
   if (state && Object.prototype.hasOwnProperty.call(state, name)) {
     state[name] = value;
     return value;
@@ -1324,6 +1325,14 @@ syncSearchScopeUi();
 refreshSearchDiscoverabilityUi();
 
 if (typeof window !== 'undefined') {
+}
+
+if (typeof importedSetSearchHandlers === 'function') {
+  importedSetSearchHandlers({
+    clearSearch,
+    refreshSearchDiscoverabilityUi,
+    scheduleSearchDiscoverabilityRefresh,
+  });
 }
 
 const isSearchBarOpen = (...args) => (

@@ -9,6 +9,7 @@ import {
   unportalDropdownMenu as importedUnportalDropdownMenu,
 } from '../../ui/ui_helpers.js';
 import { closeHistoryCompareOverlay as importedCloseHistoryCompareOverlay } from './history_compare_overlay.js';
+import { setHistoryCompareHandlers as importedSetHistoryCompareHandlers } from './history_compare_bridge.js';
 import {
   coerceContext as importedCompareCoerceContext,
   coerceViewMode as importedCompareCoerceViewMode,
@@ -142,6 +143,10 @@ function _closeHistoryCompareActionMenus(except = null) {
     if (menu) _historyCompareControlsUnportalDropdownMenu(menu);
     wrap._portaledMenu = null;
   });
+}
+
+if (typeof importedSetHistoryCompareHandlers === 'function') {
+  importedSetHistoryCompareHandlers({ closeHistoryCompareActionMenus: _closeHistoryCompareActionMenus });
 }
 
 function _renderHistoryCompareDisplayControls(data, viewMode) {

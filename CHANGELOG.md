@@ -6,6 +6,45 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.3.1] — 2026-06-28
+
+### Fixed
+
+- **Workspace file operations are stricter and more reliable** — Terminal folder creation and app-mediated moves now fail clearly instead of reporting false success or leaving partial files behind.
+  - `mkdir` and `file add-dir` now use the ESM-exported workspace directory creator directly, and missing workspace handlers return a visible terminal error instead of printing a fake success line.
+  - The live terminal prompt now refreshes its workspace path whenever the current workspace folder changes, so `cd` keeps the prompt label and mobile placeholder aligned with `pwd` and relative file commands.
+  - Workspace create/write/move routes now reject control characters and leading/trailing whitespace in paths, so visually confusing names such as newline-prefixed folders are not created.
+  - Workspace moves clean up partial copy destinations before scanner/appuser fallback moves, preventing sticky-directory ownership mismatches from leaving duplicate files or returning an unhandled 500.
+  - **Tests:** focused Vitest and backend/route coverage verifies terminal handler failures, directory creation calls, prompt CWD refreshes, unsafe path rejection, and partial-move cleanup.
+
+- **Lazy ESM bridge actions work before their old globals exist** — UI actions that moved behind lazy ESM modules now use real import-backed bridges, check whether lazy handlers are ready, and fail visibly when an action is unavailable instead of silently no-oping or closing the wrong panel.
+  - STATUS, LAST EXIT, and TABS HUD cells now open Status Monitor on the first click, before the rail menu or keyboard shortcut has loaded the monitor module.
+  - Project Monitoring and Project Runs compare/details actions now distinguish between a loaded bridge wrapper and a registered lazy handler, fall back to valid legacy globals when needed, and show an unavailable message when neither path is ready.
+  - History drawer and mobile Recents compare actions no longer close their surfaces unless the compare launcher actually opens.
+  - Output entity chips can open Atlas through the imported Atlas bridge without requiring `window.openAtlas`, and shell rail/project callbacks now use lazy loader wrappers for Atlas, Findings Board, Command Registry, Schedules, and Watchers instead of pulling those feature implementations into the bootstrap bundle.
+  - Focus traps now leave modified Tab shortcuts alone, first-open Projects shortcuts cancel pending lazy opens cleanly, and the Atlas dialog handles its own `Alt+Tab` / `Alt+Shift+Tab` cycling after lazy load, so modal tab shortcuts work in both source and bundled asset modes.
+  - First-open Projects lazy loading no longer closes its own temporary loading overlay while the real Project workspace controller is bootstrapping, so source-mode and bundled rail launches both land on a visible Project workspace.
+  - Team scope restore now falls back to the stored session token while runtime session handlers are still registering, so a mobile reload keeps the selected team label instead of briefly reverting to Personal.
+  - Autocomplete and output prompt helpers now read the imported workspace CWD helper instead of a dead `_workspaceCwd` global, `app.js` resolves imported functions before stale globals while keeping `APP_CONFIG` global-backed, `runner.js` reads live config for truncation/high-volume output behavior, and output command-summary preferences follow the same import-first pattern.
+  - Autocomplete, FAQ, Tour, History restore, Run comparison, Tab export, tab activation, PTY controls, mobile menu, runtime-context, app shell actions, terminal local-command, Command Registry catalog actions, session-token workspace refreshes, and tab drag helpers now prefer their ESM imports or bridge state before legacy globals, closing fallback paths that could mask missing browser globals after the migration.
+  - The frontend inventory check now enforces the clean string-keyed ESM resolver-helper baseline and explicit bridge-dispatch contracts, with pinned resolver-call budgets, 68 declared bridge handler slots, and 0 unresolved candidates or missing bridge registrations after the bridge-backed triage pass.
+  - History Compare and History Run Details bridges now emit one APP_CONFIG-gated dev/test diagnostic when a lazy handler is called before registration, so first-click timing regressions are visible without adding production noise.
+  - **Tests:** focused Vitest, Playwright, and asset-pipeline coverage verifies bridge readiness, lazy-handler fallbacks, unavailable-action messaging, HUD Status Monitor launch, Project Monitoring and Project Runs compare behavior, History drawer/mobile Recents compare behavior, split-compare fold expansion, Atlas chip opening without a global opener, mobile team scope restore, workspace CWD helper use, import-first resolver guards, live runner config reads, output command-summary behavior, terminal local-command bridge use, tab drag click suppression, resolver-helper inventory reporting, enforced unresolved-helper and missing bridge-registration failures, bridge missing-handler diagnostics, shell launcher wiring, shell-bootstrap lazy-boundary protection, and the frontend global inventory.
+
+- **Silent post-ESM resolution failures are now caught in CI, not at runtime** — The frontend inventory check discovers the current string-keyed resolver-helper shapes by structure and reconciles them against a committed classification registry, so a newly added helper or a dropped global binding fails the check instead of silently no-oping.
+  - Structural discovery plus a both-directions completeness meta-test fail the check when a resolver-shaped helper has no registry classification, or when a registry/ignore entry no longer matches any helper; this immediately surfaced about twenty-five resolver helpers and one dead entry the hand-maintained registry had missed.
+  - `loadProjectNamespace` is recognized as a publisher so lazily loaded project namespaces resolve as real browser-global publishes, and guard detection now follows `||`/`??` and optional-chain wrappers so compatibility fallbacks stay recognized instead of reporting as unresolved.
+  - The publish side now sees aliased browser-global writes (`SOME_GLOBAL.x = …`), auto-classifies `__darklab` bridge plumbing as internal, and runs a symmetric publish-side check that fails on unregistered computed publishers, stale publisher-registry entries, or registered publisher calls with dynamic/non-literal names, so the published-name surface can no longer drift out of view.
+  - Bridge handler-existence predicates (`hasRunnerHandler` and the output/tab/workflow equivalents) are validated as bridge dispatches — including when called through aliased imports — so probing for a handler key that is never declared or registered fails the check instead of silently returning false.
+  - The runner read its client id from a browser global that nothing publishes, so it was always empty and run-ownership and kill-attribution comparisons never matched the current browser; it now reads the imported session client id.
+  - Local-command success recording and a tab drag click-suppression read were rerouted to their bridge import and exported getter, and a dead finding-triage editor lookup that always returned undefined was removed.
+  - **Tests:** focused Vitest coverage pins resolver and publisher discovery-versus-registry reconciliation, fails the check when an unclassified resolver-shaped helper, unregistered computed publisher, or dynamic publisher name is introduced, keeps transient inventory fixtures out of the README project-structure tree, gives the subprocess-backed inventory checks enough time on slower CI runners, and updates the inventory boundary budgets for the completed resolver registry.
+
+- **Nmap service banners no longer create false Atlas domains** — Nmap output parsing now treats service/version rows and Nmap's own service-fingerprint submission link as scanner output instead of generic domain-discovery text, while scan-report, rDNS, and vulners lines still emit the expected target entities.
+  - **Tests:** focused output-signal coverage pins Python `http.server`, Netatalk `3.1.9.q3`, and `nmap.org` fingerprint-submit examples so they do not create domain entities.
+
+---
+
 ## [2.3] — 2026-06-27
 
 ### Added
@@ -20,12 +59,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Certificate rollups can use current live-provider data or bounded crt.sh snapshots when those sources respond. Temporary crt.sh timeouts and 5xx responses are surfaced as upstream outages instead of implying a target has no certificate data.
   - Overview summary and attention cards use the shared theme tokens, including the caution color for high-risk target attention states.
   - **Tests:** focused backend, route, browser-module, and Playwright coverage verifies the payload skeleton, host-to-domain/IP mapping, Atlas entity identity, review/suppression/verification rollups, certificate status buckets, RFC/OpenSSL-style certificate dates, stale provider data, fresh-vs-stale certificate selection, recent-change states, monitoring-target change markers, deep-link hint shape, populated and empty target rollups, neutral unknown-cert/no-intel/not-monitored UI states, route-level 404s, structured route/build logs, degraded-source warning logs, browser load-failure levels, stable load-error rendering, team-scope access, Overview tab rendering, desktop/mobile Overview smoke paths, source-mode Overview lazy loading, real Overview endpoint browser loading, deep-link filter actions, filter reset behavior, run/review-state hints, mobile Findings hints, suppressed-target exclusion, and cross-scope protection.
-
-- **Workspace file operations are stricter and more reliable** — Terminal folder creation and app-mediated moves now fail clearly instead of reporting false success or leaving partial files behind.
-  - `mkdir` and `file add-dir` now use the ESM-exported workspace directory creator directly, and missing workspace handlers return a visible terminal error instead of printing a fake success line.
-  - Workspace create/write/move routes now reject control characters and leading/trailing whitespace in paths, so visually confusing names such as newline-prefixed folders are not created.
-  - Workspace moves clean up partial copy destinations before scanner/appuser fallback moves, preventing sticky-directory ownership mismatches from leaving duplicate files or returning an unhandled 500.
-  - **Tests:** focused Vitest and backend/route coverage verifies terminal handler failures, directory creation calls, unsafe path rejection, and partial-move cleanup.
 
 - **Attack-surface digest notifications** — Projects can now send scheduled attack-surface digest notifications through explicitly selected existing notification channels.
   - Project Monitoring summaries support bounded `window_start` / `window_end` views with digest-window metadata, changed/recovered/failed counts, severity, top-change, and link fields so scheduled sends report only the selected window while the dashboard summary remains current-state.

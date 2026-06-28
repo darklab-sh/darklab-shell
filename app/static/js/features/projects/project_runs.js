@@ -1,5 +1,8 @@
 import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
-import { fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison } from '../run-comparison/history_compare_bridge.js';
+import {
+  fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
+  hasHistoryCompareHandler as importedHasHistoryCompareHandler,
+} from '../run-comparison/history_compare_bridge.js';
 
 let exportedDarklabProjectRuns = null;
 
@@ -252,15 +255,11 @@ let exportedDarklabProjectRuns = null;
       if (normalizedMode === 'run' && !normalizedTarget) throw new Error('Choose two project runs to compare.');
       if (normalizedMode === 'run' && normalizedLeftId === normalizedTarget) throw new Error('Choose two different project runs to compare.');
       if (normalizedMode === 'baseline' && !normalizedTarget) throw new Error('Choose a baseline label to compare.');
-      const compareFn = (...args) => {
-        const bridged = typeof importedFetchAndRenderHistoryComparison === 'function'
-          ? importedFetchAndRenderHistoryComparison(...args)
-          : undefined;
-        if (bridged !== undefined) return bridged;
-        return typeof global.fetchAndRenderHistoryComparison === 'function'
-          ? global.fetchAndRenderHistoryComparison(...args)
-          : undefined;
-      };
+      const hasImportedHandler = typeof importedHasHistoryCompareHandler === 'function'
+        && importedHasHistoryCompareHandler('fetchAndRenderHistoryComparison');
+      const compareFn = hasImportedHandler && typeof importedFetchAndRenderHistoryComparison === 'function'
+        ? importedFetchAndRenderHistoryComparison
+        : (typeof global.fetchAndRenderHistoryComparison === 'function' ? global.fetchAndRenderHistoryComparison : null);
       if (!compareFn) throw new Error('Run comparison is not available.');
       const params = new URLSearchParams({
         left: normalizedLeftId,

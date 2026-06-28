@@ -1253,7 +1253,7 @@ async function runWelcome() {
 
 if (typeof window !== 'undefined') {
   if (typeof importedSetWelcomeHandlers === 'function') {
-    importedSetWelcomeHandlers({ cancelWelcome, welcomeOwnsTab });
+    importedSetWelcomeHandlers({ cancelWelcome, requestWelcomeSettle, welcomeOwnsTab });
   }
 }
 

@@ -46,10 +46,13 @@ export function stripEsmExports(src) {
             || modulePath.includes('./history_panel_bridge')
             || modulePath.includes('/preferences/secrets_bridge')
             || modulePath.includes('./secrets_bridge')
+            || modulePath.includes('/command-registry/command_registry_bridge')
+            || modulePath.includes('./command_registry_bridge')
             || modulePath.includes('/output_bridge')
             || modulePath.includes('./output_bridge')
             || modulePath.includes('/runner_bridge')
             || modulePath.includes('./runner_bridge');
+          const commandRegistryBridgeImport = modulePath.includes('command_registry_bridge');
           if (localName === importedName) {
             const sameNameNeedsGlobalFallback = (
               modulePath.includes('/ui/')
@@ -59,7 +62,12 @@ export function stripEsmExports(src) {
             );
             if (!sameNameNeedsGlobalFallback || localDeclarationPattern.test(sourceText)) return ''
           }
-          const bareFallback = (sameNameHelperFallback || localDeclarationPattern.test(sourceText)) && !sameScopeImportFallback
+          const shouldSkipBareFallback = (
+            sameNameHelperFallback
+            || (localDeclarationPattern.test(sourceText) && !sameScopeImportFallback)
+            || commandRegistryBridgeImport
+          );
+          const bareFallback = shouldSkipBareFallback
             ? ''
             : `try { if (typeof ${importedName} !== 'undefined') return ${importedName}; } catch (_) {}`
           const explicitImportOverrides = new Set([
@@ -84,7 +92,10 @@ export function stripEsmExports(src) {
           const globalLookup = sameNameHelperFallback
             ? `if (g && g.${importedName} !== undefined) return g.${importedName}; if (w && w.${importedName} !== undefined) return w.${importedName};`
             : `if (g && g.__darklabExtractPreferGlobalThis && g.${importedName} !== undefined) return g.${importedName}; if (w && w.${importedName} !== undefined) return w.${importedName};`;
-          return `var ${localName} = (() => { ${explicitGlobalOverride}${bareFallback} const g = typeof globalThis !== 'undefined' ? globalThis : undefined; const w = typeof window !== 'undefined' ? window : undefined; ${globalLookup} return g ? g.${importedName} : undefined; })();`
+          const fallbackLookup = commandRegistryBridgeImport && localDeclarationPattern.test(sourceText)
+            ? 'return undefined;'
+            : `${globalLookup} return g ? g.${importedName} : undefined;`;
+          return `var ${localName} = (() => { ${explicitGlobalOverride}${bareFallback} const g = typeof globalThis !== 'undefined' ? globalThis : undefined; const w = typeof window !== 'undefined' ? window : undefined; ${fallbackLookup} })();`
         })
         .filter(Boolean)
         .join('\n')

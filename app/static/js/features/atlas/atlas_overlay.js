@@ -2872,6 +2872,12 @@ let exportedCycleAtlasTab = null;
     ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
       importOverlay?.addEventListener(eventName, event => event.stopPropagation(), true);
     });
+    surface?.addEventListener('keydown', (event) => {
+      if (!event || event.key !== 'Tab' || !event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!cycleAtlasTab(event.shiftKey ? -1 : 1)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
     if (typeof bindOutsideClickClose === 'function' && exportWrap) {
       bindOutsideClickClose(exportWrap, {
         triggers: exportMenuBtn,

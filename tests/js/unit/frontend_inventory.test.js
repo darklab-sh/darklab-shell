@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const EXEC_OPTIONS = { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
+const INVENTORY_CHECK_TIMEOUT_MS = 60_000
 let inventoryReport = null
 
 function runInventoryJson() {
@@ -44,20 +45,21 @@ function moduleReport(report, source) {
 describe('frontend browser global boundary inventory', () => {
   beforeAll(() => {
     runInventoryJson()
-  }, 30_000)
+  }, INVENTORY_CHECK_TIMEOUT_MS)
 
   const EXPECTED_BOUNDARY_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
-      intentional_bootstrap: 2,
-      lazy_placeholder: 69,
-      module_api_bridge: 35,
+      intentional_bootstrap: 4,
+      lazy_placeholder: 95,
+      module_api_bridge: 60,
+      bridge_internal: 10,
       test_hook: 3,
       compatibility_export: 0,
     }),
     window_property_read_purposes: Object.freeze({
       intentional_bootstrap: 2,
-      lazy_placeholder: 13,
-      module_api_bridge: 2,
+      lazy_placeholder: 11,
+      module_api_bridge: 8,
       vendor_global: 6,
       compatibility_read: 0,
     }),
@@ -68,10 +70,43 @@ describe('frontend browser global boundary inventory', () => {
       intentional_bootstrap: 3,
       vendor_global: 4,
       lazy_placeholder: 1,
-      module_api_bridge: 35,
+      module_api_bridge: 66,
+      bridge_internal: 0,
       test_hook: 3,
       compatibility_export: 0,
       compatibility_read: 0,
+    }),
+    resolver_helper_calls_by_class: Object.freeze({
+      bridge_dispatch: 76,
+      global_only: 556,
+      import_first: 577,
+    }),
+    resolver_helper_calls_by_final_resolution: Object.freeze({
+      allowlisted_global: 55,
+      bridge_dispatch_report_only: 75,
+      dynamic_or_non_literal: 22,
+      fallback_imported_binding: 368,
+      fallback_local_binding: 11,
+      global_publish: 77,
+      guarded_compatibility_fallback: 515,
+      same_file_import_source: 86,
+      unresolved_report_only: 0,
+    }),
+    bridge_dispatch: Object.freeze({
+      declaration_count: 68,
+      registration_count: 73,
+      dispatch_count: 75,
+      dispatched_missing_declaration_count: 0,
+      dispatched_missing_registration_count: 0,
+      declared_not_dispatched_count: 0,
+      registered_not_declared_count: 0,
+      by_bridge: Object.freeze({
+        controller_action: Object.freeze({ declared_count: 6, registered_count: 6, dispatched_count: 6 }),
+        output: Object.freeze({ declared_count: 12, registered_count: 12, dispatched_count: 12 }),
+        runner: Object.freeze({ declared_count: 25, registered_count: 25, dispatched_count: 25 }),
+        tabs: Object.freeze({ declared_count: 18, registered_count: 18, dispatched_count: 18 }),
+        workflows: Object.freeze({ declared_count: 7, registered_count: 7, dispatched_count: 7 }),
+      }),
     }),
   })
 
@@ -135,7 +170,7 @@ describe('frontend browser global boundary inventory', () => {
       rmSync(provider, { force: true })
       rmSync(consumer, { force: true })
     }
-  }, 15_000)
+  }, INVENTORY_CHECK_TIMEOUT_MS)
 
   it('pins browser-boundary budgets so the global surface cannot grow silently', () => {
     const report = runInventoryJson()
@@ -158,7 +193,216 @@ describe('frontend browser global boundary inventory', () => {
       report.allowlist.purposes,
       EXPECTED_BOUNDARY_BUDGETS.allowlist_purposes,
     )
+    expectPurposeBudgets(
+      report.summary.resolver_helper_calls_by_class,
+      EXPECTED_BOUNDARY_BUDGETS.resolver_helper_calls_by_class,
+    )
+    expectPurposeBudgets(
+      report.summary.resolver_helper_calls_by_final_resolution,
+      EXPECTED_BOUNDARY_BUDGETS.resolver_helper_calls_by_final_resolution,
+    )
+    Object.entries(EXPECTED_BOUNDARY_BUDGETS.bridge_dispatch).forEach(([key, expected]) => {
+      if (key === 'by_bridge') return
+      expect(report.summary.bridge_dispatch[key], key).toBe(expected)
+    })
+    Object.entries(EXPECTED_BOUNDARY_BUDGETS.bridge_dispatch.by_bridge).forEach(([bridge, expected]) => {
+      expect(report.summary.bridge_dispatch.by_bridge[bridge], bridge).toEqual(expect.objectContaining(expected))
+    })
   })
+
+  it('reports string-keyed ESM resolver helper calls for follow-up guardrails', () => {
+    const report = runInventoryJson()
+    const localCommands = moduleReport(report, '/static/js/features/terminal/local_commands.js')
+    const tabs = moduleReport(report, '/static/js/tabs.js')
+
+    expect(report.summary.resolver_helper_call_count).toBeGreaterThan(0)
+    expect(report.summary.resolver_helper_calls_by_class.global_only).toBeGreaterThan(0)
+    expect(report.summary.resolver_helper_calls_by_class.import_first).toBeGreaterThan(0)
+    expect(report.summary.resolver_helper_calls_by_class.bridge_dispatch).toBeGreaterThan(0)
+    expect(report.summary.resolver_helper_calls_by_resolution.dynamic_or_non_literal).toBeGreaterThan(0)
+
+    expect(localCommands.resolver_helper_calls).toContainEqual(expect.objectContaining({
+      helper: '_cliGlobalFunction',
+      class: 'global_only',
+      name: '_recordSuccessfulLocalCommand',
+      name_resolution: 'literal',
+    }))
+    expect(tabs.resolver_helper_calls).toContainEqual(expect.objectContaining({
+      helper: '_tabGlobalValue',
+      class: 'import_first',
+      name: '_tabDragSuppressClickUntil',
+      fallback: expect.objectContaining({ status: 'missing' }),
+    }))
+  })
+
+  it('reconciles structural resolver-helper discovery against the committed registry', () => {
+    const report = runInventoryJson()
+    const discovery = report.summary.resolver_helper_discovery
+
+    expect(discovery.discovered_count).toBeGreaterThan(0)
+    expect(discovery.uncovered).toEqual([])
+    expect(discovery.dead_registry_entries).toEqual([])
+    expect(discovery.dead_ignore_entries).toEqual([])
+  })
+
+  it('validates aliased bridge handler-existence predicate keys as bridge dispatch', () => {
+    const report = runInventoryJson()
+    const uiHelpers = moduleReport(report, '/static/js/ui/ui_helpers.js')
+
+    // `importedHasRunnerHandler('hasPendingTerminalConfirm')` resolves through the
+    // aliased import to the canonical hasRunnerHandler and is treated as a runner
+    // bridge dispatch, so its key is held to the declared/registered contract.
+    expect(uiHelpers.resolver_helper_calls).toContainEqual(expect.objectContaining({
+      helper: 'hasRunnerHandler',
+      class: 'bridge_dispatch',
+      name: 'hasPendingTerminalConfirm',
+    }))
+    expect(report.summary.bridge_dispatch.dispatched_missing_declaration_count).toBe(0)
+    expect(report.summary.bridge_dispatch.dispatched_missing_registration_count).toBe(0)
+  })
+
+  it('recognizes aliased and computed browser-global publishers', () => {
+    const report = runInventoryJson()
+    const suggestions = moduleReport(report, '/static/js/features/autocomplete/suggestions.js')
+    const runnerBridge = moduleReport(report, '/static/js/runner_bridge.js')
+
+    // Aliased member write (SOME_GLOBAL.x = …) is now captured as a publish.
+    expect(suggestions.window_publishes).toContainEqual(expect.objectContaining({
+      name: 'acSuggestions',
+      purpose: 'module_api_bridge',
+    }))
+    // `__darklab*` bridge plumbing is auto-classified, not flagged as a stray publish.
+    expect(runnerBridge.window_publishes).toContainEqual(expect.objectContaining({
+      name: '__darklabRunnerHandlers',
+      purpose: 'bridge_internal',
+    }))
+    // The publish-side completeness check has no untracked computed publishers.
+    expect(report.summary.untracked_computed_publisher_count).toBe(0)
+    expect(report.summary.publisher_helper_discovery).toEqual(expect.objectContaining({
+      registered_count: 2,
+      discovered_count: 2,
+      discovered: ['_setStateValue', 'loadProjectNamespace'],
+      dead_registry_entries: [],
+      dynamic_or_non_literal_call_count: 0,
+      dynamic_or_non_literal_calls: [],
+    }))
+    expect(report.summary.window_publish_purposes.compatibility_export || 0).toBe(0)
+  })
+
+  it('fails check mode when computed browser-global publisher registry coverage drifts', () => {
+    const fixture = resolve(REPO_ROOT, 'app/static/js/__inventory_publisher_check.fixture.js')
+    try {
+      writeFileSync(fixture, [
+        "const FIXTURE_PUBLISH_GLOBAL = typeof window !== 'undefined' ? window : globalThis",
+        'function _unregisteredFixturePublisher(name, value) {',
+        '  FIXTURE_PUBLISH_GLOBAL[name] = value',
+        '}',
+        'export { _unregisteredFixturePublisher }',
+        '',
+      ].join('\n'))
+
+      const failure = runInventoryCheckWithOutput()
+
+      expect(failure.ok).toBe(false)
+      expect(failure.output).toContain('computed browser-global publishers not registered')
+      expect(failure.output).toContain('_unregisteredFixturePublisher')
+    } finally {
+      rmSync(fixture, { force: true })
+    }
+  }, INVENTORY_CHECK_TIMEOUT_MS)
+
+  it('fails check mode when a registered browser-global publisher uses a dynamic name', () => {
+    const fixture = resolve(REPO_ROOT, 'app/static/js/__inventory_publisher_dynamic_check.fixture.js')
+    try {
+      writeFileSync(fixture, [
+        "const FIXTURE_PUBLISH_GLOBAL = typeof window !== 'undefined' ? window : globalThis",
+        'function loadProjectNamespace(_modulePath, globalName, factory) {',
+        '  FIXTURE_PUBLISH_GLOBAL[globalName] = factory',
+        '}',
+        "const dynamicName = 'DynamicInventoryPublisherFixture'",
+        'loadProjectNamespace("./fixture.js", dynamicName, () => ({}))',
+        '',
+      ].join('\n'))
+
+      const dynamicFailure = runInventoryCheckWithOutput()
+
+      expect(dynamicFailure.ok).toBe(false)
+      expect(dynamicFailure.output).toContain('publisher-helper registry drift')
+      expect(dynamicFailure.output).toContain('published name is dynamic or non-literal')
+      expect(dynamicFailure.output).toContain('loadProjectNamespace')
+    } finally {
+      rmSync(fixture, { force: true })
+    }
+  }, INVENTORY_CHECK_TIMEOUT_MS)
+
+  it('fails check mode when a resolver-shaped helper is missing from the registry', () => {
+    const fixture = resolve(REPO_ROOT, 'app/static/js/__inventory_discovery_check.fixture.js')
+    try {
+      writeFileSync(fixture, [
+        "const FIXTURE_DISCOVERY_GLOBAL = typeof window !== 'undefined' ? window : globalThis",
+        'function _unregisteredFixtureGlobalFunction(name) {',
+        '  const fn = FIXTURE_DISCOVERY_GLOBAL && FIXTURE_DISCOVERY_GLOBAL[name]',
+        "  return typeof fn === 'function' ? fn : null",
+        '}',
+        'export { _unregisteredFixtureGlobalFunction }',
+        '',
+      ].join('\n'))
+
+      const failure = runInventoryCheckWithOutput()
+
+      expect(failure.ok).toBe(false)
+      expect(failure.output).toContain('resolver-helper registry drift')
+      expect(failure.output).toContain('_unregisteredFixtureGlobalFunction')
+    } finally {
+      rmSync(fixture, { force: true })
+    }
+  }, INVENTORY_CHECK_TIMEOUT_MS)
+
+  it('fails check mode when a string-keyed resolver helper has no resolution path', () => {
+    const fixture = resolve(REPO_ROOT, 'app/static/js/__inventory_resolver_check.fixture.js')
+    try {
+      writeFileSync(fixture, [
+        "const FIXTURE_GLOBAL = typeof window !== 'undefined' ? window : globalThis",
+        'function _runtimeGlobalFunction(name) {',
+        '  const fn = FIXTURE_GLOBAL && FIXTURE_GLOBAL[name]',
+        "  return typeof fn === 'function' ? fn : null",
+        '}',
+        "_runtimeGlobalFunction('missingInventoryResolverFixture')",
+        '',
+      ].join('\n'))
+
+      const failure = runInventoryCheckWithOutput()
+
+      expect(failure.ok).toBe(false)
+      expect(failure.output).toContain('unresolved ESM resolver helper calls')
+      expect(failure.output).toContain('/static/js/__inventory_resolver_check.fixture.js')
+      expect(failure.output).toContain("_runtimeGlobalFunction('missingInventoryResolverFixture')")
+    } finally {
+      rmSync(fixture, { force: true })
+    }
+  }, INVENTORY_CHECK_TIMEOUT_MS)
+
+  it('fails check mode when a bridge dispatch has no declared or registered handler', () => {
+    const fixture = resolve(REPO_ROOT, 'app/static/js/__inventory_bridge_dispatch_check.fixture.js')
+    try {
+      writeFileSync(fixture, [
+        "function _callRunnerHandler(name, fallback, args) { return fallback || args || name }",
+        "_callRunnerHandler('missingBridgeHandlerFixture', undefined, [])",
+        '',
+      ].join('\n'))
+
+      const failure = runInventoryCheckWithOutput()
+
+      expect(failure.ok).toBe(false)
+      expect(failure.output).toContain('invalid bridge-dispatch contracts')
+      expect(failure.output).toContain('missing declared handler slots')
+      expect(failure.output).toContain('missing handler registration')
+      expect(failure.output).toContain('runner.missingBridgeHandlerFixture')
+      expect(failure.output).toContain('/static/js/__inventory_bridge_dispatch_check.fixture.js')
+    } finally {
+      rmSync(fixture, { force: true })
+    }
+  }, INVENTORY_CHECK_TIMEOUT_MS)
 
   it('fails check mode when an allowlist entry no longer matches a boundary', () => {
     const tempDir = mkdtempSync(resolve(tmpdir(), 'darklab-inventory-'))
@@ -184,5 +428,5 @@ describe('frontend browser global boundary inventory', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
-  }, 15_000)
+  }, INVENTORY_CHECK_TIMEOUT_MS)
 })

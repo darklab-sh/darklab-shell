@@ -1,5 +1,8 @@
 // Options modal encrypted secrets panel.
 import { showToast as importedShowToast } from '../../core/utils.js';
+import { appendLine as importedAppendLine } from '../../output_bridge.js';
+import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
+import { setStatus as importedSetStatus } from '../../runner_bridge.js';
 import { apiFetch as importedApiFetch } from '../../session.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import {
@@ -31,12 +34,14 @@ function _optionsSecretsApiFetch(...args) {
 }
 
 function _optionsSecretsAppendLine(...args) {
-  const append = _optionsSecretsGlobalFunction('appendLine');
+  const append = (typeof importedAppendLine === 'function' && importedAppendLine)
+    || _optionsSecretsGlobalFunction('appendLine');
   if (append) append(...args);
 }
 
 function _optionsSecretsSetStatus(...args) {
-  const set = _optionsSecretsGlobalFunction('setStatus');
+  const set = (typeof importedSetStatus === 'function' && importedSetStatus)
+    || _optionsSecretsGlobalFunction('setStatus');
   if (set) set(...args);
 }
 
@@ -176,7 +181,8 @@ async function _ensureOptionsSecretCatalog(requirements = {}) {
     _setOptionsCommandRegistryData(data);
     return data;
   } catch (err) {
-    const logError = _optionsSecretsGlobalFunction('logClientError');
+    const logError = (typeof importedLogClientError === 'function' && importedLogClientError)
+      || _optionsSecretsGlobalFunction('logClientError');
     if (logError) logError('failed to load secret consumer catalog', err);
     return null;
   }

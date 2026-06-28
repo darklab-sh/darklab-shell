@@ -44,6 +44,12 @@ import {
   hasHistoryPanelHandler as importedHasHistoryPanelHandler,
   resetHistorySelectionOnClose as importedResetHistorySelectionOnClose,
 } from '../features/history/history_panel_bridge.js';
+import { resetCmdHistoryNav as importedResetCmdHistoryNav } from '../features/history/history_recall_bridge.js';
+import {
+  hasPendingTerminalConfirm as importedHasPendingTerminalConfirm,
+  hasRunnerHandler as importedHasRunnerHandler,
+} from '../runner_bridge.js';
+import { requestWelcomeSettle as importedRequestWelcomeSettle } from '../welcome_bridge.js';
 
 (function initSharedUiHelpers(global) {
   const uiFn = (name) => {
@@ -96,6 +102,24 @@ import {
       return;
     }
     uiFn('syncMobileViewportState')?.();
+  };
+  const resetCmdHistoryNavFromBridge = () => {
+    if (typeof importedResetCmdHistoryNav === 'function') importedResetCmdHistoryNav();
+  };
+  const requestWelcomeSettleFromBridge = (...args) => {
+    const settle = (typeof importedRequestWelcomeSettle === 'function' && importedRequestWelcomeSettle)
+      || uiFn('requestWelcomeSettle');
+    return typeof settle === 'function' ? settle(...args) : undefined;
+  };
+  const hasPendingTerminalConfirmFromBridge = () => {
+    if (
+      typeof importedHasRunnerHandler === 'function'
+      && importedHasRunnerHandler('hasPendingTerminalConfirm')
+      && typeof importedHasPendingTerminalConfirm === 'function'
+    ) {
+      return !!importedHasPendingTerminalConfirm();
+    }
+    return !!uiFn('hasPendingTerminalConfirm')?.();
   };
   const uiValue = (name) => (global ? global[name] : undefined);
   const uiEl = (imported, name) => imported || uiValue(name) || null;
@@ -508,8 +532,8 @@ import {
     const end = typeof sourceInput.selectionEnd === 'number' ? sourceInput.selectionEnd : value.length;
     setComposerValue(value, start, end, { dispatch: false, exclude: sourceInput });
     if (state && state._suspendCmdHistoryNavReset) state._suspendCmdHistoryNavReset = false;
-    else uiFn('resetCmdHistoryNav')?.();
-    if (value.length > 0) uiFn('requestWelcomeSettle')?.(activeTabId());
+    else resetCmdHistoryNavFromBridge();
+    if (value.length > 0) requestWelcomeSettleFromBridge(activeTabId());
 
     const autocomplete = readAutocompleteState();
     if (autocomplete.suppressInputOnce) {
@@ -517,7 +541,7 @@ import {
       uiFn('acHide')?.();
       return;
     }
-    if (uiFn('hasPendingTerminalConfirm')?.()) {
+    if (hasPendingTerminalConfirmFromBridge()) {
       writeAutocompleteState({ index: -1, filtered: [] });
       uiFn('acHide')?.();
       return;
@@ -1267,6 +1291,7 @@ const hideAcDropdown = globalThis.hideAcDropdown;
 const hideFaqOverlay = globalThis.hideFaqOverlay;
 const hideModalOverlay = globalThis.hideModalOverlay;
 const hideHistoryPanel = globalThis.hideHistoryPanel;
+var exportedHideHistoryRow = globalThis.hideHistoryRow;
 const hideOptionsOverlay = globalThis.hideOptionsOverlay;
 const hidePanelOverlay = globalThis.hidePanelOverlay;
 const hideSearchBar = globalThis.hideSearchBar;
@@ -1275,6 +1300,7 @@ const hideTabKillBtn = globalThis.hideTabKillBtn;
 const hideThemeOverlay = globalThis.hideThemeOverlay;
 const hideWorkflowsOverlay = globalThis.hideWorkflowsOverlay;
 const hideWorkspaceOverlay = globalThis.hideWorkspaceOverlay;
+var exportedHideRunTimer = globalThis.hideRunTimer;
 const isAcDropdownOpen = globalThis.isAcDropdownOpen;
 const isActiveTabRunning = globalThis.isActiveTabRunning;
 const isFaqOverlayOpen = globalThis.isFaqOverlayOpen;
@@ -1286,23 +1312,31 @@ const isShortcutsOverlayOpen = globalThis.isShortcutsOverlayOpen;
 const isThemeOverlayOpen = globalThis.isThemeOverlayOpen;
 const isWorkflowsOverlayOpen = globalThis.isWorkflowsOverlayOpen;
 const isWorkspaceOverlayOpen = globalThis.isWorkspaceOverlayOpen;
+var exportedIsRunButtonDisabled = globalThis.isRunButtonDisabled;
 const showMobileMenu = globalThis.showMobileMenu;
 const hideMobileMenu = globalThis.hideMobileMenu;
 const isMobileMenuOpen = globalThis.isMobileMenuOpen;
 const markInteractionSurfaceReady = globalThis.markInteractionSurfaceReady;
+var exportedNormalizeComposerSmartPeriod = globalThis.normalizeComposerSmartPeriod;
 const portalDropdownMenu = globalThis.portalDropdownMenu;
 const refocusComposerAfterAction = globalThis.refocusComposerAfterAction;
 const setComposerValue = globalThis.setComposerValue;
 var exportedSetMobileKeyboardOpenState = globalThis.setMobileKeyboardOpenState;
 var exportedSetMobileViewportClosedHeight = globalThis.setMobileViewportClosedHeight;
+var exportedSetRunButtonDisabled = globalThis.setRunButtonDisabled;
 const setVisibilityState = globalThis.setVisibilityState;
 const showAcDropdown = globalThis.showAcDropdown;
 const showFaqOverlay = globalThis.showFaqOverlay;
+var exportedShowHistoryPanel = globalThis.showHistoryPanel;
+var exportedShowHistoryRow = globalThis.showHistoryRow;
 const showModalOverlay = globalThis.showModalOverlay;
 const showPanelOverlay = globalThis.showPanelOverlay;
 const showSearchBar = globalThis.showSearchBar;
 const showShortcutsOverlay = globalThis.showShortcutsOverlay;
 const showTabKillBtn = globalThis.showTabKillBtn;
+var exportedShowThemeOverlay = globalThis.showThemeOverlay;
+var exportedShowOptionsOverlay = globalThis.showOptionsOverlay;
+var exportedShowRunTimer = globalThis.showRunTimer;
 const showWorkflowsOverlay = globalThis.showWorkflowsOverlay;
 const showWorkspaceOverlay = globalThis.showWorkspaceOverlay;
 const syncAppSelect = globalThis.syncAppSelect;
@@ -1335,6 +1369,7 @@ export {
   hideAcDropdown,
   hideFaqOverlay,
   hideHistoryPanel,
+  exportedHideHistoryRow as hideHistoryRow,
   hideModalOverlay,
   hideMobileMenu,
   hideOptionsOverlay,
@@ -1345,6 +1380,7 @@ export {
   hideThemeOverlay,
   hideWorkflowsOverlay,
   hideWorkspaceOverlay,
+  exportedHideRunTimer as hideRunTimer,
   isAcDropdownOpen,
   isActiveTabRunning,
   isFaqOverlayOpen,
@@ -1357,21 +1393,29 @@ export {
   isThemeOverlayOpen,
   isWorkflowsOverlayOpen,
   isWorkspaceOverlayOpen,
+  exportedIsRunButtonDisabled as isRunButtonDisabled,
   markInteractionSurfaceReady,
+  exportedNormalizeComposerSmartPeriod as normalizeComposerSmartPeriod,
   portalDropdownMenu,
   refocusComposerAfterAction,
   setComposerValue,
   exportedSetMobileKeyboardOpenState as setMobileKeyboardOpenState,
   exportedSetMobileViewportClosedHeight as setMobileViewportClosedHeight,
+  exportedSetRunButtonDisabled as setRunButtonDisabled,
   setVisibilityState,
   showAcDropdown,
   showFaqOverlay,
+  exportedShowHistoryPanel as showHistoryPanel,
+  exportedShowHistoryRow as showHistoryRow,
   showModalOverlay,
   showMobileMenu,
   showPanelOverlay,
   showSearchBar,
   showShortcutsOverlay,
   showTabKillBtn,
+  exportedShowThemeOverlay as showThemeOverlay,
+  exportedShowOptionsOverlay as showOptionsOverlay,
+  exportedShowRunTimer as showRunTimer,
   showWorkflowsOverlay,
   showWorkspaceOverlay,
   syncAppSelect,

@@ -9,6 +9,7 @@ import {
   activateTab as importedActivateTab,
   clearTab as importedClearTab,
   createTab as importedCreateTab,
+  _getTabPanelEl as importedGetTabPanelEl,
   getOutput as importedGetOutput,
   setTabLabel as importedSetTabLabel,
   setTabRunningCommand as importedSetTabRunningCommand,
@@ -19,6 +20,17 @@ import {
   appendCommandEcho as importedAppendCommandEcho,
   confirmKill as importedConfirmKill,
 } from './runner.js';
+import {
+  _readRunErrorMessage as importedReadRunErrorMessage,
+  _setRunButtonDisabled as importedSetRunButtonDisabled,
+  _sseMessageFromChunk as importedSseMessageFromChunk,
+  setStatus as importedSetStatus,
+  startPollingActiveRunsAfterReload as importedStartPollingActiveRunsAfterReload,
+  startTimer as importedStartTimer,
+  stopTimer as importedStopTimer,
+  syncActiveRunTimer as importedSyncActiveRunTimer,
+} from './runner_bridge.js';
+import { getClientId as importedGetClientId } from './session.js';
 import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from './features/workspace/workspace_autocomplete_cache.js';
 import { _workspaceCwd as importedWorkspaceCwd } from './features/runner/runner_workspace.js';
 import { addToRecentPreview as importedAddToRecentPreview } from './features/history/history_recall.js';
@@ -34,8 +46,10 @@ import {
 import { clearActiveRunDetachedForRestore as importedClearActiveRunDetachedForRestore } from './features/runner/runner_active_restore.js';
 import {
   isHistoryPanelOpen as importedIsHistoryPanelOpen,
+  hideTabKillBtn as importedHideTabKillBtn,
   markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  showTabKillBtn as importedShowTabKillBtn,
 } from './ui/ui_helpers.js';
 import {
   apiFetch as importedRuntimeApiFetch,
@@ -84,7 +98,7 @@ function _ptyAppConfig() {
 function _ptyActiveTabId() {
   if (typeof importedGetActiveTabId === 'function') return importedGetActiveTabId();
   const read = _ptyGlobalFunction('getActiveTabId');
-  return read ? read() : (_ptyGlobalValue('activeTabId') || null);
+  return read ? read() : null;
 }
 
 function _ptyGetTab(tabId) {
@@ -148,8 +162,12 @@ function _ptyClearActiveRunDetachedForRestore(runId) {
   if (typeof clear === 'function') clear(runId);
 }
 
-function _ptyCall(name, ...args) {
-  const fn = _ptyGlobalFunction(name);
+function _ptyCall(name, importedOrFirstArg = undefined, ...rest) {
+  const imported = typeof importedOrFirstArg === 'function' ? importedOrFirstArg : null;
+  const args = imported
+    ? rest
+    : (arguments.length > 1 ? [importedOrFirstArg, ...rest] : []);
+  const fn = imported || _ptyGlobalFunction(name);
   return fn ? fn(...args) : undefined;
 }
 
@@ -172,20 +190,58 @@ function _ptyAppendCommandEcho(...args) {
 }
 
 function _ptySetStatus(status) {
-  _ptyCall('setStatus', status);
+  _ptyCall('setStatus', importedSetStatus, status);
 }
 
 function _ptySetRunButtonDisabled(disabled) {
-  _ptyCall('_setRunButtonDisabled', disabled);
+  _ptyCall('_setRunButtonDisabled', importedSetRunButtonDisabled, disabled);
+}
+
+function _ptyShowTabKillBtn(tabId) {
+  const show = (typeof importedShowTabKillBtn === 'function' && importedShowTabKillBtn)
+    || _ptyGlobalFunction('showTabKillBtn');
+  if (show) show(tabId);
+}
+
+function _ptyHideTabKillBtn(tabId) {
+  const hide = (typeof importedHideTabKillBtn === 'function' && importedHideTabKillBtn)
+    || _ptyGlobalFunction('hideTabKillBtn');
+  if (hide) hide(tabId);
+}
+
+function _ptyStartPollingActiveRunsAfterReload() {
+  const start = (typeof importedStartPollingActiveRunsAfterReload === 'function' && importedStartPollingActiveRunsAfterReload)
+    || _ptyGlobalFunction('startPollingActiveRunsAfterReload');
+  if (start) start();
+}
+
+function _ptySyncActiveRunTimer(tabId) {
+  const sync = (typeof importedSyncActiveRunTimer === 'function' && importedSyncActiveRunTimer)
+    || _ptyGlobalFunction('syncActiveRunTimer');
+  if (sync) sync(tabId);
+}
+
+function _ptyStartTimer(...args) {
+  const start = (typeof importedStartTimer === 'function' && importedStartTimer)
+    || _ptyGlobalFunction('startTimer');
+  if (start) start(...args);
+}
+
+function _ptyStopTimer() {
+  const stop = (typeof importedStopTimer === 'function' && importedStopTimer)
+    || _ptyGlobalFunction('stopTimer');
+  if (stop) stop();
 }
 
 function _ptyReadRunErrorMessage(resp) {
-  const read = _ptyGlobalFunction('_readRunErrorMessage');
+  const read = (typeof importedReadRunErrorMessage === 'function' && importedReadRunErrorMessage)
+    || _ptyGlobalFunction('_readRunErrorMessage');
   return read ? read(resp) : Promise.resolve('');
 }
 
 function _ptySseMessageFromChunk(part) {
-  const parse = _ptyGlobalFunction('_sseMessageFromChunk');
+  const parse = (typeof importedSseMessageFromChunk === 'function' && importedSseMessageFromChunk)
+    || _ptyGlobalFunction('_sseMessageFromChunk');
   if (parse) return parse(part);
   let eventId = '';
   const dataLines = [];
@@ -681,7 +737,11 @@ function _ptySendInput(runId, data, tabId = '') {
 }
 
 function _ptyCurrentClientId() {
-  return String(_ptyGlobalValue('CLIENT_ID') || '');
+  if (typeof importedGetClientId === 'function') return String(importedGetClientId() || '');
+  const legacyClientId = PTY_GLOBAL && typeof PTY_GLOBAL.CLIENT_ID === 'string'
+    ? PTY_GLOBAL.CLIENT_ID
+    : '';
+  return String(legacyClientId || '');
 }
 
 function _ptyConfirmSessionKill(session) {
@@ -805,7 +865,8 @@ function _ptySessionForOverlay(overlay) {
 
 function _ptyPanelForTab(tabId) {
   if (!tabId) return null;
-  const getPanel = _ptyGlobalFunction('getTabPanel');
+  const getPanel = (typeof importedGetTabPanelEl === 'function' && importedGetTabPanelEl)
+    || _ptyGlobalFunction('getTabPanel');
   if (getPanel) return getPanel(tabId);
   return Array.from(document.querySelectorAll('.tab-panel'))
     .find(panel => panel.dataset && panel.dataset.id === String(tabId)) || null;
@@ -1199,9 +1260,9 @@ function _prepareAttachedInteractivePtyTab(run, tabId) {
   const setTabStatus = (typeof importedSetTabStatus === 'function' && importedSetTabStatus) || _ptyGlobalFunction('setTabStatus');
   if (setTabStatus) setTabStatus(tabId, 'running');
   if (tabId === _ptyActiveTabId()) _ptySetStatus('running');
-  _ptyCall('showTabKillBtn', tabId);
+  _ptyShowTabKillBtn(tabId);
   _ptySetRunButtonDisabled(true);
-  if (tabId === _ptyActiveTabId()) _ptyCall('syncActiveRunTimer', tabId);
+  if (tabId === _ptyActiveTabId()) _ptySyncActiveRunTimer(tabId);
   return tab;
 }
 
@@ -1236,8 +1297,8 @@ function _ptyDisplaceSession(tabId, session, msg = {}) {
   if (setTabStatus) setTabStatus(tabId, 'idle');
   if (tabId === _ptyActiveTabId()) _ptySetStatus('idle');
   _ptySetRunButtonDisabled(false);
-  _ptyCall('hideTabKillBtn', tabId);
-  _ptyCall('startPollingActiveRunsAfterReload');
+  _ptyHideTabKillBtn(tabId);
+  _ptyStartPollingActiveRunsAfterReload();
   return true;
 }
 
@@ -1341,8 +1402,8 @@ async function _ptyHandleStreamEndedWithoutExit(tabId, session) {
     const setTabStatus = (typeof importedSetTabStatus === 'function' && importedSetTabStatus) || _ptyGlobalFunction('setTabStatus');
     if (setTabStatus) setTabStatus(tabId, 'running');
     _ptySetRunButtonDisabled(true);
-    _ptyCall('showTabKillBtn', tabId);
-    _ptyCall('startPollingActiveRunsAfterReload');
+    _ptyShowTabKillBtn(tabId);
+    _ptyStartPollingActiveRunsAfterReload();
     return;
   }
   await _ptyFinalize(tabId, session, { code: null, stream_ended_without_exit: true });
@@ -1401,9 +1462,9 @@ async function _ptyFinalize(tabId, session, msg = {}) {
   _ptySetStatus(ok ? 'ok' : 'fail');
   const setTabStatus = (typeof importedSetTabStatus === 'function' && importedSetTabStatus) || _ptyGlobalFunction('setTabStatus');
   if (setTabStatus) setTabStatus(tabId, ok ? 'idle' : 'fail');
-  _ptyCall('stopTimer');
+  _ptyStopTimer();
   _ptySetRunButtonDisabled(false);
-  _ptyCall('hideTabKillBtn', tabId);
+  _ptyHideTabKillBtn(tabId);
   const finalizeTabClose = typeof importedFinalizeClosingTab === 'function'
     ? importedFinalizeClosingTab
     : _ptyGlobalFunction('finalizeClosingTab');
@@ -1523,8 +1584,8 @@ function _prepareInteractivePtyTab(cmd, tabId) {
   const setTabStatus = (typeof importedSetTabStatus === 'function' && importedSetTabStatus) || _ptyGlobalFunction('setTabStatus');
   if (setTabStatus) setTabStatus(tabId, 'running');
   _ptySetRunButtonDisabled(true);
-  _ptyCall('showTabKillBtn', tabId);
-  _ptyCall('startTimer');
+  _ptyShowTabKillBtn(tabId);
+  _ptyStartTimer();
 }
 
 function _failInteractivePtyTab(tabId, message, session = null) {
@@ -1555,9 +1616,9 @@ function _failInteractivePtyTab(tabId, message, session = null) {
   _ptySetStatus('fail');
   const setTabStatus = (typeof importedSetTabStatus === 'function' && importedSetTabStatus) || _ptyGlobalFunction('setTabStatus');
   if (setTabStatus) setTabStatus(tabId, 'fail');
-  _ptyCall('stopTimer');
+  _ptyStopTimer();
   _ptySetRunButtonDisabled(false);
-  _ptyCall('hideTabKillBtn', tabId);
+  _ptyHideTabKillBtn(tabId);
   const refocus = (typeof importedRefocusComposerAfterAction === 'function' && importedRefocusComposerAfterAction)
     || _ptyGlobalFunction('refocusComposerAfterAction');
   if (tabId === _ptyActiveTabId() && refocus) {

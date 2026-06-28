@@ -27,7 +27,10 @@ import {
   setTabStatus as importedSetTabStatus,
   unmountShellPrompt as importedUnmountShellPrompt,
 } from '../../tabs_bridge.js';
-import { getComposerValue as importedGetComposerValue } from '../../ui/ui_helpers.js';
+import {
+  getComposerValue as importedGetComposerValue,
+  hideTabKillBtn as importedHideTabKillBtn,
+} from '../../ui/ui_helpers.js';
 
 const TAB_SESSION_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -408,7 +411,8 @@ function restoreTabSessionState() {
       _tabSessionRenderRestoredTabOutput(tabId, item && item.rawLines);
       const status = typeof item?.st === 'string' && item.st !== 'running' ? item.st : 'idle';
       _tabSessionSetTabStatus(tabId, status);
-      const hideKill = _tabSessionGlobalFunction('hideTabKillBtn');
+      const hideKill = (typeof importedHideTabKillBtn === 'function' && importedHideTabKillBtn)
+        || _tabSessionGlobalFunction('hideTabKillBtn');
       if (hideKill) hideKill(tabId);
       restoredIds.push(tabId);
       restoredRecords.push({ tabId, item });

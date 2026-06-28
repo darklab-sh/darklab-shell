@@ -325,8 +325,7 @@ describe('autocomplete helpers', () => {
   it('acAccept refreshes autocomplete after accepting a slash-terminated folder', () => {
     vi.useFakeTimers()
     try {
-      const openAutocompleteForVisibleComposer = vi.fn(() => true)
-      window.openAutocompleteForVisibleComposer = openAutocompleteForVisibleComposer
+      const refreshed = vi.fn()
       const { acAccept } = fromDomScripts(
         ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
         {
@@ -353,6 +352,7 @@ describe('autocomplete helpers', () => {
       }`,
       )
       const input = document.getElementById('cmd')
+      input.addEventListener('input', refreshed)
       input.value = 'cd naa'
       input.setSelectionRange(6, 6)
 
@@ -360,7 +360,7 @@ describe('autocomplete helpers', () => {
       vi.runOnlyPendingTimers()
 
       expect(input.value).toBe('cd naabu/')
-      expect(openAutocompleteForVisibleComposer).toHaveBeenCalledTimes(1)
+      expect(refreshed).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
@@ -2689,6 +2689,51 @@ describe('autocomplete helpers', () => {
     const flagItems = getAutocompleteMatches('ping darklab.sh -', 16)
     expect(flagItems).toHaveLength(1)
     expect(flagItems[0].value).toBe('-c')
+  })
+
+  it('uses bridged allowed-command FAQ data for command lookup suggestions', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      [
+        'app/static/js/core/utils.js',
+        'app/static/js/core/autocomplete_core.js',
+        'app/static/js/features/command-registry/command_registry_bridge.js',
+        'app/static/js/features/autocomplete/runtime_context.js',
+        'app/static/js/features/autocomplete/suggestions.js',
+        'app/static/js/autocomplete.js',
+      ],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'man subfinder',
+        acSuggestions: [],
+        acContextRegistry: {
+          man: {
+            argument_limit: 1,
+            arg_hints: {
+              __positional__: [
+                { value: '<command>', hintOnly: true, description: 'Manual page for any allowed command' },
+              ],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      setAllowedCommandsFaqData,
+    }`,
+    )
+    delete window.getAllowedCommandsFaqData
+
+    setAllowedCommandsFaqData({ commands: ['subfinder -d example.com'] })
+
+    const items = getAutocompleteMatches('man sub', 7)
+    expect(items.map(item => item.value)).toContain('subfinder')
   })
 
   it('suggests built-in pipe commands after a supported command pipe', () => {

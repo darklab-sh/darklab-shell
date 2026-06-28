@@ -47,6 +47,7 @@ function loadOutputFns({
     syncOutputPrefixes,
     _setTsMode,
     _setLnMode,
+    isTabSessionRestoreInProgress,
     buildPromptLabel,
     currentPromptWorkspacePath,
     _showOutputEntityMenu,
@@ -279,6 +280,22 @@ describe('appendLine', () => {
 
     expect(currentPromptWorkspacePath()).toBe('/shell')
     expect(buildPromptLabel()).toBe('anon@darklab.sh:/shell $')
+  })
+
+  it('exposes live tab-session restore state through the output bridge', () => {
+    const { isTabSessionRestoreInProgress } = loadOutputFns({
+      extraGlobals: {
+        _tabSessionRestoreInProgress: false,
+      },
+    })
+
+    expect(isTabSessionRestoreInProgress()).toBe(false)
+
+    window._tabSessionRestoreInProgress = true
+    expect(isTabSessionRestoreInProgress()).toBe(true)
+
+    window._tabSessionRestoreInProgress = false
+    expect(isTabSessionRestoreInProgress()).toBe(false)
   })
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {

@@ -22,6 +22,7 @@ import {
   activateTab as importedActivateTab,
   clearTab as importedClearTab,
   createDefaultTabLabel as importedCreateDefaultTabLabel,
+  getOutput as importedGetOutput,
   setTabLabel as importedSetTabLabel,
   updateNewTabBtn as importedUpdateNewTabBtn,
   updateTabScrollButtons as importedUpdateTabScrollButtons,
@@ -210,7 +211,8 @@ function _tabCloseSetTabLabel(id, label) {
 }
 
 function _tabCloseSyncMountedPromptLineNumber(id) {
-  const getOutput = _tabCloseGlobalFunction('getOutput');
+  const getOutput = (typeof importedGetOutput === 'function' && importedGetOutput)
+    || _tabCloseGlobalFunction('getOutput');
   const out = typeof getOutput === 'function' ? getOutput(id) : null;
   const prompt = TAB_CLOSE_GLOBAL && TAB_CLOSE_GLOBAL.shellPromptWrap;
   if (!prompt) return;

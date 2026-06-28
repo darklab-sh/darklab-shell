@@ -36,6 +36,7 @@ import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissi
 import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
 import { _closeHistoryRunActionMenus } from './history_actions.js';
 import { copyHistoryRunPermalink as importedCopyHistoryRunPermalink } from './history_links.js';
+import { refreshHistoryPanel as importedRefreshHistoryPanel } from './history_panel_bridge.js';
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './history_recall.js';
 import {
   _historyCanManageHistory as importedHistoryCanManageHistory,
@@ -316,9 +317,12 @@ function _historyRunRenderAnsiWithEntityTokens(content, text, entities, tabId) {
 }
 
 function _historyRunSubmitComposerCommand(command, options) {
-  const submit = _historyRunGlobalFunction('submitComposerCommand')
-    || (typeof importedBridgeSubmitComposerCommand !== 'undefined' && importedBridgeSubmitComposerCommand)
-    || (typeof importedSubmitComposerCommand !== 'undefined' && importedSubmitComposerCommand);
+  if (typeof importedBridgeSubmitComposerCommand === 'function') {
+    const result = importedBridgeSubmitComposerCommand(command, options);
+    if (result !== false) return result;
+  }
+  const submit = (typeof importedSubmitComposerCommand !== 'undefined' && importedSubmitComposerCommand)
+    || _historyRunGlobalFunction('submitComposerCommand');
   return typeof submit === 'function' ? submit(command, options) : null;
 }
 
@@ -376,7 +380,8 @@ function _historyRunOpenWatchersModal(options) {
 }
 
 function _historyRunRefreshHistoryPanel() {
-  const refresh = _historyRunGlobalFunction('refreshHistoryPanel');
+  const refresh = (typeof importedRefreshHistoryPanel === 'function' && importedRefreshHistoryPanel)
+    || _historyRunGlobalFunction('refreshHistoryPanel');
   if (typeof refresh === 'function') refresh();
 }
 

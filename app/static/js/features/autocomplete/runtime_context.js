@@ -12,6 +12,7 @@ import {
   logClientError as importedRuntimeLogClientError,
 } from '../../runtime_bridge.js';
 import { getOutput as importedGetOutput } from '../../tabs.js';
+import { normalizeCommandPath as importedNormalizeWorkspaceCommandPath } from '../../core/workspace_core.js';
 import {
   _cliConfigEntries as importedCliConfigEntries,
   _cliThemeDescription as importedCliThemeDescription,
@@ -32,12 +33,19 @@ import {
   _runtimeWorkflowContext as importedRuntimeWorkflowContext,
   hasWorkflowHandler as importedHasWorkflowHandler,
 } from '../workflows/workflows_bridge.js';
+import { _workspaceCwd as importedWorkspaceCwd } from '../runner/runner_workspace.js';
 
 const RUNTIME_CONTEXT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
 function _runtimeGlobalFunction(name) {
   const fn = RUNTIME_CONTEXT_GLOBAL && RUNTIME_CONTEXT_GLOBAL[name];
   return typeof fn === 'function' ? fn : null;
+}
+
+function _runtimeAllowedCommandsFaqData() {
+  const bridgeState = RUNTIME_CONTEXT_GLOBAL && RUNTIME_CONTEXT_GLOBAL.__darklabCommandRegistryBridge;
+  if (bridgeState && bridgeState.allowedCommandsFaqData) return bridgeState.allowedCommandsFaqData;
+  return null;
 }
 
 function _runtimeApiFetch(url, options) {
@@ -96,21 +104,21 @@ function _runtimeAppConfig() {
 }
 
 function _runtimeActiveTabId() {
-  const readActiveTabId = _runtimeGlobalFunction('getActiveTabId')
-    || (typeof importedGetActiveTabId !== 'undefined' && importedGetActiveTabId);
+  const readActiveTabId = (typeof importedGetActiveTabId !== 'undefined' && importedGetActiveTabId)
+    || _runtimeGlobalFunction('getActiveTabId');
   if (typeof readActiveTabId === 'function') return readActiveTabId();
   return RUNTIME_CONTEXT_GLOBAL.activeTabId || null;
 }
 
 function _runtimeGetTab(tabId) {
-  const readTab = _runtimeGlobalFunction('getTab')
-    || (typeof importedGetTab !== 'undefined' && importedGetTab);
+  const readTab = (typeof importedGetTab !== 'undefined' && importedGetTab)
+    || _runtimeGlobalFunction('getTab');
   return typeof readTab === 'function' ? readTab(tabId) : null;
 }
 
 function _runtimeGetOutput(tabId) {
-  const readOutput = _runtimeGlobalFunction('getOutput')
-    || (typeof importedGetOutput !== 'undefined' && importedGetOutput);
+  const readOutput = (typeof importedGetOutput !== 'undefined' && importedGetOutput)
+    || _runtimeGlobalFunction('getOutput');
   return typeof readOutput === 'function' ? readOutput(tabId) : null;
 }
 
@@ -262,8 +270,7 @@ function _runtimeBuiltinDescription(root, baseRegistry = {}) {
 
 function _runtimeAllowedCommandRoots() {
   const roots = new Set();
-  const getFaqData = _runtimeGlobalFunction('getAllowedCommandsFaqData');
-  const faqData = getFaqData ? getFaqData() : null;
+  const faqData = _runtimeAllowedCommandsFaqData();
   const source = faqData && Array.isArray(faqData.commands) ? faqData.commands : [];
   source.forEach((command) => {
     const root = String(command || '').trim().split(/\s+/, 1)[0].toLowerCase();
@@ -317,11 +324,17 @@ function _runtimeWorkspaceFilePathHints() {
 
 function _runtimeWorkspaceCwd() {
   const tabId = _runtimeActiveTabId();
-  const readWorkspaceCwd = _runtimeGlobalFunction('_workspaceCwd');
+  const readWorkspaceCwd = (
+    typeof importedWorkspaceCwd === 'function'
+    && importedWorkspaceCwd
+  ) || _runtimeGlobalFunction('_workspaceCwd');
   if (readWorkspaceCwd) return readWorkspaceCwd(tabId);
   if (tabId) {
     const tab = _runtimeGetTab(tabId);
-    const parts = String(tab && tab.workspaceCwd || '').split('/').filter(Boolean);
+    const parts = String(tab && tab.workspaceCwd || '')
+      .split('/')
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
     return parts.join('/');
   }
   return '';
@@ -345,7 +358,8 @@ function _runtimeWorkspaceDirectHintFromPath(item, cwd = '', kind = 'file') {
 }
 
 function _runtimeNormalizeWorkspaceCommandPath(path = '', cwd = '') {
-  const normalize = _runtimeGlobalFunction('normalizeWorkspaceCommandPath');
+  const normalize = (typeof importedNormalizeWorkspaceCommandPath === 'function' && importedNormalizeWorkspaceCommandPath)
+    || _runtimeGlobalFunction('normalizeWorkspaceCommandPath');
   if (normalize) {
     return String(normalize(path, cwd) || '').split('/').filter(Boolean).join('/');
   }
@@ -557,12 +571,12 @@ function _runtimeWorkspaceNavigableDirectoryHints() {
 }
 
 function _runtimeThemeContext() {
-  const themeEntries = _runtimeGlobalFunction('_cliThemeEntries')
-    || (typeof importedCliThemeEntries === 'function' ? importedCliThemeEntries : null);
-  const themeSlug = _runtimeGlobalFunction('_cliThemeSlug')
-    || (typeof importedCliThemeSlug === 'function' ? importedCliThemeSlug : null);
-  const themeDescription = _runtimeGlobalFunction('_cliThemeDescription')
-    || (typeof importedCliThemeDescription === 'function' ? importedCliThemeDescription : null);
+  const themeEntries = (typeof importedCliThemeEntries === 'function' ? importedCliThemeEntries : null)
+    || _runtimeGlobalFunction('_cliThemeEntries');
+  const themeSlug = (typeof importedCliThemeSlug === 'function' ? importedCliThemeSlug : null)
+    || _runtimeGlobalFunction('_cliThemeSlug');
+  const themeDescription = (typeof importedCliThemeDescription === 'function' ? importedCliThemeDescription : null)
+    || _runtimeGlobalFunction('_cliThemeDescription');
   const themeHints = (
     typeof themeEntries === 'function'
     && typeof themeSlug === 'function'
@@ -585,8 +599,8 @@ function _runtimeThemeContext() {
 }
 
 function _runtimeConfigContext() {
-  const configEntries = _runtimeGlobalFunction('_cliConfigEntries')
-    || (typeof importedCliConfigEntries === 'function' ? importedCliConfigEntries : null);
+  const configEntries = (typeof importedCliConfigEntries === 'function' ? importedCliConfigEntries : null)
+    || _runtimeGlobalFunction('_cliConfigEntries');
   const entries = typeof configEntries === 'function' ? configEntries() : [];
   const optionHints = entries.map(entry => _runtimeHint(entry.key, entry.description));
   const argHints = {
@@ -1033,6 +1047,7 @@ export {
   _runtimeContextSpec,
   _runtimeHint,
   _runtimePlaceholderHint,
+  _runtimeWorkspaceCwd,
   extractGrepOutputTokens,
   getGrepOutputSuggestions,
   getRuntimeAutocompleteContext,

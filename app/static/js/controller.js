@@ -166,7 +166,9 @@ import {
   setAllowedCommandsFaqData,
 } from './features/command-registry/faq_helpers.js';
 import {
+  closeCommandCatalogModal as importedCloseCommandCatalogModal,
   closeCommandRegistry,
+  isCommandCatalogOverlayOpen as importedIsCommandCatalogOverlayOpen,
   isCommandRegistryOverlayOpen,
   renderCommandRegistry,
   setCommandRegistryData as importedSetCommandRegistryData,
@@ -266,7 +268,10 @@ import {
 } from './features/projects/project_context_bridge.js';
 
 const closeAtlas = (...args) => _controllerFn('closeAtlas', importedCloseAtlas)?.(...args);
-const closeCommandCatalogModal = (...args) => _controllerFn('closeCommandCatalogModal')?.(...args);
+const closeCommandCatalogModal = (...args) => _controllerFn(
+  'closeCommandCatalogModal',
+  importedCloseCommandCatalogModal
+)?.(...args);
 const closeProviderStatusModal = (...args) => {
   const fn = (
     typeof importedHasSecretsHandler === 'function'
@@ -281,7 +286,10 @@ const closeWatchersModal = (...args) => _controllerFn('closeWatchersModal')?.(..
 const closeWorkflowEditor = (...args) => _controllerFn('closeWorkflowEditor', importedCloseWorkflowEditor)?.(...args);
 const ensureWorkflowCatalogLoaded = (...args) => _controllerFn('ensureWorkflowCatalogLoaded', importedEnsureWorkflowCatalogLoaded)?.(...args);
 const isAtlasOverlayOpen = (...args) => !!_controllerFn('isAtlasOverlayOpen', importedIsAtlasOverlayOpen)?.(...args);
-const isCommandCatalogOverlayOpen = (...args) => !!_controllerFn('isCommandCatalogOverlayOpen')?.(...args);
+const isCommandCatalogOverlayOpen = (...args) => !!_controllerFn(
+  'isCommandCatalogOverlayOpen',
+  importedIsCommandCatalogOverlayOpen
+)?.(...args);
 const isHistoryCompareOverlayOpen = (...args) => !!_controllerFn('isHistoryCompareOverlayOpen')?.(...args);
 const isHistoryRunOverlayOpen = (...args) => !!_controllerFn('isHistoryRunOverlayOpen', importedIsHistoryRunOverlayOpen)?.(...args);
 const isProviderStatusModalOpen = (...args) => {
@@ -1209,6 +1217,7 @@ document.addEventListener('keydown', e => {
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
   ) {
+    if (handleTabShortcut(e, { surfaceOnly: true })) return;
     if (handleChromeShortcut(e)) return;
     return;
   }

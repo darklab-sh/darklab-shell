@@ -198,6 +198,11 @@ function getSessionId() {
   return SESSION_ID;
 }
 
+function getClientId() {
+  _ensureSessionIdentity();
+  return CLIENT_ID;
+}
+
 // Keep SESSION_ID current in other open tabs when session_token changes in
 // localStorage (the storage event only fires in tabs that did not make the
 // change, so this does not double-apply in the tab that called updateSessionId).
@@ -294,6 +299,7 @@ if (typeof window !== 'undefined') {
 export {
   apiFetch,
   describeFetchError,
+  getClientId,
   getSessionId,
   logClientError,
   maskSessionToken,

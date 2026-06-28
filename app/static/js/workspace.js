@@ -34,6 +34,7 @@ import {
 import { downloadUrlAsAttachment, showToast } from './core/utils.js';
 import { APP_CONFIG } from './core/config.js';
 import { DarklabWorkspaceCore as importedWorkspaceCore } from './core/workspace_core.js';
+import { setRuntimeHandlers as importedSetRuntimeHandlers } from './runtime_bridge.js';
 import { apiFetch as importedApiFetch } from './session.js';
 import { activeTeamScopeCan, getActiveTeamId, teamScopeDeniedMessage } from './features/team_scope.js';
 import {
@@ -49,6 +50,7 @@ import {
 } from './features/workspace/workspace_viewer_formats.js';
 import { createTextSearchController } from './search.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from './ui/overlay_actions_bridge.js';
+import { setWorkspaceHandlers as importedSetWorkspaceHandlers } from './workspace_bridge.js';
 import { DarklabEntityMetadata as importedEntityMetadata } from './ui/ui_entity_metadata.js';
 import {
   applyMobileTextInputDefaults,
@@ -1851,16 +1853,25 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 if (typeof window !== 'undefined') {
   if (isWorkspaceEnabled()) setTimeout(() => { _workspaceFileCacheApi().refresh?.(); }, 0);
 }
+if (typeof importedSetRuntimeHandlers === 'function') {
+  importedSetRuntimeHandlers({ refreshWorkspaceFiles });
+}
+if (typeof importedSetWorkspaceHandlers === 'function') {
+  importedSetWorkspaceHandlers({ closeWorkspace });
+}
 
 export {
   closeWorkspace,
   createWorkspaceDirectory,
   hideWorkspaceEditor,
   hideWorkspaceViewer,
+  _formatWorkspaceBytes,
+  downloadWorkspaceFile,
   moveWorkspacePath,
   openWorkspace,
   openWorkspaceEditorFromCommand,
   readWorkspaceFile,
   refreshWorkspaceFiles,
   showWorkspaceViewer,
+  workspaceCanWrite,
 };

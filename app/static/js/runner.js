@@ -1,7 +1,10 @@
 // ── Shared command execution + desktop input wrapper ──
 import { DarklabRunnerCore as importedRunnerCore } from './core/runner_core.js';
 import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_output_model.js';
-import { copyTextToClipboard as importedCopyTextToClipboard } from './core/utils.js';
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  showToast as importedShowToast,
+} from './core/utils.js';
 import {
   cmdInput as importedCmdInput,
   mobileCmdInput as importedMobileCmdInput,
@@ -22,6 +25,7 @@ import {
 import {
   apiFetch as importedApiFetch,
   describeFetchError as importedDescribeFetchError,
+  getClientId as importedGetClientId,
   getSessionId as importedGetSessionId,
   logClientError as importedLogClientError,
   maskSessionToken as importedMaskSessionToken,
@@ -52,10 +56,14 @@ import {
 import {
   blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
   getComposerValue as importedGetComposerValue,
+  hideRunTimer as importedHideRunTimer,
   hideTabKillBtn as importedHideTabKillBtn,
   isHistoryPanelOpen as importedIsHistoryPanelOpen,
+  isRunButtonDisabled as importedIsRunButtonDisabled,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
+  setRunButtonDisabled as importedSetRunButtonDisabled,
+  showRunTimer as importedShowRunTimer,
   showTabKillBtn as importedShowTabKillBtn,
   syncRunButtonDisabled as importedSyncRunButtonDisabled,
 } from './ui/ui_helpers.js';
@@ -70,10 +78,13 @@ import {
 } from './features/tabs/tab_close_lifecycle.js';
 import {
   createWorkspaceDirectory as importedCreateWorkspaceDirectory,
+  downloadWorkspaceFile as importedDownloadWorkspaceFile,
+  _formatWorkspaceBytes as importedFormatWorkspaceBytes,
   moveWorkspacePath as importedMoveWorkspacePath,
   openWorkspaceEditorFromCommand as importedOpenWorkspaceEditorFromCommand,
   readWorkspaceFile as importedReadWorkspaceFile,
   refreshWorkspaceFiles as importedRefreshWorkspaceFiles,
+  workspaceCanWrite as importedWorkspaceCanWrite,
 } from './workspace.js';
 import {
   getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
@@ -124,6 +135,7 @@ import {
   loadStarredFromServer as importedLoadStarredFromServer,
   reloadSessionHistory as importedReloadSessionHistory,
 } from './features/history/history_actions.js';
+import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from './features/history/history_restore_bridge.js';
 import {
   handleConfigCommand as importedHandleConfigCommand,
   handleThemeCommand as importedHandleThemeCommand,
@@ -155,6 +167,13 @@ import {
   hasHistoryPanelHandler as importedHasHistoryPanelHandler,
   refreshHistoryPanel as importedRefreshHistoryPanel,
 } from './features/history/history_panel_bridge.js';
+import {
+  isProjectWorkspaceOpen as importedIsProjectWorkspaceOpen,
+  notifyProjectWorkspaceChanged as importedNotifyProjectWorkspaceChanged,
+  refreshActiveProjectContext as importedRefreshActiveProjectContext,
+  refreshProjectWorkspace as importedRefreshProjectWorkspace,
+} from './features/projects/project_context_bridge.js';
+import { getRunNotifyPreference as importedGetRunNotifyPreference } from './features/preferences/preferences.js';
 
 // If no chunk arrives from the SSE stream for 45 seconds (> 2× the 20s server heartbeat),
 // verify the backend's active-run registry before changing the tab state. Tiny heartbeat
@@ -295,7 +314,7 @@ var _runnerWorkspaceListCommandAdapter = (...args) => _runnerFn('_workspaceListC
 var _runnerWorkspaceMoveCommandAdapter = (...args) => _runnerFn('_workspaceMoveCommand', importedWorkspaceMoveCommand)?.(...args);
 var _runnerWorkspacePathExistsAdapter = (...args) => _runnerFn('_workspacePathExists', importedWorkspacePathExists)?.(...args);
 var _runnerWorkspacePathHasGlobAdapter = (...args) => _runnerFn('_workspacePathHasGlob', importedWorkspacePathHasGlob)?.(...args);
-var _formatWorkspaceBytes = (...args) => _runnerFn('_formatWorkspaceBytes')?.(...args);
+var _formatWorkspaceBytes = (...args) => _runnerFn('_formatWorkspaceBytes', importedFormatWorkspaceBytes)?.(...args);
 var _maybeMountDeferredPrompt = (...args) => _runnerFn('_maybeMountDeferredPrompt', importedMaybeMountDeferredPrompt)?.(...args);
 var _runnerActiveTeamScopeCanAdapter = (...args) => {
   const fn = _runnerFn('activeTeamScopeCan', importedActiveTeamScopeCan);
@@ -318,9 +337,9 @@ var dismissMobileKeyboardAfterSubmit = (...args) => {
   ) ? importedDismissMobileKeyboardAfterSubmit : _runnerFn('dismissMobileKeyboardAfterSubmit');
   return typeof fn === 'function' ? fn(...args) : undefined;
 };
-var downloadWorkspaceFile = (...args) => _runnerFn('downloadWorkspaceFile')?.(...args);
+var downloadWorkspaceFile = (...args) => _runnerFn('downloadWorkspaceFile', importedDownloadWorkspaceFile)?.(...args);
 var flushRecentValues = _runnerFn('flushRecentValues', importedFlushRecentValues);
-var getRunNotifyPreference = (...args) => _runnerFn('getRunNotifyPreference')?.(...args);
+var getRunNotifyPreference = (...args) => _runnerFn('getRunNotifyPreference', importedGetRunNotifyPreference)?.(...args);
 var _runnerHandleConfigCommandAdapter = (...args) => {
   const fn = (typeof importedHandleConfigCommand === 'function' && importedHandleConfigCommand)
     || _runnerFn('handleConfigCommand');
@@ -350,10 +369,10 @@ var _runnerHandleWorkflowTerminalCommandAdapter = (...args) => {
     : _runnerFn('handleWorkflowTerminalCommand');
   return typeof fn === 'function' ? fn(...args) : false;
 };
-var hideRunTimer = (...args) => _runnerFn('hideRunTimer')?.(...args);
+var hideRunTimer = (...args) => _runnerFn('hideRunTimer', importedHideRunTimer)?.(...args);
 var isInteractivePtyCommand = (...args) => _runnerFn('isInteractivePtyCommand')?.(...args);
-var isProjectWorkspaceOpen = (...args) => _runnerFn('isProjectWorkspaceOpen')?.(...args);
-var isRunButtonDisabled = (...args) => _runnerFn('isRunButtonDisabled')?.(...args);
+var isProjectWorkspaceOpen = (...args) => _runnerFn('isProjectWorkspaceOpen', importedIsProjectWorkspaceOpen)?.(...args);
+var isRunButtonDisabled = (...args) => _runnerFn('isRunButtonDisabled', importedIsRunButtonDisabled)?.(...args);
 var loadRecentValues = (...args) => _runnerFn('loadRecentValues', importedLoadRecentValues)?.(...args);
 var loadStarredFromServer = (...args) => _runnerFn('loadStarredFromServer', importedLoadStarredFromServer)?.(...args);
 var moveWorkspacePath = (...args) => {
@@ -361,7 +380,7 @@ var moveWorkspacePath = (...args) => {
     || _runnerFn('moveWorkspacePath');
   return typeof fn === 'function' ? fn(...args) : undefined;
 };
-var notifyProjectWorkspaceChanged = (...args) => _runnerFn('notifyProjectWorkspaceChanged')?.(...args);
+var notifyProjectWorkspaceChanged = (...args) => _runnerFn('notifyProjectWorkspaceChanged', importedNotifyProjectWorkspaceChanged)?.(...args);
 var openWorkspaceEditorFromCommand = (...args) => {
   const fn = (typeof importedOpenWorkspaceEditorFromCommand === 'function' && importedOpenWorkspaceEditorFromCommand)
     || _runnerFn('openWorkspaceEditorFromCommand');
@@ -372,8 +391,8 @@ var readWorkspaceFile = (...args) => {
     || _runnerFn('readWorkspaceFile');
   return typeof fn === 'function' ? fn(...args) : undefined;
 };
-var refreshActiveProjectContext = (...args) => _runnerFn('refreshActiveProjectContext')?.(...args);
-var refreshProjectWorkspace = (...args) => _runnerFn('refreshProjectWorkspace')?.(...args);
+var refreshActiveProjectContext = (...args) => _runnerFn('refreshActiveProjectContext', importedRefreshActiveProjectContext)?.(...args);
+var refreshProjectWorkspace = (...args) => _runnerFn('refreshProjectWorkspace', importedRefreshProjectWorkspace)?.(...args);
 var refreshWorkspaceFiles = (...args) => {
   const fn = (typeof importedRefreshWorkspaceFiles === 'function' && importedRefreshWorkspaceFiles)
     || _runnerFn('refreshWorkspaceFiles');
@@ -390,7 +409,7 @@ var rememberRecentValuesFromCommand = (...args) => {
   const fn = _runnerFn('rememberRecentValuesFromCommand', importedRememberRecentValuesFromCommand);
   return typeof fn === 'function' ? fn(...args) : undefined;
 };
-var restoreHistoryRunIntoTab = (...args) => _runnerFn('restoreHistoryRunIntoTab')?.(...args);
+var restoreHistoryRunIntoTab = (...args) => _runnerFn('restoreHistoryRunIntoTab', importedRestoreHistoryRunIntoTab)?.(...args);
 var setComposerPromptMode = (...args) => {
   const fn = (typeof importedHasComposerPromptHandler === 'function' && importedHasComposerPromptHandler('setComposerPromptMode'))
     ? importedSetComposerPromptMode
@@ -398,7 +417,7 @@ var setComposerPromptMode = (...args) => {
   return typeof fn === 'function' ? fn(...args) : undefined;
 };
 var setRunButtonDisabled = (...args) => {
-  const fn = _runnerFn('setRunButtonDisabled');
+  const fn = _runnerFn('setRunButtonDisabled', importedSetRunButtonDisabled);
   if (typeof fn === 'function') return fn(...args);
   if (runBtn) runBtn.disabled = !!args[0];
   const mobileRunBtn = _runnerEl('mobileRunBtn', importedMobileRunBtn);
@@ -406,8 +425,8 @@ var setRunButtonDisabled = (...args) => {
   return undefined;
 };
 var showConfirm = (...args) => _runnerFn('showConfirm', importedShowConfirm)?.(...args);
-var showRunTimer = (...args) => _runnerFn('showRunTimer')?.(...args);
-var showToast = (...args) => _runnerFn('showToast')?.(...args);
+var showRunTimer = (...args) => _runnerFn('showRunTimer', importedShowRunTimer)?.(...args);
+var showToast = (...args) => _runnerFn('showToast', importedShowToast)?.(...args);
 var startInteractivePtyCommand = (...args) => _runnerFn('startInteractivePtyCommand')?.(...args);
 var _runnerTeamScopeDeniedMessageAdapter = (...args) => {
   const fn = _runnerFn('teamScopeDeniedMessage', importedTeamScopeDeniedMessage);
@@ -416,16 +435,23 @@ var _runnerTeamScopeDeniedMessageAdapter = (...args) => {
     : `View-only team members can't ${args[0] || 'run commands in team scope'}. Switch to Personal or ask for operator access.`;
 };
 var _runnerWorkspaceCanWriteAdapter = (...args) => {
-  const fn = _runnerFn('workspaceCanWrite');
+  const fn = _runnerFn('workspaceCanWrite', importedWorkspaceCanWrite);
   return typeof fn === 'function' ? fn(...args) : true;
 };
 var acSpecialCommands = _runnerValue('acSpecialCommands') || {};
-var pendingKillTabId = _runnerValue('pendingKillTabId') || null;
-var APP_CONFIG = _runnerValue('APP_CONFIG') || {};
-var CLIENT_ID = _runnerValue('CLIENT_ID') || '';
+var pendingKillTabId = null;
+var CLIENT_ID = (typeof importedGetClientId === 'function' && importedGetClientId())
+  || _runnerValue('CLIENT_ID')
+  || '';
 var SESSION_ID = (typeof importedGetSessionId === 'function' && importedGetSessionId())
   || _runnerValue('SESSION_ID')
   || '';
+
+function _runnerAppConfig() {
+  const config = _runnerValue('APP_CONFIG');
+  return config && typeof config === 'object' && !Array.isArray(config) ? config : {};
+}
+
 function _runnerCore() {
   return (typeof importedRunnerCore !== 'undefined' && importedRunnerCore)
     || null;
@@ -703,8 +729,11 @@ function _shouldSuppressStreamOutputLine(tab, line) {
 // every caller having to wire the two pills up separately. Callers that have
 // a real exit code (the SSE exit handler, kill) override afterwards.
 function setStatus(s) {
-  status.className = 'status-pill ' + s;
-  status.textContent = s === 'running' ? 'RUNNING' : 'IDLE';
+  status = status || _runnerEl('status', importedStatus);
+  if (status) {
+    status.className = 'status-pill ' + s;
+    status.textContent = s === 'running' ? 'RUNNING' : 'IDLE';
+  }
   if (typeof emitUiEvent === 'function') {
     emitUiEvent('app:status-changed', { status: s });
     if (s === 'ok') emitUiEvent('app:last-exit-changed', { value: 0 });
@@ -1204,6 +1233,7 @@ function _handleKillRequestDenied(message, tabId, runId) {
 }
 
 function _currentClientId() {
+  if (typeof importedGetClientId === 'function') return String(importedGetClientId() || '');
   return typeof CLIENT_ID !== 'undefined' ? String(CLIENT_ID || '') : '';
 }
 
@@ -1341,7 +1371,7 @@ function _workspaceTerminalDeniedMessage(action = 'change Files') {
 }
 
 function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
-  const shown = APP_CONFIG.max_output_lines || outputLineCount || 0;
+  const shown = _runnerAppConfig().max_output_lines || outputLineCount || 0;
   const total = outputLineCount || shown;
   if (fullOutputAvailable) {
     return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]`;
@@ -1425,7 +1455,7 @@ function _typedRunStreamLineMessage(msg, streamState) {
 
 function _appendStreamLine(text, cls, tabId, msg, options = {}) {
   let metadata = _streamOutputMetadata(msg);
-  if (options.liveOutput && APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+  if (options.liveOutput && _runnerAppConfig().high_volume_output_line_threshold) {
     metadata = metadata || {};
     metadata.live_output = true;
   }
@@ -1457,7 +1487,7 @@ function _batchedStreamLineEntry(msg, lineText, streamState) {
     type: 'output',
     text: lineText,
   }, streamState);
-  if (APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+  if (_runnerAppConfig().high_volume_output_line_threshold) {
     lineMsg.live_output = true;
   }
   return lineMsg;
@@ -3875,8 +3905,11 @@ function runCommand() {
 
 if (typeof importedSetRunnerHandlers === 'function') {
   importedSetRunnerHandlers({
+    _readRunErrorMessage,
     _recordSuccessfulLocalCommand,
     _seedLocalStorageStarsToServer,
+    _setRunButtonDisabled,
+    _sseMessageFromChunk,
     appendCommandEcho,
     attachActiveRunFromMonitor,
     cancelPendingTerminalConfirm,
@@ -3890,9 +3923,13 @@ if (typeof importedSetRunnerHandlers === 'function') {
     resumeBackgroundRunStreamsAfterStatusMonitor,
     runCommand,
     setStatus,
+    startPollingActiveRunsAfterReload,
+    startTimer,
+    stopTimer,
     submitCommand,
     submitComposerCommand,
     submitVisibleComposerCommand,
+    syncActiveRunTimer,
   });
 }
 
@@ -3901,8 +3938,10 @@ export {
   _handleRunStreamMessage,
   _markTabRunStarted,
   _persistClientSideRun,
+  _readRunErrorMessage,
   _recordSuccessfulLocalCommand,
   _seedLocalStorageStarsToServer,
+  _sseMessageFromChunk,
   _setPendingTerminalConfirm,
   appendCommandEcho,
   appendPromptNewline,
