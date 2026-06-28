@@ -17361,11 +17361,33 @@ class TestOutputSignals:
             "following fingerprints at https://nmap.org/cgi-bin/submit.cgi?new-service :"
         )
         assert "entities" not in nmap_classifier.classify_line(
+            "1 service unrecognized despite returning data. If you know the service/version, please submit the "
+            "following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :"
+        )
+        assert "entities" not in nmap_classifier.classify_line(
             r'SF:x201\.0\x20Strict//EN"\x20"http://www\.w3\.org/TR/xhtml1/DTD/xhtml1-s'
         )
         assert "entities" not in nmap_classifier.classify_line(
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
+        assert "entities" not in nmap_classifier.classify_line(
+            "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
+        )
+        assert "entities" not in nmap_classifier.classify_line(
+            "548/tcp   open  afp         syn-ack Netatalk 3.1.9.q3 (name: MAYHEW-NAS; protocol 3.4)"
+        )
+        nmap_report = nmap_classifier.classify_line("Nmap scan report for web.darklab.sh (104.21.4.35)")
+        nmap_report_entities = nmap_report["entities"]
+        assert isinstance(nmap_report_entities, list)
+        nmap_report_values = {(item["type"], item["canonical_value"]) for item in nmap_report_entities}
+        assert ("host", "web.darklab.sh") in nmap_report_values
+        assert ("ip", "104.21.4.35") in nmap_report_values
+        nmap_rdns = nmap_classifier.classify_line("rDNS record for 104.21.4.35: web.darklab.sh")
+        nmap_rdns_entities = nmap_rdns["entities"]
+        assert isinstance(nmap_rdns_entities, list)
+        nmap_rdns_values = {(item["type"], item["canonical_value"]) for item in nmap_rdns_entities}
+        assert ("domain", "web.darklab.sh") in nmap_rdns_values
+        assert ("ip", "104.21.4.35") in nmap_rdns_values
         nuclei_classifier = OutputSignalClassifier("nuclei -u https://darklab.sh")
         projectdiscovery_banner = nuclei_classifier.classify_line("\t\tprojectdiscovery.io")
         projectdiscovery_banner_ansi = nuclei_classifier.classify_line("\x1b[36m\t\tprojectdiscovery.io\x1b[0m")
