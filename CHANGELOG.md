@@ -6,7 +6,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.3.1] — Unreleased
+## [2.3.1] — 2026-06-28
 
 ### Fixed
 
@@ -40,8 +40,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Local-command success recording and a tab drag click-suppression read were rerouted to their bridge import and exported getter, and a dead finding-triage editor lookup that always returned undefined was removed.
   - **Tests:** focused Vitest coverage pins resolver and publisher discovery-versus-registry reconciliation, fails the check when an unclassified resolver-shaped helper, unregistered computed publisher, or dynamic publisher name is introduced, keeps transient inventory fixtures out of the README project-structure tree, gives the subprocess-backed inventory checks enough time on slower CI runners, and updates the inventory boundary budgets for the completed resolver registry.
 
-- **Nmap service banners no longer create false Atlas domains** — Nmap output parsing now treats service/version rows as evidence about the scanned host instead of generic domain-discovery text, while scan-report, rDNS, and vulners lines still emit the expected target entities.
-  - **Tests:** focused output-signal coverage pins Python `http.server` and Netatalk `3.1.9.q3` banner examples so they do not create domain entities.
+- **Nmap service banners no longer create false Atlas domains** — Nmap output parsing now treats service/version rows and Nmap's own service-fingerprint submission link as scanner output instead of generic domain-discovery text, while scan-report, rDNS, and vulners lines still emit the expected target entities.
+  - **Tests:** focused output-signal coverage pins Python `http.server`, Netatalk `3.1.9.q3`, and `nmap.org` fingerprint-submit examples so they do not create domain entities.
 
 ---
 
