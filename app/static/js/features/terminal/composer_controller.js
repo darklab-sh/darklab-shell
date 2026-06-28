@@ -15,7 +15,13 @@ import {
 } from '../mobile/mobile_shell_layout.js';
 import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from '../workspace/workspace_autocomplete_cache.js';
 import { loadSessionVariables as importedLoadSessionVariables } from '../autocomplete/runtime_context.js';
-import { setAutocompleteCatalog as importedSetAutocompleteCatalog } from '../autocomplete/suggestions.js';
+import {
+  loadProjectAutocompleteTargets as importedLoadProjectAutocompleteTargets,
+  loadRecentValues as importedLoadRecentValues,
+  loadScheduleAutocompleteHints as importedLoadScheduleAutocompleteHints,
+  loadWatcherAutocompleteHints as importedLoadWatcherAutocompleteHints,
+  setAutocompleteCatalog as importedSetAutocompleteCatalog,
+} from '../autocomplete/suggestions.js';
 import {
   apiFetch as importedApiFetch,
   logClientError as importedLogClientError,
@@ -51,16 +57,36 @@ import {
 import {
   closeOptions as importedCloseOptions,
   closeThemeSelector as importedCloseThemeSelector,
+  focusCommandInputFromGesture as importedFocusCommandInputFromGesture,
   isEditableTarget as importedIsEditableTarget,
 } from '../../app.js';
+import {
+  closeWorkspace as importedCloseWorkspace,
+} from '../../workspace_bridge.js';
 import {
   closeFaq as importedCloseFaq,
   closeWorkflows as importedCloseWorkflows,
 } from '../../controller_action_bridge.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from '../../ui/ui_outside_click.js';
 import {
+  getComposerInputs as importedGetComposerInputs,
+  getComposerValue as importedGetComposerValue,
+  getVisibleComposerInput as importedGetVisibleComposerInput,
+  handleComposerInputChange as importedHandleComposerInputChange,
   hideHistoryPanel as importedHideHistoryPanel,
+  isAcDropdownOpen as importedIsAcDropdownOpen,
+  isActiveTabRunning as importedIsActiveTabRunning,
+  isFaqOverlayOpen as importedIsFaqOverlayOpen,
   isHistoryPanelOpen as importedIsHistoryPanelOpen,
+  isOptionsOverlayOpen as importedIsOptionsOverlayOpen,
+  isThemeOverlayOpen as importedIsThemeOverlayOpen,
+  isWorkflowsOverlayOpen as importedIsWorkflowsOverlayOpen,
+  isWorkspaceOverlayOpen as importedIsWorkspaceOverlayOpen,
+  normalizeComposerSmartPeriod as importedNormalizeComposerSmartPeriod,
+  refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  syncComposerSelection as importedSyncComposerSelection,
+  syncFocusedComposerState as importedSyncFocusedComposerState,
+  syncRunButtonDisabled as importedSyncRunButtonDisabled,
 } from '../../ui/ui_helpers.js';
 import { closeTopmostDismissible as importedCloseTopmostDismissible } from '../../ui/ui_dismissible.js';
 import {
@@ -87,6 +113,10 @@ import {
   setComposerState as importedSetComposerState,
   setWelcomeState as importedSetWelcomeState,
 } from '../../core/state.js';
+import {
+  requestWelcomeSettle as importedRequestWelcomeSettle,
+  welcomeOwnsTab as importedWelcomeOwnsTab,
+} from '../../welcome_bridge.js';
 
 const COMPOSER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -102,6 +132,13 @@ function _composerFn(name) {
 
 function _composerImportedFn(importedFn, name) {
   return (typeof importedFn === 'function' && importedFn) || _composerFn(name);
+}
+
+function _composerFocusCommandInputFromGesture(...args) {
+  return _composerImportedFn(
+    importedFocusCommandInputFromGesture,
+    'focusCommandInputFromGesture',
+  )?.(...args);
 }
 
 function _composerHasActiveTerminalConfirm() {
@@ -196,12 +233,14 @@ function _composerSetState(next = {}) {
 }
 
 function _composerInputs() {
-  const readInputs = _composerFn('getComposerInputs');
+  const readInputs = (typeof importedGetComposerInputs === 'function' && importedGetComposerInputs)
+    || _composerFn('getComposerInputs');
   return typeof readInputs === 'function' ? readInputs() : {};
 }
 
 function _composerGetValue(fallback = '') {
-  const readValue = _composerFn('getComposerValue');
+  const readValue = (typeof importedGetComposerValue === 'function' && importedGetComposerValue)
+    || _composerFn('getComposerValue');
   if (typeof readValue === 'function') {
     const value = readValue();
     if (value || !(cmdInput && typeof cmdInput.value === 'string' && cmdInput.value)) return value;
@@ -213,7 +252,8 @@ function _composerGetValue(fallback = '') {
 }
 
 function _composerVisibleInput() {
-  const readInput = _composerFn('getVisibleComposerInput');
+  const readInput = (typeof importedGetVisibleComposerInput === 'function' && importedGetVisibleComposerInput)
+    || _composerFn('getVisibleComposerInput');
   return typeof readInput === 'function' ? readInput() : cmdInput;
 }
 
@@ -226,7 +266,8 @@ function _composerSyncShellPrompt() {
 }
 
 function _composerSyncSelection(start, end, options) {
-  const syncSelection = _composerFn('syncComposerSelection');
+  const syncSelection = (typeof importedSyncComposerSelection === 'function' && importedSyncComposerSelection)
+    || _composerFn('syncComposerSelection');
   if (typeof syncSelection === 'function') return syncSelection(start, end, options);
   return null;
 }
@@ -237,7 +278,8 @@ function _composerAcHide() {
 }
 
 function _composerRefocus(options) {
-  const refocus = _composerFn('refocusComposerAfterAction');
+  const refocus = (typeof importedRefocusComposerAfterAction === 'function' && importedRefocusComposerAfterAction)
+    || _composerFn('refocusComposerAfterAction');
   if (typeof refocus === 'function') refocus(options);
 }
 
@@ -259,11 +301,11 @@ function _refreshWorkspaceFileCache() {
 
 function _isMajorSurfaceOpenForPromptPaste() {
   return (
-    (_composerFn('isFaqOverlayOpen')?.() || false)
-    || (_composerFn('isOptionsOverlayOpen')?.() || false)
-    || (_composerFn('isThemeOverlayOpen')?.() || false)
-    || (_composerFn('isWorkflowsOverlayOpen')?.() || false)
-    || (_composerFn('isWorkspaceOverlayOpen')?.() || false)
+    (_composerImportedFn(importedIsFaqOverlayOpen, 'isFaqOverlayOpen')?.() || false)
+    || (_composerImportedFn(importedIsOptionsOverlayOpen, 'isOptionsOverlayOpen')?.() || false)
+    || (_composerImportedFn(importedIsThemeOverlayOpen, 'isThemeOverlayOpen')?.() || false)
+    || (_composerImportedFn(importedIsWorkflowsOverlayOpen, 'isWorkflowsOverlayOpen')?.() || false)
+    || (_composerImportedFn(importedIsWorkspaceOverlayOpen, 'isWorkspaceOverlayOpen')?.() || false)
     || (_composerFn('isHistoryCompareOverlayOpen')?.() || false)
     || (_composerImportedFn(importedIsHistoryRunOverlayOpen, 'isHistoryRunOverlayOpen')?.() || false)
     || (_composerFn('isHistoryPanelOpen')?.() || false)
@@ -317,12 +359,14 @@ function _setComposerWelcomePromptAfterSettle(value) {
 }
 
 function _composerWelcomeOwns(tabId) {
-  const welcomeOwns = _composerFn('welcomeOwnsTab');
+  const welcomeOwns = (typeof importedWelcomeOwnsTab === 'function' && importedWelcomeOwnsTab)
+    || _composerFn('welcomeOwnsTab');
   return typeof welcomeOwns === 'function' && welcomeOwns(tabId);
 }
 
 function _composerRequestWelcomeSettle(tabId) {
-  const requestSettle = _composerFn('requestWelcomeSettle');
+  const requestSettle = (typeof importedRequestWelcomeSettle === 'function' && importedRequestWelcomeSettle)
+    || _composerFn('requestWelcomeSettle');
   return typeof requestSettle === 'function' ? requestSettle(tabId) : false;
 }
 
@@ -428,7 +472,7 @@ if (shellPromptWrap && cmdInput) {
     if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     if (useMobileTerminalViewportMode()) {
       e.preventDefault();
-      _composerFn('focusCommandInputFromGesture')?.();
+      _composerFocusCommandInputFromGesture();
       return;
     }
     if (_pendingPromptFocusTimer) {
@@ -464,13 +508,13 @@ if (shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('touchstart', e => {
     if (useMobileTerminalViewportMode()) {
       e.preventDefault();
-      _composerFn('focusCommandInputFromGesture')?.();
+      _composerFocusCommandInputFromGesture();
     }
   }, { passive: false });
   shellPromptWrap.addEventListener('click', e => {
     if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     if (useMobileTerminalViewportMode()) {
-      _composerFn('focusCommandInputFromGesture')?.();
+      _composerFocusCommandInputFromGesture();
       return;
     }
     if (e.detail > 1 || Date.now() < _suppressPromptFocusUntil) return;
@@ -480,7 +524,7 @@ if (shellPromptWrap && cmdInput) {
       _pendingPromptFocusTimer = null;
       if (_selectionTouchesElement(shellPromptWrap)) return;
       if (Date.now() < _suppressPromptFocusUntil) return;
-      _composerFn('focusCommandInputFromGesture')?.();
+      _composerFocusCommandInputFromGesture();
     }, 220);
   });
   shellPromptWrap.addEventListener('dblclick', () => {
@@ -556,10 +600,10 @@ const _composerApiFetch = (typeof importedApiFetch === 'function' && importedApi
 if (typeof _composerApiFetch === 'function') _composerApiFetch('/autocomplete').then(r => r.json()).then(data => {
   _writeComposerAutocompleteCatalog(data);
   _composerImportedFn(importedLoadSessionVariables, 'loadSessionVariables')?.()?.catch?.(() => {});
-  _composerFn('loadRecentValues')?.()?.catch?.(() => {});
-  _composerFn('loadProjectAutocompleteTargets')?.()?.catch?.(() => {});
-  _composerFn('loadScheduleAutocompleteHints')?.()?.catch?.(() => {});
-  _composerFn('loadWatcherAutocompleteHints')?.()?.catch?.(() => {});
+  _composerImportedFn(importedLoadRecentValues, 'loadRecentValues')?.()?.catch?.(() => {});
+  _composerImportedFn(importedLoadProjectAutocompleteTargets, 'loadProjectAutocompleteTargets')?.()?.catch?.(() => {});
+  _composerImportedFn(importedLoadScheduleAutocompleteHints, 'loadScheduleAutocompleteHints')?.()?.catch?.(() => {});
+  _composerImportedFn(importedLoadWatcherAutocompleteHints, 'loadWatcherAutocompleteHints')?.()?.catch?.(() => {});
   _refreshWorkspaceFileCache()?.catch?.(() => {});
   const refreshSearchDiscoverability = _composerFn('scheduleSearchDiscoverabilityRefresh')
     || _composerFn('refreshSearchDiscoverabilityUi');
@@ -571,8 +615,10 @@ if (typeof _composerApiFetch === 'function') _composerApiFetch('/autocomplete').
 });
 
 cmdInput.addEventListener('input', () => {
-  _composerFn('normalizeComposerSmartPeriod')?.(cmdInput);
-  if (_composerFn('isHistoryPanelOpen')?.()) _composerFn('hideHistoryPanel')?.();
+  _composerImportedFn(importedNormalizeComposerSmartPeriod, 'normalizeComposerSmartPeriod')?.(cmdInput);
+  if (_composerImportedFn(importedIsHistoryPanelOpen, 'isHistoryPanelOpen')?.()) {
+    _composerImportedFn(importedHideHistoryPanel, 'hideHistoryPanel')?.();
+  }
   if (_composerIsHistSearchMode()) {
     // Read the DOM value directly — the hist-search path intentionally
     // short-circuits handleComposerInputChange, so the shared composer
@@ -584,7 +630,7 @@ cmdInput.addEventListener('input', () => {
     if (_hsOut) _hsOut.scrollTop = _hsOut.scrollHeight;
     return;
   }
-  _composerFn('handleComposerInputChange')?.(cmdInput);
+  _composerImportedFn(importedHandleComposerInputChange, 'handleComposerInputChange')?.(cmdInput);
   // Keep the active tab's draft current so activateTab can read it directly.
   const _activeTab = _composerActiveTab();
   if (_activeTab && _activeTab.st !== 'running') {
@@ -599,7 +645,7 @@ cmdInput.addEventListener('keydown', e => {
       if (!_composerCloseTopmostDismissible()) {
         _composerImportedFn(importedCloseFaq, 'closeFaq')?.();
         _composerImportedFn(importedCloseWorkflows, 'closeWorkflows')?.();
-        _composerFn('closeWorkspace')?.();
+        _composerImportedFn(importedCloseWorkspace, 'closeWorkspace')?.();
         _composerCloseOptions();
         _composerCloseThemeSelector();
       }
@@ -612,7 +658,7 @@ cmdInput.addEventListener('keydown', e => {
     if (_composerHandleHistSearchKey(e)) return;
   }
 
-  if (_composerFn('isActiveTabRunning')?.()) {
+  if (_composerImportedFn(importedIsActiveTabRunning, 'isActiveTabRunning')?.()) {
     if (_handleRunningComposerShortcut(e)) return;
     _composerAcHide();
     e.preventDefault();
@@ -625,7 +671,7 @@ cmdInput.addEventListener('keydown', e => {
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (isWordArrowLeft || isWordArrowRight)) {
     e.preventDefault();
     e.stopPropagation();
-    _composerFn('syncFocusedComposerState')?.(cmdInput);
+    _composerImportedFn(importedSyncFocusedComposerState, 'syncFocusedComposerState')?.(cmdInput);
     const value = _composerGetValue('');
     const { start, end } = getCmdSelection(value);
     const next = isWordArrowLeft
@@ -702,7 +748,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'a' || e.key === 'A')) {
     e.preventDefault();
-    if (_composerFn('syncComposerSelection')) _composerSyncSelection(0, 0);
+    if (_composerImportedFn(importedSyncComposerSelection, 'syncComposerSelection')) _composerSyncSelection(0, 0);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(0, 0);
     _composerSyncShellPrompt();
     return;
@@ -725,7 +771,7 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     const value = _composerGetValue('');
     const end = value.length;
-    if (_composerFn('syncComposerSelection')) _composerSyncSelection(end, end);
+    if (_composerImportedFn(importedSyncComposerSelection, 'syncComposerSelection')) _composerSyncSelection(end, end);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(end, end);
     _composerSyncShellPrompt();
     return;
@@ -734,11 +780,11 @@ cmdInput.addEventListener('keydown', e => {
   const eventMatchesLetterFn = _composerImportedFn(importedEventMatchesLetter, 'eventMatchesLetter');
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetterFn?.(e, 'b')) {
     e.preventDefault();
-    _composerFn('syncFocusedComposerState')?.(cmdInput);
+    _composerImportedFn(importedSyncFocusedComposerState, 'syncFocusedComposerState')?.(cmdInput);
     const value = _composerGetValue('');
     const { start } = getCmdSelection(value);
     const next = findWordBoundaryLeft(value, start);
-    if (_composerFn('syncComposerSelection')) _composerSyncSelection(next, next);
+    if (_composerImportedFn(importedSyncComposerSelection, 'syncComposerSelection')) _composerSyncSelection(next, next);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
     _composerSyncShellPrompt();
     return;
@@ -746,11 +792,11 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetterFn?.(e, 'f')) {
     e.preventDefault();
-    _composerFn('syncFocusedComposerState')?.(cmdInput);
+    _composerImportedFn(importedSyncFocusedComposerState, 'syncFocusedComposerState')?.(cmdInput);
     const value = _composerGetValue('');
     const { end } = getCmdSelection(value);
     const next = findWordBoundaryRight(value, end);
-    if (_composerFn('syncComposerSelection')) _composerSyncSelection(next, next);
+    if (_composerImportedFn(importedSyncComposerSelection, 'syncComposerSelection')) _composerSyncSelection(next, next);
     else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
     _composerSyncShellPrompt();
     return;
@@ -792,7 +838,7 @@ cmdInput.addEventListener('keydown', e => {
     else if (selectableItems.length > 0) {
       if (_composerFn('acExpandSharedPrefix')?.(selectableItems)) return;
       let nextIndex;
-      if (acState.index < 0 || !_composerFn('isAcDropdownOpen')?.()) {
+      if (acState.index < 0 || !_composerImportedFn(importedIsAcDropdownOpen, 'isAcDropdownOpen')?.()) {
         nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, -1, 1);
       } else if (e.shiftKey) {
         nextIndex = _composerAutocompleteNextSelectableIndex(acState.filtered, acState.index, -1);
@@ -810,7 +856,7 @@ cmdInput.addEventListener('keydown', e => {
       _composerAcHide();
       return;
     }
-    const acOpen = _composerFn('isAcDropdownOpen')?.();
+    const acOpen = _composerImportedFn(importedIsAcDropdownOpen, 'isAcDropdownOpen')?.();
     const acState = _readComposerAutocompleteState();
     const selectableItems = _composerAutocompleteSelectableItems(acState.filtered);
     if (acOpen && selectableItems.length) {
@@ -828,7 +874,7 @@ cmdInput.addEventListener('keydown', e => {
       _composerAcHide();
       return;
     }
-    const acOpen = _composerFn('isAcDropdownOpen')?.();
+    const acOpen = _composerImportedFn(importedIsAcDropdownOpen, 'isAcDropdownOpen')?.();
     const acState = _readComposerAutocompleteState();
     const selectableItems = _composerAutocompleteSelectableItems(acState.filtered);
     if (acOpen && selectableItems.length) {
@@ -872,6 +918,6 @@ if (runBtn) runBtn.addEventListener('click', () => { _composerSubmitCommand(_com
 
 _composerSyncShellPrompt();
 _composerSyncShellPrompt();
-_composerFn('syncRunButtonDisabled')?.();
+_composerImportedFn(importedSyncRunButtonDisabled, 'syncRunButtonDisabled')?.();
 
 _composerSetupMobileComposer();

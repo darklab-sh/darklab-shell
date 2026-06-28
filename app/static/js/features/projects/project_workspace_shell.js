@@ -119,7 +119,7 @@ let exportedDarklabProjectWorkspaceShell = null;
 
     async function open() {
       if (!ctx.projectWorkspaceOverlay || !ctx.projectWorkspaceBody) return;
-      ctx.closeMajorOverlays?.();
+      ctx.closeMajorOverlays?.({ skipProjectWorkspace: true });
       ctx.blurVisibleComposerInputIfMobile?.();
       ctx.setProjectWorkspaceTab?.('details');
       showOverlay();

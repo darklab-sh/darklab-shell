@@ -42,8 +42,11 @@ import {
   enhanceAppSelects as importedEnhanceAppSelects,
   focusElement as importedFocusElement,
   hideHistoryPanel as importedHideHistoryPanel,
+  hideHistoryRow as importedHideHistoryRow,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
+  showHistoryPanel as importedShowHistoryPanel,
+  showHistoryRow as importedShowHistoryRow,
   syncAppSelect as importedSyncAppSelect,
 } from './ui/ui_helpers.js';
 import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
@@ -54,9 +57,18 @@ import {
   appendLine as importedAppendLine,
 } from './output.js';
 import {
+  appendCommandEcho as importedAppendCommandEcho,
+} from './runner_bridge.js';
+import {
   activateTab as importedActivateTab,
 } from './tabs.js';
+import {
+  toggleHistoryPanelSurface as importedToggleHistoryPanelSurface,
+} from './controller_action_bridge.js';
 import { setHistoryPanelHandlers as importedSetHistoryPanelHandlers } from './features/history/history_panel_bridge.js';
+import {
+  resetCmdHistoryNav as importedResetCmdHistoryNav,
+} from './features/history/history_recall.js';
 import {
   _closeHistoryActionMenus as importedCloseHistoryActionMenus,
   _closeHistoryRunActionMenus as importedCloseHistoryRunActionMenus,
@@ -105,8 +117,14 @@ import {
   restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab,
 } from './features/history/history_restore.js';
 import {
+  closeHistoryCompareActionMenus as importedCloseHistoryCompareActionMenus,
+  hasHistoryCompareHandler as importedHasHistoryCompareHandler,
   openHistoryCompareLauncher as importedOpenHistoryCompareLauncher,
 } from './features/run-comparison/history_compare_bridge.js';
+import {
+  getActiveProjectContext as importedGetActiveProjectContext,
+  refreshProjectWorkspace as importedRefreshProjectWorkspace,
+} from './features/projects/project_context_bridge.js';
 
 function _historyCore() {
   return (typeof importedHistoryCore !== 'undefined' && importedHistoryCore)
@@ -201,18 +219,24 @@ var _historyUseMobileTerminalViewportModeAdapter = () => _historyUseMobileTermin
 var _historyBlurActiveElementAdapter = (...args) => _historyFn('blurActiveElement', importedBlurActiveElement)?.(...args);
 var _historyFocusElementAdapter = (...args) => _historyFn('focusElement', importedFocusElement)?.(...args);
 var _historyHidePanelAdapter = (...args) => _historyFn('hideHistoryPanel', importedHideHistoryPanel)?.(...args);
-var _historyHideRowAdapter = (...args) => _historyFn('hideHistoryRow')?.(...args);
+var _historyHideRowAdapter = (...args) => _historyFn('hideHistoryRow', importedHideHistoryRow)?.(...args);
 var _historyRefocusComposerAdapter = (...args) => _historyFn('refocusComposerAfterAction', importedRefocusComposerAfterAction)?.(...args);
 var _historySetComposerValueAdapter = (...args) => _historyFn('setComposerValue', importedSetComposerValue)?.(...args);
-var _historyShowPanelAdapter = (...args) => _historyFn('showHistoryPanel')?.(...args);
-var _historyShowRowAdapter = (...args) => _historyFn('showHistoryRow')?.(...args);
-var _historyResetCmdNavAdapter = (...args) => _historyFn('resetCmdHistoryNav')?.(...args);
-var _historyTogglePanelSurfaceAdapter = (...args) => _historyFn('toggleHistoryPanelSurface')?.(...args);
+var _historyShowPanelAdapter = (...args) => _historyFn('showHistoryPanel', importedShowHistoryPanel)?.(...args);
+var _historyShowRowAdapter = (...args) => _historyFn('showHistoryRow', importedShowHistoryRow)?.(...args);
+var _historyResetCmdNavAdapter = (...args) => _historyFn('resetCmdHistoryNav', importedResetCmdHistoryNav)?.(...args);
+var _historyTogglePanelSurfaceAdapter = (...args) => _historyFn('toggleHistoryPanelSurface', importedToggleHistoryPanelSurface)?.(...args);
 var _historyAppendLineAdapter = (...args) => _historyFn('appendLine', importedAppendLine)?.(...args);
-var _historyAppendCommandEchoAdapter = (...args) => _historyFn('appendCommandEcho')?.(...args);
+var _historyAppendCommandEchoAdapter = (...args) => _historyFn('appendCommandEcho', importedAppendCommandEcho)?.(...args);
 var _historyActivateTabAdapter = (...args) => _historyFn('activateTab', importedActivateTab)?.(...args);
 var _historyCloseActionMenusAdapter = (...args) => _historyFn('_closeHistoryActionMenus', importedCloseHistoryActionMenus)?.(...args);
-var _historyCloseCompareActionMenusAdapter = (...args) => _historyFn('_closeHistoryCompareActionMenus')?.(...args);
+var _historyCloseCompareActionMenusAdapter = (...args) => (
+  typeof importedHasHistoryCompareHandler === 'function'
+  && importedHasHistoryCompareHandler('closeHistoryCompareActionMenus')
+  && typeof importedCloseHistoryCompareActionMenus === 'function'
+    ? importedCloseHistoryCompareActionMenus(...args)
+    : undefined
+);
 var _historyCloseRunActionMenusAdapter = (...args) => _historyFn('_closeHistoryRunActionMenus', importedCloseHistoryRunActionMenus)?.(...args);
 var _historyCreateEntryAdapter = (...args) => _historyFn('_createHistoryEntry', importedCreateHistoryEntry)?.(...args);
 var _historyCreateSnapshotEntryAdapter = (...args) => _historyFn('_createSnapshotHistoryEntry', importedCreateSnapshotHistoryEntry)?.(...args);
@@ -240,7 +264,7 @@ var _historyToggleStarAdapter = (...args) => _historyFn('_toggleStar', importedT
 var _historyCopyRunPermalinkAdapter = (...args) => _historyFn('copyHistoryRunPermalink', importedCopyHistoryRunPermalink)?.(...args);
 var _historyCopySnapshotLinkAdapter = (...args) => _historyFn('copySnapshotLink', importedCopySnapshotLink)?.(...args);
 var _historyOpenSnapshotLinkAdapter = (...args) => _historyFn('openSnapshotLink', importedOpenSnapshotLink)?.(...args);
-var _historyGetActiveProjectContextAdapter = (...args) => _historyFn('getActiveProjectContext')?.(...args);
+var _historyGetActiveProjectContextAdapter = (...args) => _historyFn('getActiveProjectContext', importedGetActiveProjectContext)?.(...args);
 var _historyOpenAtlasAdapter = (...args) => _historyFn('openAtlas', importedOpenAtlas)?.(...args);
 function _historyOpenCompareLauncherAdapter(...args) {
   const importedReady = typeof importedOpenHistoryCompareLauncher === 'function'
@@ -263,7 +287,7 @@ function _historyOpenCompareLauncherAdapter(...args) {
 var _historyOpenRunDetailsAdapter = (...args) => _historyFn('openHistoryRunDetails')?.(...args);
 var _historyOpenSchedulesModalAdapter = (...args) => _historyFn('openSchedulesModal')?.(...args);
 var _historyOpenWatchersModalAdapter = (...args) => _historyFn('openWatchersModal')?.(...args);
-var _historyRefreshProjectWorkspaceAdapter = (...args) => _historyFn('refreshProjectWorkspace')?.(...args);
+var _historyRefreshProjectWorkspaceAdapter = (...args) => _historyFn('refreshProjectWorkspace', importedRefreshProjectWorkspace)?.(...args);
 var _historyCanManageHistoryAdapter = (...args) => _historyFn('_historyCanManageHistory', importedHistoryCanManageHistory)?.(...args);
 var _historyMutationErrorAdapter = (...args) => _historyFn('_historyMutationError', importedHistoryMutationError)?.(...args);
 var _historyScopeDeniedMessageAdapter = (...args) => _historyFn('_historyScopeDeniedMessage', importedHistoryScopeDeniedMessage)?.(...args);

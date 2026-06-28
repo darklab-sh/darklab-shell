@@ -21,6 +21,7 @@ import {
 } from './core/dom.js';
 import { getAppConfig as importedGetAppConfig } from './core/config.js';
 import { maskSessionToken as importedMaskSessionToken } from './core/session_core.js';
+import { showToast as importedShowToast } from './core/utils.js';
 import {
   getActiveTab as importedGetActiveTab,
   getActiveTabId as importedGetActiveTabId,
@@ -38,13 +39,17 @@ import {
   focusElement as importedFocusElement,
   getComposerInputs as importedGetComposerInputs,
   getVisibleComposerInput as importedGetVisibleComposerInput,
+  hideFaqOverlay as importedHideFaqOverlay,
   hideHistoryPanel as importedHideHistoryPanel,
   hideOptionsOverlay as importedHideOptionsOverlay,
+  hideShortcutsOverlay as importedHideShortcutsOverlay,
   hideThemeOverlay as importedHideThemeOverlay,
+  hideWorkflowsOverlay as importedHideWorkflowsOverlay,
   hideWorkspaceOverlay as importedHideWorkspaceOverlay,
   isFaqOverlayOpen as importedIsFaqOverlayOpen,
   isHistoryPanelOpen as importedIsHistoryPanelOpen,
   isOptionsOverlayOpen as importedIsOptionsOverlayOpen,
+  isShortcutsOverlayOpen as importedIsShortcutsOverlayOpen,
   isThemeOverlayOpen as importedIsThemeOverlayOpen,
   isWorkflowsOverlayOpen as importedIsWorkflowsOverlayOpen,
   isWorkspaceOverlayOpen as importedIsWorkspaceOverlayOpen,
@@ -52,6 +57,8 @@ import {
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
   setMobileKeyboardOpenState as importedSetMobileKeyboardOpenState,
+  showOptionsOverlay as importedShowOptionsOverlay,
+  showThemeOverlay as importedShowThemeOverlay,
   syncComposerSelection as importedSyncComposerSelection,
   syncFocusedComposerState as importedSyncFocusedComposerState,
 } from './ui/ui_helpers.js';
@@ -62,6 +69,11 @@ import {
   syncOutputPrefixes as importedSyncOutputPrefixes,
 } from './output.js';
 import { clearFaqHash as importedClearFaqHash } from './features/command-registry/faq_helpers.js';
+import {
+  hideCommandCatalogOverlay as importedHideCommandCatalogOverlay,
+  isCommandCatalogOverlayOpen as importedIsCommandCatalogOverlayOpen,
+} from './features/command-registry/command_registry_bridge.js';
+import { closeWorkflows as importedCloseWorkflows } from './controller_action_bridge.js';
 import {
   activateTab as importedActivateTab,
   clearTab as importedClearTab,
@@ -83,6 +95,9 @@ import {
   syncOptionsControls as importedSyncOptionsControls,
 } from './features/preferences/preferences.js';
 import { updateOptionsSessionTokenStatus as importedUpdateOptionsSessionTokenStatus } from './features/preferences/session_token_bridge.js';
+import {
+  closeWorkspace as importedCloseWorkspace,
+} from './workspace_bridge.js';
 import {
   closeAtlas as importedCloseAtlas,
   isAtlasOverlayOpen as importedIsAtlasOverlayOpen,
@@ -118,9 +133,7 @@ import {
   logClientError as importedLogClientError,
 } from './runtime_bridge.js';
 
-let importedHideCommandCatalogOverlay;
 let importedHideCommandRegistryOverlay;
-let importedIsCommandCatalogOverlayOpen;
 let importedIsCommandRegistryOverlayOpen;
 
 const APP_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
@@ -181,7 +194,7 @@ var themeOverlay = _appEl('themeOverlay', importedThemeOverlay);
 var themeSelect = _appEl('themeSelect', importedThemeSelect);
 var tsBtn = _appEl('tsBtn', importedTsBtn);
 var _appSetAutocompleteStateAdapter = (...args) => _appFn('setAutocompleteState', importedSetAutocompleteState)?.(...args);
-var _appShowToastAdapter = (...args) => _appFn('showToast')?.(...args);
+var _appShowToastAdapter = (...args) => _appFn('showToast', importedShowToast)?.(...args);
 var _appBuildPromptLabelAdapter = (...args) => _appFn('buildPromptLabel', importedBuildPromptLabel)?.(...args);
 var _appCurrentPromptWorkspacePathAdapter = (...args) => _appFn('currentPromptWorkspacePath', importedCurrentPromptWorkspacePath)?.(...args);
 var _appGetComposerInputsAdapter = (...args) => _appFn('getComposerInputs', importedGetComposerInputs)?.(...args);
@@ -208,29 +221,29 @@ var _appCloseHistoryRunOverlayAdapter = (...args) => _appFn('closeHistoryRunOver
 var _appIsHistoryPanelOpenAdapter = (...args) => _appFn('isHistoryPanelOpen', importedIsHistoryPanelOpen)?.(...args);
 var _appHideHistoryPanelAdapter = (...args) => _appFn('hideHistoryPanel', importedHideHistoryPanel)?.(...args);
 var _appIsWorkflowsOverlayOpenAdapter = (...args) => _appFn('isWorkflowsOverlayOpen', importedIsWorkflowsOverlayOpen)?.(...args);
-var _appCloseWorkflowsAdapter = (...args) => _appFn('closeWorkflows')?.(...args);
-var _appHideWorkflowsOverlayAdapter = (...args) => _appFn('hideWorkflowsOverlay')?.(...args);
+var _appCloseWorkflowsAdapter = (...args) => _appFn('closeWorkflows', importedCloseWorkflows)?.(...args);
+var _appHideWorkflowsOverlayAdapter = (...args) => _appFn('hideWorkflowsOverlay', importedHideWorkflowsOverlay)?.(...args);
 var _appIsSchedulesOverlayOpenAdapter = (...args) => _appFn('isSchedulesOverlayOpen')?.(...args);
 var _appCloseSchedulesModalAdapter = (...args) => _appFn('closeSchedulesModal')?.(...args);
 var _appIsWatchersOverlayOpenAdapter = (...args) => _appFn('isWatchersOverlayOpen')?.(...args);
 var _appCloseWatchersModalAdapter = (...args) => _appFn('closeWatchersModal')?.(...args);
 var _appIsWorkspaceOverlayOpenAdapter = (...args) => _appFn('isWorkspaceOverlayOpen', importedIsWorkspaceOverlayOpen)?.(...args);
-var _appCloseWorkspaceAdapter = (...args) => _appFn('closeWorkspace')?.(...args);
+var _appCloseWorkspaceAdapter = (...args) => _appFn('closeWorkspace', importedCloseWorkspace)?.(...args);
 var _appHideWorkspaceOverlayAdapter = (...args) => _appFn('hideWorkspaceOverlay', importedHideWorkspaceOverlay)?.(...args);
 var _appIsFaqOverlayOpenAdapter = (...args) => _appFn('isFaqOverlayOpen', importedIsFaqOverlayOpen)?.(...args);
-var _appHideFaqOverlayAdapter = (...args) => _appFn('hideFaqOverlay')?.(...args);
+var _appHideFaqOverlayAdapter = (...args) => _appFn('hideFaqOverlay', importedHideFaqOverlay)?.(...args);
 var _appIsThemeOverlayOpenAdapter = (...args) => _appFn('isThemeOverlayOpen', importedIsThemeOverlayOpen)?.(...args);
 var _appHideThemeOverlayAdapter = (...args) => _appFn('hideThemeOverlay', importedHideThemeOverlay)?.(...args);
 var _appIsOptionsOverlayOpenAdapter = (...args) => _appFn('isOptionsOverlayOpen', importedIsOptionsOverlayOpen)?.(...args);
 var _appHideOptionsOverlayAdapter = (...args) => _appFn('hideOptionsOverlay', importedHideOptionsOverlay)?.(...args);
-var _appIsShortcutsOverlayOpenAdapter = (...args) => _appFn('isShortcutsOverlayOpen')?.(...args);
-var _appHideShortcutsOverlayAdapter = (...args) => _appFn('hideShortcutsOverlay')?.(...args);
+var _appIsShortcutsOverlayOpenAdapter = (...args) => _appFn('isShortcutsOverlayOpen', importedIsShortcutsOverlayOpen)?.(...args);
+var _appHideShortcutsOverlayAdapter = (...args) => _appFn('hideShortcutsOverlay', importedHideShortcutsOverlay)?.(...args);
 var _appMaskSessionTokenAdapter = (...args) => (
   typeof importedMaskSessionToken === 'function' ? importedMaskSessionToken(...args) : undefined
 );
 var _appSyncOptionsControlsAdapter = (...args) => _appFn('syncOptionsControls', importedSyncOptionsControls)?.(...args);
 var _appUpdateOptionsSessionTokenStatusAdapter = (...args) => _appFn('_updateOptionsSessionTokenStatus', importedUpdateOptionsSessionTokenStatus)?.(...args);
-var _appShowOptionsOverlayAdapter = (...args) => _appFn('showOptionsOverlay')?.(...args);
+var _appShowOptionsOverlayAdapter = (...args) => _appFn('showOptionsOverlay', importedShowOptionsOverlay)?.(...args);
 var _appMarkInteractionSurfaceReadyAdapter = (...args) => _appFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.(...args);
 var _appLoadOptionsPanelsAdapter = (...args) => _appFn('loadOptionsPanels')?.(...args);
 var _appRefreshOptionsSecretsAdapter = (...args) => {
@@ -257,7 +270,7 @@ var _appBlurVisibleComposerMobileAdapter = (...args) => _appFn('blurVisibleCompo
 var _appRefocusComposerAdapter = (...args) => _appFn('refocusComposerAfterAction', importedRefocusComposerAfterAction)?.(...args);
 var _appRenderThemeSelectionOptionsAdapter = (...args) => _appFn('renderThemeSelectionOptions', importedRenderThemeSelectionOptions)?.(...args);
 var _appSyncThemeSelectionControlsAdapter = (...args) => _appFn('syncThemeSelectionControls', importedSyncThemeSelectionControls)?.(...args);
-var _appShowThemeOverlayAdapter = (...args) => _appFn('showThemeOverlay')?.(...args);
+var _appShowThemeOverlayAdapter = (...args) => _appFn('showThemeOverlay', importedShowThemeOverlay)?.(...args);
 var _appFocusElementAdapter = (...args) => _appFn('focusElement', importedFocusElement)?.(...args);
 var _appCloseTabAdapter = (...args) => _appFn('closeTab', importedCloseTab)?.(...args);
 var _appPermalinkTabAdapter = (...args) => _appFn('permalinkTab', importedPermalinkTab)?.(...args);
@@ -456,14 +469,15 @@ function focusCommandInputFromGesture({ preventScroll = true } = {}) {
   if (typeof _appFocusAnyComposerInputAdapter === 'function' && _appFocusAnyComposerInputAdapter({ preventScroll: true })) return;
 }
 
-function _closeMajorOverlays() {
+function _closeMajorOverlays(options = {}) {
+  const skipProjectWorkspace = !!(options && options.skipProjectWorkspace);
   if (typeof _appIsCommandCatalogOverlayOpenAdapter === 'function' && _appIsCommandCatalogOverlayOpenAdapter()) {
     if (typeof _appHideCommandCatalogOverlayAdapter === 'function') _appHideCommandCatalogOverlayAdapter();
   }
   if (typeof _appIsCommandRegistryOverlayOpenAdapter === 'function' && _appIsCommandRegistryOverlayOpenAdapter()) {
     if (typeof _appHideCommandRegistryOverlayAdapter === 'function') _appHideCommandRegistryOverlayAdapter();
   }
-  if (typeof importedIsProjectWorkspaceOpen === 'function' && importedIsProjectWorkspaceOpen()) {
+  if (!skipProjectWorkspace && typeof importedIsProjectWorkspaceOpen === 'function' && importedIsProjectWorkspaceOpen()) {
     importedCloseProjectWorkspace({ refocus: false });
   }
   if (typeof _appIsAtlasOverlayOpenAdapter === 'function' && _appIsAtlasOverlayOpenAdapter()) {
@@ -864,6 +878,7 @@ export {
   closeThemeSelector,
   copyActiveShortcutTab,
   createShortcutTab,
+  focusCommandInputFromGesture,
   hidePromptUsernameSavedIndicator,
   isEditableTarget,
   isStatusMonitorShortcutOpen,

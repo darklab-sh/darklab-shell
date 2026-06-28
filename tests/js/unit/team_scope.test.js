@@ -124,6 +124,32 @@ describe('team scope selector', () => {
       .toBe("View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.")
   })
 
+  it('restores token-scoped team selection before runtime session handlers are ready', async () => {
+    const sessionToken = 'tok_scope_reload'
+    const apiFetch = defaultApiFetch({
+      teams: [{
+        id: 'team_live_1',
+        name: 'Live team',
+        slug: 'live-team',
+        member: { role: 'operator' },
+      }],
+    })
+    const { DarklabTeamScope } = await loadTeamScopeHarness({
+      apiFetch,
+      sessionId: '',
+      localStorageEntries: {
+        session_token: sessionToken,
+        [`active_team_id:${sessionToken}`]: 'team_live_1',
+      },
+    })
+
+    await DarklabTeamScope.refreshTeamScopes()
+
+    expect(DarklabTeamScope.getActiveTeamId()).toBe('team_live_1')
+    expect(document.getElementById('team-scope-label').textContent).toBe('Live team')
+    expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Live team')
+  })
+
   it('renders scope choices as selectable rows with visible state markers', async () => {
     const sessionId = 'tok_scope_options'
     const apiFetch = defaultApiFetch({

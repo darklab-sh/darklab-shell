@@ -36,6 +36,7 @@ import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissi
 import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
 import { _closeHistoryRunActionMenus } from './history_actions.js';
 import { copyHistoryRunPermalink as importedCopyHistoryRunPermalink } from './history_links.js';
+import { refreshHistoryPanel as importedRefreshHistoryPanel } from './history_panel_bridge.js';
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './history_recall.js';
 import {
   _historyCanManageHistory as importedHistoryCanManageHistory,
@@ -379,7 +380,8 @@ function _historyRunOpenWatchersModal(options) {
 }
 
 function _historyRunRefreshHistoryPanel() {
-  const refresh = _historyRunGlobalFunction('refreshHistoryPanel');
+  const refresh = (typeof importedRefreshHistoryPanel === 'function' && importedRefreshHistoryPanel)
+    || _historyRunGlobalFunction('refreshHistoryPanel');
   if (typeof refresh === 'function') refresh();
 }
 

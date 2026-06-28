@@ -8,6 +8,7 @@ const runtimeHandlers = RUNTIME_BRIDGE_GLOBAL.__darklabRuntimeHandlers || {
   getSessionId: null,
   logClientError: null,
   openStatusMonitor: null,
+  refreshWorkspaceFiles: null,
   refreshStatusMonitor: null,
 };
 
@@ -104,6 +105,14 @@ function refreshStatusMonitor(...args) {
   return null;
 }
 
+function refreshWorkspaceFiles(...args) {
+  if (typeof runtimeHandlers.refreshWorkspaceFiles === 'function') {
+    return runtimeHandlers.refreshWorkspaceFiles(...args);
+  }
+  _logMissingRuntimeHandler('refreshWorkspaceFiles', 'refreshWorkspaceFiles', 'warning');
+  return null;
+}
+
 function openStatusMonitor(...args) {
   if (typeof runtimeHandlers.openStatusMonitor === 'function') {
     return runtimeHandlers.openStatusMonitor(...args);
@@ -120,6 +129,7 @@ if (RUNTIME_BRIDGE_GLOBAL) {
     logClientError,
     openStatusMonitor,
     refreshStatusMonitor,
+    refreshWorkspaceFiles,
     setRuntimeHandlers,
   };
 }
@@ -131,5 +141,6 @@ export {
   logClientError,
   openStatusMonitor,
   refreshStatusMonitor,
+  refreshWorkspaceFiles,
   setRuntimeHandlers,
 };

@@ -71,7 +71,7 @@ function _outputAppConfig() {
 
 function _outputAppState() {
   if (typeof importedGetAppState === 'function') return importedGetAppState();
-  return _outputGlobalValue('APP_STATE') || {};
+  return {};
 }
 
 function _outputActiveTabId() {

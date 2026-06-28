@@ -5,6 +5,10 @@ import {
   hasRuntimeHandler as importedHasRuntimeHandler,
 } from '../../runtime_bridge.js';
 import {
+  appendCommandEcho as importedAppendCommandEcho,
+  hasRunnerHandler as importedHasRunnerHandler,
+} from '../../runner_bridge.js';
+import {
   appendLine as importedAppendLine,
   hasPendingOutputBatch as importedHasPendingOutputBatch,
   renderCommandOutcomeSummary as importedRenderCommandOutcomeSummary,
@@ -15,6 +19,10 @@ import {
   getOutput as importedGetOutput,
   setTabStatus as importedSetTabStatus,
 } from '../../tabs.js';
+import {
+  hideHistoryPanel as importedHideHistoryPanel,
+  hideTabKillBtn as importedHideTabKillBtn,
+} from '../../ui/ui_helpers.js';
 import {
   _historyExitClass as importedHistoryExitClass,
   _historyExitLabel as importedHistoryExitLabel,
@@ -63,7 +71,9 @@ function _historyRestoreClearTab(tabId) {
 function _historyRestoreAppendLine(text, cls, tabId, metadata = null) {
   const append = (typeof importedAppendLine !== 'undefined' && importedAppendLine)
     || _historyRestoreGlobalFunction('appendLine');
-  if (typeof append === 'function') append(text, cls, tabId, metadata);
+  if (typeof append !== 'function') return;
+  if (metadata) append(text, cls, tabId, metadata);
+  else append(text, cls, tabId);
 }
 
 function _historyRestoreSetTabStatus(tabId, status) {
@@ -85,9 +95,17 @@ function _historyRestoreApiFetch(url, options) {
 }
 
 function _historyRestoreAppendCommandEcho(tabId, command) {
-  const append = _historyRestoreGlobalFunction('_appendHistoryCommandEcho');
-  if (typeof append === 'function') {
-    append(tabId, command);
+  if (
+    typeof importedAppendCommandEcho === 'function'
+    && typeof importedHasRunnerHandler === 'function'
+    && importedHasRunnerHandler('appendCommandEcho')
+  ) {
+    importedAppendCommandEcho(command, tabId);
+    return;
+  }
+  const legacyAppendCommandEcho = HISTORY_RESTORE_GLOBAL && HISTORY_RESTORE_GLOBAL.appendCommandEcho;
+  if (typeof legacyAppendCommandEcho === 'function') {
+    legacyAppendCommandEcho(command, tabId);
     return;
   }
   _historyRestoreAppendLine(command, 'prompt-echo', tabId);
@@ -113,11 +131,6 @@ function _historyRestoreOutputLineMetadata(entry) {
 }
 
 function _historyRestoreAppendOutputLine(entry, tabId) {
-  const append = _historyRestoreGlobalFunction('_appendHistoryOutputLine');
-  if (typeof append === 'function') {
-    append(entry, tabId);
-    return;
-  }
   if (entry && typeof entry === 'object') {
     const text = String(entry.text || '');
     const cls = String(entry.cls || '');
@@ -291,9 +304,11 @@ function restoreHistoryRunIntoTab(run, {
       _historyRestoreRenderCommandOutcomeSummary(tabId, t && t.commandOutcomeSummary);
       _suppressHistoryRestoreStatusPeek(tabId);
       _historyRestoreSetTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');
-      const hideKill = _historyRestoreGlobalFunction('hideTabKillBtn');
+      const hideKill = (typeof importedHideTabKillBtn === 'function' && importedHideTabKillBtn)
+        || _historyRestoreGlobalFunction('hideTabKillBtn');
       if (hideKill) hideKill(tabId);
-      const hidePanel = _historyRestoreGlobalFunction('hideHistoryPanel');
+      const hidePanel = (typeof importedHideHistoryPanel === 'function' && importedHideHistoryPanel)
+        || _historyRestoreGlobalFunction('hideHistoryPanel');
       if (hidePanelOnSuccess && hidePanel) hidePanel();
       if (highlightLineNumber || Number.isInteger(highlightLineIndex)) {
         _scheduleRestoredHistoryLineHighlight(tabId, {

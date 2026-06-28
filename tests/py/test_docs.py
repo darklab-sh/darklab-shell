@@ -839,6 +839,13 @@ class TestDocumentedCombinedTotals:
 # parent directory below).
 _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
     "app/blueprints/__init__.py",     # empty package marker
+    "app/static/js/__inventory_bridge_dispatch_check.fixture.js",  # transient Vitest fixture
+    "app/static/js/__inventory_check_consumer.fixture.js",  # transient Vitest fixture
+    "app/static/js/__inventory_check_provider.fixture.js",  # transient Vitest fixture
+    "app/static/js/__inventory_discovery_check.fixture.js",  # transient Vitest fixture
+    "app/static/js/__inventory_publisher_check.fixture.js",  # transient Vitest fixture
+    "app/static/js/__inventory_publisher_dynamic_check.fixture.js",  # transient Vitest fixture
+    "app/static/js/__inventory_resolver_check.fixture.js",  # transient Vitest fixture
 })
 
 # Directories whose individual files are intentionally collapsed into a

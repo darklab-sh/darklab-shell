@@ -45,8 +45,7 @@ function _runtimeGlobalFunction(name) {
 function _runtimeAllowedCommandsFaqData() {
   const bridgeState = RUNTIME_CONTEXT_GLOBAL && RUNTIME_CONTEXT_GLOBAL.__darklabCommandRegistryBridge;
   if (bridgeState && bridgeState.allowedCommandsFaqData) return bridgeState.allowedCommandsFaqData;
-  const getFaqData = _runtimeGlobalFunction('getAllowedCommandsFaqData');
-  return getFaqData ? getFaqData() : null;
+  return null;
 }
 
 function _runtimeApiFetch(url, options) {

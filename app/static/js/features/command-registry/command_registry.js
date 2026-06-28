@@ -626,6 +626,9 @@ if (typeof importedSetCommandRegistryHandlers === 'function') {
   importedSetCommandRegistryHandlers({
     openCommandRegistry,
     closeCommandRegistry,
+    closeCommandCatalogModal,
+    hideCommandCatalogOverlay,
+    isCommandCatalogOverlayOpen,
     isCommandRegistryOverlayOpen,
     renderCommandRegistry,
   });

@@ -8,6 +8,7 @@ const projectContextHandlers = PROJECT_CONTEXT_GLOBAL.__darklabProjectContextHan
   cycleProjectWorkspaceTab: null,
   getActiveProjectContext: null,
   isProjectWorkspaceOpen: null,
+  notifyProjectWorkspaceChanged: null,
   openEntityMetadataEditor: null,
   openProjectAutoPromoteRuleFromAtlas: null,
   openProjectWorkspace: null,
@@ -67,6 +68,12 @@ function isProjectWorkspaceOpen(...args) {
     : false;
 }
 
+function notifyProjectWorkspaceChanged(...args) {
+  return typeof projectContextHandlers.notifyProjectWorkspaceChanged === 'function'
+    ? projectContextHandlers.notifyProjectWorkspaceChanged(...args)
+    : undefined;
+}
+
 function openProjectAutoPromoteRuleFromAtlas(...args) {
   return typeof projectContextHandlers.openProjectAutoPromoteRuleFromAtlas === 'function'
     ? projectContextHandlers.openProjectAutoPromoteRuleFromAtlas(...args)
@@ -84,6 +91,7 @@ export {
   cycleProjectWorkspaceTab,
   getActiveProjectContext,
   isProjectWorkspaceOpen,
+  notifyProjectWorkspaceChanged,
   openEntityMetadataEditor,
   openProjectAutoPromoteRuleFromAtlas,
   openProjectWorkspace,

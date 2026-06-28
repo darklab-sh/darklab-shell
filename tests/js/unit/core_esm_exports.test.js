@@ -585,11 +585,21 @@ describe('core ESM exports', () => {
       const runnerBridge = await import(freshModuleUrl('../../../app/static/js/runner_bridge.js'))
       const tabsBridge = await import(freshModuleUrl('../../../app/static/js/tabs_bridge.js'))
       const outputBridge = await import(freshModuleUrl('../../../app/static/js/output_bridge.js'))
+      const historyCompareBridge = await import(
+        freshModuleUrl('../../../app/static/js/features/run-comparison/history_compare_bridge.js')
+      )
+      const historyRunModalStateBridge = await import(
+        freshModuleUrl('../../../app/static/js/features/history/history_run_modal_state_bridge.js')
+      )
 
       expect(runnerBridge.runCommand('echo ok')).toBeUndefined()
       expect(runnerBridge.runCommand('echo ok')).toBeUndefined()
       expect(tabsBridge.createTab('Imported tab')).toBeNull()
       await expect(outputBridge.appendLines([])).resolves.toBeUndefined()
+      expect(historyCompareBridge.openHistoryCompareLauncher()).toBeUndefined()
+      expect(historyCompareBridge.openHistoryCompareLauncher()).toBeUndefined()
+      expect(historyRunModalStateBridge.openHistoryRunDetails({ id: 'run-missing' })).toBeUndefined()
+      expect(historyRunModalStateBridge.openHistoryRunDetails({ id: 'run-missing' })).toBeUndefined()
 
       expect(diagnostics.filter(args => args[0] === '[darklab] RUNNER_BRIDGE_HANDLER_MISSING'))
         .toHaveLength(1)
@@ -615,6 +625,26 @@ describe('core ESM exports', () => {
           event: 'OUTPUT_BRIDGE_HANDLER_MISSING',
           level: 'error',
           handler: 'appendLines',
+        }),
+      ])
+      expect(diagnostics.filter(args => args[0] === '[darklab] HISTORY_COMPARE_HANDLER_MISSING'))
+        .toHaveLength(1)
+      expect(diagnostics).toContainEqual([
+        '[darklab] HISTORY_COMPARE_HANDLER_MISSING',
+        expect.objectContaining({
+          event: 'HISTORY_COMPARE_HANDLER_MISSING',
+          level: 'warning',
+          handler: 'openHistoryCompareLauncher',
+        }),
+      ])
+      expect(diagnostics.filter(args => args[0] === '[darklab] HISTORY_RUN_MODAL_STATE_HANDLER_MISSING'))
+        .toHaveLength(1)
+      expect(diagnostics).toContainEqual([
+        '[darklab] HISTORY_RUN_MODAL_STATE_HANDLER_MISSING',
+        expect.objectContaining({
+          event: 'HISTORY_RUN_MODAL_STATE_HANDLER_MISSING',
+          level: 'warning',
+          handler: 'openHistoryRunDetails',
         }),
       ])
     } finally {

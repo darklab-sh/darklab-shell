@@ -4,6 +4,7 @@ import { showToast as importedShowToast } from '../../core/utils.js';
 import { _historyCanManageHistory as importedHistoryCanManageHistory } from './history_mutations.js';
 import { activeTeamScopeCan as importedActiveTeamScopeCan } from '../team_scope.js';
 import { openEntityMetadataEditor as importedOpenEntityMetadataEditor } from '../projects/project_context_bridge.js';
+import { refreshHistoryPanel as importedRefreshHistoryPanel } from './history_panel_bridge.js';
 
 const HISTORY_ROWS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -442,7 +443,11 @@ function _historyEditEntityMetadata(entityType, entity) {
   }
   editor(entityType, entity, {
     onSaved: async () => {
-      const refreshHistoryPanel = _historyRowsGlobalFunction('refreshHistoryPanel');
+      const refreshHistoryPanel = (
+        typeof importedRefreshHistoryPanel === 'function'
+        && importedRefreshHistoryPanel
+      )
+        || _historyRowsGlobalFunction('refreshHistoryPanel');
       if (refreshHistoryPanel) refreshHistoryPanel();
       _historyRowsShowToast('Metadata saved');
     },

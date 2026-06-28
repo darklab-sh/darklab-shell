@@ -1610,6 +1610,7 @@ export {
   flushRecentValues,
   getAutocompleteMatches,
   limitAutocompleteMatchesForDisplay,
+  loadProjectAutocompleteTargets,
   loadScheduleAutocompleteHints,
   loadRecentValues,
   loadWatcherAutocompleteHints,

@@ -877,7 +877,6 @@ describe('history panel actions', () => {
         window.setTabStatus = setTabStatus;
         window.appendLine = appendLine;
         window.appendCommandEcho = appendCommandEcho;
-        window._appendHistoryCommandEcho = _appendHistoryCommandEcho;
         window._appendHistoryOutputLine = _appendHistoryOutputLine;
         window.renderCommandOutcomeSummary = renderCommandOutcomeSummary;
         window.hasPendingOutputBatch = hasPendingOutputBatch;

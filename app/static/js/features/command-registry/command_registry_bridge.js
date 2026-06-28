@@ -3,9 +3,12 @@
 const COMMAND_REGISTRY_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 const commandRegistryBridgeState = COMMAND_REGISTRY_BRIDGE_GLOBAL.__darklabCommandRegistryBridge || {
   allowedCommandsFaqData: null,
+  closeCommandCatalogHandler: null,
+  hideCommandCatalogHandler: null,
   openCommandRegistryHandler: null,
   closeCommandRegistryHandler: null,
   commandRegistryBridgeData: null,
+  isCommandCatalogOverlayOpenHandler: null,
   isCommandRegistryOverlayOpenHandler: null,
   renderCommandRegistryHandler: null,
 };
@@ -18,8 +21,17 @@ function setCommandRegistryHandlers(handlers = {}) {
   if (typeof handlers.closeCommandRegistry === 'function') {
     commandRegistryBridgeState.closeCommandRegistryHandler = handlers.closeCommandRegistry;
   }
+  if (typeof handlers.closeCommandCatalogModal === 'function') {
+    commandRegistryBridgeState.closeCommandCatalogHandler = handlers.closeCommandCatalogModal;
+  }
+  if (typeof handlers.hideCommandCatalogOverlay === 'function') {
+    commandRegistryBridgeState.hideCommandCatalogHandler = handlers.hideCommandCatalogOverlay;
+  }
   if (typeof handlers.isCommandRegistryOverlayOpen === 'function') {
     commandRegistryBridgeState.isCommandRegistryOverlayOpenHandler = handlers.isCommandRegistryOverlayOpen;
+  }
+  if (typeof handlers.isCommandCatalogOverlayOpen === 'function') {
+    commandRegistryBridgeState.isCommandCatalogOverlayOpenHandler = handlers.isCommandCatalogOverlayOpen;
   }
   if (typeof handlers.renderCommandRegistry === 'function') {
     commandRegistryBridgeState.renderCommandRegistryHandler = handlers.renderCommandRegistry;
@@ -38,6 +50,18 @@ function closeCommandRegistry(...args) {
     : undefined;
 }
 
+function closeCommandCatalogModal(...args) {
+  return typeof commandRegistryBridgeState.closeCommandCatalogHandler === 'function'
+    ? commandRegistryBridgeState.closeCommandCatalogHandler(...args)
+    : undefined;
+}
+
+function hideCommandCatalogOverlay(...args) {
+  return typeof commandRegistryBridgeState.hideCommandCatalogHandler === 'function'
+    ? commandRegistryBridgeState.hideCommandCatalogHandler(...args)
+    : undefined;
+}
+
 function getCommandRegistryData() {
   return commandRegistryBridgeState.commandRegistryBridgeData;
 }
@@ -49,6 +73,12 @@ function getAllowedCommandsFaqData() {
 function isCommandRegistryOverlayOpen(...args) {
   return typeof commandRegistryBridgeState.isCommandRegistryOverlayOpenHandler === 'function'
     ? !!commandRegistryBridgeState.isCommandRegistryOverlayOpenHandler(...args)
+    : false;
+}
+
+function isCommandCatalogOverlayOpen(...args) {
+  return typeof commandRegistryBridgeState.isCommandCatalogOverlayOpenHandler === 'function'
+    ? !!commandRegistryBridgeState.isCommandCatalogOverlayOpenHandler(...args)
     : false;
 }
 
@@ -69,9 +99,12 @@ function setAllowedCommandsFaqData(data) {
 }
 
 export {
+  closeCommandCatalogModal,
   closeCommandRegistry,
   getAllowedCommandsFaqData,
   getCommandRegistryData,
+  hideCommandCatalogOverlay,
+  isCommandCatalogOverlayOpen,
   isCommandRegistryOverlayOpen,
   openCommandRegistry,
   renderCommandRegistry,

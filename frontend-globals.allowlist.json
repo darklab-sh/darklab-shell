@@ -181,6 +181,254 @@
       "removal_target": "Import autocomplete selection helpers directly from the autocomplete module or a neutral bridge."
     },
     {
+      "name": "acSpecialCommands",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["/static/js/runner.js", "/static/js/features/autocomplete/suggestions.js"],
+      "reason": "Autocomplete suggestions publish the server special-command catalog on the browser boundary and the runner reads it for local-command hinting while the runner/autocomplete cycle remains split.",
+      "removal_target": "Deliver the special-command catalog to the runner through a neutral autocomplete bridge or shared module state instead of the browser boundary."
+    },
+    {
+      "name": "acBuiltinCommandRoots",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["*"],
+      "reason": "Autocomplete publishes its derived suggestion data (suggestions, wordlists, context registry, builtin command roots) on the browser boundary so other surfaces can read it while the autocomplete cycle remains split.",
+      "removal_target": "Read autocomplete-derived data through a neutral autocomplete bridge instead of the browser boundary."
+    },
+    {
+      "name": "acContextRegistry",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["*"],
+      "reason": "Autocomplete publishes its derived suggestion data (suggestions, wordlists, context registry, builtin command roots) on the browser boundary so other surfaces can read it while the autocomplete cycle remains split.",
+      "removal_target": "Read autocomplete-derived data through a neutral autocomplete bridge instead of the browser boundary."
+    },
+    {
+      "name": "acFiltered",
+      "purpose": "module_api_bridge",
+      "owner": "features/command-registry/faq_helpers.js",
+      "sources": ["*"],
+      "reason": "FAQ command-chip autocomplete state is mirrored on the browser boundary while the command-registry/autocomplete cycle remains split.",
+      "removal_target": "Share FAQ autocomplete state through a neutral bridge instead of the browser boundary."
+    },
+    {
+      "name": "acIndex",
+      "purpose": "module_api_bridge",
+      "owner": "features/command-registry/faq_helpers.js",
+      "sources": ["*"],
+      "reason": "FAQ command-chip autocomplete state is mirrored on the browser boundary while the command-registry/autocomplete cycle remains split.",
+      "removal_target": "Share FAQ autocomplete state through a neutral bridge instead of the browser boundary."
+    },
+    {
+      "name": "acSuggestions",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["*"],
+      "reason": "Autocomplete publishes its derived suggestion data (suggestions, wordlists, context registry, builtin command roots) on the browser boundary so other surfaces can read it while the autocomplete cycle remains split.",
+      "removal_target": "Read autocomplete-derived data through a neutral autocomplete bridge instead of the browser boundary."
+    },
+    {
+      "name": "acWordlists",
+      "purpose": "module_api_bridge",
+      "owner": "features/autocomplete/suggestions.js",
+      "sources": ["*"],
+      "reason": "Autocomplete publishes its derived suggestion data (suggestions, wordlists, context registry, builtin command roots) on the browser boundary so other surfaces can read it while the autocomplete cycle remains split.",
+      "removal_target": "Read autocomplete-derived data through a neutral autocomplete bridge instead of the browser boundary."
+    },
+    {
+      "name": "applyThemeSelection",
+      "purpose": "module_api_bridge",
+      "owner": "features/theme/theme.js",
+      "sources": ["*"],
+      "reason": "Theme application and the selection-control sync are exposed on the browser boundary so preference and shell surfaces can drive theme changes while the theme module is bootstrapped from server data.",
+      "removal_target": "Invoke theme actions through a neutral theme bridge instead of the browser boundary."
+    },
+    {
+      "name": "DarklabConfig",
+      "purpose": "module_api_bridge",
+      "owner": "core/config.js",
+      "sources": ["*"],
+      "reason": "The config module exposes its get/set API object on the browser boundary so the server-config bootstrap path and consumers can reach it before the module is imported everywhere.",
+      "removal_target": "Import the config API directly from core/config.js once all consumers are module-wired."
+    },
+    {
+      "name": "DarklabRunner",
+      "purpose": "module_api_bridge",
+      "owner": "runner_bridge.js",
+      "sources": ["*"],
+      "reason": "The runner bridge exposes its handler API object on the browser boundary so consumers reach runner actions before the runner module is imported everywhere.",
+      "removal_target": "Import runner actions through the runner bridge module instead of the browser boundary."
+    },
+    {
+      "name": "DarklabRuntime",
+      "purpose": "module_api_bridge",
+      "owner": "runtime_bridge.js",
+      "sources": ["*"],
+      "reason": "The runtime bridge exposes its handler API object on the browser boundary so consumers reach runtime actions before the runtime module is imported everywhere.",
+      "removal_target": "Import runtime actions through the runtime bridge module instead of the browser boundary."
+    },
+    {
+      "name": "DarklabTabs",
+      "purpose": "module_api_bridge",
+      "owner": "tabs_bridge.js",
+      "sources": ["*"],
+      "reason": "The tabs bridge exposes its handler API object on the browser boundary so consumers reach tab actions before the tabs module is imported everywhere.",
+      "removal_target": "Import tab actions through the tabs bridge module instead of the browser boundary."
+    },
+    {
+      "name": "fetchAndRenderHistoryComparison",
+      "purpose": "module_api_bridge",
+      "owner": "features/run-comparison/history_compare_renderer.js",
+      "sources": ["*"],
+      "reason": "The lazily-loaded run-comparison renderer exposes its render/restore/metric helpers on the browser boundary so the history surfaces can drive comparison rendering after the compare chunk loads.",
+      "removal_target": "Invoke comparison rendering through the history compare bridge instead of the browser boundary."
+    },
+    {
+      "name": "_compareMetricCell",
+      "purpose": "module_api_bridge",
+      "owner": "features/run-comparison/history_compare_renderer.js",
+      "sources": ["*"],
+      "reason": "The lazily-loaded run-comparison renderer exposes its render/restore/metric helpers on the browser boundary so the history surfaces can drive comparison rendering after the compare chunk loads.",
+      "removal_target": "Invoke comparison rendering through the history compare bridge instead of the browser boundary."
+    },
+    {
+      "name": "_renderHistoryComparison",
+      "purpose": "module_api_bridge",
+      "owner": "features/run-comparison/history_compare_renderer.js",
+      "sources": ["*"],
+      "reason": "The lazily-loaded run-comparison renderer exposes its render/restore/metric helpers on the browser boundary so the history surfaces can drive comparison rendering after the compare chunk loads.",
+      "removal_target": "Invoke comparison rendering through the history compare bridge instead of the browser boundary."
+    },
+    {
+      "name": "_restoreBothHistoryCompareRuns",
+      "purpose": "module_api_bridge",
+      "owner": "features/run-comparison/history_compare_renderer.js",
+      "sources": ["*"],
+      "reason": "The lazily-loaded run-comparison renderer exposes its render/restore/metric helpers on the browser boundary so the history surfaces can drive comparison rendering after the compare chunk loads.",
+      "removal_target": "Invoke comparison rendering through the history compare bridge instead of the browser boundary."
+    },
+    {
+      "name": "handleTourCommand",
+      "purpose": "module_api_bridge",
+      "owner": "features/tour/tour_cli.js",
+      "sources": ["*"],
+      "reason": "The tour CLI handler is exposed on the browser boundary so the terminal local-command path can route tour commands while the tour module remains lazily wired.",
+      "removal_target": "Route tour commands through a neutral tour bridge instead of the browser boundary."
+    },
+    {
+      "name": "searchDiscoverabilityPrompted",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["*"],
+      "reason": "Search mirrors its in-progress UI state (matches, match index, scope, signal counts, discoverability prompt) on the browser boundary so reload/restore and shared surfaces can read it while the search cycle remains split.",
+      "removal_target": "Hold search UI state in shared module state instead of the browser boundary."
+    },
+    {
+      "name": "searchMatches",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["*"],
+      "reason": "Search mirrors its in-progress UI state (matches, match index, scope, signal counts, discoverability prompt) on the browser boundary so reload/restore and shared surfaces can read it while the search cycle remains split.",
+      "removal_target": "Hold search UI state in shared module state instead of the browser boundary."
+    },
+    {
+      "name": "searchMatchIdx",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["*"],
+      "reason": "Search mirrors its in-progress UI state (matches, match index, scope, signal counts, discoverability prompt) on the browser boundary so reload/restore and shared surfaces can read it while the search cycle remains split.",
+      "removal_target": "Hold search UI state in shared module state instead of the browser boundary."
+    },
+    {
+      "name": "searchScope",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["*"],
+      "reason": "Search mirrors its in-progress UI state (matches, match index, scope, signal counts, discoverability prompt) on the browser boundary so reload/restore and shared surfaces can read it while the search cycle remains split.",
+      "removal_target": "Hold search UI state in shared module state instead of the browser boundary."
+    },
+    {
+      "name": "searchSignalCounts",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["*"],
+      "reason": "Search mirrors its in-progress UI state (matches, match index, scope, signal counts, discoverability prompt) on the browser boundary so reload/restore and shared surfaces can read it while the search cycle remains split.",
+      "removal_target": "Hold search UI state in shared module state instead of the browser boundary."
+    },
+    {
+      "name": "syncThemeSelectionControls",
+      "purpose": "module_api_bridge",
+      "owner": "features/theme/theme.js",
+      "sources": ["*"],
+      "reason": "Theme application and the selection-control sync are exposed on the browser boundary so preference and shell surfaces can drive theme changes while the theme module is bootstrapped from server data.",
+      "removal_target": "Invoke theme actions through a neutral theme bridge instead of the browser boundary."
+    },
+    {
+      "name": "_welcomePromptAfterSettle",
+      "purpose": "module_api_bridge",
+      "owner": "features/terminal/composer_controller.js",
+      "sources": ["*"],
+      "reason": "The composer exposes its post-settle welcome-prompt hook on the browser boundary so the welcome flow can trigger it while the composer/welcome cycle remains split.",
+      "removal_target": "Invoke the welcome-prompt hook through a neutral composer/welcome bridge instead of the browser boundary."
+    },
+    {
+      "name": "APP_STATE_API",
+      "purpose": "module_api_bridge",
+      "owner": "core/state.js",
+      "sources": ["/static/js/ui/ui_helpers.js"],
+      "reason": "Shared UI helpers reach the app-state accessor API through the browser boundary before the state module is imported everywhere.",
+      "removal_target": "Import the app-state API directly from core/state.js in shared UI helpers."
+    },
+    {
+      "name": "cancelWelcome",
+      "purpose": "module_api_bridge",
+      "owner": "welcome.js",
+      "sources": ["/static/js/tabs.js", "/static/js/features/mobile/mobile_menu_actions.js"],
+      "reason": "Tabs and the mobile menu invoke the welcome cancel action through the browser boundary while welcome ownership remains split across modules.",
+      "removal_target": "Invoke welcome actions through a neutral welcome bridge and remove this browser publish."
+    },
+    {
+      "name": "clearSearch",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["/static/js/features/mobile/mobile_menu_actions.js"],
+      "reason": "The mobile menu invokes the search clear action through the browser boundary while the search/mobile cycle remains split.",
+      "removal_target": "Invoke search actions through a neutral search bridge and remove this browser publish."
+    },
+    {
+      "name": "DarklabHistoryCompareCore",
+      "purpose": "module_api_bridge",
+      "owner": "features/run-comparison/history_compare_core.js",
+      "sources": ["/static/js/history.js"],
+      "reason": "History reaches the lazily-loaded run-comparison core namespace through the browser boundary after the compare chunk loads.",
+      "removal_target": "Resolve the run-comparison core through the history compare bridge instead of the browser boundary."
+    },
+    {
+      "name": "openSearchFromSignal",
+      "purpose": "module_api_bridge",
+      "owner": "search.js",
+      "sources": ["/static/js/features/mobile/mobile_menu_actions.js"],
+      "reason": "The mobile menu opens search from a signal action through the browser boundary while the search/mobile cycle remains split.",
+      "removal_target": "Invoke search actions through a neutral search bridge and remove this browser publish."
+    },
+    {
+      "name": "requestWelcomeSettle",
+      "purpose": "module_api_bridge",
+      "owner": "welcome.js",
+      "sources": ["/static/js/runner.js"],
+      "reason": "The runner requests welcome settle through the browser boundary while welcome ownership remains split across modules.",
+      "removal_target": "Invoke welcome actions through a neutral welcome bridge and remove this browser publish."
+    },
+    {
+      "name": "welcomeOwnsTab",
+      "purpose": "module_api_bridge",
+      "owner": "welcome.js",
+      "sources": ["/static/js/tabs.js"],
+      "reason": "Tabs queries welcome tab ownership through the browser boundary while welcome ownership remains split across modules.",
+      "removal_target": "Query welcome ownership through a neutral welcome bridge and remove this browser publish."
+    },
+    {
       "name": "acShow",
       "purpose": "module_api_bridge",
       "owner": "autocomplete.js",

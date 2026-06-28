@@ -23,11 +23,11 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 Current totals:
 
 - behavior tests: 3,860
-- docs/inventory meta-tests: 40
+- docs/inventory meta-tests: 48
 - `pytest`: 2181 (2146 behavior + 35 meta)
-- `vitest`: 1450 (1445 behavior + 5 meta)
+- `vitest`: 1460 (1447 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,900
+- total: 3,910
 
 This document is organized in two parts:
 
@@ -2908,6 +2908,15 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `keeps lazy loader placeholders separate from unexpected window publishes` | Verifies lazy-loader placeholder globals are reported separately from unexpected non-allowlisted window publishes. |
 | `passes check mode while reporting global purpose totals` | Verifies `--check` still passes with resolved app reads, reports purpose totals for publishes and reads, and fails if a new tracked `window.*` publish/read lacks an allowlist entry. |
 | `pins browser-boundary budgets so the global surface cannot grow silently` | Verifies module bridge, test-hook, lazy-placeholder, and allowlist purpose counts stay explicit when intentional browser boundaries change. |
+| `reports string-keyed ESM resolver helper calls for follow-up guardrails` | Verifies the frontend inventory report includes string-keyed ESM resolver helper classes and final resolution buckets so bridge and import fallback usage stays visible. |
+| `reconciles structural resolver-helper discovery against the committed registry` | Verifies structurally discovered resolver helpers stay classified in the committed registry and stale registry entries are caught. |
+| `validates aliased bridge handler-existence predicate keys as bridge dispatch` | Verifies aliased bridge handler-existence predicates are recognized as bridge dispatches and checked against their registered handler contracts. |
+| `recognizes aliased and computed browser-global publishers` | Verifies the frontend inventory scanner recognizes browser-global publishers that use aliases or simple computed keys. |
+| `fails check mode when computed browser-global publisher registry coverage drifts` | Verifies `--check` fails when computed browser-global publisher coverage is unregistered. |
+| `fails check mode when a registered browser-global publisher uses a dynamic name` | Verifies `--check` fails when a registered browser-global publisher uses a dynamic published name. |
+| `fails check mode when a resolver-shaped helper is missing from the registry` | Verifies `--check` fails when structural resolver-helper discovery finds an unclassified helper shape. |
+| `fails check mode when a string-keyed resolver helper has no resolution path` | Verifies `--check` fails when a string-keyed ESM resolver helper cannot resolve to an import, local binding, bridge dispatch, allowlisted global, or known compatibility fallback. |
+| `fails check mode when a bridge dispatch has no declared or registered handler` | Verifies `--check` fails when an ESM bridge dispatch key is not declared and registered by the matching bridge contract. |
 | `fails check mode when an allowlist entry no longer matches a boundary` | Verifies `--check` fails when a frontend globals allowlist entry no longer matches any current publish/read boundary. |
 
 #### `grep_output_suggestions.test.js`
@@ -3770,6 +3779,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | --- | --- |
 | `clears a stale stored team id after a successful team refresh` | Verifies that a stored team id that is no longer returned by `/session/teams` is removed and the selector falls back to Personal. |
 | `exposes active team capabilities for write affordance guards` | Verifies that the active team scope exposes server-granted capabilities for browser write-action guards. |
+| `restores token-scoped team selection before runtime session handlers are ready` | Verifies that reload startup restores a token-scoped team selection even before runtime session handlers are available. |
 | `renders scope choices as selectable rows with visible state markers` | Verifies that the scope selector renders Personal and team choices as selectable rows with visible active and role state. |
 | `clears team state without showing selector noise when team refresh returns 401` | Verifies that unauthorized team refreshes clear active team state and stored scope without showing an inline selector error. |
 | `shows an inline error when the open selector cannot refresh teams` | Verifies that a failed team refresh while the selector is open shows the inline error state and unavailable labels. |

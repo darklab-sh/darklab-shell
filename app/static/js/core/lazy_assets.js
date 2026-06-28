@@ -418,6 +418,13 @@ let exportedLoadWatchersModal = null;
       refreshAtlasOverlay: overlayModule?.refreshAtlasOverlay || null,
       cycleAtlasTab: overlayModule?.cycleAtlasTab || null,
     };
+    if (typeof window !== 'undefined') {
+      if (typeof atlasApi.openAtlas === 'function') window.openAtlas = atlasApi.openAtlas;
+      if (typeof atlasApi.closeAtlas === 'function') window.closeAtlas = atlasApi.closeAtlas;
+      if (typeof atlasApi.isAtlasOverlayOpen === 'function') window.isAtlasOverlayOpen = atlasApi.isAtlasOverlayOpen;
+      if (typeof atlasApi.refreshAtlasOverlay === 'function') window.refreshAtlasOverlay = atlasApi.refreshAtlasOverlay;
+      if (typeof atlasApi.cycleAtlasTab === 'function') window.cycleAtlasTab = atlasApi.cycleAtlasTab;
+    }
     if (typeof importedSetAtlasHandlers === 'function') {
       importedSetAtlasHandlers(atlasApi);
     }
@@ -858,6 +865,14 @@ let exportedLoadWatchersModal = null;
     return false;
   }
 
+  function lazyIsFindingsBoardOpen() {
+    if (window.isFindingsBoardOpen === lazyIsFindingsBoardOpen) {
+      return !!document.getElementById('findings-board-overlay')?.classList.contains('open');
+    }
+    if (typeof window.isFindingsBoardOpen === 'function') return window.isFindingsBoardOpen();
+    return false;
+  }
+
   async function lazyOpenWatchersModal(options = {}) {
     const watchers = await loadWatchersModal();
     const open = watchers?.openWatchersModal;
@@ -1212,6 +1227,7 @@ let exportedLoadWatchersModal = null;
   }
   if (typeof window.openFindingsBoard !== 'function') window.openFindingsBoard = lazyOpenFindingsBoard;
   if (typeof window.closeFindingsBoard !== 'function') window.closeFindingsBoard = lazyCloseFindingsBoard;
+  if (typeof window.isFindingsBoardOpen !== 'function') window.isFindingsBoardOpen = lazyIsFindingsBoardOpen;
   if (typeof window.openSchedulesModal !== 'function') window.openSchedulesModal = lazyOpenSchedulesModal;
   if (typeof window.closeSchedulesModal !== 'function') window.closeSchedulesModal = lazyCloseSchedulesModal;
   if (typeof window.isSchedulesOverlayOpen !== 'function') window.isSchedulesOverlayOpen = lazyIsSchedulesOverlayOpen;
@@ -1260,6 +1276,9 @@ let exportedLoadWatchersModal = null;
     importedSetCommandRegistryHandlers({
       openCommandRegistry: lazyOpenCommandRegistry,
       closeCommandRegistry: lazyCloseCommandRegistry,
+      closeCommandCatalogModal: () => {},
+      hideCommandCatalogOverlay: () => {},
+      isCommandCatalogOverlayOpen: () => false,
       isCommandRegistryOverlayOpen: lazyIsCommandRegistryOverlayOpen,
     });
   }

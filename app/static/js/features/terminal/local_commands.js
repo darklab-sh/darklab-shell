@@ -37,6 +37,7 @@ import {
   applyThemeSelection as importedApplyThemeSelection,
 } from '../theme/theme.js';
 import {
+  _recordSuccessfulLocalCommand as importedRecordSuccessfulLocalCommand,
   appendCommandEcho as importedAppendCommandEcho,
   setStatus as importedSetStatus,
 } from '../../runner_bridge.js';
@@ -112,7 +113,10 @@ function _cliAppendCommandEcho(command, tabId = null) {
 }
 
 function _cliRecordSuccess(command) {
-  const recordSuccessfulLocalCommand = _cliGlobalFunction('_recordSuccessfulLocalCommand');
+  const recordSuccessfulLocalCommand = (typeof importedRecordSuccessfulLocalCommand === 'function'
+    ? importedRecordSuccessfulLocalCommand
+    : null)
+    || _cliGlobalFunction('_recordSuccessfulLocalCommand');
   if (recordSuccessfulLocalCommand) recordSuccessfulLocalCommand(command);
 }
 

@@ -70,8 +70,17 @@ let DarklabTeamScope = null;
   let menuNote = null;
   let menuOutsideBound = false;
 
+  function localStorageValue(key) {
+    try { return localStorage.getItem(key) || ''; } catch (_) { return ''; }
+  }
+
+  function storageSessionId() {
+    return localStorageValue('session_token') || localStorageValue('session_id') || 'anonymous';
+  }
+
   function storageKey() {
-    const sessionId = (typeof importedGetSessionId === 'function' && importedGetSessionId()) || 'anonymous';
+    const sessionId = (typeof importedGetSessionId === 'function' && importedGetSessionId())
+      || storageSessionId();
     return `${STORAGE_PREFIX}${sessionId || 'anonymous'}`;
   }
 

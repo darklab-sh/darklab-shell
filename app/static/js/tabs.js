@@ -37,6 +37,7 @@ import {
 import {
   confirmKill as importedConfirmKill,
   setStatus as importedSetStatus,
+  syncActiveRunTimer as importedSyncActiveRunTimer,
 } from './runner_bridge.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
 import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
@@ -49,8 +50,20 @@ import {
   setComposerValue as importedSetComposerValue,
   syncRunButtonDisabled as importedSyncRunButtonDisabled,
 } from './ui/ui_helpers.js';
-import { bindTabDragReorder as importedBindTabDragReorder } from './features/tabs/tab_drag_reorder.js';
+import {
+  bindTabDragReorder as importedBindTabDragReorder,
+  tabDragSuppressClickUntil as importedTabDragSuppressClickUntil,
+} from './features/tabs/tab_drag_reorder.js';
 import { closeTab as importedCloseTab } from './features/tabs/tab_close_lifecycle.js';
+import {
+  getPreference as importedGetPreference,
+  setPreferenceCookie as importedSetPreferenceCookie,
+} from './features/preferences/preferences.js';
+import {
+  exitHistSearch as importedExitHistSearch,
+  isHistSearchMode as importedIsHistSearchMode,
+} from './features/history/history_search.js';
+import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
 import {
   copyTab as importedCopyTab,
   exportTabHtml as importedExportTabHtml,
@@ -70,6 +83,12 @@ import {
   hasMobileShellLayoutHandler as importedHasMobileShellLayoutHandler,
   useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode,
 } from './features/mobile/mobile_shell_layout_bridge.js';
+import {
+  clearSearch as importedClearSearch,
+  hasSearchHandler as importedHasSearchHandler,
+  refreshSearchDiscoverabilityUi as importedRefreshSearchDiscoverabilityUi,
+  scheduleSearchDiscoverabilityRefresh as importedScheduleSearchDiscoverabilityRefresh,
+} from './search_bridge.js';
 import { setTabHandlers as importedSetTabHandlers } from './tabs_bridge.js';
 
 var _tabsScrollControlsBound = false;
@@ -104,6 +123,15 @@ function _tabUseMobileTerminalViewportMode() {
     return importedUseMobileTerminalViewportMode();
   }
   return !!_tabGlobalFn('useMobileTerminalViewportMode')?.();
+}
+
+function _tabSearchFn(name, imported = null) {
+  const bridgeReady = (
+    typeof importedHasSearchHandler === 'function'
+    && importedHasSearchHandler(name)
+    && typeof imported === 'function'
+  );
+  return bridgeReady ? imported : _tabGlobalFn(name);
 }
 
 function _tabGlobalValue(name, imported = undefined) {
@@ -311,7 +339,7 @@ var _TABBAR_CHROME_FIT_BUFFER = 12;
 var _tabbarChromeFullWidth = 0; // cached width of the chrome while fully expanded
 
 function _readTabbarChromePref() {
-  const value = _tabGlobalFn('getPreference')?.(PREF_TABBAR_CHROME) || '';
+  const value = _tabGlobalFn('getPreference', importedGetPreference)?.(PREF_TABBAR_CHROME) || '';
   return value === 'expanded' ? 'expanded' : 'auto';
 }
 
@@ -404,7 +432,7 @@ function _toggleTabbarChrome() {
   const currentlyCollapsed = !!(barEl && barEl.classList.contains('chrome-collapsed'));
   // Pinned open → release to auto. Auto+collapsed → pin open. Auto+open → no-op.
   const next = pref === 'expanded' ? 'auto' : (currentlyCollapsed ? 'expanded' : 'auto');
-  _tabGlobalFn('setPreferenceCookie')?.(PREF_TABBAR_CHROME, next);
+  _tabGlobalFn('setPreferenceCookie', importedSetPreferenceCookie)?.(PREF_TABBAR_CHROME, next);
   updateTabbarChromeFit();
   _refocusComposerAfterAction({ defer: true });
 }
@@ -791,7 +819,10 @@ function createTab(label) {
     ? importedExportTabPdf
     : _tabGlobalFn('exportTabPdf');
   tab.addEventListener('click', e => {
-    if (Date.now() < Number(_tabGlobalValue('_tabDragSuppressClickUntil') || 0)) return;
+    const suppressUntil = typeof importedTabDragSuppressClickUntil === 'function'
+      ? importedTabDragSuppressClickUntil()
+      : _tabGlobalValue('_tabDragSuppressClickUntil');
+    if (Date.now() < Number(suppressUntil || 0)) return;
     if (e.target.classList.contains('tab-close')) {
       if (closeCurrentTab) closeCurrentTab(id);
       _blurActiveElement();
@@ -936,8 +967,8 @@ function activateTab(id, { focusComposer = true } = {}) {
   // Activation swaps the live prompt, the status pill, output-follow helpers,
   // and the visible transcript. Keep it centralized here to avoid drift.
   // Exit hist-search mode cleanly before switching tabs
-  if (_tabGlobalFn('isHistSearchMode')?.()) {
-    _tabGlobalFn('exitHistSearch')?.(false);
+  if (_tabGlobalFn('isHistSearchMode', importedIsHistSearchMode)?.()) {
+    _tabGlobalFn('exitHistSearch', importedExitHistSearch)?.(false);
   }
   // Flush the current composer value into the leaving tab's draftInput before switching.
   const prevId = _activeTabId();
@@ -970,7 +1001,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   }
   ensureActiveTabVisible(id);
   updateTabScrollButtons();
-  _tabGlobalFn('clearSearch')?.();
+  _tabSearchFn('clearSearch', importedClearSearch)?.();
   // Hide the autocomplete dropdown and clear the filtered list so stale
   // suggestions from the previous tab's typing session don't persist.
   _tabGlobalFn('acHide')?.();
@@ -981,14 +1012,18 @@ function activateTab(id, { focusComposer = true } = {}) {
     if (liveDraft && liveDraft.trim()) draft = liveDraft;
   }
   _setComposerValue(draft, draft.length, draft.length, { dispatch: false });
-  _tabGlobalFn('resetCmdHistoryNav')?.();
-  _tabGlobalFn('syncActiveRunTimer')?.(id);
+  _tabGlobalFn('resetCmdHistoryNav', importedResetCmdHistoryNav)?.();
+  _tabGlobalFn('syncActiveRunTimer', importedSyncActiveRunTimer)?.(id);
   if (focusComposer) _refocusComposerAfterAction({ preventScroll: true });
   _syncRunButtonDisabled();
   _syncTabShellPrompt();
   updateOutputFollowButton(id);
-  if (_tabGlobalFn('scheduleSearchDiscoverabilityRefresh')) _tabGlobalFn('scheduleSearchDiscoverabilityRefresh')();
-  else _tabGlobalFn('refreshSearchDiscoverabilityUi')?.();
+  const scheduleSearchRefresh = _tabSearchFn(
+    'scheduleSearchDiscoverabilityRefresh',
+    importedScheduleSearchDiscoverabilityRefresh,
+  );
+  if (scheduleSearchRefresh) scheduleSearchRefresh();
+  else _tabSearchFn('refreshSearchDiscoverabilityUi', importedRefreshSearchDiscoverabilityUi)?.();
   _schedulePersistTabSessionState();
   importedEmitUiEvent('app:tab-activated', { id, prevId, activeTabId: _activeTabId() });
 }
@@ -1014,7 +1049,7 @@ function setTabStatus(id, st) {
       mountShellPrompt(id);
     }
     _syncRunButtonDisabled();
-    _tabGlobalFn('refreshSearchDiscoverabilityUi')?.();
+    _tabSearchFn('refreshSearchDiscoverabilityUi', importedRefreshSearchDiscoverabilityUi)?.();
   }
   updateOutputFollowButton(id);
   _schedulePersistTabSessionState();
@@ -1107,12 +1142,12 @@ function clearTab(id, { preserveRunState = false } = {}) {
       const setStatus = (typeof importedSetStatus === 'function' && importedSetStatus)
         || _tabGlobalFn('setStatus');
       setStatus?.('idle');
-      _tabGlobalFn('clearSearch')?.();
+      _tabSearchFn('clearSearch', importedClearSearch)?.();
     }
   }
   updateOutputFollowButton(id);
   if (id === _activeTabId()) {
-    _tabGlobalFn('refreshSearchDiscoverabilityUi')?.();
+    _tabSearchFn('refreshSearchDiscoverabilityUi', importedRefreshSearchDiscoverabilityUi)?.();
   }
   if (typeof document !== 'undefined'
     && document.body

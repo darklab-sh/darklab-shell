@@ -8,7 +8,9 @@ import { maskSessionToken as importedMaskSessionToken } from '../../core/session
 import {
   apiFetch as importedRuntimeApiFetch,
   hasRuntimeHandler as importedHasRuntimeHandler,
+  refreshWorkspaceFiles as importedRefreshWorkspaceFiles,
 } from '../../runtime_bridge.js';
+import { _seedLocalStorageStarsToServer as importedSeedLocalStorageStarsToServer } from '../../runner_bridge.js';
 import {
   getSessionId as importedGetSessionId,
   updateSessionId as importedUpdateSessionId,
@@ -90,6 +92,12 @@ function _sessionTokenLoadRecentValues() {
   return load ? load() : Promise.resolve(null);
 }
 
+function _sessionTokenSeedLocalStorageStarsToServer() {
+  const seed = (typeof importedSeedLocalStorageStarsToServer === 'function' && importedSeedLocalStorageStarsToServer)
+    || _sessionTokenGlobalFunction('_seedLocalStorageStarsToServer');
+  return seed ? seed() : Promise.resolve();
+}
+
 function _sessionTokenFlushRecentValues() {
   const flush = typeof importedFlushRecentValues === 'function'
     ? importedFlushRecentValues
@@ -116,6 +124,17 @@ function _sessionTokenReloadWorkflowCatalog() {
     ? importedReloadWorkflowCatalog
     : _sessionTokenGlobalFunction('reloadWorkflowCatalog');
   return reload ? reload() : Promise.resolve(null);
+}
+
+function _sessionTokenRefreshWorkspaceFiles() {
+  const refresh = (
+    typeof importedRefreshWorkspaceFiles === 'function'
+    && typeof importedHasRuntimeHandler === 'function'
+    && importedHasRuntimeHandler('refreshWorkspaceFiles')
+  )
+    ? importedRefreshWorkspaceFiles
+    : null;
+  return refresh ? refresh() : null;
 }
 
 function _updateOptionsSessionTokenStatus() {
@@ -320,13 +339,11 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     localStorage.setItem('session_token', newToken);
     _sessionTokenUpdateSessionId(newToken);
     await _sessionTokenLoadRecentValues().catch(() => {});
-    const seedStars = _sessionTokenGlobalFunction('_seedLocalStorageStarsToServer');
-    if (seedStars) await seedStars();
+    await _sessionTokenSeedLocalStorageStarsToServer();
     await _sessionTokenReloadSessionHistory().catch(() => {});
     _sessionTokenReloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
-    const refreshWorkspaceFiles = _sessionTokenGlobalFunction('refreshWorkspaceFiles');
-    if (refreshWorkspaceFiles) refreshWorkspaceFiles().catch(() => {});
+    _sessionTokenRefreshWorkspaceFiles()?.catch?.(() => {});
     _sessionTokenCopyText(newToken)
       .then(() => _sessionTokenShowToast('New token copied to clipboard'))
       .catch(() => {});
@@ -477,13 +494,11 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
     localStorage.setItem('session_token', value);
     _sessionTokenUpdateSessionId(value);
     await _sessionTokenLoadRecentValues().catch(() => {});
-    const seedStars = _sessionTokenGlobalFunction('_seedLocalStorageStarsToServer');
-    if (seedStars) await seedStars();
+    await _sessionTokenSeedLocalStorageStarsToServer();
     await _sessionTokenReloadSessionHistory().catch(() => {});
     _sessionTokenReloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
-    const refreshWorkspaceFiles = _sessionTokenGlobalFunction('refreshWorkspaceFiles');
-    if (refreshWorkspaceFiles) refreshWorkspaceFiles().catch(() => {});
+    _sessionTokenRefreshWorkspaceFiles()?.catch?.(() => {});
     _sessionTokenShowToast('Session token applied');
   } catch (err) {
     _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
@@ -525,8 +540,7 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
     _sessionTokenReloadWorkflowCatalog().catch(() => {});
 
     _updateOptionsSessionTokenStatus();
-    const refreshWorkspaceFiles = _sessionTokenGlobalFunction('refreshWorkspaceFiles');
-    if (refreshWorkspaceFiles) refreshWorkspaceFiles().catch(() => {});
+    _sessionTokenRefreshWorkspaceFiles()?.catch?.(() => {});
     _sessionTokenCopyText(newToken)
       .then(() => _sessionTokenShowToast('New token copied to clipboard'))
       .catch(() => _sessionTokenShowToast('Token rotated'));

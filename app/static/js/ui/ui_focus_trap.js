@@ -76,6 +76,7 @@ const bindFocusTrap = (function () {
       const last = list[list.length - 1];
 
       if (e.key === 'Tab') {
+        if (e.altKey || e.ctrlKey || e.metaKey) return;
         if (e.shiftKey) {
           if (active === first || !container.contains(active)) {
             e.preventDefault();
