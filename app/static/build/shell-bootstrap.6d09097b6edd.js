@@ -8074,6 +8074,7 @@ var importedProjectWorkspaceShell;
       setProjectRunCompareMode: _setProjectRunCompareMode,
       setSelectedProjectId: projectWorkspaceState.setSelectedId,
       setWorkspaceTab: projectWorkspaceState.setTab,
+      openHistoryRunDetails: _shellFn("openHistoryRunDetails", openHistoryRunDetails),
       restoreHistoryRunIntoTab: _shellFn("restoreHistoryRunIntoTab", restoreHistoryRunIntoTab),
       syncProjectRunCompareMode: _syncProjectRunCompareMode,
       toggleArtifactGroup: projectWorkspaceState.toggleArtifactGroup,

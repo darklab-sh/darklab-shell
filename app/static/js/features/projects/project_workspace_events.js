@@ -5,6 +5,10 @@ import {
 import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
 import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import {
+  hasHistoryRunModalStateHandler as importedHasHistoryRunModalStateHandler,
+  openHistoryRunDetails as importedOpenHistoryRunDetails,
+} from '../history/history_run_modal_state_bridge.js';
 import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from '../history/history_restore.js';
 
 let exportedDarklabProjectWorkspaceEvents = null;
@@ -87,6 +91,16 @@ let exportedDarklabProjectWorkspaceEvents = null;
       return typeof importedRestoreHistoryRunIntoTab === 'function'
         ? importedRestoreHistoryRunIntoTab
         : null;
+    }
+
+    function openHistoryRunDetails() {
+      if (typeof ctx.openHistoryRunDetails === 'function') return ctx.openHistoryRunDetails;
+      const hasImportedHandler = typeof importedHasHistoryRunModalStateHandler === 'function'
+        && importedHasHistoryRunModalStateHandler('openHistoryRunDetails');
+      if (hasImportedHandler && typeof importedOpenHistoryRunDetails === 'function') {
+        return importedOpenHistoryRunDetails;
+      }
+      return null;
     }
 
     function pagerDescriptor(button) {
@@ -1266,6 +1280,17 @@ let exportedDarklabProjectWorkspaceEvents = null;
             highlightLineIndex: Number.isInteger(lineIndex) ? lineIndex : null,
           });
           ctx.closeProjectWorkspace({ refocus: false });
+          return;
+        } else if (action === 'open-finding-run-details') {
+          const runId = String(btn.dataset.runId || '').trim();
+          if (!runId) throw new Error('Finding is missing its source run.');
+          const openDetails = openHistoryRunDetails();
+          if (typeof openDetails !== 'function') throw new Error('Run Details is not available.');
+          ctx.closeProjectWorkspace({ refocus: false });
+          openDetails({
+            id: runId,
+            command: String(btn.dataset.runCommand || ''),
+          });
           return;
         } else if (action === 'artifact-preview') {
           const artifactId = String(btn.dataset.artifactId || '').trim();

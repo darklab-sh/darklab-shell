@@ -256,7 +256,7 @@ test.describe('project overview browser contract', () => {
     await expect(overview.locator('.project-overview-target-detail', {
       hasText: 'Provider:',
     })).toContainText('80, 443')
-    await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
+    await expect(overview.locator('.project-overview-target-header-badges')).toContainText('High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
     await expect(overview.locator('.project-overview-target-chips')).not.toContainText('Intel: None')
     await expect(overview.locator('.project-overview-highlights')).toContainText('Censys saw https on 443')
@@ -302,7 +302,7 @@ test.describe('project overview browser contract', () => {
     await expect(overview.locator('.project-overview-target-detail', {
       hasText: 'Ports:',
     })).toContainText('https-alt')
-    await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
+    await expect(overview.locator('.project-overview-target-header-badges')).toContainText('High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('App ports')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Provider/app drift')
@@ -355,7 +355,7 @@ test.describe('project overview mobile browser contract', () => {
 
     const overview = page.locator('#project-mobile-detail-body .project-overview-root.is-mobile')
     await expect(overview.locator('.project-overview-target-title')).toHaveText(TARGET_VALUE)
-    await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
+    await expect(overview.locator('.project-overview-target-header-badges')).toContainText('High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
     await expect(overview.locator('[data-project-overview-action="entities"]')).toBeVisible()
     await expect(overview.locator('[data-project-overview-action="findings"]')).toBeVisible()

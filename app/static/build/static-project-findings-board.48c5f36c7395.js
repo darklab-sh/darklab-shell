@@ -18,7 +18,7 @@ var exportedDarklabProjectFindingsBoard = null;
       const wrap = document.createElement("div");
       wrap.className = "project-finding-board-card-actions";
       if (card.run_id) {
-        const open = ctx.makeProjectButton("Open", "open-finding", projectId);
+        const open = ctx.makeProjectButton("Open", "open-finding-run-details", projectId);
         open.dataset.findingId = card.id;
         open.dataset.runId = card.run_id;
         open.dataset.runCommand = card.run_command;

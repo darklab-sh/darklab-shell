@@ -271,8 +271,8 @@ describe('project overview controller', () => {
     )
     const summary = container.querySelector('.project-overview-summary')
     const summaryText = summary?.textContent || ''
-    expect(summary?.querySelector('.project-overview-summary-grid.is-primary')).toBeTruthy()
-    expect(summary?.querySelector('.project-overview-summary-grid.is-secondary')).toBeTruthy()
+    expect([...summary?.querySelectorAll('.project-overview-summary-heading') || []].map(node => node.textContent))
+      .toEqual(['Coverage', 'Evidence', 'Risk/work'])
     expect(summaryText).toContain('Targets')
     expect(summaryText).toContain('cached providers')
     expect(summaryText).toContain('App-native ports')
@@ -283,7 +283,10 @@ describe('project overview controller', () => {
     expect(summaryText).toContain('High-risk targets')
     const caveatText = container.querySelector('.project-overview-provider-caveat')?.textContent || ''
     expect(caveatText).toContain('Cached provider data')
-    expect(caveatText).toContain('App-captured ports and services are shown first when available')
+    expect(caveatText).toContain('App-captured ports and services are shown first')
+    const rootChildren = [...container.querySelector('.project-overview-root').children]
+    expect(rootChildren.findIndex(node => node.classList.contains('project-overview-progress')))
+      .toBeLessThan(rootChildren.findIndex(node => node.classList.contains('project-overview-target-section')))
     const progressText = container.querySelector('.project-overview-progress')?.textContent || ''
     expect(progressText).toContain('Triage')
     expect(progressText).toContain('New')
@@ -329,6 +332,11 @@ describe('project overview controller', () => {
     expect(recentCard?.textContent).toContain('Windowed')
     expect(recentCard?.classList.contains('is-windowed')).toBe(false)
     expect(container.querySelector('.project-overview-target-title')?.textContent).toBe('api.example.com')
+    const firstRow = container.querySelector('.project-overview-target-row')
+    expect(firstRow?.classList.contains('has-severity-amber')).toBe(true)
+    const headerText = container.querySelector('.project-overview-target-header-badges')?.textContent || ''
+    expect(headerText).toContain('High')
+    expect(headerText).toContain('1 new')
     const detailRows = [...container.querySelectorAll('.project-overview-target-detail')]
     const portsDetail = detailRows.find(row => row.querySelector('.project-overview-target-detail-label')?.textContent === 'Ports: ')
     expect(portsDetail).toBeTruthy()
@@ -347,12 +355,11 @@ describe('project overview controller', () => {
     expect(portChips.every(chip => chip.classList.contains('badge-tone-muted'))).toBe(true)
     expect(portChips[0]?.getAttribute('title')).toBe('443/tcp https (nginx)')
     const chipText = container.querySelector('.project-overview-target-chips')?.textContent || ''
-    expect(chipText).toContain('Finding: High')
     expect(chipText).toContain('Cert: <=30d')
     expect(chipText).toContain('App ports')
     expect(chipText).toContain('Provider/app drift')
     expect(chipText).toContain('Intel: Stale')
-    expect(container.querySelector('.project-overview-chip')?.getAttribute('title'))
+    expect(container.querySelector('.project-overview-severity-badge')?.getAttribute('title'))
       .toBe('Highest actionable finding severity for this target')
     expect(container.querySelector('.project-overview-highlights')?.textContent).toContain('Censys saw https on 443')
 
@@ -377,6 +384,36 @@ describe('project overview controller', () => {
       entity_id: `ent_${index + 1}`,
       value: `api-${index + 1}.example.com`,
       display_label: `domain:api-${index + 1}.example.com`,
+      ...(index >= 6 ? {
+        top_finding_severity: '',
+        app_ports: [],
+        app_port_count: 0,
+        app_services: [],
+        open_ports: [],
+        services: [],
+        source_flags: {
+          has_intel: false,
+          has_stale_intel: false,
+          has_findings: false,
+          has_app_scan_evidence: false,
+          has_app_ports: false,
+          has_recent_changes: false,
+        },
+        app_evidence: {
+          coverage_state: 'not_scanned',
+          scan_run_count: 0,
+          app_port_run_count: 0,
+          port_entity_count: 0,
+          command_roots: [],
+          host_entity_id: '',
+          scope_note: '',
+          coverage_caveat: '',
+        },
+        certificate: { status: 'unknown', expires_at: '', days_until_expiry: null, last_checked_at: '' },
+        finding_counts: { by_review_state: {}, by_verification_state: {}, suppressed: 0 },
+        port_provenance: { app: [], provider: [], divergence: { app_only: [], provider_only: [], has_drift: false } },
+        intel_summary: { providers_with_data: [], highlights: [] },
+      } : {}),
     }))
     const projectWorkspaceRequest = vi.fn(async () => apiResponse(longPayload))
     const ctx = makeContext(projectWorkspaceRequest)
@@ -387,11 +424,16 @@ describe('project overview controller', () => {
     controller.renderOverview(container, 'prj_1', {})
 
     expect(container.querySelectorAll('.project-overview-target-row')).toHaveLength(6)
-    expect(container.querySelector('.project-overview-progress')).toBeTruthy()
-    expect(container.querySelector('.project-overview-gaps')).toBeTruthy()
+    const orderedChildren = [...container.querySelector('.project-overview-root').children]
+    expect(orderedChildren.findIndex(node => node.classList.contains('project-overview-progress')))
+      .toBeLessThan(orderedChildren.findIndex(node => node.classList.contains('project-overview-target-section')))
+    expect(orderedChildren.findIndex(node => node.classList.contains('project-overview-gaps')))
+      .toBeLessThan(orderedChildren.findIndex(node => node.classList.contains('project-overview-target-section')))
     expect(container.querySelector('.project-overview-target-list')?.textContent).not.toContain('api-8.example.com')
+    expect(container.querySelector('.project-overview-target-count')?.textContent).toBe('8 targets')
     const showAll = container.querySelector('[data-project-overview-action="toggle-targets"]')
     expect(showAll?.textContent).toBe('Show all 8 targets')
+    expect(showAll?.hasAttribute('data-project-action')).toBe(false)
 
     showAll.click()
     expect(ctx.renderProjectExplorer).toHaveBeenCalled()
@@ -399,8 +441,23 @@ describe('project overview controller', () => {
 
     expect(container.querySelectorAll('.project-overview-target-row')).toHaveLength(8)
     expect(container.querySelector('.project-overview-target-list')?.textContent).toContain('api-8.example.com')
+    const expandedChildren = [...container.querySelector('.project-overview-root').children]
+    expect(expandedChildren.findIndex(node => node.classList.contains('project-overview-progress')))
+      .toBeLessThan(expandedChildren.findIndex(node => node.classList.contains('project-overview-target-section')))
     const showFewer = container.querySelector('[data-project-overview-action="toggle-targets"]')
     expect(showFewer?.textContent).toBe('Show fewer targets')
+
+    const hideEmpty = container.querySelector('[data-project-overview-action="toggle-empty-targets"]')
+    expect(hideEmpty?.classList.contains('toggle-btn')).toBe(true)
+    expect(hideEmpty?.getAttribute('aria-pressed')).toBe('false')
+    hideEmpty.click()
+    expect(ctx.renderProjectExplorer).toHaveBeenCalled()
+    controller.renderOverview(container, 'prj_1', {})
+
+    expect(container.querySelector('[data-project-overview-action="toggle-empty-targets"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('.project-overview-target-count')?.textContent).toBe('Showing 6 of 8 targets')
+    expect(container.querySelectorAll('.project-overview-target-row')).toHaveLength(6)
+    expect(container.querySelector('.project-overview-target-list')?.textContent).not.toContain('api-8.example.com')
   })
 
   it('renders the empty target state from an empty overview payload', async () => {
@@ -490,18 +547,14 @@ describe('project overview controller', () => {
     expect(recentState?.textContent).toContain('No monitoring window')
     expect(recentState?.querySelector('.badge')?.classList.contains('badge-tone-muted')).toBe(true)
     const chips = [...container.querySelectorAll('.project-overview-chip')]
-    const certChip = chips.find(chip => chip.textContent.includes('Cert: Unknown'))
     const scannedChip = chips.find(chip => chip.textContent.includes('Scanned'))
-    const intelChip = chips.find(chip => chip.textContent.includes('Intel: None'))
-    expect(certChip?.classList.contains('badge-tone-muted')).toBe(true)
-    expect(certChip?.getAttribute('title')).toBe('No usable certificate expiry data found for this target')
+    expect(chips.find(chip => chip.textContent.includes('Cert: Unknown'))).toBeUndefined()
+    expect(chips.find(chip => chip.textContent.includes('Intel: None'))).toBeUndefined()
     expect(scannedChip?.classList.contains('badge-tone-cyan')).toBe(true)
     expect(scannedChip?.getAttribute('title')).toContain('does not prove no ports exist')
-    expect(intelChip?.classList.contains('badge-tone-muted')).toBe(true)
-    expect(intelChip?.getAttribute('title')).toBe('No cached provider data for this target')
     expect([...container.querySelectorAll('.project-overview-target-detail')]
       .map(node => node.textContent)
-      .join('\n')).toContain('Intel: none')
+      .join('\n')).not.toContain('Intel: none')
     expect(container.querySelector('.project-overview-highlights')).toBeNull()
   })
 

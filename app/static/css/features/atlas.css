@@ -583,22 +583,21 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-list {
-  display: grid;
-  gap: 0;
+  display: block;
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
   overflow-y: auto;
-  align-content: start;
 }
 
 .atlas-entity-row {
   width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 12px;
+  height: auto;
   min-height: 70px;
+  overflow: visible;
   padding: 12px 16px;
   border: 0;
   border-bottom: 1px solid var(--border);
@@ -624,17 +623,14 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   text-align: left;
 }
 
-.atlas-entity-row.has-row-action,
 .atlas-finding-queue-row.has-row-action {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
-.atlas-entity-row.is-selecting,
 .atlas-finding-queue-row.is-selecting {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-.atlas-entity-row.is-selecting.has-row-action,
 .atlas-finding-queue-row.is-selecting.has-row-action {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
@@ -682,6 +678,7 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-row-select-label {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -690,9 +687,13 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-entity-main {
+  flex: 1 1 auto;
   display: grid;
   gap: 4px;
+  align-self: center;
   min-width: 0;
+  max-width: 100%;
+  overflow: visible;
 }
 
 .atlas-entity-value,
@@ -704,22 +705,35 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-entity-value {
+  display: block;
   color: var(--text);
   font-weight: 700;
+  line-height: 1.35;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .atlas-entity-badges,
 .atlas-label-list {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  align-self: flex-start;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
+  padding-top: 2px;
 }
 
 .atlas-muted {
+  display: block;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .atlas-empty,

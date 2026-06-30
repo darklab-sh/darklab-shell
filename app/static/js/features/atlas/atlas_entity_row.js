@@ -74,7 +74,7 @@ function appendDataset(el, dataset = {}) {
 }
 
 function atlasBadges(entity, { badge = defaultBadge, text: textFn = text } = {}) {
-  const badges = document.createElement('span');
+  const badges = document.createElement('div');
   badges.className = 'atlas-entity-badges';
   if (entity.project_link_count) badges.appendChild(badge(`${entity.project_link_count} projects`, 'green'));
   const labels = Array.isArray(entity.labels) ? entity.labels : [];
@@ -113,12 +113,12 @@ function renderAtlasEntityRow({
     appendSelectionControl(row, entity);
   }
 
-  const main = document.createElement('span');
+  const main = document.createElement('div');
   main.className = 'atlas-entity-main';
-  const value = document.createElement('span');
+  const value = document.createElement('div');
   value.className = 'atlas-entity-value';
   value.textContent = valueText;
-  const meta = document.createElement('span');
+  const meta = document.createElement('div');
   meta.className = 'atlas-muted';
   const runCount = Number(entity && entity.run_count || 0);
   const occurrenceCount = Number(entity && entity.occurrence_count || 0);

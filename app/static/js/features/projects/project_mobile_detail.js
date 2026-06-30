@@ -488,7 +488,7 @@ let exportedDarklabProjectMobileDetail = null;
             { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
             finding.run_id ? {
               label: 'See in run',
-              action: 'open-finding',
+              action: 'open-finding-run-details',
               dataset: {
                 findingId,
                 runId: String(finding.run_id || ''),

@@ -29,48 +29,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Improve Overview tab readability and triage density (UI/UX pass).**
-  - Motivation: with many targets (e.g. 105, 89 unscanned) the per-target list (`project_overview.js` `renderTargetRow`) renders ~7 labeled lines each, and on scan-light projects most read "No app-captured ports / No ports · No services / Intel none / No app scan". The page becomes a wall of negatives; the real signal (finding counts + severity) is buried, and the same emptiness is repeated across the `Provider:` row, `Intel:` row, `Cert: Unknown` chip, and `Intel: None` chip.
-  - Collapse empty per-target detail rows (highest-impact change).
-    - Render `Ports`/`Provider`/`Intel`/`Scan` rows only when they carry data; for an all-empty target, replace them with a single muted tail (e.g. `not scanned · no provider intel`) or omit entirely.
-    - De-duplicate negatives: the `Provider:`/`Intel:` rows and the `Cert: Unknown`/`Intel: None` chips restate the same "nothing here"; show `Cert`/`Intel` chips only when actionable (expiring, stale), not on every row.
-    - Lead with the real content (finding summary + severity) rather than ending with it.
-    - Target a compact ~2-line row: title + type/review-state + severity + actions on line 1; a single muted detail line that shows only present data (ports/services inline when available) on line 2.
-  - Make severity the primary visual signal.
-    - Add a severity-colored left accent/border per target card driven by `top_finding_severity`, using the semantic `--red`/`--amber` tokens, so Critical/High targets are immediately scannable instead of uniform gray.
-  - Add prioritization controls for long target lists.
-    - Sort/group targets by top finding severity (Critical → High → …) — note `_overview_target_sort_key` already sorts by severity then cert then label, so confirm the UI reflects it and consider grouping headers.
-    - Add a filter toggle such as "hide unscanned targets with no findings" to clear the empty cards in one action.
-  - Fix the summary's two-tier layout (`renderRollups`).
-    - The bordered "primary" cards vs borderless "secondary" items read as unfinished, and the "Watcher context / Recent changes" item floats right with no number — give the secondary row consistent alignment/treatment.
-    - Reconsider grouping by theme rather than card size: Coverage (targets, scanned, unscanned), Evidence (app ports, provider ports, drift), Risk/Work (high-risk, verification gaps, certs).
-    - Render "App scan coverage" as a ratio or mini progress bar (`16 of 105 · 15%`) rather than a bare count.
-  - Reorder sections so aggregate panels are reachable.
-    - `renderOverview` currently renders the per-target list immediately after the summary, pushing `renderFindingProgress`/`renderOperationalTempo`/`renderCoverageGaps`/`renderDeliverablesStatus` below up to `OVERVIEW_TARGET_LIMIT` (200) rows. Place aggregates directly under the summary, above the per-target worklist, or make the worklist collapsible.
-  - Condense the persistent "Cached provider data" caveat (`renderProviderIntelCaveat`) to one line or an info tooltip on the badge; it partly duplicates the secondary "Cached provider ports" card copy.
-  - Related data-correctness flag (cross-reference `docs/overview_update_code_review.md`): the screenshots show "Cached provider ports: 2" but "Provider/app drift: 8 targets differ" (≈ every app-port target), confirming the drift over-flag where `_overview_port_provenance` counts `app_only` as drift even when the provider has no intel (`overview.py` `has_drift`). Gate `app_only` drift on `has_intel` so the drift metric is trustworthy before leaning on it visually.
-  - Apply the same density improvements to the mobile Overview surface for parity.
-  - Keep all changes within the design system: passive metadata as `.badge`/`.badge-tone-*`, severity color via the semantic tokens, no one-off pill classes (see the existing `.project-overview-port-chip` vs `.badge` note in `docs/overview_update_code_review.md`).
-
-- **Add a project filter to the Atlas modal and surface the project scope as a clearable chip.**
-  - "Open in Atlas" from the Projects modal (`project_navigation.js` → `openAtlas`) launches the Atlas overlay scoped to the project, but the scope is invisible: it lives only in `state.projectId`/`state.projectName` (`atlas_overlay.js`) and surfaces faintly in the subtitle. There is no filter control or chip, no way to clear it, and no way to filter by project from within Atlas — the Projects-modal button is the only entry point.
-  - Add a project filter control alongside the existing Atlas filters (run search/select, finding status, orphan, suppression) in the template (`app/templates/index.html`, the `atlas-*-filter` row) so users can scope to any project from inside the modal.
-  - Model it on the existing run filter: a `select` plus a clearable chip (`atlas-run-filter-chip` is the pattern), wired into `state` and the existing filter request/persistence path (the `filters` payload already carries `project_id`/`project_name`).
-  - When launched via "Open in Atlas", show the project filter as applied — the chip is visible and the dropdown reflects the launched project.
-  - Give it the same clear behavior as other filters: clicking the chip's `x` and the "Clear filters" button (`atlas-clear-filters-btn`) both reset the project scope, and changing the dropdown re-scopes.
-  - Completion note: The Atlas project-filter slice is implemented. Atlas now has a project filter select beside the existing run/status/orphan/suppression filters, shows project-launched scope as a clearable chip, lets users switch to another project from inside Atlas, preserves project scope in saved views, and clears project scope through either the chip or **Clear filters**.
-
-- **Change Findings-tab row click to open the finding in Atlas instead of restoring its source run.**
-  - Today a finding row (and its "Open" button) fire `open-finding`, which restores the source run into a terminal tab, highlights the finding's output line, and closes the Projects workspace (`project_workspace_events.js`, `action === 'open-finding'`). A primary click doing something destructive — tearing down the modal and dropping into the terminal — is surprising and inconsistent with the Entities tab, where row click opens the entity in Atlas (`open-project-entity`).
-  - Make a finding row's primary click open that finding in Atlas, matching the Entities-tab pattern. Atlas already manages findings (finding filters, bulk triage, findings board, and finding detail in `atlas_entity_detail.js`); confirm or add a deep-link/focus path to a single finding.
-  - Keep run access as an explicit secondary action rather than removing it — viewing a finding in its raw output context with the exact line highlighted is unique value Atlas does not provide.
-  - Decide where that secondary action lands, noting the line-highlight tradeoff.
-    - The current terminal-restore path highlights the finding's exact output line (`highlightLineIndex`).
-    - The Run Details modal (`openHistoryRunDetails`, `history_run_details.js`) is less disruptive (overlay, preserves project context) but currently has no line-highlight support.
-    - Either keep "See in run" doing the terminal restore, or port line-highlight into the Run Details modal before pointing the action there; do not lose line-highlight in the swap.
-  - Apply the same change to the mobile findings surface for parity.
-  - Completion note: The Findings-row primary action slice is implemented. Desktop and mobile Project Findings rows now open the selected finding in project-scoped Atlas, Atlas accepts a requested finding id and selects it after the Findings list loads, and the raw source-run path remains available as an explicit **See in run** action with the original terminal line highlight.
-
 ---
 
 ## Known Issues

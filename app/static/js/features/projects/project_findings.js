@@ -89,7 +89,7 @@ let exportedDarklabProjectFindings = null;
         edit.dataset.findingId = String(finding.id || '');
         buttonGroup.append(triage, edit);
         if (finding.run_id) {
-          const seeRun = ctx.makeProjectButton('See in run', 'open-finding', projectId);
+          const seeRun = ctx.makeProjectButton('See in run', 'open-finding-run-details', projectId);
           seeRun.dataset.findingId = String(finding.id || '');
           seeRun.dataset.runId = String(finding.run_id || '');
           seeRun.dataset.runCommand = String(finding.run_command || '');
@@ -240,6 +240,7 @@ let exportedDarklabProjectFindings = null;
         action: findingId ? {
           action: selectMode ? 'toggle-project-finding-row' : 'open-project-finding',
           dataset: {
+            projectId,
             findingId,
           },
         } : null,

@@ -25,6 +25,7 @@ import {
 import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
 import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js';
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
+import { openHistoryRunDetails as importedOpenHistoryRunDetails } from './features/history/history_run_modal_state_bridge.js';
 import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from './features/history/history_restore_bridge.js';
 import { setProjectContextHandlers as importedSetProjectContextHandlers } from './features/projects/project_context_bridge.js';
 import { setProjectHudHandlers as importedSetProjectHudHandlers } from './features/projects/project_hud_bridge.js';
@@ -2895,6 +2896,7 @@ let importedProjectWorkspaceShell;
       setProjectRunCompareMode: _setProjectRunCompareMode,
       setSelectedProjectId: projectWorkspaceState.setSelectedId,
       setWorkspaceTab: projectWorkspaceState.setTab,
+      openHistoryRunDetails: _shellFn('openHistoryRunDetails', importedOpenHistoryRunDetails),
       restoreHistoryRunIntoTab: _shellFn('restoreHistoryRunIntoTab', importedRestoreHistoryRunIntoTab),
       syncProjectRunCompareMode: _syncProjectRunCompareMode,
       toggleArtifactGroup: projectWorkspaceState.toggleArtifactGroup,

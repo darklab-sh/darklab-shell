@@ -61,7 +61,7 @@ import {
 } from "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import {
   DarklabAtlasEntityRow
-} from "./static-chunk-geovhkhz.906ab9e27563.js";
+} from "./static-chunk-b3etjcu4.ab70b0c41ed7.js";
 import {
   DarklabAtlasTabs
 } from "./static-chunk-wkckhpty.7befd18332ed.js";

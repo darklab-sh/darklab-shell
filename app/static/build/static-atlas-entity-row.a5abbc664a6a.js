@@ -4,7 +4,7 @@ import {
   formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow
-} from "./static-chunk-geovhkhz.906ab9e27563.js";
+} from "./static-chunk-b3etjcu4.ab70b0c41ed7.js";
 export {
   DarklabAtlasEntityRow,
   formatCompactPortLabel,

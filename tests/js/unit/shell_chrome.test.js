@@ -93,6 +93,7 @@ function loadShellChrome({
   preferences = {},
   openStatusMonitor = vi.fn(() => Promise.resolve(true)),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
+  openHistoryRunDetails = vi.fn(),
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   showToast = vi.fn(),
@@ -296,6 +297,7 @@ function loadShellChrome({
     toggleRailCollapsed: null,
     openStatusMonitor,
     openAtlas,
+    openHistoryRunDetails,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
@@ -591,6 +593,7 @@ function loadShellChrome({
     railSectionWorkflows: document.getElementById('rail-section-workflows'),
     preferences,
     openStatusMonitor,
+    openHistoryRunDetails,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
@@ -1788,7 +1791,8 @@ describe('shell chrome project workspace', () => {
       await tick()
       await tick()
       expect(document.getElementById('project-mobile-detail-body').textContent).toContain('darklab.sh')
-      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('Cert: Healthy')
+      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('Finding: High')
+      expect(document.getElementById('project-mobile-detail-body').textContent).not.toContain('Cert: Healthy')
       expect(document.getElementById('project-mobile-detail-body').querySelector('.project-overview-root.is-mobile')).not.toBeNull()
 
       document.querySelector('[data-project-mobile-detail-tab="packages"]').click()
@@ -2030,7 +2034,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
       expect(reviewSelect).not.toBeNull()
-      expect(actionSheet.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
+      expect(actionSheet.querySelector('[data-project-action="open-finding-run-details"]')).not.toBeNull()
       const actionSheetItems = actionSheet.querySelector('.action-sheet-items')
       expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
       expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
@@ -3255,8 +3259,9 @@ describe('shell chrome project workspace', () => {
       .toContain('Raw artifact files are unavailable because Files are disabled on this instance.')
   })
 
-  it('opens a finding source run at the recorded line', async () => {
+  it('opens project findings in Atlas and source runs in Run Details', async () => {
     const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored'))
+    const openHistoryRunDetails = vi.fn()
     const showConfirm = vi.fn((options = {}) => {
       const bodyText = typeof options.body === 'object' ? String(options.body.text || '') : String(options.body || '')
       return bodyText.startsWith('Delete package:')
@@ -4021,6 +4026,7 @@ describe('shell chrome project workspace', () => {
     const shell = loadShellChrome({
       apiFetch,
       restoreHistoryRunIntoTab,
+      openHistoryRunDetails,
       showWorkspaceViewer,
       showConfirm,
       fetchAndRenderHistoryComparison,
@@ -5061,23 +5067,37 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-finding-review')?.value).toBe('reviewed')
 
     const explorerBody = document.getElementById('project-explorer-body')
-    expect(explorerBody.querySelector('[data-project-action="open-project-finding"][data-finding-id="finding-1"]')).not.toBeNull()
-    expect(explorerBody.querySelector('[data-project-action="open-finding"][data-run-id="run-1"]')).not.toBeNull()
+    const openFindingRow = explorerBody.querySelector(
+      '[data-project-action="open-project-finding"][data-project-id="project-1"][data-finding-id="finding-1"]',
+    )
+    expect(openFindingRow).not.toBeNull()
+    expect(explorerBody.querySelector('[data-project-action="open-finding-run-details"][data-run-id="run-1"]')).not.toBeNull()
     expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
-    explorerBody.querySelector('[data-project-action="open-finding"]').click()
+    openFindingRow.click()
+    await tick()
+    await tick()
+    expect(shell.openAtlas).toHaveBeenCalledWith({
+      source: 'project-workspace',
+      projectId: 'project-1',
+      projectName: 'darklab.sh',
+      tab: 'findings',
+      findingId: 'finding-1',
+    })
+    expect(shell.showToast).not.toHaveBeenCalledWith('Finding is missing its project context', 'error')
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+    explorerBody.querySelector('[data-project-action="open-finding-run-details"]').click()
     await tick()
 
-    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
-      {
-        id: 'run-1',
-        command: 'nuclei https://darklab.sh',
-        full_output_available: true,
-      },
-      {
-        hidePanelOnSuccess: false,
-        highlightLineIndex: 42,
-      },
-    )
+    expect(openHistoryRunDetails).toHaveBeenCalledWith({
+      id: 'run-1',
+      command: 'nuclei https://darklab.sh',
+    })
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
     expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
 
     await shell.openProjectWorkspace()

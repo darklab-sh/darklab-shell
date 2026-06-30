@@ -1,11 +1,11 @@
 import {
   exportedOpenAtlas
-} from "./static-chunk-2lqvgxi2.0eb8956dece5.js";
+} from "./static-chunk-a4qtn6yf.317f9c79bc03.js";
 import {
   exportedOpenFindingsBoard
 } from "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-su6lrvju.f76caa9fc9c2.js";
+import "./static-chunk-zqhsq3bs.cf55aeb40c2c.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -15,7 +15,10 @@ import {
 import {
   restoreHistoryRunIntoTab
 } from "./static-chunk-rjpbqpge.4b3f5ec190f6.js";
-import "./static-chunk-su3zfblw.dfaa45e2b263.js";
+import {
+  hasHistoryRunModalStateHandler,
+  openHistoryRunDetails
+} from "./static-chunk-su3zfblw.dfaa45e2b263.js";
 import "./static-chunk-xbxp24ix.e021648f87bd.js";
 import {
   activeTeamScopeCan,
@@ -28,8 +31,8 @@ import "./static-chunk-2bgb52uq.a327269283bb.js";
 import "./static-chunk-yo5cjr7d.b86e0c93eff0.js";
 import "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-db3mpkvp.8160da32b718.js";
-import "./static-chunk-geovhkhz.906ab9e27563.js";
+import "./static-chunk-vup3nxbi.29ebe5c76a40.js";
+import "./static-chunk-b3etjcu4.ab70b0c41ed7.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
 import "./static-chunk-wkckhpty.7befd18332ed.js";
 
@@ -92,6 +95,14 @@ var exportedDarklabProjectWorkspaceEvents = null;
       if (typeof ctx.restoreHistoryRunIntoTab === "function") return ctx.restoreHistoryRunIntoTab;
       if (typeof ctx.restoreHistoryRun === "function") return ctx.restoreHistoryRun;
       return typeof restoreHistoryRunIntoTab === "function" ? restoreHistoryRunIntoTab : null;
+    }
+    function openHistoryRunDetails2() {
+      if (typeof ctx.openHistoryRunDetails === "function") return ctx.openHistoryRunDetails;
+      const hasImportedHandler = typeof hasHistoryRunModalStateHandler === "function" && hasHistoryRunModalStateHandler("openHistoryRunDetails");
+      if (hasImportedHandler && typeof openHistoryRunDetails === "function") {
+        return openHistoryRunDetails;
+      }
+      return null;
     }
     function pagerDescriptor(button) {
       const configs = [
@@ -1215,6 +1226,17 @@ var exportedDarklabProjectWorkspaceEvents = null;
             highlightLineIndex: Number.isInteger(lineIndex) ? lineIndex : null
           });
           ctx.closeProjectWorkspace({ refocus: false });
+          return;
+        } else if (action === "open-finding-run-details") {
+          const runId = String(btn.dataset.runId || "").trim();
+          if (!runId) throw new Error("Finding is missing its source run.");
+          const openDetails = openHistoryRunDetails2();
+          if (typeof openDetails !== "function") throw new Error("Run Details is not available.");
+          ctx.closeProjectWorkspace({ refocus: false });
+          openDetails({
+            id: runId,
+            command: String(btn.dataset.runCommand || "")
+          });
           return;
         } else if (action === "artifact-preview") {
           const artifactId = String(btn.dataset.artifactId || "").trim();

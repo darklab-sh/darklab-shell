@@ -59,6 +59,7 @@ let exportedDarklabProjectOverview = null;
         loaded: false,
         loading: false,
         payload: null,
+        hideEmptyTargets: false,
         targetsExpanded: false,
       };
     }
@@ -265,6 +266,19 @@ let exportedDarklabProjectOverview = null;
       return card;
     }
 
+    function renderSummaryGroup(label, cards) {
+      const group = document.createElement('section');
+      group.className = 'project-overview-summary-group';
+      const heading = document.createElement('div');
+      heading.className = 'project-overview-summary-heading';
+      heading.textContent = label;
+      const grid = document.createElement('div');
+      grid.className = 'project-overview-summary-grid';
+      cards.forEach(card => grid.appendChild(card));
+      group.append(heading, grid);
+      return group;
+    }
+
     function renderRollups(st) {
       const source = rollups(st);
       const certs = source.certificate_statuses && typeof source.certificate_statuses === 'object'
@@ -276,26 +290,28 @@ let exportedDarklabProjectOverview = null;
       const highSignal = Number(severities.critical || 0) + Number(severities.high || 0);
       const certAttention = Number(certs.expired || 0) + Number(certs.expiring_14d || 0) + Number(certs.expiring_30d || 0);
       const recentState = String(source.recent_change_state || 'not-monitored');
+      const targetCount = Number(source.target_count || 0);
+      const scannedCount = Number(source.app_scan_target_count || 0);
+      const scanPercent = targetCount > 0 ? Math.round((scannedCount / targetCount) * 100) : 0;
       const wrap = document.createElement('div');
       wrap.className = 'project-overview-summary';
-      const primary = document.createElement('div');
-      primary.className = 'project-overview-summary-grid is-primary';
-      primary.append(
-        summaryCard('Targets', formatCount(source.target_count), `${formatCount(source.provider_count)} cached providers`, '', 'primary'),
-        summaryCard('App-native ports', formatCount(source.app_port_count), `${formatCount(source.app_port_target_count)} targets`, '', 'primary'),
-        summaryCard('App scan coverage', formatCount(source.app_scan_target_count), `${formatCount(source.unscanned_target_count)} unscanned`, '', 'primary'),
-        summaryCard('Verification gaps', formatCount(source.awaiting_verification_target_count), 'targets waiting', '', 'primary'),
+      wrap.append(
+        renderSummaryGroup('Coverage', [
+          summaryCard('Targets', formatCount(source.target_count), `${formatCount(source.provider_count)} cached providers`),
+          summaryCard('App scan coverage', `${formatCount(scannedCount)} of ${formatCount(targetCount)}`, `${formatCount(scanPercent)}% · ${formatCount(source.unscanned_target_count)} unscanned`),
+        ]),
+        renderSummaryGroup('Evidence', [
+          summaryCard('App-native ports', formatCount(source.app_port_count), `${formatCount(source.app_port_target_count)} targets`),
+          summaryCard('Cached provider ports', formatCount(source.open_port_count), `${formatCount(source.service_count)} services`),
+          summaryCard('Provider/app drift', formatCount(source.port_divergence_target_count), 'targets differ', Number(source.port_divergence_target_count || 0) ? 'attention' : ''),
+        ]),
+        renderSummaryGroup('Risk/work', [
+          summaryCard('High-risk targets', formatCount(highSignal), 'critical/high finding', highSignal ? 'attention' : ''),
+          summaryCard('Verification gaps', formatCount(source.awaiting_verification_target_count), 'targets waiting', Number(source.awaiting_verification_target_count || 0) ? 'attention' : ''),
+          summaryCard('Certificates', formatCount(certAttention), 'expired or expiring', certAttention ? 'attention' : ''),
+          summaryCard('Recent changes', recentLabels[recentState] || readableToken(recentState), ''),
+        ]),
       );
-      const secondary = document.createElement('div');
-      secondary.className = 'project-overview-summary-grid is-secondary';
-      secondary.append(
-        summaryCard('Cached provider ports', formatCount(source.open_port_count), `${formatCount(source.service_count)} services`, '', 'compact'),
-        summaryCard('Provider/app drift', formatCount(source.port_divergence_target_count), 'targets differ', Number(source.port_divergence_target_count || 0) ? 'attention' : '', 'compact'),
-        summaryCard('High-risk targets', formatCount(highSignal), 'critical/high finding', highSignal ? 'attention' : '', 'compact'),
-        summaryCard('Certificates', formatCount(certAttention), 'expired or expiring', certAttention ? 'attention' : '', 'compact'),
-        summaryCard('Recent changes', recentLabels[recentState] || readableToken(recentState), '', '', 'compact'),
-      );
-      wrap.append(primary, secondary);
       return wrap;
     }
 
@@ -304,7 +320,8 @@ let exportedDarklabProjectOverview = null;
       wrap.className = 'project-overview-provider-caveat';
       wrap.appendChild(badge('Cached provider data', 'badge-tone-muted'));
       const text = document.createElement('span');
-      text.textContent = 'App-captured ports and services are shown first when available. Provider ports, services, certificates, and highlights come from saved intel snapshots.';
+      text.textContent = 'App-captured ports and services are shown first; provider data comes from saved intel snapshots.';
+      text.title = 'Provider ports, services, certificates, and highlights come from saved intel snapshots.';
       wrap.appendChild(text);
       return wrap;
     }
@@ -638,13 +655,6 @@ let exportedDarklabProjectOverview = null;
       const labels = ports.map(appPortLabel).filter(Boolean);
       const wrap = document.createElement('div');
       wrap.className = 'project-overview-port-badge-list';
-      if (!labels.length) {
-        const empty = document.createElement('span');
-        empty.className = 'project-overview-target-value-muted';
-        empty.textContent = 'No app-captured ports';
-        wrap.appendChild(empty);
-        return wrap;
-      }
       labels.slice(0, limit).forEach((label) => {
         const chip = badge(label, 'badge-tone-muted', 'project-overview-port-badge', label);
         wrap.appendChild(chip);
@@ -664,6 +674,7 @@ let exportedDarklabProjectOverview = null;
     function providerPortText(target) {
       const ports = Array.isArray(target?.open_ports) ? target.open_ports : [];
       const services = Array.isArray(target?.services) ? target.services : [];
+      if (!ports.length && !services.length) return '';
       const portText = ports.length ? ports.slice(0, 5).join(', ') : 'No ports';
       const serviceText = services.length ? services.slice(0, 4).join(', ') : 'No services';
       return `${portText} · ${serviceText}`;
@@ -710,6 +721,31 @@ let exportedDarklabProjectOverview = null;
       return scopeNote ? `${label}: ${scopeNote}` : label;
     }
 
+    function hasFindingWork(target) {
+      const counts = findingCounts(target);
+      const severity = String(target?.top_finding_severity || '');
+      return Boolean(severity)
+        || Number(counts.review.new || 0) > 0
+        || Number(counts.review.important || 0) > 0
+        || Number(counts.review.needs_followup || 0) > 0
+        || Number(counts.verification.not_started || 0) > 0
+        || Number(counts.verification.ready_to_verify || 0) > 0
+        || Number(counts.verification.needs_retest || 0) > 0;
+    }
+
+    function isUnscannedEmptyTarget(target) {
+      const evidence = target?.app_evidence && typeof target.app_evidence === 'object' ? target.app_evidence : {};
+      const coverageState = String(evidence.coverage_state || 'not_scanned');
+      return coverageState === 'not_scanned'
+        && !hasFindingWork(target)
+        && !target?.source_flags?.has_intel
+        && !target?.source_flags?.has_stale_intel
+        && !target?.source_flags?.has_recent_changes
+        && (!Array.isArray(target?.app_ports) || target.app_ports.length === 0)
+        && (!Array.isArray(target?.open_ports) || target.open_ports.length === 0)
+        && (!Array.isArray(target?.services) || target.services.length === 0);
+    }
+
     function findingProgressText(target) {
       const counts = findingCounts(target);
       const awaitingReview = Number(counts.review.new || 0);
@@ -742,6 +778,46 @@ let exportedDarklabProjectOverview = null;
       else body.textContent = String(value || '');
       row.append(key, body);
       return row;
+    }
+
+    function targetSummaryLine(target) {
+      const parts = [];
+      const evidence = target?.app_evidence && typeof target.app_evidence === 'object' ? target.app_evidence : {};
+      const coverageState = String(evidence.coverage_state || 'not_scanned');
+      if (Array.isArray(target?.app_ports) && target.app_ports.length) {
+        parts.push(`${formatCount(Number(target?.app_port_count || target.app_ports.length))} app port${Number(target?.app_port_count || target.app_ports.length) === 1 ? '' : 's'}`);
+      } else if (coverageState === 'scanned_no_ports_seen') {
+        parts.push('scanned, no app ports surfaced');
+      } else if (coverageState === 'not_scanned') {
+        parts.push('not scanned');
+      }
+      if (target?.source_flags?.has_intel) {
+        parts.push(target?.source_flags?.has_stale_intel ? 'provider intel stale' : 'provider intel current');
+      } else {
+        parts.push('no provider intel');
+      }
+      return parts.join(' · ');
+    }
+
+    function targetDetailRows(target) {
+      const rows = [];
+      const portList = appPortChipList(target);
+      if (portList.childElementCount) rows.push(targetDetailRow('Ports', portList));
+      const providerText = providerPortText(target);
+      if (providerText) rows.push(targetDetailRow('Provider', providerText));
+      const intelText = providerFreshnessValue(target);
+      if (intelText && intelText !== 'none') rows.push(targetDetailRow('Intel', intelText));
+      const scanText = appEvidenceText(target);
+      if (scanText && scanText !== appCoverageLabels.not_scanned) rows.push(targetDetailRow('Scan', scanText));
+      const findings = findingProgressValue(target);
+      if (findings && findings !== 'no open review work') rows.push(targetDetailRow('Findings', findings));
+      if (!rows.length) {
+        const tail = document.createElement('div');
+        tail.className = 'project-overview-target-muted-tail';
+        tail.textContent = targetSummaryLine(target);
+        rows.push(tail);
+      }
+      return rows;
     }
 
     function applyEntityHints(projectId, hints, options = {}) {
@@ -848,14 +924,14 @@ let exportedDarklabProjectOverview = null;
         ));
       }
       const certStatus = String(target?.certificate?.status || 'unknown');
-      chips.push(badge(
-        `Cert: ${certificateText(target?.certificate)}`,
-        certificateTone(certStatus),
-        'project-overview-chip',
-        certStatus === 'unknown'
-          ? 'No usable certificate expiry data found for this target'
-          : 'Certificate expiry status for this target',
-      ));
+      if (certStatus === 'expired' || certStatus === 'expiring_14d' || certStatus === 'expiring_30d') {
+        chips.push(badge(
+          `Cert: ${certificateText(target?.certificate)}`,
+          certificateTone(certStatus),
+          'project-overview-chip',
+          'Certificate expiry status for this target',
+        ));
+      }
       if (target?.source_flags?.has_recent_changes) {
         chips.push(badge('Changed', 'badge-tone-cyan', 'project-overview-chip'));
       }
@@ -891,43 +967,63 @@ let exportedDarklabProjectOverview = null;
           'project-overview-chip',
           'Cached provider data for this target is past its refresh window',
         ));
-      } else if (!target?.source_flags?.has_intel) {
-        chips.push(badge(
-          'Intel: None',
-          'badge-tone-muted',
-          'project-overview-chip',
-          'No cached provider data for this target',
-        ));
       }
       return chips;
     }
 
+    function targetSeverityClass(target) {
+      const tone = severityTone(target?.top_finding_severity);
+      if (tone === 'badge-tone-red') return 'has-severity-red';
+      if (tone === 'badge-tone-amber') return 'has-severity-amber';
+      return '';
+    }
+
     function renderTargetRow(projectId, target, { mobile = false } = {}) {
       const row = document.createElement('article');
-      row.className = mobile
-        ? 'project-overview-target-row is-mobile'
-        : 'project-overview-target-row panel-row';
+      row.className = [
+        'project-overview-target-row',
+        mobile ? 'is-mobile' : 'panel-row',
+        targetSeverityClass(target),
+      ].filter(Boolean).join(' ');
       const main = document.createElement('div');
       main.className = 'project-overview-target-main';
+      const header = document.createElement('div');
+      header.className = 'project-overview-target-header';
       const title = document.createElement('div');
       title.className = 'project-overview-target-title';
       title.textContent = targetTitle(target);
+      const headerBadges = document.createElement('div');
+      headerBadges.className = 'project-overview-target-header-badges';
+      const severity = String(target?.top_finding_severity || '');
+      if (severity) {
+        headerBadges.appendChild(badge(
+          severityLabels[severity] || readableToken(severity),
+          severityTone(severity),
+          'project-overview-severity-badge',
+          'Highest actionable finding severity for this target',
+        ));
+      }
+      const findingSummary = findingProgressValue(target);
+      if (findingSummary && findingSummary !== 'no open review work') {
+        headerBadges.appendChild(badge(
+          findingSummary,
+          'badge-tone-muted',
+          'project-overview-finding-summary-badge',
+          'Finding review and verification work for this target',
+        ));
+      }
+      header.append(title, headerBadges);
       const meta = document.createElement('div');
       meta.className = 'project-overview-target-meta';
       meta.textContent = targetMeta(target);
       const details = document.createElement('div');
       details.className = 'project-overview-target-details';
-      details.append(
-        targetDetailRow('Ports', appPortChipList(target)),
-        targetDetailRow('Provider', providerPortText(target)),
-        targetDetailRow('Intel', providerFreshnessValue(target)),
-        targetDetailRow('Scan', appEvidenceText(target)),
-        targetDetailRow('Findings', findingProgressValue(target)),
-      );
+      targetDetailRows(target).forEach(item => details.appendChild(item));
       const chipWrap = document.createElement('div');
       chipWrap.className = 'project-overview-target-chips';
       targetChips(target).forEach(chip => chipWrap.appendChild(chip));
-      main.append(title, meta, details, chipWrap);
+      main.append(header, meta, details);
+      if (chipWrap.childElementCount) main.appendChild(chipWrap);
 
       const highlights = providerHighlights(target);
       if (highlights.length) {
@@ -956,27 +1052,60 @@ let exportedDarklabProjectOverview = null;
       return row;
     }
 
+    function filteredTargets(rows, st) {
+      if (!st?.hideEmptyTargets) return rows;
+      return rows.filter(target => !isUnscannedEmptyTarget(target));
+    }
+
+    function renderTargetToolbar(rows, visibleRows, st) {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-overview-target-toolbar';
+      const meta = document.createElement('span');
+      meta.className = 'project-overview-target-count';
+      meta.textContent = visibleRows.length === rows.length
+        ? `${formatCount(rows.length)} targets`
+        : `Showing ${formatCount(visibleRows.length)} of ${formatCount(rows.length)} targets`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'toggle-btn project-overview-worklist-filter-toggle';
+      button.textContent = 'Hide unscanned with no findings';
+      button.setAttribute('aria-pressed', st?.hideEmptyTargets ? 'true' : 'false');
+      button.dataset.projectOverviewAction = 'toggle-empty-targets';
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        st.hideEmptyTargets = !st.hideEmptyTargets;
+        st.targetsExpanded = false;
+        if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+        else ctx.renderProjectExplorer?.();
+      });
+      ctx.bindProjectRuntimePressable?.(button);
+      wrap.append(meta, button);
+      return wrap;
+    }
+
     function renderTargetList(projectId, rows, st, { mobile = false } = {}) {
       const wrap = document.createElement('div');
       wrap.className = 'project-overview-target-section';
+      const visibleRows = filteredTargets(rows, st);
+      wrap.appendChild(renderTargetToolbar(rows, visibleRows, st));
       const list = document.createElement('div');
       list.className = 'project-overview-target-list';
-      const limit = Number(st?.targetsExpanded) ? rows.length : TARGET_PREVIEW_LIMIT;
-      rows.slice(0, limit).forEach(target => list.appendChild(renderTargetRow(projectId, target, { mobile })));
+      const limit = Number(st?.targetsExpanded) ? visibleRows.length : TARGET_PREVIEW_LIMIT;
+      visibleRows.slice(0, limit).forEach(target => list.appendChild(renderTargetRow(projectId, target, { mobile })));
+      if (!visibleRows.length) {
+        const empty = document.createElement('div');
+        empty.className = 'project-overview-target-filter-empty';
+        empty.textContent = 'No targets match the current worklist filter.';
+        list.appendChild(empty);
+      }
       wrap.appendChild(list);
-      if (rows.length > TARGET_PREVIEW_LIMIT) {
+      if (visibleRows.length > TARGET_PREVIEW_LIMIT) {
         const footer = document.createElement('div');
         footer.className = 'project-overview-target-list-footer';
-        const button = typeof ctx.makeProjectButton === 'function'
-          ? ctx.makeProjectButton(
-            st.targetsExpanded ? 'Show fewer targets' : `Show all ${formatCount(rows.length)} targets`,
-            'overview-target-list-toggle',
-            projectId,
-            'ghost',
-          )
-          : document.createElement('button');
+        const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = st.targetsExpanded ? 'Show fewer targets' : `Show all ${formatCount(rows.length)} targets`;
+        button.className = 'btn btn-ghost';
+        button.textContent = st.targetsExpanded ? 'Show fewer targets' : `Show all ${formatCount(visibleRows.length)} targets`;
         button.dataset.projectOverviewAction = 'toggle-targets';
         button.addEventListener('click', (event) => {
           event.preventDefault();
@@ -1035,17 +1164,17 @@ let exportedDarklabProjectOverview = null;
       root.dataset.projectOverviewRoot = normalized;
       root.appendChild(renderRollups(st));
       root.appendChild(renderProviderIntelCaveat());
+      root.appendChild(renderFindingProgress(st));
+      root.appendChild(renderOperationalTempo(normalized, st));
+      root.appendChild(renderCoverageGaps(normalized, st));
+      root.appendChild(renderDeliverablesStatus(st));
+      root.appendChild(renderRecentState(st));
       const rows = targets(st);
       if (!rows.length) {
         root.appendChild(ctx.emptyProjectPanel?.('No project targets yet.') || document.createTextNode('No project targets yet.'));
       } else {
         root.appendChild(renderTargetList(normalized, rows, st, { mobile }));
       }
-      root.appendChild(renderFindingProgress(st));
-      root.appendChild(renderOperationalTempo(normalized, st));
-      root.appendChild(renderCoverageGaps(normalized, st));
-      root.appendChild(renderDeliverablesStatus(st));
-      root.appendChild(renderRecentState(st));
       container.replaceChildren(root);
     }
 

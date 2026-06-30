@@ -10062,25 +10062,29 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 
 .project-overview-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
 .project-overview-summary {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
-.project-overview-summary-grid.is-primary {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+.project-overview-summary-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
-.project-overview-summary-grid.is-secondary {
-  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
-  gap: 8px;
+.project-overview-summary-heading {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
-
 
 
 .project-overview-summary-card {
@@ -10093,15 +10097,8 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   background: var(--theme-chrome-row-bg);
 }
 
-.project-overview-summary-card.is-primary {
-  min-height: 78px;
-  padding: 14px;
-}
-
 .project-overview-summary-card.is-compact {
-  gap: 2px;
-  padding: 9px 10px;
-  background: transparent;
+  padding: 12px;
 }
 
 
@@ -10119,12 +10116,12 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 }
 
 .project-overview-summary-card.is-compact strong {
-  font-size: 15px;
+  font-size: 20px;
 }
 
 .project-overview-summary-card.is-compact span,
 .project-overview-summary-card.is-compact .project-overview-summary-detail {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 
@@ -10463,6 +10460,27 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   gap: 8px;
 }
 
+.project-overview-target-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.project-overview-target-count {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.project-overview-worklist-filter-toggle.toggle-btn {
+  min-height: 28px;
+  padding: 5px 9px;
+}
+
 .project-overview-target-list-footer {
   display: flex;
   justify-content: flex-start;
@@ -10476,8 +10494,26 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  position: relative;
   padding: 12px;
   background: var(--theme-chrome-row-bg);
+  overflow: hidden;
+}
+
+.project-overview-target-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: transparent;
+}
+
+.project-overview-target-row.has-severity-red::before {
+  background: var(--red);
+}
+
+.project-overview-target-row.has-severity-amber::before {
+  background: var(--amber);
 }
 
 
@@ -10491,13 +10527,30 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 
 .project-overview-target-main {
   display: grid;
-  gap: 7px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-overview-target-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-overview-target-header-badges {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
   min-width: 0;
 }
 
 
 
 .project-overview-target-title {
+  min-width: 0;
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -10541,6 +10594,14 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   color: var(--muted);
 }
 
+.project-overview-target-muted-tail,
+.project-overview-target-filter-empty {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .project-overview-port-badge-list {
   display: flex;
   flex-wrap: wrap;
@@ -10560,6 +10621,15 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
 
 .project-overview-chip.badge {
   min-height: 20px;
+}
+
+.project-overview-severity-badge.badge,
+.project-overview-finding-summary-badge.badge {
+  max-width: min(100%, 360px);
+  min-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 
@@ -10657,6 +10727,15 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.project-overview-root.is-mobile .project-overview-target-header {
+  display: grid;
+  gap: 6px;
+}
+
+.project-overview-root.is-mobile .project-overview-target-header-badges {
+  justify-content: flex-start;
 }
 
 
@@ -14388,22 +14467,21 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-list {
-  display: grid;
-  gap: 0;
+  display: block;
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
   overflow-y: auto;
-  align-content: start;
 }
 
 .atlas-entity-row {
   width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 12px;
+  height: auto;
   min-height: 70px;
+  overflow: visible;
   padding: 12px 16px;
   border: 0;
   border-bottom: 1px solid var(--border);
@@ -14429,17 +14507,14 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   text-align: left;
 }
 
-.atlas-entity-row.has-row-action,
 .atlas-finding-queue-row.has-row-action {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
-.atlas-entity-row.is-selecting,
 .atlas-finding-queue-row.is-selecting {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-.atlas-entity-row.is-selecting.has-row-action,
 .atlas-finding-queue-row.is-selecting.has-row-action {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
@@ -14487,6 +14562,7 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-row-select-label {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14495,9 +14571,13 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-entity-main {
+  flex: 1 1 auto;
   display: grid;
   gap: 4px;
+  align-self: center;
   min-width: 0;
+  max-width: 100%;
+  overflow: visible;
 }
 
 .atlas-entity-value,
@@ -14509,22 +14589,35 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
 }
 
 .atlas-entity-value {
+  display: block;
   color: var(--text);
   font-weight: 700;
+  line-height: 1.35;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .atlas-entity-badges,
 .atlas-label-list {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  align-self: flex-start;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
+  padding-top: 2px;
 }
 
 .atlas-muted {
+  display: block;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .atlas-empty,
@@ -15252,9 +15345,12 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
  * contract (`>` means "drill in"). */
 .atlas-mobile-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
+  height: auto;
+  min-height: 64px;
+  overflow: visible;
   text-align: left;
   padding: 12px 14px;
   background: transparent;
@@ -15269,6 +15365,7 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  padding-top: 2px;
 }
 
 .atlas-mobile-row-select input {
@@ -15282,31 +15379,36 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  overflow: visible;
 }
 
 .atlas-mobile-row .atlas-entity-value,
 .atlas-mobile-row .atlas-finding-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .atlas-mobile-row .atlas-muted {
   font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .atlas-mobile-row .atlas-entity-badges {
   flex: 0 0 auto;
   display: flex;
   gap: 4px;
-  align-items: center;
-  flex-wrap: nowrap;
+  align-items: flex-start;
+  flex-wrap: wrap;
   max-width: 38%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .atlas-mobile-row-chev {
   flex: 0 0 auto;
+  margin-top: 1px;
   color: var(--muted);
   font-size: 18px;
   line-height: 1;
