@@ -99,6 +99,7 @@ function loadShellChrome({
   logClientError = vi.fn(),
   appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
+  openAtlas = vi.fn(() => Promise.resolve()),
   bindDismissible = null,
   bindMobileSheet = null,
   bindOutsideClickClose = () => {},
@@ -294,11 +295,13 @@ function loadShellChrome({
     renderHudClock: null,
     toggleRailCollapsed: null,
     openStatusMonitor,
+    openAtlas,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
     showToast,
     fetchAndRenderHistoryComparison,
+    openAtlas,
     bindDismissible,
     bindMobileSheet,
     enhanceAppSelects,
@@ -597,6 +600,7 @@ function loadShellChrome({
     bindMobileSheet,
     projectFindingsData: global.DarklabProjectFindingsData,
     openFindingsBoard: global.openFindingsBoard,
+    openAtlas,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
@@ -1343,6 +1347,7 @@ describe('shell chrome project workspace', () => {
     expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
     expect(field('source_command_roots').value).toBe('nmap')
     const optionValues = name => [...field(name).options].map(option => option.value)
+    expect(optionValues('target_entity_kind')).toEqual(['any', 'ip', 'domain', 'port', 'hash', 'cve', 'url'])
     expect(optionValues('match_mode')).toContain('domain_suffix')
     expect(optionValues('match_mode')).not.toContain('cidr')
     field('target_entity_kind').value = 'ip'
@@ -2017,7 +2022,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(detailBody.textContent).toContain('443 open')
       expect(detailBody.textContent).toContain('443/tcp open https')
-      expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
+      expect(detailBody.querySelector('[data-project-action="open-project-finding"]')).not.toBeNull()
       expect(detailBody.querySelector('[data-project-action="open-findings-board"]')).toBeNull()
       expect(detailBody.querySelector('[data-project-finding-view-mode="board"]')).toBeNull()
       expect(detailBody.querySelector('.project-finding-board')).toBeNull()
@@ -2025,6 +2030,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
       expect(reviewSelect).not.toBeNull()
+      expect(actionSheet.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
       const actionSheetItems = actionSheet.querySelector('.action-sheet-items')
       expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
       expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
@@ -2045,19 +2051,18 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.querySelector('[data-project-finding-group-toggle]')).toBeNull()
       expect(detailBody.textContent).toContain('nmap darklab.sh')
       shell.restoreHistoryRunIntoTab.mockClear()
-      detailBody.querySelector('[data-project-action="open-finding"]').click()
+      shell.openAtlas.mockClear()
+      detailBody.querySelector('[data-project-action="open-project-finding"]').click()
       await tick()
-      expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
-        {
-          id: 'run-1',
-          command: 'nmap darklab.sh',
-          full_output_available: true,
-        },
-        {
-          hidePanelOnSuccess: false,
-          highlightLineIndex: 4,
-        },
-      )
+      await tick()
+      expect(shell.openAtlas).toHaveBeenCalledWith({
+        source: 'project-workspace',
+        projectId: 'project-1',
+        projectName: 'darklab.sh',
+        tab: 'findings',
+        findingId: 'finding-1',
+      })
+      expect(shell.restoreHistoryRunIntoTab).not.toHaveBeenCalled()
       expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
 
       await shell.openProjectWorkspace()
@@ -5055,7 +5060,11 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-finding-bulk-review')).toBeNull()
     expect(document.querySelector('.project-finding-review')?.value).toBe('reviewed')
 
-    document.querySelector('[data-project-action="open-finding"]').click()
+    const explorerBody = document.getElementById('project-explorer-body')
+    expect(explorerBody.querySelector('[data-project-action="open-project-finding"][data-finding-id="finding-1"]')).not.toBeNull()
+    expect(explorerBody.querySelector('[data-project-action="open-finding"][data-run-id="run-1"]')).not.toBeNull()
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+    explorerBody.querySelector('[data-project-action="open-finding"]').click()
     await tick()
 
     expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(

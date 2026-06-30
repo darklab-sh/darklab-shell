@@ -198,6 +198,15 @@ class RunOutputCapture:
             if isinstance(entity.get("start"), int) and isinstance(entity.get("end"), int):
                 item["start"] = entity["start"]
                 item["end"] = entity["end"]
+            attributes = entity.get("attributes")
+            if isinstance(attributes, Mapping):
+                safe_attributes = {
+                    str(key).strip(): value
+                    for key, value in attributes.items()
+                    if str(key).strip() and isinstance(value, (str, int, float, bool))
+                }
+                if safe_attributes:
+                    item["attributes"] = safe_attributes
             normalized.append(item)
         return normalized
 

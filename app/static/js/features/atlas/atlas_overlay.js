@@ -89,6 +89,8 @@ let exportedCycleAtlasTab = null;
   const runFilterSearch = document.getElementById('atlas-run-filter-search');
   const runFilterSelect = document.getElementById('atlas-run-filter-select');
   const runFilterChip = document.getElementById('atlas-run-filter-chip');
+  const projectFilterSelect = document.getElementById('atlas-project-filter-select');
+  const projectFilterChip = document.getElementById('atlas-project-filter-chip');
   const findingStatusFilter = document.getElementById('atlas-finding-status-filter');
   const orphanFilter = document.getElementById('atlas-orphan-filter');
   const suppressionFilter = document.getElementById('atlas-suppression-filter');
@@ -199,6 +201,9 @@ let exportedCycleAtlasTab = null;
     projectName: '',
     launchProjectId: '',
     launchProjectName: '',
+    projectOptions: [],
+    projectOptionsLoaded: false,
+    projectOptionsLoading: false,
     runId: '',
     runLabel: '',
     runOptions: [],
@@ -213,6 +218,7 @@ let exportedCycleAtlasTab = null;
     loading: false,
     selectedId: '',
     requestedEntityValue: '',
+    requestedFindingId: '',
     requestedView: '',
     requestedViewStarted: 0,
     refreshIntelOnSelect: false,
@@ -465,6 +471,7 @@ let exportedCycleAtlasTab = null;
     state.runLabel = String(options && options.runLabel || '').trim();
     state.runOptionsQuery = '';
     state.requestedEntityValue = String(options && options.entityValue || '').trim();
+    state.requestedFindingId = String(options && options.findingId || '').trim();
     state.requestedView = ['detail', 'list'].includes(String(options && options.forceView || ''))
       ? String(options.forceView)
       : 'list';
@@ -494,6 +501,9 @@ let exportedCycleAtlasTab = null;
     });
     loadRunOptions().catch((err) => {
       logImportClientError('failed to load atlas run filters', err);
+    });
+    loadProjectOptions().catch((err) => {
+      logImportClientError('failed to load atlas project filters', err);
     });
     await refreshAtlas({ resetOffset: true });
   }
@@ -681,6 +691,10 @@ let exportedCycleAtlasTab = null;
       runFilterSelect.appendChild(option('Filter by run', ''));
       runFilterSelect.dataset.populated = '1';
     }
+    if (projectFilterSelect && !projectFilterSelect.dataset.populated) {
+      projectFilterSelect.appendChild(option('Filter by project', ''));
+      projectFilterSelect.dataset.populated = '1';
+    }
     syncSelectDisplay(findingStatusFilter);
     if (findingBulkStatus) {
       findingBulkStatus.disabled = state.loading || state.bulkInFlight || !canTriageAtlasRows();
@@ -688,6 +702,7 @@ let exportedCycleAtlasTab = null;
       syncSelectDisplay(findingBulkStatus);
     }
     syncSelectDisplay(runFilterSelect);
+    syncSelectDisplay(projectFilterSelect);
     syncSelectDisplay(orphanFilter);
     syncSelectDisplay(suppressionFilter);
     syncSelectDisplay(savedViewSelect);
@@ -790,6 +805,28 @@ let exportedCycleAtlasTab = null;
       : [];
   }
 
+  function normalizeProjectOptions(value) {
+    return Array.isArray(value)
+      ? value.map(item => ({
+        id: String(item && item.id || '').trim(),
+        name: String(item && (item.name || item.slug || item.id) || '').trim(),
+        slug: String(item && item.slug || '').trim(),
+        status: String(item && item.status || '').trim(),
+      })).filter(item => item.id)
+      : [];
+  }
+
+  function projectOptionLabel(project) {
+    const name = String(project && project.name || project && project.id || '').trim() || 'Project';
+    const status = String(project && project.status || '').trim();
+    return status === 'archived' ? `${name} (archived)` : name;
+  }
+
+  function selectedProjectOption() {
+    const selectedId = String(state.projectId || '');
+    return state.projectOptions.find(project => String(project.id || '') === selectedId) || null;
+  }
+
   function runOptionLabel(run) {
     const command = String(run && run.command || '').trim() || 'Run';
     const entityCount = Number(run && run.entity_count || 0);
@@ -841,6 +878,40 @@ let exportedCycleAtlasTab = null;
     runFilterSelect.value = state.runId || '';
     runFilterSelect.disabled = state.runOptionsLoading;
     syncSelectDisplay(runFilterSelect);
+  }
+
+  function renderProjectFilterControls() {
+    if (!projectFilterSelect) return;
+    const optionRows = [...state.projectOptions];
+    if (state.projectId && !optionRows.some(project => String(project.id || '') === state.projectId)) {
+      optionRows.unshift({
+        id: state.projectId,
+        name: state.projectName || state.projectId,
+        slug: '',
+        status: '',
+      });
+    }
+    const nextValues = ['', ...optionRows.map(project => String(project.id || ''))].join('\n');
+    const currentValues = Array.from(projectFilterSelect.options || []).map(option => option.value).join('\n');
+    if (nextValues !== currentValues) {
+      projectFilterSelect.replaceChildren();
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = state.projectOptionsLoading ? 'Loading projects...' : 'Filter by project';
+      projectFilterSelect.appendChild(placeholder);
+      optionRows.forEach((project) => {
+        const option = document.createElement('option');
+        option.value = String(project.id || '');
+        option.textContent = projectOptionLabel(project);
+        option.dataset.projectName = String(project.name || project.id || '');
+        projectFilterSelect.appendChild(option);
+      });
+    } else if (projectFilterSelect.options[0]) {
+      projectFilterSelect.options[0].textContent = state.projectOptionsLoading ? 'Loading projects...' : 'Filter by project';
+    }
+    projectFilterSelect.value = state.projectId || '';
+    projectFilterSelect.disabled = state.projectOptionsLoading;
+    syncSelectDisplay(projectFilterSelect);
   }
 
   function currentSavedViewState(name = '') {
@@ -992,6 +1063,35 @@ let exportedCycleAtlasTab = null;
     } finally {
       state.runOptionsLoading = false;
       renderRunFilterControls();
+    }
+  }
+
+  async function loadProjectOptions({ force = false } = {}) {
+    if (
+      !force
+      && state.projectOptionsLoaded
+      && (!state.projectId || state.projectOptions.some(project => String(project.id || '') === String(state.projectId || '')))
+    ) {
+      return state.projectOptions;
+    }
+    state.projectOptionsLoading = true;
+    renderProjectFilterControls();
+    try {
+      const params = new URLSearchParams({ mode: 'switcher', limit: '30' });
+      const resp = await api()(`/projects?${params.toString()}`, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      state.projectOptions = normalizeProjectOptions(data.projects);
+      state.projectOptionsLoaded = true;
+      const selected = selectedProjectOption();
+      if (selected && selected.name && !state.projectName) state.projectName = selected.name;
+      return state.projectOptions;
+    } catch (err) {
+      logImportClientError('failed to load atlas project filters', err);
+      return state.projectOptions;
+    } finally {
+      state.projectOptionsLoading = false;
+      renderProjectFilterControls();
     }
   }
 
@@ -1469,6 +1569,9 @@ let exportedCycleAtlasTab = null;
     loadRunOptions({ force: true }).catch((err) => {
       logImportClientError('failed to load atlas run filters', err);
     });
+    loadProjectOptions({ force: true }).catch((err) => {
+      logImportClientError('failed to load atlas project filters', err);
+    });
     refreshAtlas({ resetOffset: true, force: true });
   }
 
@@ -1774,6 +1877,8 @@ let exportedCycleAtlasTab = null;
     renderFindingControls();
     renderRunFilterControls();
     renderRunFilterChip();
+    renderProjectFilterControls();
+    renderProjectFilterChip();
     renderTabs();
     renderList();
     renderPagination();
@@ -1794,6 +1899,10 @@ let exportedCycleAtlasTab = null;
     applyRunFilter('', '');
   }
 
+  function clearProjectFilter() {
+    applyProjectFilter('', '');
+  }
+
   function clearAtlasFilters() {
     clearTimeout(state.searchTimer);
     clearTimeout(state.runSearchTimer);
@@ -1804,8 +1913,8 @@ let exportedCycleAtlasTab = null;
     state.findingStatus = '';
     state.orphanFilter = 'hide';
     state.suppressionFilter = 'hide';
-    state.projectId = state.launchProjectId;
-    state.projectName = state.launchProjectName;
+    state.projectId = '';
+    state.projectName = '';
     state.selectedSavedViewId = '';
     state.selectedId = '';
     state.selectedFindingId = '';
@@ -1823,6 +1932,9 @@ let exportedCycleAtlasTab = null;
     render();
     loadRunOptions({ query: '', force: true }).catch((err) => {
       logImportClientError('failed to load atlas run filters', err);
+    });
+    loadProjectOptions({ force: true }).catch((err) => {
+      logImportClientError('failed to load atlas project filters', err);
     });
     refreshAtlas({ resetOffset: true });
   }
@@ -1849,6 +1961,30 @@ let exportedCycleAtlasTab = null;
     state.refreshIntelOnSelect = false;
     state.addActiveProjectOnSelect = false;
     renderRunFilterControls();
+    refreshAtlas({ resetOffset: true });
+  }
+
+  function applyProjectFilter(projectId, projectName = '') {
+    state.projectId = '';
+    state.projectName = '';
+    const normalizedProjectId = String(projectId || '').trim();
+    if (normalizedProjectId) {
+      const matched = state.projectOptions.find(project => String(project.id || '') === normalizedProjectId);
+      state.projectId = normalizedProjectId;
+      state.projectName = String(projectName || matched?.name || normalizedProjectId).trim();
+    }
+    state.selectedFindingId = '';
+    state.selectedFindingIds.clear();
+    state.selectedId = '';
+    state.selectedEntityIds.clear();
+    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detail = null;
+    state.requestedEntityValue = '';
+    state.requestedView = '';
+    state.requestedViewStarted = 0;
+    state.refreshIntelOnSelect = false;
+    state.addActiveProjectOnSelect = false;
+    renderProjectFilterControls();
     refreshAtlas({ resetOffset: true });
   }
 
@@ -1882,6 +2018,21 @@ let exportedCycleAtlasTab = null;
     chip.title = state.runLabel ? `${state.runLabel} (${state.runId})` : state.runId;
     chip.addEventListener('click', clearRunFilter);
     runFilterChip.appendChild(chip);
+  }
+
+  function renderProjectFilterChip() {
+    if (!projectFilterChip) return;
+    projectFilterChip.replaceChildren();
+    const hasProjectFilter = !!state.projectId;
+    projectFilterChip.classList.toggle('u-hidden', !hasProjectFilter);
+    if (!hasProjectFilter) return;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip chip-removable';
+    chip.textContent = `Project: ${truncateRunFilterLabel(state.projectName || state.projectId)} ×`;
+    chip.title = state.projectName ? `${state.projectName} (${state.projectId})` : state.projectId;
+    chip.addEventListener('click', clearProjectFilter);
+    projectFilterChip.appendChild(chip);
   }
 
   async function refreshAtlas({ resetOffset = false, force = false } = {}) {
@@ -1962,6 +2113,11 @@ let exportedCycleAtlasTab = null;
           }
         });
         state.selectedEntityIds.clear();
+        if (state.requestedFindingId) {
+          const requested = state.findings.find(item => String(item.id || '') === state.requestedFindingId);
+          state.selectedFindingId = requested ? String(requested.id || '') : '';
+          state.requestedFindingId = '';
+        }
         if (!state.selectedFindingId && state.findings[0]) state.selectedFindingId = state.findings[0].id;
         if (state.selectedFindingId && !state.findings.some(item => String(item.id || '') === state.selectedFindingId)) {
           state.selectedFindingId = state.findings[0]?.id || '';
@@ -2771,6 +2927,16 @@ let exportedCycleAtlasTab = null;
         selected?.dataset?.runCommand || selected?.textContent || '',
       );
     });
+    projectFilterSelect?.addEventListener('focus', () => {
+      loadProjectOptions({ force: !state.projectOptionsLoaded });
+    });
+    projectFilterSelect?.addEventListener('change', () => {
+      const selected = projectFilterSelect.selectedOptions?.[0] || null;
+      applyProjectFilter(
+        projectFilterSelect.value,
+        selected?.dataset?.projectName || selected?.textContent || '',
+      );
+    });
     findingStatusFilter?.addEventListener('change', () => {
       state.findingStatus = String(findingStatusFilter.value || '');
       state.selectedFindingId = '';
@@ -2950,6 +3116,8 @@ let exportedCycleAtlasTab = null;
     exportEntities,
     loadRunOptions,
     applyRunFilter,
+    loadProjectOptions,
+    applyProjectFilter,
     loadSavedViews,
     applySavedView,
     saveCurrentView,

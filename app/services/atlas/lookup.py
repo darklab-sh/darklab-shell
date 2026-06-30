@@ -9,7 +9,7 @@ from typing import Any
 
 from core.database import DB_BACKEND
 from core.database_backend import dialect_for_backend
-from services.atlas.materializer import ATLAS_ENTITY_TYPES
+from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.atlas.scope import (
     entity_exists_in_scope as entity_exists_in_scope,
     entity_import_exists_sql as _entity_import_exists_sql,
@@ -51,6 +51,8 @@ ATLAS_ENTITY_EXPORT_FIELDS = (
     "id",
     "type",
     "canonical_value",
+    "host_entity_id",
+    "attributes",
     "first_seen_at",
     "last_seen_at",
     "occurrence_count",
@@ -201,6 +203,8 @@ def _row_to_entity(row) -> dict[str, Any]:
         "session_id": row["session_id"],
         "type": row["type"],
         "canonical_value": row["canonical_value"],
+        "host_entity_id": (row["host_entity_id"] if "host_entity_id" in row.keys() else "") or "",
+        "attributes": _load_json_dict(row["attributes_json"] if "attributes_json" in row.keys() else "{}"),
         "first_seen_at": row["first_seen_at"],
         "last_seen_at": row["last_seen_at"],
         "occurrence_count": int(row["occurrence_count"] or 0),
@@ -1520,7 +1524,8 @@ def list_entities(
     page_limit = max(1, min(int(limit or 50), 200))
     page_offset = max(0, int(offset or 0))
     rows_sql = _sql_join((
-        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, ",
+        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
+        "e.first_seen_at, e.last_seen_at, ",
         "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created, "
         "COUNT(DISTINCT entity_run.id) AS run_count ",
         "FROM entities e ",
@@ -1646,7 +1651,8 @@ def _query_export_entities(
         page_limit,
     ]
     rows_sql = _sql_join((
-        "SELECT e.id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, e.occurrence_count, "
+        "SELECT e.id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
+        "e.first_seen_at, e.last_seen_at, e.occurrence_count, "
         "e.suppressed, e.suppressed_reason, e.suppressed_at ",
         "FROM entities e ",
         "WHERE ",
@@ -1681,6 +1687,8 @@ def _query_export_entities(
             "id": row["id"],
             "type": row["type"],
             "canonical_value": row["canonical_value"],
+            "host_entity_id": row["host_entity_id"] or "",
+            "attributes": _load_json_dict(row["attributes_json"]),
             "first_seen_at": row["first_seen_at"],
             "last_seen_at": row["last_seen_at"],
             "occurrence_count": int(row["occurrence_count"] or 0),
@@ -1766,6 +1774,8 @@ def atlas_entities_export(
 def _export_csv_value(value: Any) -> str:
     if isinstance(value, list):
         return "; ".join(str(item) for item in value if str(item or ""))
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
     return str(value or "")
 
 
@@ -1804,7 +1814,8 @@ def entity_detail(
     finding_scope_sql = _finding_source_scope_sql("f", team_id)
     finding_scope_params = _finding_source_scope_params(session_id, team_id)
     row = conn.execute(
-        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, "
+        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
+        "e.first_seen_at, e.last_seen_at, "
         "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created "
         "FROM entities e WHERE " + entity_scope_sql + " AND e.id = ?",  # nosec
         [*entity_scope_params, entity_id],

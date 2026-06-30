@@ -14,7 +14,7 @@ from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_ru
 log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.4"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 

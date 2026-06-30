@@ -1538,6 +1538,7 @@ def test_api_v1_project_readers_are_token_scoped():
     project = _create_project(client, token, name="Scoped API Project")
     run_id = _seed_run(token, command="echo project api", output="project api")
     entity_id = "ent_" + uuid.uuid4().hex[:16]
+    port_entity_id = "ent_" + uuid.uuid4().hex[:16]
     finding_id = "fnd_" + uuid.uuid4().hex[:16]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -1566,9 +1567,27 @@ def test_api_v1_project_readers_are_token_scoped():
             (entity_id, run_id),
         )
         conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
+            "first_seen_at, last_seen_at, occurrence_count, created) "
+            "VALUES (?, ?, 'port', 'api.darklab.sh:443/tcp', ?, ?, ?, "
+            "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 1, '2026-05-19T00:00:00+00:00')",
+            (port_entity_id, token, "sig_" + uuid.uuid4().hex, entity_id, json.dumps({"service": "https"})),
+        )
+        conn.execute(
+            "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+            "VALUES (?, ?, '2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 1)",
+            (port_entity_id, run_id),
+        )
+        conn.execute(
             "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
             "VALUES (?, ?, 'atlas_entity', ?, 'manual', '2026-05-19T00:00:00+00:00')",
             ("ple_" + uuid.uuid4().hex[:16], project["id"], entity_id),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', '2026-05-19T00:00:00+00:00')",
+            ("ple_" + uuid.uuid4().hex[:16], project["id"], port_entity_id),
         )
         conn.execute(
             "INSERT INTO findings "
@@ -1590,10 +1609,12 @@ def test_api_v1_project_readers_are_token_scoped():
     owner_findings = client.get(f"/api/v1/projects/{project['id']}/findings", headers=_headers(token))
     owner_runs = client.get(f"/api/v1/projects/{project['id']}/runs", headers=_headers(token))
     owner_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=domain", headers=_headers(token))
+    owner_port_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=port", headers=_headers(token))
     owner_packages = client.get(f"/api/v1/projects/{project['id']}/packages", headers=_headers(token))
     atlas_summary_resp = client.get("/api/v1/atlas", headers=_headers(token))
     atlas_runs = client.get("/api/v1/atlas/runs", headers=_headers(token))
     atlas_entities = client.get("/api/v1/atlas/entities?entity_type=domain&q=api", headers=_headers(token))
+    atlas_port_entities = client.get("/api/v1/atlas/entities?entity_type=port&q=443", headers=_headers(token))
     atlas_entity = client.get(f"/api/v1/atlas/entities/{entity_id}", headers=_headers(token))
     atlas_findings = client.get("/api/v1/atlas/findings?q=finding&review_state=new", headers=_headers(token))
     atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(token))
@@ -1613,7 +1634,13 @@ def test_api_v1_project_readers_are_token_scoped():
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
     assert owner_entities.status_code == 200
     assert json.loads(owner_entities.data)["entities"][0]["id"] == entity_id
-    assert json.loads(owner_entities.data)["counts_by_type"] == {"domain": 1}
+    assert json.loads(owner_entities.data)["counts_by_type"] == {"domain": 1, "port": 1}
+    assert owner_port_entities.status_code == 200
+    owner_port_payload = json.loads(owner_port_entities.data)
+    assert owner_port_payload["entities"][0]["id"] == port_entity_id
+    assert owner_port_payload["entities"][0]["type"] == "port"
+    assert owner_port_payload["entities"][0]["host_entity_id"] == entity_id
+    assert owner_port_payload["entities"][0]["attributes"] == {"service": "https"}
     assert owner_packages.status_code == 200
     assert json.loads(owner_packages.data)["total"] == 1
     assert atlas_summary_resp.status_code == 200
@@ -1622,6 +1649,12 @@ def test_api_v1_project_readers_are_token_scoped():
     assert json.loads(atlas_runs.data)["runs"][0]["id"] == run_id
     assert atlas_entities.status_code == 200
     assert json.loads(atlas_entities.data)["entities"][0]["id"] == entity_id
+    assert atlas_port_entities.status_code == 200
+    atlas_port_payload = json.loads(atlas_port_entities.data)
+    assert atlas_port_payload["entities"][0]["id"] == port_entity_id
+    assert atlas_port_payload["entities"][0]["type"] == "port"
+    assert atlas_port_payload["entities"][0]["host_entity_id"] == entity_id
+    assert atlas_port_payload["entities"][0]["attributes"] == {"service": "https"}
     assert atlas_entity.status_code == 200
     assert json.loads(atlas_entity.data)["entity"]["id"] == entity_id
     assert atlas_findings.status_code == 200
@@ -3516,10 +3549,11 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["HistorySearchPage"]["properties"]["matches"]["items"] == {"$ref": "#/components/schemas/HistorySearchMatch"}
     atlas_summary_params = {param["name"] for param in spec["paths"]["/atlas"]["get"]["parameters"]}
     assert {"project_id", "run_id", "orphan_filter", "suppression_filter"}.issubset(atlas_summary_params)
-    atlas_entity_params = {param["name"] for param in spec["paths"]["/atlas/entities"]["get"]["parameters"]}
+    atlas_entity_params = {param["name"]: param for param in spec["paths"]["/atlas/entities"]["get"]["parameters"]}
     assert {"entity_type", "q", "project_id", "run_id", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
         atlas_entity_params
     )
+    assert "port" in atlas_entity_params["entity_type"]["schema"]["enum"]
     atlas_finding_params = {param["name"] for param in spec["paths"]["/atlas/findings"]["get"]["parameters"]}
     assert {"q", "project_id", "run_id", "review_state", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
         atlas_finding_params
@@ -3536,8 +3570,11 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "severity",
         "target_id",
     }.issubset(project_finding_params)
-    project_entity_params = {param["name"] for param in spec["paths"]["/projects/{project_id}/entities"]["get"]["parameters"]}
+    project_entity_params = {
+        param["name"]: param for param in spec["paths"]["/projects/{project_id}/entities"]["get"]["parameters"]
+    }
     assert {"entity_type", "run_id", "target_id", "limit", "offset"}.issubset(project_entity_params)
+    assert "port" in project_entity_params["entity_type"]["schema"]["enum"]
     run_output_params = {param["name"] for param in spec["paths"]["/runs/{run_id}/output"]["get"]["parameters"]}
     assert {"format", "range"}.issubset(run_output_params)
     assert spec["paths"]["/runs/{run_id}/wait"]["post"]["responses"]["408"]["content"]["application/json"]["schema"] == {

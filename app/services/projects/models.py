@@ -138,6 +138,12 @@ def row_to_target(row, *, include_provenance=False):
             "type": row["type"],
             "value": row["canonical_value"],
             "canonical_value": row["canonical_value"],
+            "host_entity_id": (row["host_entity_id"] if "host_entity_id" in row.keys() else "") or "",
+            "attributes": (
+                dialect_for_backend(DB_BACKEND).decode_json_dict(row["attributes_json"])
+                if "attributes_json" in row.keys()
+                else {}
+            ),
             "source_run_id": row["source_run_id"] if "source_run_id" in row.keys() else "",
             "confidence": row["confidence"] if "confidence" in row.keys() else 1.0,
             "review_state": row["review_state"] if "review_state" in row.keys() else "confirmed",

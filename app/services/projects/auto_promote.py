@@ -15,7 +15,7 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.intel.canonical import CanonicalizationError, canonical_entity
-from services.intel.schema import ENTITY_TYPES
+from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.projects.contracts import MAX_ENTITY_ID_LEN, ProjectWorkspaceError, ProjectWorkspaceNotFound
 from services.projects.links import (
     _budget_available,
@@ -30,7 +30,7 @@ from services.projects.utils import cfg_int, now as _now, raise_quota as _raise_
 AUTO_PROMOTE_LINK_SOURCE = "auto_promote_rule"
 AUTO_PROMOTE_TABLE = "project_auto_promote_rules"
 AUTO_PROMOTE_ENTITY_TYPE = "atlas_entity"
-AUTO_PROMOTE_TARGET_KINDS = frozenset({"any", *ENTITY_TYPES})
+AUTO_PROMOTE_TARGET_KINDS = frozenset({"any", *ATLAS_ENTITY_TYPES})
 AUTO_PROMOTE_MATCH_MODES = frozenset({"exact", "contains", "wildcard", "domain_suffix", "cidr", "regex"})
 PROMOTABLE_PROJECT_LINK_SOURCES = frozenset({"auto_command", "auto_input_file"})
 MIN_BROAD_PATTERN_CHARS = 3
@@ -86,7 +86,7 @@ def _escape_like_pattern(value: str) -> str:
 
 def _exact_any_patterns(pattern: str) -> list[str]:
     values = {pattern.strip().lower()}
-    for entity_type in sorted(ENTITY_TYPES):
+    for entity_type in sorted(ATLAS_ENTITY_TYPES):
         try:
             if entity_type == "hash" and ":" in pattern:
                 algorithm, token = pattern.split(":", 1)

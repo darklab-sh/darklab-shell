@@ -29,7 +29,57 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+- **Enhance the project Overview tab with app-captured data.**
+  - The Overview payload (`app/services/projects/overview.py`) is built almost entirely from `entity_intel_snapshots` (cached external provider data). Ports, services, certificates, provider count, and target highlights are all provider-sourced; only the high-risk finding count and watcher recent-changes are app-native. The tab reads as a mirror of external intel rather than the state of the engagement.
+  - Completion note: The finding-count rendering slice is implemented. Overview now renders project-wide triage and verification progress from the existing per-target `finding_counts`, and target rows summarize new, awaiting-verification, false-positive, and suppressed finding work without changing the backend payload.
+  - North star: the Overview tab should answer what targets have been touched, what still needs review, what has been verified, what has no scan evidence, and whether the project deliverables are stale.
+  - Render the per-target `finding_counts` block (`by_review_state`, `by_verification_state`, `suppressed`) that the backend already computes and the frontend (`project_overview.js`) currently discards.
+    - Add a project-wide triage funnel rollup: New → Reviewed → Important/Needs-followup, plus suppressed and false-positive counts.
+    - Add a verification progress funnel: not_started → ready → verified → needs_retest. Show `not_applicable` as an aside count, not a funnel stage (like suppressed/false-positive in the triage funnel), so the funnel math reconciles with the total. The backend `FINDING_VERIFICATION_STATE_ORDER` is not_started → ready_to_verify → verified → needs_retest → not_applicable.
+    - Frontend-only; no backend change needed since the data is already on the wire.
+  - Add operational tempo from runs and the audit timeline as a bounded backend summary in the Overview payload.
+    - Last run time, runs in the last 7d, last finding triaged, last artifact captured.
+    - A short recent-activity strip with deep-links, reusing the Activity tab's target-type → workspace-tab mapping.
+  - Completion note: The operational-tempo slice is implemented. Overview now returns a bounded `operational_tempo` summary for linked runs, triage, and artifacts, plus a short `recent_activity` strip sourced from scoped audit events. The UI renders those fields as compact cards and activity jump buttons that reuse the existing workspace tabs.
+  - Add coverage/gap signals by crossing app-captured runs and findings against the target list. Split these into what is answerable now versus what is gated on future capture.
+    - Answerable now from app data (ship first): targets no app run has touched (targets carry `source_run_id`, and findings/runs link back — no provider port data needed), targets with findings awaiting verification, and targets with stale or missing follow-up.
+    - Gated on future app-native port/service capture: "scanned but nothing found" style gaps. The Overview's ports/services come only from `entity_intel_snapshots` today; there is no per-target app-native port rollup (nmap-import parsing lands in findings/entities, not a port structure), so this gap waits on that capture work.
+    - Negative evidence is a distinct requirement: port entities prove "this scan found open ports," but they cannot by themselves prove "this host was scanned and had none." Distinguishing "scanned, no open ports" from "untouched" needs scan-observation evidence (which host a run actually scanned), tracked as its own stream — see the port entity TODO's scan-observation item. Caveat: even with that evidence we usually do not know the scan's port coverage, so the honest claim is "scanned in a run that surfaced no ports," not "no open ports exist."
+    - Treat provider-derived ports/services separately from app-captured evidence. If a gap uses cached provider ports, label it clearly as provider-derived until the backend has app-native port evidence for that target.
+    - Turns Overview into an actionable worklist instead of just a read-only intel summary.
+  - Completion note: The answerable coverage-gap slice is implemented. Overview now returns bounded `coverage_gaps` for targets with no app-captured scan, targets awaiting verification, and targets needing review/follow-up, plus rollup counts for targets awaiting verification and needing follow-up. The UI renders those gaps as a compact worklist with existing Entities/Findings deep-links.
+  - Add a deliverables status line for Packages/Report as another bounded backend summary.
+    - Last package built, last report saved/exported, and report freshness versus the latest finding or triage update.
+  - Completion note: The deliverables-status slice is implemented. Overview now returns a bounded `deliverables_status` summary for latest package save/build, latest report save/export, latest finding activity, and report freshness. The UI renders it as compact deliverable cards with a freshness badge.
+  - Demote external intel honestly: keep the ports/services/cert panel, but make provider freshness more visible.
+    - `last_checked_at`, stale flags, and `Intel: Stale`/`Intel: None` already exist; surface them more clearly in summary and row details.
+    - Add a clear "cached provider data" caveat anywhere the UI might otherwise imply live app-captured state.
+  - Completion note: The cached-provider polish slice is implemented. Overview now labels provider-backed port/service counts as cached provider data, shows a visible cached-provider caveat before target rows, and includes per-target provider freshness details with stale/no-intel states and the latest checked timestamp when available.
+  - Suggested sequencing:
+    - First: render finding triage and verification rollups from existing `finding_counts`.
+    - Second: add backend overview summaries for app-captured runs, artifacts, and recent activity.
+    - Third: add the coverage gaps that are answerable now from run/finding linkage (untouched targets, awaiting verification, stale follow-up); defer the port-dependent "scanned but nothing found" gap until app-native port capture exists.
+    - Fourth: add deliverables status for Packages/Report.
+    - Fifth: polish copy and visual treatment around cached provider intel.
+
+- **Add a project filter to the Atlas modal and surface the project scope as a clearable chip.**
+  - "Open in Atlas" from the Projects modal (`project_navigation.js` → `openAtlas`) launches the Atlas overlay scoped to the project, but the scope is invisible: it lives only in `state.projectId`/`state.projectName` (`atlas_overlay.js`) and surfaces faintly in the subtitle. There is no filter control or chip, no way to clear it, and no way to filter by project from within Atlas — the Projects-modal button is the only entry point.
+  - Add a project filter control alongside the existing Atlas filters (run search/select, finding status, orphan, suppression) in the template (`app/templates/index.html`, the `atlas-*-filter` row) so users can scope to any project from inside the modal.
+  - Model it on the existing run filter: a `select` plus a clearable chip (`atlas-run-filter-chip` is the pattern), wired into `state` and the existing filter request/persistence path (the `filters` payload already carries `project_id`/`project_name`).
+  - When launched via "Open in Atlas", show the project filter as applied — the chip is visible and the dropdown reflects the launched project.
+  - Give it the same clear behavior as other filters: clicking the chip's `x` and the "Clear filters" button (`atlas-clear-filters-btn`) both reset the project scope, and changing the dropdown re-scopes.
+  - Completion note: The Atlas project-filter slice is implemented. Atlas now has a project filter select beside the existing run/status/orphan/suppression filters, shows project-launched scope as a clearable chip, lets users switch to another project from inside Atlas, preserves project scope in saved views, and clears project scope through either the chip or **Clear filters**.
+
+- **Change Findings-tab row click to open the finding in Atlas instead of restoring its source run.**
+  - Today a finding row (and its "Open" button) fire `open-finding`, which restores the source run into a terminal tab, highlights the finding's output line, and closes the Projects workspace (`project_workspace_events.js`, `action === 'open-finding'`). A primary click doing something destructive — tearing down the modal and dropping into the terminal — is surprising and inconsistent with the Entities tab, where row click opens the entity in Atlas (`open-project-entity`).
+  - Make a finding row's primary click open that finding in Atlas, matching the Entities-tab pattern. Atlas already manages findings (finding filters, bulk triage, findings board, and finding detail in `atlas_entity_detail.js`); confirm or add a deep-link/focus path to a single finding.
+  - Keep run access as an explicit secondary action rather than removing it — viewing a finding in its raw output context with the exact line highlighted is unique value Atlas does not provide.
+  - Decide where that secondary action lands, noting the line-highlight tradeoff.
+    - The current terminal-restore path highlights the finding's exact output line (`highlightLineIndex`).
+    - The Run Details modal (`openHistoryRunDetails`, `history_run_details.js`) is less disruptive (overlay, preserves project context) but currently has no line-highlight support.
+    - Either keep "See in run" doing the terminal restore, or port line-highlight into the Run Details modal before pointing the action there; do not lose line-highlight in the swap.
+  - Apply the same change to the mobile findings surface for parity.
+  - Completion note: The Findings-row primary action slice is implemented. Desktop and mobile Project Findings rows now open the selected finding in project-scoped Atlas, Atlas accepts a requested finding id and selects it after the Findings list loads, and the raw source-run path remains available as an explicit **See in run** action with the original terminal line highlight.
 
 ---
 

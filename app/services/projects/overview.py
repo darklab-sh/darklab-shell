@@ -7,12 +7,14 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from core.database import db_connect
+from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
+from core import database
 from services.atlas.lookup import _row_to_intel_snapshot, _snapshot_has_intel, summarize_intel_snapshots
 from services.atlas.scope import metadata_owner_id
 from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES
@@ -23,6 +25,7 @@ from services.projects.queries import _project_atlas_entity_select_sql, _project
 from services.projects.scope import project_select_columns, shared_owner_where
 from services.projects.targets import _canonical_target_payload
 from services.projects.utils import now as _now
+from services.teams.storage import token_hash
 
 
 OVERVIEW_PAYLOAD_VERSION = 1
@@ -66,6 +69,20 @@ _TARGET_ENTITY_TYPES = {"domain", "ip", "url"}
 _PORT_LIST_LIMIT = 24
 _SERVICE_LIST_LIMIT = 24
 _RECENT_CHANGE_LIMIT = 10
+_OVERVIEW_ACTIVITY_LIMIT = 5
+_OVERVIEW_GAP_LIMIT = 5
+
+_ACTIVITY_TARGET_TABS = {
+    "entity": "entities",
+    "finding": "findings",
+    "file": "artifacts",
+    "import": "entities",
+    "package": "packages",
+    "project": "details",
+    "report": "report",
+    "run": "runs",
+    "target": "details",
+}
 
 log = logging.getLogger("shell")
 
@@ -81,9 +98,43 @@ def overview_payload_contract(project: Mapping[str, Any] | None = None) -> dict[
             "target_count": 0,
             "certificate_statuses": {status: 0 for status in CERT_STATUS_ORDER},
             "finding_severities": {severity: 0 for severity in FINDING_SEVERITY_RANK},
+            "app_scan_target_count": 0,
+            "app_port_target_count": 0,
+            "scanned_no_ports_seen_count": 0,
+            "unscanned_target_count": 0,
+            "awaiting_verification_target_count": 0,
+            "needs_followup_target_count": 0,
             "recent_change_state": RECENT_CHANGE_NOT_MONITORED,
         },
         "recent_changes": [],
+        "operational_tempo": {
+            "last_run_at": "",
+            "last_run_id": "",
+            "runs_last_7d": 0,
+            "last_finding_triaged_at": "",
+            "last_finding_triaged_id": "",
+            "last_artifact_at": "",
+            "last_artifact_id": "",
+        },
+        "recent_activity": [],
+        "coverage_gaps": {
+            "untouched_targets": [],
+            "awaiting_verification": [],
+            "needs_followup": [],
+        },
+        "deliverables_status": {
+            "last_package_at": "",
+            "last_package_id": "",
+            "last_package_name": "",
+            "last_package_build_at": "",
+            "last_package_build_job_id": "",
+            "last_report_saved_at": "",
+            "last_report_id": "",
+            "last_report_exported_at": "",
+            "last_report_export_job_id": "",
+            "latest_finding_activity_at": "",
+            "report_freshness": "not_started",
+        },
     }
 
 
@@ -273,6 +324,10 @@ def get_project_intel_overview(
         target_ids = [str(target["id"]) for target in targets if target.get("id")]
         snapshots_by_entity = _overview_snapshots_by_entity(conn, metadata_session, target_ids)
         findings_by_entity = _overview_findings_by_entity(conn, session_id, team_id, target_ids)
+        observations_by_entity = _overview_scan_observations_by_entity(conn, session_id, team_id, target_ids)
+        operational_tempo = _overview_operational_tempo(conn, session_id, team_id, project_id, target_ids)
+        recent_activity = _overview_recent_activity(conn, session_id, team_id, project_id)
+        deliverables_status = _overview_deliverables_status(conn, session_id, team_id, project_id, target_ids)
 
     monitoring_payload = get_project_monitoring_summary(
         session_id,
@@ -290,11 +345,16 @@ def get_project_intel_overview(
         targets,
         snapshots_by_entity,
         findings_by_entity,
+        observations_by_entity,
         recent_changes,
         log_context=log_context,
     )
     payload["recent_changes"] = recent_changes[:_RECENT_CHANGE_LIMIT]
+    payload["operational_tempo"] = operational_tempo
+    payload["recent_activity"] = recent_activity
     payload["rollups"] = _overview_rollups(payload["targets"], recent_change_state)
+    payload["coverage_gaps"] = _overview_coverage_gaps(payload["targets"])
+    payload["deliverables_status"] = deliverables_status
     log.debug("PROJECT_OVERVIEW_PAYLOAD_BUILT", extra={
         **log_context,
         "target_count": len(targets),
@@ -380,10 +440,374 @@ def _overview_findings_by_entity(
     return grouped
 
 
+def _run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tuple[str, tuple[Any, ...]]:
+    prefix = f"{alias}." if alias else ""
+    if team_id:
+        return f"{prefix}team_id = ?", (team_id,)
+    return f"{prefix}session_id = ? AND COALESCE({prefix}team_id, '') = ''", (session_id,)
+
+
+def _project_run_ids(conn, session_id: str, team_id: str, project_id: str) -> list[str]:
+    run_owner_sql, run_owner_params = _run_owner_clause(session_id, team_id, alias="r")
+    rows = conn.execute(
+        "SELECT DISTINCT r.id "
+        "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+        "WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_owner_sql,  # nosec
+        (project_id, *run_owner_params),
+    ).fetchall()
+    return [str(row["id"] or "") for row in rows if str(row["id"] or "")]
+
+
+def _overview_operational_tempo(
+    conn,
+    session_id: str,
+    team_id: str,
+    project_id: str,
+    target_ids: list[str],
+) -> dict[str, Any]:
+    run_ids = _project_run_ids(conn, session_id, team_id, project_id)
+    tempo = {
+        "last_run_at": "",
+        "last_run_id": "",
+        "runs_last_7d": 0,
+        "last_finding_triaged_at": "",
+        "last_finding_triaged_id": "",
+        "last_artifact_at": "",
+        "last_artifact_id": "",
+    }
+    if run_ids:
+        placeholders = ",".join("?" for _ in run_ids)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        run_row = conn.execute(
+            "SELECT id, COALESCE(NULLIF(finished, ''), started) AS activity_at "
+            "FROM runs "
+            f"WHERE id IN ({placeholders}) "  # nosec
+            "ORDER BY activity_at DESC, id DESC LIMIT 1",
+            tuple(run_ids),
+        ).fetchone()
+        if run_row:
+            tempo["last_run_at"] = str(run_row["activity_at"] or "")
+            tempo["last_run_id"] = str(run_row["id"] or "")
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM runs "
+            f"WHERE id IN ({placeholders}) AND COALESCE(NULLIF(finished, ''), started) >= ?",  # nosec
+            (*run_ids, cutoff),
+        ).fetchone()
+        tempo["runs_last_7d"] = int(count_row["count"] or 0) if count_row else 0
+        artifact_row = conn.execute(
+            "SELECT id, created FROM run_file_artifacts "
+            f"WHERE run_id IN ({placeholders}) "  # nosec
+            "ORDER BY created DESC, id DESC LIMIT 1",
+            tuple(run_ids),
+        ).fetchone()
+        if artifact_row:
+            tempo["last_artifact_at"] = str(artifact_row["created"] or "")
+            tempo["last_artifact_id"] = str(artifact_row["id"] or "")
+
+    if target_ids:
+        placeholders = ",".join("?" for _ in target_ids)
+        finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND COALESCE(f.team_id, '') = '' "
+        finding_owner_params = (team_id,) if team_id else (session_id,)
+        triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
+        triage_row = conn.execute(
+            "SELECT f.id, ftd.updated "
+            "FROM findings f JOIN finding_triage_details ftd ON ftd.finding_id = f.id AND " + triage_owner_sql + " "  # nosec
+            "WHERE (COALESCE(f.entity_id, f.target_id) IN (" + placeholders + ") "  # nosec
+            "OR f.target_id IN (" + placeholders + ")) "  # nosec
+            + finding_owner_sql
+            + "ORDER BY ftd.updated DESC, f.id DESC LIMIT 1",
+            (*triage_owner_params, *target_ids, *target_ids, *finding_owner_params),
+        ).fetchone()
+        if triage_row:
+            tempo["last_finding_triaged_at"] = str(triage_row["updated"] or "")
+            tempo["last_finding_triaged_id"] = str(triage_row["id"] or "")
+    return tempo
+
+
+def _activity_summary(details: Mapping[str, Any] | None) -> str:
+    source = details if isinstance(details, Mapping) else {}
+    preferred = (
+        "name",
+        "label",
+        "source",
+        "review_state",
+        "status",
+        "redaction_mode",
+        "package_id",
+        "report_id",
+        "file_path",
+        "source_path",
+        "destination_path",
+        "path",
+        "old_path",
+        "new_path",
+    )
+    parts = []
+    for key in preferred:
+        value = source.get(key)
+        if value is None or value == "":
+            continue
+        parts.append(f"{key.replace('_', ' ')}: {value}")
+    if not parts:
+        for key, value in list(source.items())[:3]:
+            if value is None or value == "":
+                continue
+            parts.append(f"{str(key).replace('_', ' ')}: {value}")
+    return " · ".join(str(part) for part in parts[:3])
+
+
+def _overview_activity_link(target_type: str, target_id: str) -> dict[str, str]:
+    normalized_type = str(target_type or "").strip()
+    normalized_id = str(target_id or "").strip()
+    tab = _ACTIVITY_TARGET_TABS.get(normalized_type, "")
+    if not tab:
+        return {}
+    return {
+        "tab": tab,
+        "target_type": normalized_type,
+        "target_id": normalized_id,
+    }
+
+
+def _overview_recent_activity(conn, session_id: str, team_id: str, project_id: str) -> list[dict[str, Any]]:
+    dialect = dialect_for_backend(database.DB_BACKEND)
+    owner_sql, owner_params = _overview_audit_owner_scope(session_id, team_id)
+    rows = conn.execute(
+        "SELECT id, event_type, target_type, target_id, details, created "
+        "FROM audit_events "
+        "WHERE project_id = ? AND " + owner_sql + " "  # nosec
+        "ORDER BY created DESC, id DESC LIMIT ?",
+        (project_id, *owner_params, _OVERVIEW_ACTIVITY_LIMIT),
+    ).fetchall()
+    result = []
+    for row in rows:
+        details = dialect.decode_json_dict(row["details"])
+        target_type = str(row["target_type"] or "")
+        target_id = str(row["target_id"] or "")
+        result.append({
+            "id": str(row["id"] or ""),
+            "created": str(row["created"] or ""),
+            "event_type": str(row["event_type"] or ""),
+            "target_type": target_type,
+            "target_id": target_id,
+            "summary": _activity_summary(details),
+            "deep_link": _overview_activity_link(target_type, target_id),
+        })
+    return result
+
+
+def _overview_audit_owner_scope(session_id: str, team_id: str) -> tuple[str, tuple[Any, ...]]:
+    if team_id:
+        return "team_id = ?", (team_id,)
+    return "owner_session_hash = ? AND COALESCE(team_id, '') = ''", (token_hash(session_id),)
+
+
+def _overview_latest_completed_audit_event(
+    conn,
+    session_id: str,
+    team_id: str,
+    project_id: str,
+    event_type: str,
+) -> dict[str, str]:
+    owner_sql, owner_params = _overview_audit_owner_scope(session_id, team_id)
+    dialect = dialect_for_backend(database.DB_BACKEND)
+    rows = conn.execute(
+        "SELECT id, target_id, job_id, details, created "
+        "FROM audit_events "
+        "WHERE project_id = ? AND event_type = ? AND " + owner_sql + " "  # nosec
+        "ORDER BY created DESC, id DESC LIMIT 20",
+        (project_id, event_type, *owner_params),
+    ).fetchall()
+    for row in rows:
+        details = dialect.decode_json_dict(row["details"])
+        if str(details.get("status") or "").strip().lower() != "complete":
+            continue
+        return {
+            "id": str(row["id"] or ""),
+            "target_id": str(row["target_id"] or ""),
+            "job_id": str(row["job_id"] or details.get("job_id") or ""),
+            "created": str(row["created"] or ""),
+        }
+    return {}
+
+
+def _overview_latest_package(conn, session_id: str, team_id: str, project_id: str) -> dict[str, str]:
+    package_where = "project_id = ?"
+    package_params: list[Any] = [project_id]
+    if not team_id:
+        package_where += " AND session_id = ?"
+        package_params.append(session_id)
+    row = conn.execute(
+        "SELECT id, name, status, updated, created "
+        "FROM evidence_packages WHERE " + package_where + " "  # nosec
+        "ORDER BY updated DESC, created DESC, id DESC LIMIT 1",
+        tuple(package_params),
+    ).fetchone()
+    if not row:
+        return {}
+    return {
+        "id": str(row["id"] or ""),
+        "name": str(row["name"] or ""),
+        "status": str(row["status"] or ""),
+        "updated": str(row["updated"] or row["created"] or ""),
+    }
+
+
+def _overview_latest_report(conn, session_id: str, team_id: str, project_id: str) -> dict[str, str]:
+    if team_id:
+        report_where = "team_id = ? AND project_id = ?"
+        report_params: tuple[Any, ...] = (team_id, project_id)
+    else:
+        report_where = "session_id = ? AND COALESCE(team_id, '') = '' AND project_id = ?"
+        report_params = (session_id, project_id)
+    row = conn.execute(
+        "SELECT id, updated, created FROM project_reports WHERE " + report_where + " "  # nosec
+        "ORDER BY updated DESC, created DESC, id DESC LIMIT 1",
+        report_params,
+    ).fetchone()
+    if not row:
+        return {}
+    return {
+        "id": str(row["id"] or ""),
+        "updated": str(row["updated"] or row["created"] or ""),
+    }
+
+
+def _overview_latest_finding_activity_at(
+    conn,
+    session_id: str,
+    team_id: str,
+    target_ids: list[str],
+) -> str:
+    if not target_ids:
+        return ""
+    placeholders = ",".join("?" for _ in target_ids)
+    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND COALESCE(f.team_id, '') = '' "
+    finding_owner_params = (team_id,) if team_id else (session_id,)
+    triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
+    rows = conn.execute(
+        "SELECT f.last_seen_at, f.created, ftd.updated AS triage_updated "
+        "FROM findings f "
+        "LEFT JOIN finding_triage_details ftd ON ftd.finding_id = f.id AND " + triage_owner_sql + " "  # nosec
+        "WHERE (COALESCE(f.entity_id, f.target_id) IN (" + placeholders + ") "  # nosec
+        "OR f.target_id IN (" + placeholders + ")) "  # nosec
+        + finding_owner_sql,
+        (*triage_owner_params, *target_ids, *target_ids, *finding_owner_params),
+    ).fetchall()
+    latest = ""
+    for row in rows:
+        latest = max(
+            latest,
+            str(row["last_seen_at"] or ""),
+            str(row["created"] or ""),
+            str(row["triage_updated"] or ""),
+        )
+    return latest
+
+
+def _overview_report_freshness(report_saved_at: str, report_exported_at: str, finding_activity_at: str) -> str:
+    latest_report_at = max(str(report_saved_at or ""), str(report_exported_at or ""))
+    latest_finding_at = str(finding_activity_at or "")
+    if not latest_report_at:
+        return "not_started"
+    if not latest_finding_at:
+        return "no_finding_activity"
+    return "fresh" if latest_report_at >= latest_finding_at else "stale"
+
+
+def _overview_deliverables_status(
+    conn,
+    session_id: str,
+    team_id: str,
+    project_id: str,
+    target_ids: list[str],
+) -> dict[str, Any]:
+    latest_package = _overview_latest_package(conn, session_id, team_id, project_id)
+    latest_report = _overview_latest_report(conn, session_id, team_id, project_id)
+    package_build = _overview_latest_completed_audit_event(
+        conn,
+        session_id,
+        team_id,
+        project_id,
+        "package.build",
+    )
+    report_export = _overview_latest_completed_audit_event(
+        conn,
+        session_id,
+        team_id,
+        project_id,
+        "report.build",
+    )
+    finding_activity_at = _overview_latest_finding_activity_at(conn, session_id, team_id, target_ids)
+    report_saved_at = str(latest_report.get("updated") or "")
+    report_exported_at = str(report_export.get("created") or "")
+    return {
+        "last_package_at": str(latest_package.get("updated") or ""),
+        "last_package_id": str(latest_package.get("id") or ""),
+        "last_package_name": str(latest_package.get("name") or ""),
+        "last_package_build_at": str(package_build.get("created") or ""),
+        "last_package_build_job_id": str(package_build.get("job_id") or package_build.get("target_id") or ""),
+        "last_report_saved_at": report_saved_at,
+        "last_report_id": str(latest_report.get("id") or ""),
+        "last_report_exported_at": report_exported_at,
+        "last_report_export_job_id": str(report_export.get("job_id") or report_export.get("target_id") or ""),
+        "latest_finding_activity_at": finding_activity_at,
+        "report_freshness": _overview_report_freshness(report_saved_at, report_exported_at, finding_activity_at),
+    }
+
+
+def _overview_scan_observations_by_entity(
+    conn,
+    session_id: str,
+    team_id: str,
+    target_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    if not target_ids:
+        return {}
+    placeholders = ",".join("?" for _ in target_ids)
+    owner_sql = "team_id = ?" if team_id else "session_id = ? AND COALESCE(team_id, '') = ''"
+    owner_params = (team_id,) if team_id else (session_id,)
+    rows = conn.execute(
+        "SELECT entity_id, run_id, command_root, observed_at, port_entity_count "
+        "FROM scan_target_observations "
+        f"WHERE entity_id IN ({placeholders}) AND scan_kind = 'port_scan' AND " + owner_sql + " "  # nosec
+        "ORDER BY observed_at DESC, run_id DESC",
+        (*target_ids, *owner_params),
+    ).fetchall()
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        entity_id = str(row["entity_id"] or "")
+        if not entity_id:
+            continue
+        item = grouped.setdefault(entity_id, {
+            "scan_run_count": 0,
+            "last_observed_at": "",
+            "port_entity_count": 0,
+            "command_roots": [],
+            "_run_ids": set(),
+        })
+        run_id = str(row["run_id"] or "")
+        if run_id and run_id not in item["_run_ids"]:
+            item["_run_ids"].add(run_id)
+            item["scan_run_count"] += 1
+        observed_at = str(row["observed_at"] or "")
+        if observed_at and observed_at > str(item["last_observed_at"] or ""):
+            item["last_observed_at"] = observed_at
+        item["port_entity_count"] += int(row["port_entity_count"] or 0)
+        root = str(row["command_root"] or "").strip().lower()
+        if root and root not in item["command_roots"]:
+            item["command_roots"].append(root)
+    for item in grouped.values():
+        item.pop("_run_ids", None)
+        item["command_roots"] = sorted(item["command_roots"])
+    return grouped
+
+
 def _overview_target_rows(
     targets: list[dict[str, Any]],
     snapshots_by_entity: dict[str, list[dict[str, Any]]],
     findings_by_entity: dict[str, list[dict[str, Any]]],
+    observations_by_entity: dict[str, dict[str, Any]],
     recent_changes: list[dict[str, Any]],
     *,
     log_context: Mapping[str, Any] | None = None,
@@ -399,6 +823,7 @@ def _overview_target_rows(
         has_intel = str(intel_summary.get("status") or "") == "available"
         has_stale_intel = has_intel and _overview_snapshots_are_stale(snapshots)
         findings = findings_by_entity.get(entity_id, [])
+        app_evidence = _overview_app_evidence(observations_by_entity.get(entity_id))
         top_severity = highest_actionable_finding_severity(findings)
         hints = target_deep_link_hints(
             entity_id,
@@ -417,8 +842,10 @@ def _overview_target_rows(
                 "has_intel": has_intel,
                 "has_stale_intel": has_stale_intel,
                 "has_findings": bool(findings),
+                "has_app_scan_evidence": int(app_evidence.get("scan_run_count") or 0) > 0,
                 "has_recent_changes": entity_id in recent_targets,
             },
+            "app_evidence": app_evidence,
             "open_ports": intel_extract["open_ports"],
             "services": intel_extract["services"],
             "certificate": intel_extract["certificate"],
@@ -435,6 +862,31 @@ def _overview_target_rows(
         })
     rows.sort(key=_overview_target_sort_key)
     return rows
+
+
+def _overview_app_evidence(observation: Mapping[str, Any] | None) -> dict[str, Any]:
+    source = observation if isinstance(observation, Mapping) else {}
+    scan_run_count = int(source.get("scan_run_count") or 0)
+    port_entity_count = int(source.get("port_entity_count") or 0)
+    if port_entity_count > 0:
+        coverage_state = "app_ports_found"
+    elif scan_run_count > 0:
+        coverage_state = "scanned_no_ports_seen"
+    else:
+        coverage_state = "not_scanned"
+    roots = source.get("command_roots")
+    command_roots = [str(root or "") for root in roots] if isinstance(roots, list) else []
+    return {
+        "coverage_state": coverage_state,
+        "scan_run_count": scan_run_count,
+        "last_observed_at": str(source.get("last_observed_at") or ""),
+        "port_entity_count": port_entity_count,
+        "command_roots": [root for root in command_roots if root],
+        "coverage_caveat": (
+            "No app-captured ports were surfaced by the observed scan runs; this does not prove no ports exist."
+            if coverage_state == "scanned_no_ports_seen" else ""
+        ),
+    }
 
 
 def _overview_snapshots_are_stale(snapshots: list[dict[str, Any]]) -> bool:
@@ -473,6 +925,11 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
     ports: set[int] = set()
     services: set[str] = set()
     provider_ids: set[str] = set()
+    app_scan_target_count = 0
+    app_port_target_count = 0
+    scanned_no_ports_seen_count = 0
+    awaiting_verification_target_count = 0
+    needs_followup_target_count = 0
     for target in targets:
         raw_certificate = target.get("certificate")
         certificate = raw_certificate if isinstance(raw_certificate, dict) else {}
@@ -487,6 +944,28 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
         raw_intel_summary = target.get("intel_summary")
         intel_summary = raw_intel_summary if isinstance(raw_intel_summary, dict) else {}
         provider_ids.update(str(provider) for provider in intel_summary.get("providers_with_data", []) if str(provider or ""))
+        raw_app_evidence = target.get("app_evidence")
+        app_evidence = raw_app_evidence if isinstance(raw_app_evidence, Mapping) else {}
+        if int(app_evidence.get("scan_run_count") or 0) > 0:
+            app_scan_target_count += 1
+        if int(app_evidence.get("port_entity_count") or 0) > 0:
+            app_port_target_count += 1
+        if str(app_evidence.get("coverage_state") or "") == "scanned_no_ports_seen":
+            scanned_no_ports_seen_count += 1
+        raw_counts = target.get("finding_counts")
+        counts = raw_counts if isinstance(raw_counts, Mapping) else {}
+        raw_review = counts.get("by_review_state")
+        review = raw_review if isinstance(raw_review, Mapping) else {}
+        raw_verification = counts.get("by_verification_state")
+        verification = raw_verification if isinstance(raw_verification, Mapping) else {}
+        if (
+            int(verification.get("not_started") or 0)
+            + int(verification.get("ready_to_verify") or 0)
+            + int(verification.get("needs_retest") or 0)
+        ) > 0:
+            awaiting_verification_target_count += 1
+        if (int(review.get("new") or 0) + int(review.get("needs_followup") or 0)) > 0:
+            needs_followup_target_count += 1
     return {
         "target_count": len(targets),
         "certificate_statuses": certificate_statuses,
@@ -494,8 +973,78 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
         "open_port_count": len(ports),
         "service_count": len(services),
         "provider_count": len(provider_ids),
+        "app_scan_target_count": app_scan_target_count,
+        "app_port_target_count": app_port_target_count,
+        "scanned_no_ports_seen_count": scanned_no_ports_seen_count,
+        "unscanned_target_count": max(0, len(targets) - app_scan_target_count),
+        "awaiting_verification_target_count": awaiting_verification_target_count,
+        "needs_followup_target_count": needs_followup_target_count,
         "recent_change_state": recent_change_state,
     }
+
+
+def _overview_gap_item(target: Mapping[str, Any], reason: str, detail: str, hints_key: str = "entities") -> dict[str, Any]:
+    raw_hints = target.get("deep_link_hints")
+    hints = raw_hints if isinstance(raw_hints, Mapping) else {}
+    raw_tab_hints = hints.get(hints_key)
+    tab_hints = raw_tab_hints if isinstance(raw_tab_hints, Mapping) else {}
+    return {
+        "entity_id": str(target.get("entity_id") or target.get("id") or ""),
+        "display_label": str(target.get("display_label") or target.get("value") or target.get("entity_id") or ""),
+        "reason": reason,
+        "detail": detail,
+        "deep_link": {
+            "tab": "findings" if hints_key == "findings" else "entities",
+            "hints": {str(key): str(value) for key, value in tab_hints.items() if str(value or "")},
+        },
+    }
+
+
+def _overview_coverage_gaps(targets: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    gaps = {
+        "untouched_targets": [],
+        "awaiting_verification": [],
+        "needs_followup": [],
+    }
+    for target in targets:
+        raw_app_evidence = target.get("app_evidence")
+        app_evidence = raw_app_evidence if isinstance(raw_app_evidence, Mapping) else {}
+        if int(app_evidence.get("scan_run_count") or 0) <= 0:
+            gaps["untouched_targets"].append(_overview_gap_item(
+                target,
+                "no_app_scan",
+                "No app-captured scan has touched this target.",
+                "entities",
+            ))
+        raw_counts = target.get("finding_counts")
+        counts = raw_counts if isinstance(raw_counts, Mapping) else {}
+        raw_review = counts.get("by_review_state")
+        review = raw_review if isinstance(raw_review, Mapping) else {}
+        raw_verification = counts.get("by_verification_state")
+        verification = raw_verification if isinstance(raw_verification, Mapping) else {}
+        waiting = (
+            int(verification.get("not_started") or 0)
+            + int(verification.get("ready_to_verify") or 0)
+            + int(verification.get("needs_retest") or 0)
+        )
+        if waiting > 0:
+            noun = "finding" if waiting == 1 else "findings"
+            gaps["awaiting_verification"].append(_overview_gap_item(
+                target,
+                "awaiting_verification",
+                f"{waiting} {noun} awaiting verification.",
+                "findings",
+            ))
+        followup = int(review.get("new") or 0) + int(review.get("needs_followup") or 0)
+        if followup > 0:
+            noun = "finding needs" if followup == 1 else "findings need"
+            gaps["needs_followup"].append(_overview_gap_item(
+                target,
+                "needs_followup",
+                f"{followup} {noun} review or follow-up.",
+                "findings",
+            ))
+    return {key: items[:_OVERVIEW_GAP_LIMIT] for key, items in gaps.items()}
 
 
 def _overview_recent_changes(

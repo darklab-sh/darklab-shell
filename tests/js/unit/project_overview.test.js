@@ -73,6 +73,12 @@ const overviewPayload = {
     open_port_count: 2,
     service_count: 2,
     provider_count: 1,
+    app_scan_target_count: 1,
+    app_port_target_count: 1,
+    scanned_no_ports_seen_count: 0,
+    unscanned_target_count: 0,
+    awaiting_verification_target_count: 1,
+    needs_followup_target_count: 1,
     recent_change_state: 'windowed',
     certificate_statuses: {
       expired: 0,
@@ -94,6 +100,64 @@ const overviewPayload = {
     state: 'changed',
     target_ids: ['ent_1'],
   }],
+  operational_tempo: {
+    last_run_at: '2026-06-24T13:00:00+00:00',
+    last_run_id: 'run_7',
+    runs_last_7d: 3,
+    last_finding_triaged_at: '2026-06-24T14:00:00+00:00',
+    last_finding_triaged_id: 'finding_1',
+    last_artifact_at: '2026-06-24T15:00:00+00:00',
+    last_artifact_id: 'artifact_1',
+  },
+  recent_activity: [{
+    id: 'audit_1',
+    created: '2026-06-24T14:00:00+00:00',
+    event_type: 'finding.triage.updated',
+    target_type: 'finding',
+    target_id: 'ent_1',
+    summary: 'label: High finding triaged',
+    deep_link: {
+      tab: 'findings',
+      target_type: 'finding',
+      target_id: 'ent_1',
+    },
+  }],
+  coverage_gaps: {
+    untouched_targets: [],
+    awaiting_verification: [{
+      entity_id: 'ent_1',
+      display_label: 'domain:api.example.com',
+      reason: 'awaiting_verification',
+      detail: '3 findings awaiting verification.',
+      deep_link: {
+        tab: 'findings',
+        hints: { target_id: 'ent_1', orphan_filter: 'all', severity: 'high' },
+      },
+    }],
+    needs_followup: [{
+      entity_id: 'ent_1',
+      display_label: 'domain:api.example.com',
+      reason: 'needs_followup',
+      detail: '2 findings need review or follow-up.',
+      deep_link: {
+        tab: 'findings',
+        hints: { target_id: 'ent_1', orphan_filter: 'all', severity: 'high' },
+      },
+    }],
+  },
+  deliverables_status: {
+    last_package_at: '2026-06-24T16:00:00+00:00',
+    last_package_id: 'pkg_1',
+    last_package_name: 'Executive handoff',
+    last_package_build_at: '2026-06-24T16:30:00+00:00',
+    last_package_build_job_id: 'pkg_job_1',
+    last_report_saved_at: '2026-06-24T17:00:00+00:00',
+    last_report_id: 'rpt_1',
+    last_report_exported_at: '2026-06-24T17:30:00+00:00',
+    last_report_export_job_id: 'rpt_job_1',
+    latest_finding_activity_at: '2026-06-24T14:00:00+00:00',
+    report_freshness: 'fresh',
+  },
   targets: [{
     entity_id: 'ent_1',
     id: 'ent_1',
@@ -105,7 +169,16 @@ const overviewPayload = {
       has_intel: true,
       has_stale_intel: true,
       has_findings: true,
+      has_app_scan_evidence: true,
       has_recent_changes: true,
+    },
+    app_evidence: {
+      coverage_state: 'app_ports_found',
+      scan_run_count: 1,
+      last_observed_at: '2026-06-24T00:00:00+00:00',
+      port_entity_count: 2,
+      command_roots: ['nmap'],
+      coverage_caveat: '',
     },
     open_ports: [80, 443],
     services: ['http', 'https'],
@@ -117,8 +190,21 @@ const overviewPayload = {
     },
     top_finding_severity: 'high',
     finding_counts: {
-      by_review_state: { new: 1 },
-      suppressed: 0,
+      by_review_state: {
+        new: 1,
+        reviewed: 2,
+        important: 1,
+        needs_followup: 1,
+        false_positive: 1,
+      },
+      by_verification_state: {
+        not_started: 1,
+        ready_to_verify: 1,
+        verified: 2,
+        needs_retest: 1,
+        not_applicable: 1,
+      },
+      suppressed: 1,
     },
     intel_summary: {
       providers_with_data: ['censys'],
@@ -154,20 +240,84 @@ describe('project overview controller', () => {
       { cache: 'no-store' },
     )
     expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('Targets')
+    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('cached providers')
+    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('Cached provider ports')
+    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('App scan coverage')
+    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('Verification gaps')
     expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('High-risk targets')
+    const caveatText = container.querySelector('.project-overview-provider-caveat')?.textContent || ''
+    expect(caveatText).toContain('Cached provider data')
+    expect(caveatText).toContain('Ports, services, certificates, and provider highlights come from saved intel snapshots')
+    const progressText = container.querySelector('.project-overview-progress')?.textContent || ''
+    expect(progressText).toContain('Triage')
+    expect(progressText).toContain('New')
+    expect(progressText).toContain('Reviewed')
+    expect(progressText).toContain('Important/follow-up')
+    expect(progressText).toContain('False positive: 1')
+    expect(progressText).toContain('Suppressed: 1')
+    expect(progressText).toContain('Verification')
+    expect(progressText).toContain('Not started')
+    expect(progressText).toContain('Ready')
+    expect(progressText).toContain('Verified')
+    expect(progressText).toContain('Needs retest')
+    expect(progressText).toContain('Not applicable: 1')
+    const tempoText = container.querySelector('.project-overview-tempo')?.textContent || ''
+    expect(tempoText).toContain('Last run')
+    expect(tempoText).toContain('2026-06-24 13:00:00+00:00')
+    expect(tempoText).toContain('Runs 7d')
+    expect(tempoText).toContain('3')
+    expect(tempoText).toContain('Last triage')
+    expect(tempoText).toContain('Last artifact')
+    expect(tempoText).toContain('Finding Triage Updated')
+    expect(tempoText).toContain('label: High finding triaged')
+    const gapText = container.querySelector('.project-overview-gaps')?.textContent || ''
+    expect(gapText).toContain('Awaiting verification: 1')
+    expect(gapText).toContain('domain:api.example.com')
+    expect(gapText).toContain('3 findings awaiting verification')
+    expect(gapText).toContain('Needs follow-up: 1')
+    expect(gapText).toContain('2 findings need review or follow-up')
+    const deliverablesText = container.querySelector('.project-overview-deliverables')?.textContent || ''
+    expect(deliverablesText).toContain('Last package')
+    expect(deliverablesText).toContain('2026-06-24 16:00:00+00:00')
+    expect(deliverablesText).toContain('Executive handoff')
+    expect(deliverablesText).toContain('Package build')
+    expect(deliverablesText).toContain('pkg_job_1')
+    expect(deliverablesText).toContain('Report saved')
+    expect(deliverablesText).toContain('rpt_1')
+    expect(deliverablesText).toContain('Report exported')
+    expect(deliverablesText).toContain('rpt_job_1')
+    expect(deliverablesText).toContain('Report fresh')
+    expect(deliverablesText).toContain('Latest finding activity 2026-06-24 14:00:00+00:00')
     const summaryCards = [...container.querySelectorAll('.project-overview-summary-card')]
     const recentCard = summaryCards.find(card => card.textContent.includes('Recent changes'))
     expect(recentCard?.textContent).toContain('Windowed')
     expect(recentCard?.classList.contains('is-windowed')).toBe(false)
     expect(container.querySelector('.project-overview-target-title')?.textContent).toBe('api.example.com')
-    expect(container.querySelector('.project-overview-target-detail')?.textContent).toContain('80, 443')
+    const detailText = [...container.querySelectorAll('.project-overview-target-detail')]
+      .map(node => node.textContent)
+      .join('\n')
+    expect(detailText).toContain('Cached provider ports/services: 80, 443')
+    expect(detailText).toContain('Cached provider data: stale · checked 2026-06-24 00:00:00+00:00')
+    expect(detailText).toContain('App ports found: 2 port hits across 1 run')
+    expect(detailText).toContain('Findings: 1 new · 3 awaiting verification · 1 false positive · 1 suppressed')
     const chipText = container.querySelector('.project-overview-target-chips')?.textContent || ''
     expect(chipText).toContain('Finding: High')
     expect(chipText).toContain('Cert: <=30d')
+    expect(chipText).toContain('App ports')
     expect(chipText).toContain('Intel: Stale')
     expect(container.querySelector('.project-overview-chip')?.getAttribute('title'))
       .toBe('Highest actionable finding severity for this target')
     expect(container.querySelector('.project-overview-highlights')?.textContent).toContain('Censys saw https on 443')
+
+    container.querySelector('[data-project-overview-activity="findings"]').click()
+    expect(ctx.setProjectWorkspaceTab).toHaveBeenLastCalledWith('findings')
+    expect([...ctx._sets.targetFilters.get('prj_1')]).toEqual([])
+
+    container.querySelector('[data-project-overview-gap="findings"]').click()
+    expect(ctx.setProjectWorkspaceTab).toHaveBeenLastCalledWith('findings')
+    expect([...ctx._sets.targetFilters.get('prj_1')]).toEqual(['ent_1'])
+    expect([...ctx._sets.severityFilters.get('prj_1')]).toEqual(['high'])
+    expect(ctx.setProjectFindingOrphanFilter).toHaveBeenLastCalledWith('prj_1', 'all')
   })
 
   it('renders the empty target state from an empty overview payload', async () => {
@@ -180,6 +330,10 @@ describe('project overview controller', () => {
         open_port_count: 0,
         service_count: 0,
         provider_count: 0,
+        app_scan_target_count: 0,
+        app_port_target_count: 0,
+        scanned_no_ports_seen_count: 0,
+        unscanned_target_count: 0,
         recent_change_state: 'not-monitored',
         certificate_statuses: {},
         finding_severities: {},
@@ -217,7 +371,16 @@ describe('project overview controller', () => {
           has_intel: false,
           has_stale_intel: false,
           has_findings: false,
+          has_app_scan_evidence: true,
           has_recent_changes: false,
+        },
+        app_evidence: {
+          coverage_state: 'scanned_no_ports_seen',
+          scan_run_count: 1,
+          last_observed_at: '2026-06-24T00:00:00+00:00',
+          port_entity_count: 0,
+          command_roots: ['nmap'],
+          coverage_caveat: 'No app-captured ports were surfaced by the observed scan runs; this does not prove no ports exist.',
         },
         certificate: {
           status: 'unknown',
@@ -245,11 +408,17 @@ describe('project overview controller', () => {
     expect(recentState?.querySelector('.badge')?.classList.contains('badge-tone-muted')).toBe(true)
     const chips = [...container.querySelectorAll('.project-overview-chip')]
     const certChip = chips.find(chip => chip.textContent.includes('Cert: Unknown'))
+    const scannedChip = chips.find(chip => chip.textContent.includes('Scanned'))
     const intelChip = chips.find(chip => chip.textContent.includes('Intel: None'))
     expect(certChip?.classList.contains('badge-tone-muted')).toBe(true)
     expect(certChip?.getAttribute('title')).toBe('No usable certificate expiry data found for this target')
+    expect(scannedChip?.classList.contains('badge-tone-cyan')).toBe(true)
+    expect(scannedChip?.getAttribute('title')).toContain('does not prove no ports exist')
     expect(intelChip?.classList.contains('badge-tone-muted')).toBe(true)
     expect(intelChip?.getAttribute('title')).toBe('No cached provider data for this target')
+    expect([...container.querySelectorAll('.project-overview-target-detail')]
+      .map(node => node.textContent)
+      .join('\n')).toContain('Cached provider data: none')
     expect(container.querySelector('.project-overview-highlights')).toBeNull()
   })
 

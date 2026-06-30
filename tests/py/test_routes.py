@@ -45,7 +45,7 @@ from core.database_backend import DatabaseBackend, quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import record_run_findings
-from services.atlas.materializer import materialize_run_entities
+from services.atlas.materializer import materialize_run_entities, upsert_entity
 from services.workspace import files as workspace_files
 from services.workspace.files import resolve_workspace_path
 
@@ -1106,6 +1106,100 @@ class TestAtlasImportRoutes:
             assert entity_count == 1
             assert import_link_count == 1
             assert project_link["source"] == "auto_input_file"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_port_import_links_entity_without_creating_project_target(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_port"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_import_port"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Port Import', 'port-import', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                host_entity_id = upsert_entity(
+                    conn,
+                    session_id,
+                    "domain",
+                    "imported.example",
+                    seen_at=now,
+                    occurrence_count=0,
+                )
+                conn.commit()
+            jsonl_payload = (
+                json.dumps({
+                    "row_type": "entity",
+                    "entity_kind": "port",
+                    "entity_value": "imported.example:443/tcp",
+                    "external_id": "port-443",
+                }) + "\n"
+            ).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_jsonl",
+                    "source_tool": "Generic JSONL",
+                    "import_name": "Port import",
+                    "file": (io.BytesIO(jsonl_payload), "ports.jsonl"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["entity_valid"] == 1
+            assert preview_payload["counts"]["project_target_candidates"] == 0
+            assert preview_payload["apply_options"]["import_entities"]["available"] is True
+            assert preview_payload["apply_options"]["link_to_project"]["available"] is True
+            assert preview_payload["apply_options"]["create_project_targets"]["available"] is False
+
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {
+                        "import_entities": True,
+                        "link_to_project": True,
+                        "create_project_targets": True,
+                    },
+                },
+            )
+
+            assert applied.status_code == 200
+            counts = applied.get_json()["counts"]
+            assert counts["entities_created"] == 1
+            assert counts["entity_links"] == 1
+            assert counts["project_links_added"] == 1
+            assert counts["project_targets_created"] == 0
+            assert counts["project_targets_existing"] == 0
+            with db_connect() as conn:
+                port_row = conn.execute(
+                    "SELECT id, host_entity_id FROM entities WHERE session_id = ? AND type = 'port'",
+                    (session_id,),
+                ).fetchone()
+                project_link = conn.execute(
+                    "SELECT entity_type, source FROM project_links WHERE project_id = ? AND entity_id = ?",
+                    (project_id, port_row["id"]),
+                ).fetchone()
+                import_link = conn.execute(
+                    "SELECT occurrence_count, external_id FROM atlas_entity_import_links WHERE entity_id = ?",
+                    (port_row["id"],),
+                ).fetchone()
+            assert port_row["host_entity_id"] == host_entity_id
+            assert project_link["entity_type"] == "atlas_entity"
+            assert project_link["source"] == "manual"
+            assert import_link["occurrence_count"] == 1
+            assert import_link["external_id"] == "port-443"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -15678,8 +15772,29 @@ class TestAtlasRoutes:
     def test_exports_entities_as_csv_and_jsonl_with_metadata(self):
         client = get_client()
         session_id = self._session_id()
-        _, recorded = self._seed_entity_run(session_id)
+        run_id, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        with db_connect() as conn:
+            recorded_with_port = materialize_run_entities(
+                conn,
+                session_id,
+                run_id,
+                [{
+                    "text": "443/tcp open https nginx on darklab.sh",
+                    "entities": [
+                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                        {
+                            "type": "port",
+                            "value": "darklab.sh:443/tcp",
+                            "attributes": {"service": "https", "version": "nginx"},
+                        },
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:02+00:00",
+                command="nmap darklab.sh",
+            )
+            conn.commit()
+        port_id = next(item["id"] for item in recorded_with_port if item["type"] == "port")
         project_resp = client.post(
             "/projects",
             json={"name": "Atlas Export"},
@@ -15691,19 +15806,28 @@ class TestAtlasRoutes:
             json={"project_id": project["id"]},
             headers={"X-Session-ID": session_id},
         )
+        client.post(
+            f"/atlas/entities/{port_id}/project_links",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
         with db_connect() as conn:
-            conn.execute(
-                "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
-                "VALUES (?, ?, 'atlas_entity', ?, 'primary', datetime('now'))",
-                ("lbl_" + uuid.uuid4().hex, session_id, domain_id),
-            )
-            conn.execute(
-                "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
-                "VALUES (?, ?, 'atlas_entity', ?, 'Scope approved', datetime('now'), datetime('now'))",
-                ("note_" + uuid.uuid4().hex, session_id, domain_id),
-            )
+            for entity_id, label, note in (
+                (domain_id, "primary", "Scope approved"),
+                (port_id, "service", "HTTPS verified"),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_labels "
+                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "VALUES (?, ?, 'atlas_entity', ?, ?, datetime('now'))",
+                    ("lbl_" + uuid.uuid4().hex, session_id, entity_id, label),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes "
+                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, 'atlas_entity', ?, ?, datetime('now'), datetime('now'))",
+                    ("note_" + uuid.uuid4().hex, session_id, entity_id, note),
+                )
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
                 "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
@@ -15723,6 +15847,14 @@ class TestAtlasRoutes:
         )
         jsonl_resp = client.get(
             f"/atlas/entities/export?format=jsonl&type=domain&project_id={quote(project['id'])}",
+            headers={"X-Session-ID": session_id},
+        )
+        port_csv_resp = client.get(
+            f"/atlas/entities/export?format=csv&type=port&project_id={quote(project['id'])}",
+            headers={"X-Session-ID": session_id},
+        )
+        port_jsonl_resp = client.get(
+            f"/atlas/entities/export?format=jsonl&type=port&project_id={quote(project['id'])}",
             headers={"X-Session-ID": session_id},
         )
         invalid_resp = client.get(
@@ -15749,6 +15881,29 @@ class TestAtlasRoutes:
         assert exported["notes"] == "Scope approved"
         assert exported["project_names"] == ["Atlas Export"]
         assert exported["intel_providers_with_data"] == ["crtsh"]
+        assert port_csv_resp.status_code == 200
+        port_rows = list(csv.DictReader(io.StringIO(port_csv_resp.get_data(as_text=True))))
+        assert len(port_rows) == 1
+        assert port_rows[0]["id"] == port_id
+        assert port_rows[0]["type"] == "port"
+        assert port_rows[0]["canonical_value"] == "darklab.sh:443/tcp"
+        assert port_rows[0]["host_entity_id"] == domain_id
+        assert json.loads(port_rows[0]["attributes"]) == {"service": "https", "version": "nginx"}
+        assert port_rows[0]["labels"] == "service"
+        assert port_rows[0]["notes"] == "HTTPS verified"
+        assert port_rows[0]["project_names"] == "Atlas Export"
+        assert port_rows[0]["intel_providers_with_data"] == ""
+        assert port_jsonl_resp.status_code == 200
+        exported_port = json.loads(port_jsonl_resp.get_data(as_text=True).splitlines()[0])
+        assert exported_port["id"] == port_id
+        assert exported_port["type"] == "port"
+        assert exported_port["canonical_value"] == "darklab.sh:443/tcp"
+        assert exported_port["host_entity_id"] == domain_id
+        assert exported_port["attributes"] == {"service": "https", "version": "nginx"}
+        assert exported_port["labels"] == ["service"]
+        assert exported_port["notes"] == "HTTPS verified"
+        assert exported_port["project_names"] == ["Atlas Export"]
+        assert exported_port["intel_providers_with_data"] == []
         assert invalid_resp.status_code == 400
 
 

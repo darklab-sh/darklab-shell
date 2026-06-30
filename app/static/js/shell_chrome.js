@@ -2824,6 +2824,7 @@ let importedProjectWorkspaceShell;
       mobileView: () => _projectMobileShellController().currentView(),
       openProjectEntityEditor: _openProjectEntityEditor,
       openProjectEntityInAtlas: _openProjectEntityInAtlas,
+      openAtlas: _shellOpenAtlas,
       openFindingsBoard: _shellOpenFindingsBoard,
       openProjectEntityPicker: _openProjectEntityPicker,
       openProjectMobileActionSheet: _openProjectMobileActionSheet,

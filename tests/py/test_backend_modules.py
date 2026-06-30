@@ -14,8 +14,10 @@ Run with: pytest tests/ (from the repo root)
 
 import errno
 import base64
+import csv
 import gzip
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -2813,9 +2815,43 @@ class TestProjectOverviewContract:
                     "low": 0,
                     "info": 0,
                 },
+                "app_scan_target_count": 0,
+                "app_port_target_count": 0,
+                "scanned_no_ports_seen_count": 0,
+                "unscanned_target_count": 0,
+                "awaiting_verification_target_count": 0,
+                "needs_followup_target_count": 0,
                 "recent_change_state": "not-monitored",
             },
             "recent_changes": [],
+            "operational_tempo": {
+                "last_run_at": "",
+                "last_run_id": "",
+                "runs_last_7d": 0,
+                "last_finding_triaged_at": "",
+                "last_finding_triaged_id": "",
+                "last_artifact_at": "",
+                "last_artifact_id": "",
+            },
+            "recent_activity": [],
+            "coverage_gaps": {
+                "untouched_targets": [],
+                "awaiting_verification": [],
+                "needs_followup": [],
+            },
+            "deliverables_status": {
+                "last_package_at": "",
+                "last_package_id": "",
+                "last_package_name": "",
+                "last_package_build_at": "",
+                "last_package_build_job_id": "",
+                "last_report_saved_at": "",
+                "last_report_id": "",
+                "last_report_exported_at": "",
+                "last_report_export_job_id": "",
+                "latest_finding_activity_at": "",
+                "report_freshness": "not_started",
+            },
         }
         assert project_workspace.classify_certificate_status(-1) == "expired"
         assert project_workspace.classify_certificate_status(14) == "expiring_14d"
@@ -2990,6 +3026,8 @@ class TestProjectOverviewContract:
         assert quiet_target is not None
         future_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat()
         now = datetime.now(timezone.utc).isoformat()
+        earlier = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        from services.teams.storage import token_hash
         with database.db_connect() as conn:
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
@@ -3060,6 +3098,141 @@ class TestProjectOverviewContract:
                     now,
                 ),
             )
+            materialize_run_entities(
+                conn,
+                "tok_overview_rollup",
+                "run-overview-port",
+                [
+                    {
+                        "entities": [
+                            {"type": "domain", "value": "api.example.com"},
+                            {
+                                "type": "port",
+                                "value": "api.example.com:443/tcp",
+                                "attributes": {"service": "https"},
+                            },
+                        ],
+                    }
+                ],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_rollup",
+                "run-overview-no-port",
+                [],
+                seen_at=now,
+                command="nmap 192.0.2.44",
+            )
+            for run_id, command, started in (
+                ("run-overview-port", "nmap api.example.com", now),
+                ("run-overview-no-port", "nmap 192.0.2.44", now),
+                ("run-overview-old", "curl https://api.example.com", earlier),
+            ):
+                conn.execute(
+                    "INSERT OR IGNORE INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                    (run_id, "tok_overview_rollup", command, started, started),
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO project_links "
+                    "(id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', ?)",
+                    (f"plink-{run_id}", project["id"], run_id, now),
+                )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, content_type, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "artifact-overview-new",
+                    "tok_overview_rollup",
+                    "run-overview-port",
+                    "/tmp/overview.txt",
+                    "overview.txt",
+                    "output",
+                    42,
+                    "text/plain",
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO audit_events "
+                "(id, owner_session_hash, event_type, target_type, target_id, project_id, details, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "audit-overview-finding",
+                    token_hash("tok_overview_rollup"),
+                    "finding.triage.updated",
+                    "finding",
+                    "finding-overview-high",
+                    project["id"],
+                    json.dumps({"review_state": "new", "label": "High finding triaged"}),
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO evidence_packages "
+                "(id, session_id, project_id, name, description, redaction_mode, include_artifacts, "
+                "manifest, status, created, updated) "
+                "VALUES (?, ?, ?, ?, '', 'redacted', 1, ?, 'draft', ?, ?)",
+                (
+                    "pkg-overview-latest",
+                    "tok_overview_rollup",
+                    project["id"],
+                    "Executive handoff",
+                    json.dumps({"package_format_version": 2}),
+                    earlier,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO project_reports "
+                "(id, session_id, project_id, draft, report_format_version, created, updated) "
+                "VALUES (?, ?, ?, ?, 1, ?, ?)",
+                (
+                    "rpt-overview-latest",
+                    "tok_overview_rollup",
+                    project["id"],
+                    json.dumps({"title": "Client edge report"}),
+                    earlier,
+                    now,
+                ),
+            )
+            for audit_id, event_type, target_type, target_id, job_id in (
+                (
+                    "audit-overview-package-build",
+                    "package.build",
+                    "package",
+                    "pkg-overview-latest",
+                    "pkg-job-overview",
+                ),
+                (
+                    "audit-overview-report-build",
+                    "report.build",
+                    "report",
+                    "rpt-overview-latest",
+                    "rpt-job-overview",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO audit_events "
+                    "(id, owner_session_hash, event_type, target_type, target_id, project_id, job_id, details, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        audit_id,
+                        token_hash("tok_overview_rollup"),
+                        event_type,
+                        target_type,
+                        target_id,
+                        project["id"],
+                        job_id,
+                        json.dumps({"status": "complete", "job_id": job_id}),
+                        now,
+                    ),
+                )
             conn.commit()
 
         overview = project_workspace.get_project_intel_overview("tok_overview_rollup", project["id"])
@@ -3070,6 +3243,79 @@ class TestProjectOverviewContract:
         assert overview["rollups"]["certificate_statuses"]["healthy"] == 1
         assert overview["rollups"]["certificate_statuses"]["unknown"] == 1
         assert overview["rollups"]["finding_severities"]["high"] == 1
+        assert overview["rollups"]["app_scan_target_count"] == 2
+        assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["scanned_no_ports_seen_count"] == 1
+        assert overview["rollups"]["unscanned_target_count"] == 0
+        assert overview["rollups"]["awaiting_verification_target_count"] == 1
+        assert overview["rollups"]["needs_followup_target_count"] == 1
+        assert overview["coverage_gaps"]["untouched_targets"] == []
+        assert overview["coverage_gaps"]["awaiting_verification"] == [{
+            "entity_id": target["id"],
+            "display_label": "domain:api.example.com",
+            "reason": "awaiting_verification",
+            "detail": "2 findings awaiting verification.",
+            "deep_link": {
+                "tab": "findings",
+                "hints": {
+                    "target_id": target["id"],
+                    "orphan_filter": "all",
+                    "severity": "high",
+                },
+            },
+        }]
+        assert overview["coverage_gaps"]["needs_followup"] == [{
+            "entity_id": target["id"],
+            "display_label": "domain:api.example.com",
+            "reason": "needs_followup",
+            "detail": "1 finding needs review or follow-up.",
+            "deep_link": {
+                "tab": "findings",
+                "hints": {
+                    "target_id": target["id"],
+                    "orphan_filter": "all",
+                    "severity": "high",
+                },
+            },
+        }]
+        assert overview["deliverables_status"] == {
+            "last_package_at": now,
+            "last_package_id": "pkg-overview-latest",
+            "last_package_name": "Executive handoff",
+            "last_package_build_at": now,
+            "last_package_build_job_id": "pkg-job-overview",
+            "last_report_saved_at": now,
+            "last_report_id": "rpt-overview-latest",
+            "last_report_exported_at": now,
+            "last_report_export_job_id": "rpt-job-overview",
+            "latest_finding_activity_at": now,
+            "report_freshness": "fresh",
+        }
+        assert overview["operational_tempo"] == {
+            "last_run_at": now,
+            "last_run_id": "run-overview-port",
+            "runs_last_7d": 3,
+            "last_finding_triaged_at": now,
+            "last_finding_triaged_id": "finding-overview-suppressed",
+            "last_artifact_at": now,
+            "last_artifact_id": "artifact-overview-new",
+        }
+        recent_activity_by_id = {item["id"]: item for item in overview["recent_activity"]}
+        assert recent_activity_by_id["audit-overview-finding"] == {
+            "id": "audit-overview-finding",
+            "created": now,
+            "event_type": "finding.triage.updated",
+            "target_type": "finding",
+            "target_id": "finding-overview-high",
+            "summary": "label: High finding triaged · review state: new",
+            "deep_link": {
+                "tab": "findings",
+                "target_type": "finding",
+                "target_id": "finding-overview-high",
+            },
+        }
+        assert recent_activity_by_id["audit-overview-report-build"]["deep_link"]["tab"] == "report"
+        assert recent_activity_by_id["audit-overview-package-build"]["deep_link"]["tab"] == "packages"
         rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
         target_row = rows_by_id[target["id"]]
         quiet_row = rows_by_id[quiet_target["id"]]
@@ -3085,8 +3331,87 @@ class TestProjectOverviewContract:
         assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 1
         assert target_row["intel_summary"]["providers_with_data"] == ["censys"]
         assert target_row["deep_link_hints"]["findings"]["target_id"] == target["id"]
+        assert target_row["source_flags"]["has_app_scan_evidence"] is True
+        assert target_row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert target_row["app_evidence"]["scan_run_count"] == 1
+        assert target_row["app_evidence"]["port_entity_count"] == 1
+        assert target_row["app_evidence"]["command_roots"] == ["nmap"]
         assert quiet_row["certificate"]["status"] == "unknown"
         assert quiet_row["source_flags"]["has_intel"] is False
+        assert quiet_row["source_flags"]["has_app_scan_evidence"] is True
+        assert quiet_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert quiet_row["app_evidence"]["scan_run_count"] == 1
+        assert quiet_row["app_evidence"]["port_entity_count"] == 0
+        assert "does not prove no ports exist" in quiet_row["app_evidence"]["coverage_caveat"]
+
+    def test_project_intel_overview_drops_deleted_run_scan_observations(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_deleted_scan", {"name": "Deleted Scan"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_deleted_scan",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-deleted-scan",
+                    "tok_overview_deleted_scan",
+                    "nmap api.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_deleted_scan",
+                "run-overview-deleted-scan",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_deleted_scan", project["id"])
+        assert overview is not None
+        assert overview["rollups"]["app_scan_target_count"] == 1
+        assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["unscanned_target_count"] == 0
+        assert overview["targets"][0]["app_evidence"]["coverage_state"] == "app_ports_found"
+
+        with database.db_connect() as conn:
+            database.delete_run_artifacts(conn, ["run-overview-deleted-scan"])
+            conn.commit()
+
+        refreshed = project_workspace.get_project_intel_overview("tok_overview_deleted_scan", project["id"])
+        assert refreshed is not None
+        assert refreshed["rollups"]["app_scan_target_count"] == 0
+        assert refreshed["rollups"]["app_port_target_count"] == 0
+        assert refreshed["rollups"]["unscanned_target_count"] == 1
+        assert refreshed["targets"][0]["source_flags"]["has_app_scan_evidence"] is False
+        assert refreshed["targets"][0]["app_evidence"]["coverage_state"] == "not_scanned"
+        assert refreshed["targets"][0]["app_evidence"]["scan_run_count"] == 0
+        assert refreshed["targets"][0]["app_evidence"]["port_entity_count"] == 0
+        with database.db_connect() as conn:
+            stale_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM scan_target_observations WHERE run_id = ?",
+                ("run-overview-deleted-scan",),
+            ).fetchone()["count"]
+        assert stale_count == 0
 
     def test_get_project_intel_overview_marks_stale_provider_data(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -4219,6 +4544,7 @@ class TestPostgresMigrations:
         "project_digest_settings",
         "entities",
         "entity_run_links",
+        "scan_target_observations",
         "entity_intel_snapshots",
         "run_file_artifacts",
         "findings",
@@ -4316,6 +4642,8 @@ class TestPostgresMigrations:
             "0033",
             "0034",
             "0035",
+            "0036",
+            "0037",
         ]
         for table_name in (
             "runs",
@@ -4348,6 +4676,7 @@ class TestPostgresMigrations:
             "project_digest_settings",
             "entities",
             "entity_run_links",
+            "scan_target_observations",
             "entity_intel_snapshots",
             "run_file_artifacts",
             "findings",
@@ -9322,6 +9651,9 @@ class TestIntelServices:
         assert canonical.canonical_entity("url", "https://Example.com/path/?q=1") == (
             "https://example.com/path/?q=1"
         )
+        assert canonical.canonical_entity("port", "Example.com:443") == "example.com:443/tcp"
+        assert canonical.canonical_entity("port", "192.0.2.10:53/UDP") == "192.0.2.10:53/udp"
+        assert canonical.canonical_entity("port", "[2001:db8::1]:8443/tcp") == "[2001:db8::1]:8443/tcp"
 
     def test_canonical_entity_rejects_invalid_values(self):
         from services.intel import canonical
@@ -9333,6 +9665,10 @@ class TestIntelServices:
             ("cve", "2024-1234"),
             ("url", "ftp://example.test/file"),
             ("url", "https://example.test/" + ("a" * 2050)),
+            ("port", "example.test:0/tcp"),
+            ("port", "example.test:65536/tcp"),
+            ("port", "2001:db8::1:443/tcp"),
+            ("port", "example.test:443/sctp"),
         ]:
             with pytest.raises(canonical.CanonicalizationError):
                 canonical.canonical_entity(entity_type, value)
@@ -16418,6 +16754,8 @@ class TestOutputSignals:
     def test_classifies_common_findings(self):
         assert classify_line("443/tcp open https", command="nmap ip.darklab.sh") == ["findings"]
         assert classify_line("ip.darklab.sh [107.178.109.44] 80 (http) open", command="nc -zv ip.darklab.sh 80") == ["findings"]
+        assert classify_line("192.0.2.10:443", command="naabu -host 192.0.2.10") == ["findings"]
+        assert classify_line("[2001:db8::10]:8443", command="naabu -host 2001:db8::10") == ["findings"]
         assert classify_line("darklab.sh has address 104.21.4.35", command="host darklab.sh") == ["findings"]
         assert classify_line("104.21.4.35", command="dig darklab.sh +short") == ["findings"]
         assert classify_line("1 aspmx.l.google.com.", command="dig MX darklab.sh +short") == ["findings"]
@@ -16468,6 +16806,127 @@ class TestOutputSignals:
         ]
         assert classify_line("104.21.4.35", command="cat ips.txt") == []
         assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
+
+    def test_scan_output_emits_port_entities_with_hosts(self):
+        cases: list[tuple[str, list[str], str, dict[str, str]]] = [
+            (
+                "nmap example.com",
+                ["Nmap scan report for example.com", "443/tcp open https nginx"],
+                "example.com:443/tcp",
+                {"service": "https", "version": "nginx"},
+            ),
+            (
+                "nmap 192.168.1.5",
+                ["Nmap scan report for 192.168.1.5", "80/tcp open http nginx"],
+                "192.168.1.5:80/tcp",
+                {"service": "http", "version": "nginx"},
+            ),
+            (
+                "masscan 8.8.8.8",
+                ["Discovered open port 53/udp on 8.8.8.8"],
+                "8.8.8.8:53/udp",
+                {},
+            ),
+            (
+                "masscan 198.51.100.7",
+                ["Discovered open port 443/tcp on 198.51.100.7"],
+                "198.51.100.7:443/tcp",
+                {},
+            ),
+            (
+                "rustscan -a 198.51.100.7",
+                ["Open 198.51.100.7:443"],
+                "198.51.100.7:443/tcp",
+                {},
+            ),
+            (
+                "rustscan -a 10.0.0.5",
+                ["Open 10.0.0.5:443"],
+                "10.0.0.5:443/tcp",
+                {},
+            ),
+            (
+                "rustscan -a 127.0.0.1",
+                ["Open 127.0.0.1:8080"],
+                "127.0.0.1:8080/tcp",
+                {},
+            ),
+            (
+                "naabu -host example.com",
+                ["example.com:443"],
+                "example.com:443/tcp",
+                {},
+            ),
+            (
+                "naabu -host 172.16.1.8",
+                ["172.16.1.8:8443"],
+                "172.16.1.8:8443/tcp",
+                {},
+            ),
+            (
+                "naabu -host 192.0.2.10",
+                ["192.0.2.10:443"],
+                "192.0.2.10:443/tcp",
+                {},
+            ),
+            (
+                "naabu -host 2001:db8::10",
+                ["[2001:db8::10]:8443"],
+                "[2001:db8::10]:8443/tcp",
+                {},
+            ),
+            (
+                "nc -zv fw-vx2-vp4.darklab.sh 80",
+                ["fw-vx2-vp4.darklab.sh [107.167.93.162] 80 (http) open"],
+                "fw-vx2-vp4.darklab.sh:80/tcp",
+                {"service": "http"},
+            ),
+            (
+                "nc -zv 192.168.1.20 80",
+                ["192.168.1.20 [192.168.1.20] 80 (http) open"],
+                "192.168.1.20:80/tcp",
+                {"service": "http"},
+            ),
+            (
+                "nc -zv 192.168.1.3 80",
+                [
+                    "192.168.1.3: inverse host lookup failed: No address associated with name",
+                    "(UNKNOWN) [192.168.1.3] 80 (http) open",
+                ],
+                "192.168.1.3:80/tcp",
+                {"service": "http"},
+            ),
+            (
+                "nc -zv example.com 443",
+                ["Connection to example.com 443 port [tcp/https] succeeded!"],
+                "example.com:443/tcp",
+                {},
+            ),
+            (
+                "curl -v https://example.com",
+                ["* Connected to example.com (93.184.216.34) port 443 (#0)"],
+                "93.184.216.34:443/tcp",
+                {},
+            ),
+        ]
+        for command, lines, port_value, attributes in cases:
+            classifier = OutputSignalClassifier(command)
+            entities: list[dict[str, object]] = []
+            for line in lines:
+                classified_entities = cast(
+                    list[dict[str, object]] | None,
+                    classifier.classify_line(line).get("entities"),
+                )
+                entities = classified_entities or entities
+            expected_host = port_value.rsplit(":", 1)[0].strip("[]")
+            assert any(
+                entity["type"] in {"host", "ip"} and entity["canonical_value"] == expected_host
+                for entity in entities
+            ), command
+            port_entities = [entity for entity in entities if entity["type"] == "port"]
+            assert [entity["canonical_value"] for entity in port_entities] == [port_value]
+            if attributes:
+                assert port_entities[0]["attributes"] == attributes
 
     def test_help_output_does_not_feed_signals_or_entities(self):
         assert classify_line("443/tcp open https", command="nmap -h") == []
@@ -16824,6 +17283,8 @@ class TestOutputSignals:
         ]
 
     def test_classifies_projectdiscovery_and_port_scanner_findings(self):
+        import core.output_signals as output_signals
+
         dnsx_classifier = OutputSignalClassifier("dnsx -d darklab.sh -w dns.txt")
         current_dnsx = dnsx_classifier.classify_line("[INF] Current dnsx version 1.2.3 (latest)")
         assert current_dnsx["noise_kind"] == "status"
@@ -16840,6 +17301,23 @@ class TestOutputSignals:
         assert classify_line("Open 107.178.109.44:443", command="rustscan -a ip.darklab.sh -p 80,443") == [
             "findings",
         ]
+        with mock.patch.object(output_signals.log, "debug") as debug:
+            rejected_port_candidate = OutputSignalClassifier("masscan -p 70000 192.168.1.3").classify_line(
+                "Discovered open port 70000/tcp on 192.168.1.3"
+            )
+        assert "entities" not in rejected_port_candidate
+        debug.assert_called_once()
+        assert debug.call_args.args == ("OUTPUT_SIGNAL_PORT_ENTITY_SKIPPED",)
+        debug_extra = debug.call_args.kwargs["extra"]
+        assert debug_extra["command_root"] == "masscan"
+        assert debug_extra["line_index"] == 0
+        assert debug_extra["reason"] == "invalid_port"
+        assert debug_extra["port"] == "70000"
+        assert debug_extra["proto"] == "tcp"
+        assert debug_extra["host_kind"] == "ip_literal"
+        assert isinstance(debug_extra["host_hash"], str)
+        assert len(debug_extra["host_hash"]) == 12
+        assert "192.168.1.3" not in json.dumps(debug_extra)
         assert classify_line(
             "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
             command="nuclei -u https://ip.darklab.sh",
@@ -17031,6 +17509,7 @@ class TestOutputSignals:
         assert "custom/nuclei/http.yaml" not in json.dumps(debug_extra)
 
     def test_classifies_scanner_progress_lines_as_progress_role(self):
+        import blueprints.run as run_blueprint
         from blueprints.run import _capture_event_with_signals
 
         masscan_classifier = OutputSignalClassifier("masscan -p 1-1000 192.168.1.3")
@@ -17114,6 +17593,26 @@ class TestOutputSignals:
 
         assert capture.preview_lines[0]["cls"] == LineRole.progress.value
         assert capture.preview_lines[0]["noise_kind"] == "progress"
+
+        with mock.patch.object(run_blueprint.log, "info") as info_log:
+            run_blueprint._log_atlas_entities_captured(
+                "session-1",
+                "team-1",
+                "run-port-log",
+                [{"type": "ip"}, {"type": "port"}, {"type": "port"}],
+                1,
+            )
+        info_log.assert_called_once()
+        assert info_log.call_args.args == ("ATLAS_ENTITIES_CAPTURED",)
+        assert info_log.call_args.kwargs["extra"] == {
+            "run_id": "run-port-log",
+            "session": "session-1",
+            "team_id": "team-1",
+            "count": 3,
+            "entity_type_counts": {"ip": 1, "port": 2},
+            "port_entity_count": 2,
+            "scan_observation_count": 1,
+        }
 
     def test_live_output_batcher_coalesces_progress_without_dropping_saved_lines(self):
         import blueprints.run as run_blueprint
@@ -17370,12 +17869,24 @@ class TestOutputSignals:
         assert "entities" not in nmap_classifier.classify_line(
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
-        assert "entities" not in nmap_classifier.classify_line(
+
+        nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )
-        assert "entities" not in nmap_classifier.classify_line(
+        nmap_afp = nmap_classifier.classify_line(
             "548/tcp   open  afp         syn-ack Netatalk 3.1.9.q3 (name: MAYHEW-NAS; protocol 3.4)"
         )
+        for metadata, port_value in (
+            (nmap_http, "darklab.sh:6080/tcp"),
+            (nmap_afp, "darklab.sh:548/tcp"),
+        ):
+            nmap_port_entities = metadata["entities"]
+            assert isinstance(nmap_port_entities, list)
+            nmap_port_values = {(item["type"], item["canonical_value"]) for item in nmap_port_entities}
+            assert ("host", "darklab.sh") in nmap_port_values
+            assert ("port", port_value) in nmap_port_values
+            assert all(item["canonical_value"] not in {"http.server", "3.1.9.q3"} for item in nmap_port_entities)
+
         nmap_report = nmap_classifier.classify_line("Nmap scan report for web.darklab.sh (104.21.4.35)")
         nmap_report_entities = nmap_report["entities"]
         assert isinstance(nmap_report_entities, list)
@@ -17631,13 +18142,14 @@ class TestRunOutputCapture:
             command_root="nmap",
             target="ip.darklab.sh",
             entities=RunOutputCapture._normalize_entities([{
-                "type": "domain",
-                "value": "ip.darklab.sh",
-                "canonical_value": "ip.darklab.sh",
-                "confidence": "medium",
+                "type": "port",
+                "value": "ip.darklab.sh:443/tcp",
+                "canonical_value": "ip.darklab.sh:443/tcp",
+                "confidence": "high",
                 "source_line": 0,
                 "start": 14,
                 "end": 27,
+                "attributes": {"service": "https", "version": "nginx"},
             }]),
         ))
         capture.finalize()
@@ -17652,13 +18164,14 @@ class TestRunOutputCapture:
             "command_root": "nmap",
             "target": "ip.darklab.sh",
             "entities": [{
-                "type": "domain",
-                "value": "ip.darklab.sh",
-                "canonical_value": "ip.darklab.sh",
-                "confidence": "medium",
+                "type": "port",
+                "value": "ip.darklab.sh:443/tcp",
+                "canonical_value": "ip.darklab.sh:443/tcp",
+                "confidence": "high",
                 "source_line": 0,
                 "start": 14,
                 "end": 27,
+                "attributes": {"service": "https", "version": "nginx"},
             }],
         }]
         assert list(capture.preview_lines) == expected
@@ -17671,7 +18184,8 @@ class TestRunOutputCapture:
         assert events[0].line_index == 0
         assert events[0].command_root == "nmap"
         assert events[0].target == "ip.darklab.sh"
-        assert events[0].entities[0].canonical_value == "ip.darklab.sh"
+        assert events[0].entities[0].canonical_value == "ip.darklab.sh:443/tcp"
+        assert events[0].entities[0].attributes == {"service": "https", "version": "nginx"}
 
     def test_nuclei_source_detail_round_trips_through_run_output_and_package_entries(self):
         import services.projects.package_rendering as package_rendering
@@ -20379,6 +20893,27 @@ class TestDatabaseInit:
         assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
         assert result.findings[0].references == ["https://owasp.org"]
 
+    def test_atlas_import_parser_accepts_generic_port_entities(self):
+        csv_payload = "\n".join((
+            "row_type,entity_kind,entity_value",
+            "entity,port,Example.com:443/tcp",
+            "entity,port,[2001:db8::1]:53/udp",
+        ))
+        jsonl_payload = "\n".join((
+            json.dumps({"row_type": "entity", "entity_kind": "port", "entity_value": "Example.com:443/tcp"}),
+            json.dumps({"row_type": "entity", "entity_kind": "port", "entity_value": "[2001:db8::1]:53/udp"}),
+        ))
+
+        csv_result = parse_import_file(csv_payload.encode(), format_id="generic_csv")
+        jsonl_result = parse_import_file(jsonl_payload, format_id="generic_jsonl")
+
+        expected = [
+            ("port", "example.com:443/tcp"),
+            ("port", "[2001:db8::1]:53/udp"),
+        ]
+        assert [(entity.kind, entity.canonical_value) for entity in csv_result.entities] == expected
+        assert [(entity.kind, entity.canonical_value) for entity in jsonl_result.entities] == expected
+
     def test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows(self):
         payload = "\n".join((
             '{"row_type":"entity","entity_kind":"ip","entity_value":"192.0.2.10"}',
@@ -20729,6 +21264,8 @@ SQL syntax error near q</response>
         assert source.read_sizes == [5]
 
     def test_materializes_run_entities_from_output_entries(self):
+        from core.helpers import get_log_session_id
+
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
@@ -20765,11 +21302,21 @@ SQL syntax error near q</response>
             )
             conn.commit()
             entity_rows = conn.execute(
-                "SELECT type, canonical_value, occurrence_count FROM entities ORDER BY type, canonical_value"
+                "SELECT id, type, canonical_value, occurrence_count FROM entities ORDER BY type, canonical_value"
             ).fetchall()
             link_rows = conn.execute(
                 "SELECT run_id, occurrence_count FROM entity_run_links ORDER BY run_id"
             ).fetchall()
+            domain_id = next(row["id"] for row in entity_rows if row["canonical_value"] == "darklab.sh")
+            conn.execute("UPDATE entities SET attributes_json = ? WHERE id = ?", ("{not-json", domain_id))
+            with mock.patch("services.atlas.materializer.log.warning") as warning_log:
+                materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    "run-atlas",
+                    [{"entities": [{"type": "domain", "value": "darklab.sh", "attributes": {"source": "manual"}}]}],
+                    seen_at="2026-05-14T00:00:02+00:00",
+                )
             conn.close()
 
         assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
@@ -20782,6 +21329,389 @@ SQL syntax error near q</response>
         }
         assert len(recorded) == 6
         assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 6
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED"] == {
+            "session": get_log_session_id("atlas-session"),
+            "entity_id": domain_id,
+            "entity_type": "domain",
+            "value_type": "str",
+            "reason": "invalid_json",
+        }
+
+    def test_materializes_port_entities_with_host_relationship_and_attributes(self):
+        from core.helpers import get_log_session_id
+        from services.projects import queries as project_queries
+        from services.atlas.lookup import atlas_entities_export, atlas_entities_export_csv, atlas_entities_export_jsonl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-port-atlas", "atlas-session", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            with mock.patch("services.atlas.materializer.log.debug") as debug_log:
+                recorded = materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    "run-port-atlas",
+                    [
+                        {
+                            "entities": [
+                                {"type": "host", "value": "example.com"},
+                                {
+                                    "type": "port",
+                                    "value": "example.com:443/tcp",
+                                    "attributes": {"service": "https"},
+                                },
+                            ],
+                        },
+                        {
+                            "entities": [
+                                {
+                                    "type": "port",
+                                    "value": "example.com:443/tcp",
+                                    "attributes": {"version": "nginx"},
+                                },
+                            ],
+                        },
+                    ],
+                    seen_at="2026-05-14T00:00:01+00:00",
+                    command="nmap example.com",
+                )
+            conn.commit()
+            rows = {
+                row["type"]: dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id, attributes_json, occurrence_count "
+                    "FROM entities ORDER BY type"
+                ).fetchall()
+            }
+            observation = conn.execute(
+                "SELECT entity_id, command_root, port_entity_count FROM scan_target_observations "
+                "WHERE run_id = ?",
+                ("run-port-atlas",),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "prj-port-atlas",
+                    "atlas-session",
+                    "Port Atlas",
+                    "port-atlas",
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, ?)",
+                (
+                    "plink-port-atlas",
+                    "prj-port-atlas",
+                    rows["port"]["id"],
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+            export_rows = atlas_entities_export(conn, "atlas-session", entity_type="port")
+            export_csv = atlas_entities_export_csv(export_rows)
+            export_jsonl = atlas_entities_export_jsonl(export_rows)
+            conn.close()
+            with mock.patch("core.database.DB_PATH", db_path):
+                project_entity_page = project_queries.list_project_entities(
+                    "atlas-session",
+                    "prj-port-atlas",
+                    entity_type="port",
+                )
+
+        assert [item["type"] for item in recorded] == ["domain", "port"]
+        summary = next(
+            call.kwargs["extra"]
+            for call in debug_log.call_args_list
+            if call.args == ("ATLAS_ENTITY_MATERIALIZATION_SUMMARY",)
+        )
+        assert summary == {
+            "session": get_log_session_id("atlas-session"),
+            "run_id": "run-port-atlas",
+            "command_root": "nmap",
+            "entity_count": 2,
+            "total_occurrence_count": 3,
+            "invalid_entity_count": 0,
+            "port_entity_count": 2,
+            "attribute_entity_count": 1,
+            "scan_observation_count": 1,
+        }
+        assert rows["domain"]["canonical_value"] == "example.com"
+        assert rows["port"]["canonical_value"] == "example.com:443/tcp"
+        assert rows["port"]["host_entity_id"] == rows["domain"]["id"]
+        assert json.loads(rows["port"]["attributes_json"]) == {"service": "https", "version": "nginx"}
+        assert rows["port"]["occurrence_count"] == 2
+        assert export_rows[0]["host_entity_id"] == rows["domain"]["id"]
+        assert export_rows[0]["attributes"] == {"service": "https", "version": "nginx"}
+        assert "attributes_json" not in export_rows[0]
+        export_jsonl_row = json.loads(export_jsonl.strip())
+        assert export_jsonl_row["attributes"] == {"service": "https", "version": "nginx"}
+        assert "attributes_json" not in export_jsonl_row
+        export_csv_rows = list(csv.DictReader(io.StringIO(export_csv)))
+        assert json.loads(export_csv_rows[0]["attributes"]) == {"service": "https", "version": "nginx"}
+        assert "attributes_json" not in (export_csv.splitlines()[0] if export_csv else "")
+        assert observation is not None
+        assert observation["entity_id"] == rows["domain"]["id"]
+        assert observation["command_root"] == "nmap"
+        assert observation["port_entity_count"] == 2
+        assert project_entity_page is not None
+        assert project_entity_page["entities"][0]["host_entity_id"] == rows["domain"]["id"]
+        assert project_entity_page["entities"][0]["attributes"] == {"service": "https", "version": "nginx"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            import services.atlas.intel_bridge as intel_bridge
+
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-internal-port-atlas", "atlas-session", "rustscan -a 127.0.0.1", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-internal-port-atlas",
+                [
+                    {
+                        "entities": [
+                            {"type": "ip", "value": "127.0.0.1", "canonical_value": "127.0.0.1"},
+                            {"type": "port", "value": "127.0.0.1:8080/tcp"},
+                        ],
+                    },
+                    {
+                        "entities": [
+                            {"type": "ip", "value": "198.51.100.7", "canonical_value": "198.51.100.7"},
+                            {"type": "port", "value": "198.51.100.7:443/tcp"},
+                        ],
+                    },
+                ],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="rustscan -a 127.0.0.1",
+            )
+            conn.commit()
+            internal_rows = {
+                row["canonical_value"]: dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id FROM entities ORDER BY canonical_value"
+                ).fetchall()
+            }
+            conn.close()
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch.object(intel_bridge, "lookup_entity") as lookup_entity:
+                    with mock.patch.object(intel_bridge.log, "debug") as intel_debug:
+                        refresh_result = intel_bridge.refresh_entity_intel(
+                            "atlas-session",
+                            internal_rows["127.0.0.1:8080/tcp"]["id"],
+                        )
+        assert internal_rows["127.0.0.1:8080/tcp"]["host_entity_id"] == internal_rows["127.0.0.1"]["id"]
+        assert internal_rows["198.51.100.7:443/tcp"]["host_entity_id"] == internal_rows["198.51.100.7"]["id"]
+        assert refresh_result is None
+        lookup_entity.assert_not_called()
+        unsupported_log = next(
+            call.kwargs["extra"]
+            for call in intel_debug.call_args_list
+            if call.args == ("INTEL_LOOKUP_SKIPPED_UNSUPPORTED_ENTITY_TYPE",)
+        )
+        assert unsupported_log["entity_id"] == internal_rows["127.0.0.1:8080/tcp"]["id"]
+        assert unsupported_log["entity_type"] == "port"
+
+    def test_materializes_command_target_scan_observation_without_port_entities(self):
+        from core.helpers import get_log_session_id
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-port-empty", "atlas-session", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-port-empty",
+                [],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="nmap example.com",
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT entity_type, canonical_value, command_root, port_entity_count "
+                "FROM scan_target_observations WHERE run_id = ?",
+                ("run-port-empty",),
+            ).fetchall()
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            with mock.patch("services.atlas.materializer.log.warning") as warning_log:
+                materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    "run-port-empty",
+                    [],
+                    seen_at="2026-05-14T00:00:02+00:00",
+                )
+            refreshed_observation_count = conn.execute(
+                "SELECT COUNT(*) FROM scan_target_observations WHERE run_id = ?",
+                ("run-port-empty",),
+            ).fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert [dict(row) for row in rows] == [{
+            "entity_type": "domain",
+            "canonical_value": "example.com",
+            "command_root": "nmap",
+            "port_entity_count": 0,
+        }]
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["SCAN_TARGET_OBSERVATIONS_DROPPED"] == {
+            "session": get_log_session_id("atlas-session"),
+            "run_id": "run-port-empty",
+            "command_root": "",
+            "deleted_count": 1,
+            "reason": "missing_command",
+        }
+        assert refreshed_observation_count == 0
+
+    @pytest.mark.parametrize(
+        ("run_id", "command", "expected_type", "expected_value", "expected_root"),
+        [
+            ("run-quiet-nmap", "nmap example.com", "domain", "example.com", "nmap"),
+            ("run-quiet-rustscan", "rustscan -a 198.51.100.8", "ip", "198.51.100.8", "rustscan"),
+            ("run-quiet-naabu", "naabu -host example.net", "domain", "example.net", "naabu"),
+            ("run-quiet-nc", "nc -zv example.org 443", "domain", "example.org", "nc"),
+        ],
+    )
+    def test_materializes_quiet_port_scan_target_observations_by_command_root(
+        self,
+        run_id,
+        command,
+        expected_type,
+        expected_value,
+        expected_root,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                run_id,
+                [],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command=command,
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT entity_type, canonical_value, command_root, port_entity_count "
+                "FROM scan_target_observations WHERE run_id = ?",
+                (run_id,),
+            ).fetchall()
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert [dict(row) for row in rows] == [{
+            "entity_type": expected_type,
+            "canonical_value": expected_value,
+            "command_root": expected_root,
+            "port_entity_count": 0,
+        }]
+
+    def test_materializes_no_scan_target_observation_when_command_target_is_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "run-quiet-masscan",
+                    "atlas-session",
+                    "masscan -p 80 198.51.100.7",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-quiet-masscan",
+                [],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="masscan -p 80 198.51.100.7",
+            )
+            conn.commit()
+            observation_count = conn.execute(
+                "SELECT COUNT(*) FROM scan_target_observations WHERE run_id = ?",
+                ("run-quiet-masscan",),
+            ).fetchone()[0]
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert observation_count == 0
+
+    def test_materializes_curl_port_entities_without_scan_target_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-curl-port", "atlas-session", "curl -v https://example.com", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-curl-port",
+                [{
+                    "entities": [
+                        {"type": "ip", "value": "93.184.216.34"},
+                        {"type": "port", "value": "93.184.216.34:443/tcp"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="curl -v https://example.com",
+            )
+            conn.commit()
+            entities = conn.execute(
+                "SELECT type, canonical_value FROM entities ORDER BY type, canonical_value"
+            ).fetchall()
+            observation_count = conn.execute(
+                "SELECT COUNT(*) FROM scan_target_observations WHERE run_id = ?",
+                ("run-curl-port",),
+            ).fetchone()[0]
+            conn.close()
+
+        assert [item["type"] for item in recorded] == ["ip", "port"]
+        assert [(row["type"], row["canonical_value"]) for row in entities] == [
+            ("ip", "93.184.216.34"),
+            ("port", "93.184.216.34:443/tcp"),
+        ]
+        assert observation_count == 0
 
     def test_materializer_ignores_unclassified_raw_output_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -21736,6 +22666,7 @@ SQL syntax error near q</response>
             conn = self._auto_promote_test_conn(tmp)
             self._insert_auto_promote_project(conn)
             self._insert_auto_promote_entity(conn, "ent-auto-domain", "domain", "alpha.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-port", "port", "example.com:443/tcp")
             self._insert_auto_promote_entity(conn, "ent-auto-url", "url", "https://darklab.sh/admin")
             domain_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
@@ -21746,6 +22677,17 @@ SQL syntax error near q</response>
                     "target_entity_kind": "any",
                     "match_mode": "exact",
                     "pattern": "Alpha.Example.Com.",
+                },
+            )
+            port_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any exact port",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
+                    "pattern": "example.com:443",
                 },
             )
             url_preview = project_auto_promote.preview_rule_on_conn(
@@ -21762,6 +22704,7 @@ SQL syntax error near q</response>
             conn.close()
 
         assert [item["id"] for item in domain_preview["matches"]] == ["ent-auto-domain"]
+        assert [item["id"] for item in port_preview["matches"]] == ["ent-auto-port"]
         assert [item["id"] for item in url_preview["matches"]] == ["ent-auto-url"]
 
     def test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs(self):
@@ -22199,6 +23142,9 @@ SQL syntax error near q</response>
             entity_run_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('entity_run_links')").fetchall()
             }
+            scan_observation_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('scan_target_observations')").fetchall()
+            }
             import_draft_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('atlas_import_drafts')").fetchall()
             }
@@ -22246,6 +23192,8 @@ SQL syntax error near q</response>
         assert "idx_findings_occurrences_finding_seen" in occurrence_indexes
         assert "idx_entity_run_links_run" in entity_run_indexes
         assert "idx_entity_run_links_entity_seen" in entity_run_indexes
+        assert "idx_scan_target_observations_entity_seen" in scan_observation_indexes
+        assert "idx_scan_target_observations_owner_run" in scan_observation_indexes
         assert "idx_atlas_import_drafts_scope_created" in import_draft_indexes
         assert "idx_atlas_import_drafts_expires" in import_draft_indexes
         assert "idx_atlas_import_batches_scope_applied" in import_batch_indexes
@@ -22891,6 +23839,43 @@ SQL syntax error near q</response>
 
         assert conn.execute.call_count >= 1
         assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
+
+        duplicate_conn = mock.MagicMock()
+        duplicate_conn.execute.side_effect = sqlite3.OperationalError("duplicate column name: host_entity_id")
+        with mock.patch.object(database.log, "debug") as debug_log:
+            with mock.patch.object(database.log, "warning") as warning_log:
+                database._apply_sqlite_add_column_compat(
+                    duplicate_conn,
+                    "ALTER TABLE entities ADD COLUMN host_entity_id TEXT",
+                    migration_area="atlas_port_entity_metadata",
+                )
+        debug_log.assert_called_once_with(
+            "SQLITE_SCHEMA_COMPAT_COLUMN_EXISTS",
+            extra={
+                "table": "entities",
+                "column": "host_entity_id",
+                "migration_area": "atlas_port_entity_metadata",
+            },
+        )
+        warning_log.assert_not_called()
+
+        failed_conn = mock.MagicMock()
+        failed_conn.execute.side_effect = sqlite3.OperationalError("database is locked")
+        with mock.patch.object(database.log, "warning") as warning_log:
+            database._apply_sqlite_add_column_compat(
+                failed_conn,
+                "ALTER TABLE entities ADD COLUMN attributes_json TEXT",
+                migration_area="atlas_port_entity_metadata",
+            )
+        warning_log.assert_called_once()
+        assert warning_log.call_args.args == ("SQLITE_SCHEMA_COMPAT_COLUMN_FAILED",)
+        assert warning_log.call_args.kwargs["exc_info"] is True
+        assert warning_log.call_args.kwargs["extra"] == {
+            "table": "entities",
+            "column": "attributes_json",
+            "migration_area": "atlas_port_entity_metadata",
+            "error": "database is locked",
+        }
 
 
 class TestBodyStore:

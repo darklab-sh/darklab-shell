@@ -368,6 +368,7 @@ import {
 } from '../../../app/static/js/features/atlas/atlas_tabs.js'
 import {
   DarklabAtlasEntityRow,
+  formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,
 } from '../../../app/static/js/features/atlas/atlas_entity_row.js'
@@ -1001,6 +1002,83 @@ describe('core ESM exports', () => {
       if (originalLazyAssetsJson) document.body.appendChild(originalLazyAssetsJson)
       restoreGlobals(lazyGlobal, globals)
     }
+  })
+
+  it('renders port metadata in Atlas and Project entity rows', () => {
+    const entity = {
+      id: 'ent-port-443',
+      type: 'port',
+      canonical_value: 'example.com:443/tcp',
+      host_entity_id: 'ent-host-example',
+      occurrence_count: 2,
+      run_count: 1,
+      attributes: { service: 'https', version: 'nginx', banner: 'nginx TLS' },
+    }
+
+    expect(formatPortEntityMetadata(entity, { includeHost: true })).toEqual([
+      'proto tcp',
+      'service https',
+      'version nginx',
+      'banner nginx TLS',
+      'host ent-host-example',
+    ])
+
+    const atlasRow = renderAtlasEntityRow({ entity })
+    expect(atlasRow.textContent).toContain('2 hits · 1 run')
+    expect(atlasRow.textContent).toContain('proto tcp')
+    expect(atlasRow.textContent).toContain('service https')
+    expect(atlasRow.textContent).toContain('version nginx')
+    expect(atlasRow.textContent).toContain('banner nginx TLS')
+
+    const projectController = DarklabProjectEntities.createProjectEntitiesController({
+      formatDate: value => String(value || ''),
+    })
+    const projectRow = renderProjectEntityRow({
+      entity,
+      title: entity.canonical_value,
+      meta: 'Ports · 2 hits',
+      detail: projectController.portSummary(entity, { includeHost: true }),
+    })
+    expect(projectRow.textContent).toContain('proto tcp')
+    expect(projectRow.textContent).toContain('service https')
+    expect(projectRow.textContent).toContain('version nginx')
+    expect(projectRow.textContent).toContain('banner nginx TLS')
+    expect(projectRow.textContent).toContain('host ent-host-example')
+  })
+
+  it('renders port metadata in Atlas entity detail', () => {
+    const container = document.createElement('div')
+    renderAtlasDetail(container, {
+      entity: {
+        id: 'ent-port-443',
+        type: 'port',
+        canonical_value: 'example.com:443/tcp',
+        host_entity_id: 'ent-host-example',
+        occurrence_count: 2,
+        first_seen_at: '2026-06-01T00:00:00Z',
+        last_seen_at: '2026-06-02T00:00:00Z',
+        attributes: { service: 'https', version: 'nginx', banner: 'nginx TLS' },
+        project_links: [],
+        labels: [],
+      },
+      intel_summary: {},
+      intel_snapshots: [],
+      import_sources: [],
+      runs: [],
+      findings: [],
+      detail_limits: {},
+    }, { hideInlineActions: true })
+
+    expect(container.textContent).toContain('Proto')
+    expect(container.textContent).toContain('tcp')
+    expect(container.textContent).toContain('Service')
+    expect(container.textContent).toContain('https')
+    expect(container.textContent).toContain('Version')
+    expect(container.textContent).toContain('nginx')
+    expect(container.textContent).toContain('Banner')
+    expect(container.textContent).toContain('nginx TLS')
+    expect(container.textContent).toContain('Host')
+    expect(container.textContent).toContain('ent-host-example')
   })
 
   it('logs a bounded error when a lazy module API contract is missing', async () => {

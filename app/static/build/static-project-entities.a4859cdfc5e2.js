@@ -1,9 +1,9 @@
 import {
   exportedOpenAtlas
-} from "./static-chunk-chqbks7e.9f2e150d66e2.js";
+} from "./static-chunk-evo2j66v.0f1e08dadf7e.js";
 import "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-bq2uwdee.5cc634779df5.js";
+import "./static-chunk-luxntmsb.800e86ee6e9e.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -28,14 +28,15 @@ import "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import {
   logClientError
 } from "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-4nkiwrht.8176cfb2b3d4.js";
+import "./static-chunk-yzcc4kyr.88ac01345411.js";
 import {
-  DarklabAtlasEntityRow
-} from "./static-chunk-m4e6ivjw.074a5c89d41e.js";
+  DarklabAtlasEntityRow,
+  formatPortEntityMetadata
+} from "./static-chunk-zabwxq4a.6a46e6b248cd.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
 import {
   DarklabAtlasTabs
-} from "./static-chunk-y6zchygr.f5ddd7fe938a.js";
+} from "./static-chunk-wkckhpty.7befd18332ed.js";
 
 // app/static/js/features/projects/project_entities.js
 var exportedDarklabProjectEntities = null;
@@ -50,6 +51,7 @@ var exportedDarklabProjectEntities = null;
     const atlasTabs = atlasTabsApi && Array.isArray(atlasTabsApi.tabs) ? atlasTabsApi.tabs : [
       { id: "ip", label: "Hosts/IPs", type: "ip" },
       { id: "domain", label: "Domains", type: "domain" },
+      { id: "port", label: "Ports", type: "port" },
       { id: "hash", label: "Hashes", type: "hash" },
       { id: "cve", label: "CVEs", type: "cve" },
       { id: "url", label: "URLs", type: "url" }
@@ -78,6 +80,10 @@ var exportedDarklabProjectEntities = null;
     const providerText = providers.length ? providers.slice(0, 3).join(", ") + (providers.length > 3 ? ` +${providers.length - 3}` : "") : `${count} provider${count === 1 ? "" : "s"}`;
     const refreshed = entity && entity.intel_last_refreshed ? ` · refreshed ${formatDate(entity.intel_last_refreshed)}` : "";
     return `intel: ${providerText}${refreshed}`;
+  }
+  function _portEntitySummary(entity, options = {}) {
+    const formatPortEntityMetadata2 = typeof formatPortEntityMetadata === "function" ? formatPortEntityMetadata : () => [];
+    return formatPortEntityMetadata2(entity, options).join(" · ");
   }
   function _appendDataset(el, dataset = {}) {
     Object.entries(dataset || {}).forEach(([key, value]) => {
@@ -168,11 +174,12 @@ var exportedDarklabProjectEntities = null;
     const ruleStates = /* @__PURE__ */ new Map();
     const targetKinds = [
       { value: "any", label: "Any" },
-      { value: "domain", label: "Domain" },
       { value: "ip", label: "IP" },
-      { value: "url", label: "URL" },
+      { value: "domain", label: "Domain" },
+      { value: "port", label: "Port" },
+      { value: "hash", label: "Hash" },
       { value: "cve", label: "CVE" },
-      { value: "hash", label: "Hash" }
+      { value: "url", label: "URL" }
     ];
     const matchModes = [
       { value: "exact", label: "Exact" },
@@ -515,6 +522,9 @@ var exportedDarklabProjectEntities = null;
     }
     function intelSummary(entity) {
       return _entityIntelSummary(entity, ctx.formatDate || ((value) => String(value || "")));
+    }
+    function portSummary(entity, options = {}) {
+      return _portEntitySummary(entity, options);
     }
     function counts(summary) {
       const projectId = String(summary?.project?.id || ctx.getSelectedProjectId?.() || "");
@@ -1536,6 +1546,7 @@ var exportedDarklabProjectEntities = null;
           entity.last_seen ? `last seen ${ctx.formatDate(entity.last_seen)}` : ""
         ].filter(Boolean);
         const detailParts = [
+          portSummary(entity, { includeHost: true }),
           entity.source_run_id ? `source run ${ctx.shortProjectRunId(entity.source_run_id)}` : "",
           intelSummary(entity)
         ].filter(Boolean);
@@ -1632,6 +1643,7 @@ var exportedDarklabProjectEntities = null;
           meta: typeLabel(entity.type),
           detail: [
             `${hitCount.toLocaleString()} hit${hitCount === 1 ? "" : "s"}`,
+            portSummary(entity, { includeHost: true }),
             intelSummary(entity)
           ].filter(Boolean),
           chips: chips(entity),
@@ -1863,6 +1875,7 @@ var exportedDarklabProjectEntities = null;
       tabs,
       typeLabel,
       intelSummary,
+      portSummary,
       counts,
       itemsForActiveTab,
       pagedItemsForActiveTab,

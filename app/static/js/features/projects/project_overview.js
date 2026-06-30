@@ -28,6 +28,25 @@ let exportedDarklabProjectOverview = null;
     'not-monitored': 'Not monitored',
   };
 
+  const appCoverageLabels = {
+    app_ports_found: 'App ports found',
+    scanned_no_ports_seen: 'Scanned, no ports surfaced',
+    not_scanned: 'No app scan',
+  };
+
+  const reviewStages = [
+    { key: 'new', label: 'New' },
+    { key: 'reviewed', label: 'Reviewed' },
+    { key: 'important_followup', label: 'Important/follow-up' },
+  ];
+
+  const verificationStages = [
+    { key: 'not_started', label: 'Not started' },
+    { key: 'ready_to_verify', label: 'Ready' },
+    { key: 'verified', label: 'Verified' },
+    { key: 'needs_retest', label: 'Needs retest' },
+  ];
+
   function createProjectOverviewController(context) {
     const ctx = context || {};
     const states = new Map();
@@ -127,6 +146,32 @@ let exportedDarklabProjectOverview = null;
       return payload.rollups && typeof payload.rollups === 'object' ? payload.rollups : {};
     }
 
+    function operationalTempo(st) {
+      const payload = st && st.payload && typeof st.payload === 'object' ? st.payload : {};
+      return payload.operational_tempo && typeof payload.operational_tempo === 'object'
+        ? payload.operational_tempo
+        : {};
+    }
+
+    function recentActivity(st) {
+      const payload = st && st.payload && typeof st.payload === 'object' ? st.payload : {};
+      return Array.isArray(payload.recent_activity) ? payload.recent_activity : [];
+    }
+
+    function coverageGaps(st) {
+      const payload = st && st.payload && typeof st.payload === 'object' ? st.payload : {};
+      return payload.coverage_gaps && typeof payload.coverage_gaps === 'object'
+        ? payload.coverage_gaps
+        : {};
+    }
+
+    function deliverablesStatus(st) {
+      const payload = st && st.payload && typeof st.payload === 'object' ? st.payload : {};
+      return payload.deliverables_status && typeof payload.deliverables_status === 'object'
+        ? payload.deliverables_status
+        : {};
+    }
+
     function formatCount(value) {
       const count = Number(value || 0);
       return Number.isFinite(count) ? count.toLocaleString() : '0';
@@ -139,7 +184,14 @@ let exportedDarklabProjectOverview = null;
     }
 
     function readableToken(value) {
-      return String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+      return String(value || '').replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function eventLabel(value) {
+      const readable = readableToken(value);
+      return readable
+        ? readable.replace(/\b\w/g, letter => letter.toUpperCase())
+        : 'Activity';
     }
 
     function certificateTone(status) {
@@ -162,6 +214,22 @@ let exportedDarklabProjectOverview = null;
       const normalized = String(state || 'not-monitored');
       if (normalized === 'windowed') return 'badge-tone-green';
       if (normalized === 'watcher-context-only') return 'badge-tone-cyan';
+      return 'badge-tone-muted';
+    }
+
+    function freshnessLabel(value) {
+      const normalized = String(value || 'not_started');
+      if (normalized === 'fresh') return 'Report fresh';
+      if (normalized === 'stale') return 'Report stale';
+      if (normalized === 'no_finding_activity') return 'No finding changes';
+      return 'No report';
+    }
+
+    function freshnessTone(value) {
+      const normalized = String(value || 'not_started');
+      if (normalized === 'fresh') return 'badge-tone-green';
+      if (normalized === 'stale') return 'badge-tone-amber';
+      if (normalized === 'no_finding_activity') return 'badge-tone-cyan';
       return 'badge-tone-muted';
     }
 
@@ -204,13 +272,305 @@ let exportedDarklabProjectOverview = null;
       const grid = document.createElement('div');
       grid.className = 'project-overview-summary-grid';
       grid.append(
-        summaryCard('Targets', formatCount(source.target_count), `${formatCount(source.provider_count)} providers`),
-        summaryCard('Ports', formatCount(source.open_port_count), `${formatCount(source.service_count)} services`),
+        summaryCard('Targets', formatCount(source.target_count), `${formatCount(source.provider_count)} cached providers`),
+        summaryCard('Cached provider ports', formatCount(source.open_port_count), `${formatCount(source.service_count)} services`),
+        summaryCard('App scan coverage', formatCount(source.app_scan_target_count), `${formatCount(source.unscanned_target_count)} unscanned`),
+        summaryCard('Verification gaps', formatCount(source.awaiting_verification_target_count), 'targets waiting'),
         summaryCard('High-risk targets', formatCount(highSignal), 'critical/high finding', highSignal ? 'attention' : ''),
         summaryCard('Certificates', formatCount(certAttention), 'expired or expiring', certAttention ? 'attention' : ''),
         summaryCard('Recent changes', recentLabels[recentState] || readableToken(recentState)),
       );
       return grid;
+    }
+
+    function renderProviderIntelCaveat() {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-overview-provider-caveat';
+      wrap.appendChild(badge('Cached provider data', 'badge-tone-muted'));
+      const text = document.createElement('span');
+      text.textContent = 'Ports, services, certificates, and provider highlights come from saved intel snapshots. App scan evidence is shown separately.';
+      wrap.appendChild(text);
+      return wrap;
+    }
+
+    function findingCounts(target) {
+      const counts = target?.finding_counts && typeof target.finding_counts === 'object'
+        ? target.finding_counts
+        : {};
+      return {
+        review: counts.by_review_state && typeof counts.by_review_state === 'object'
+          ? counts.by_review_state
+          : {},
+        verification: counts.by_verification_state && typeof counts.by_verification_state === 'object'
+          ? counts.by_verification_state
+          : {},
+        suppressed: Number(counts.suppressed || 0),
+      };
+    }
+
+    function findingProgressRollup(st) {
+      const result = {
+        review: {
+          new: 0,
+          reviewed: 0,
+          important_followup: 0,
+          false_positive: 0,
+        },
+        verification: {
+          not_started: 0,
+          ready_to_verify: 0,
+          verified: 0,
+          needs_retest: 0,
+          not_applicable: 0,
+        },
+        suppressed: 0,
+      };
+      targets(st).forEach((target) => {
+        const counts = findingCounts(target);
+        result.review.new += Number(counts.review.new || 0);
+        result.review.reviewed += Number(counts.review.reviewed || 0);
+        result.review.important_followup += Number(counts.review.important || 0) + Number(counts.review.needs_followup || 0);
+        result.review.false_positive += Number(counts.review.false_positive || 0);
+        result.verification.not_started += Number(counts.verification.not_started || 0);
+        result.verification.ready_to_verify += Number(counts.verification.ready_to_verify || 0);
+        result.verification.verified += Number(counts.verification.verified || 0);
+        result.verification.needs_retest += Number(counts.verification.needs_retest || 0);
+        result.verification.not_applicable += Number(counts.verification.not_applicable || 0);
+        result.suppressed += counts.suppressed;
+      });
+      return result;
+    }
+
+    function renderProgressStage(stage, count) {
+      const item = document.createElement('span');
+      item.className = 'project-overview-progress-stage';
+      const value = document.createElement('strong');
+      value.textContent = formatCount(count);
+      const label = document.createElement('span');
+      label.textContent = stage.label;
+      item.append(value, label);
+      return item;
+    }
+
+    function renderProgressRow(label, stages, counts, asideItems = []) {
+      const row = document.createElement('section');
+      row.className = 'project-overview-progress-row';
+      const title = document.createElement('div');
+      title.className = 'project-overview-progress-title';
+      title.textContent = label;
+      const track = document.createElement('div');
+      track.className = 'project-overview-progress-track';
+      stages.forEach(stage => track.appendChild(renderProgressStage(stage, counts[stage.key] || 0)));
+      row.append(title, track);
+      const asides = asideItems.filter(item => Number(item.count || 0) > 0);
+      if (asides.length) {
+        const aside = document.createElement('div');
+        aside.className = 'project-overview-progress-asides';
+        asides.forEach((item) => {
+          aside.appendChild(badge(`${item.label}: ${formatCount(item.count)}`, item.tone || 'badge-tone-muted'));
+        });
+        row.appendChild(aside);
+      }
+      return row;
+    }
+
+    function renderFindingProgress(st) {
+      const counts = findingProgressRollup(st);
+      const wrap = document.createElement('div');
+      wrap.className = 'project-overview-progress';
+      wrap.append(
+        renderProgressRow('Triage', reviewStages, counts.review, [
+          { label: 'False positive', count: counts.review.false_positive, tone: 'badge-tone-muted' },
+          { label: 'Suppressed', count: counts.suppressed, tone: 'badge-tone-muted' },
+        ]),
+        renderProgressRow('Verification', verificationStages, counts.verification, [
+          { label: 'Not applicable', count: counts.verification.not_applicable, tone: 'badge-tone-muted' },
+        ]),
+      );
+      return wrap;
+    }
+
+    function gapGroups(st) {
+      const gaps = coverageGaps(st);
+      return [
+        {
+          key: 'untouched_targets',
+          label: 'No app scan',
+          items: Array.isArray(gaps.untouched_targets) ? gaps.untouched_targets : [],
+        },
+        {
+          key: 'awaiting_verification',
+          label: 'Awaiting verification',
+          items: Array.isArray(gaps.awaiting_verification) ? gaps.awaiting_verification : [],
+        },
+        {
+          key: 'needs_followup',
+          label: 'Needs follow-up',
+          items: Array.isArray(gaps.needs_followup) ? gaps.needs_followup : [],
+        },
+      ];
+    }
+
+    function gapHints(item) {
+      const link = item?.deep_link && typeof item.deep_link === 'object' ? item.deep_link : {};
+      return link.hints && typeof link.hints === 'object' ? link.hints : {};
+    }
+
+    function renderGapItem(projectId, item) {
+      const link = item?.deep_link && typeof item.deep_link === 'object' ? item.deep_link : {};
+      const tab = String(link.tab || '').trim();
+      const node = tab ? document.createElement('button') : document.createElement('span');
+      node.className = 'project-overview-gap-item';
+      if (tab) {
+        node.type = 'button';
+        node.dataset.projectOverviewGap = tab;
+        node.addEventListener('click', (event) => {
+          event.preventDefault();
+          gotoTab(projectId, tab, gapHints(item));
+        });
+        ctx.bindProjectRuntimePressable?.(node);
+      }
+      const label = document.createElement('strong');
+      label.textContent = String(item?.display_label || item?.entity_id || 'Target');
+      const detail = document.createElement('span');
+      detail.textContent = String(item?.detail || '');
+      node.append(label, detail);
+      return node;
+    }
+
+    function renderCoverageGaps(projectId, st) {
+      const groups = gapGroups(st).filter(group => group.items.length);
+      const wrap = document.createElement('section');
+      wrap.className = 'project-overview-gaps';
+      if (!groups.length) {
+        const empty = document.createElement('div');
+        empty.className = 'project-overview-gap-empty';
+        empty.textContent = 'No app-data gaps in the current target set';
+        wrap.appendChild(empty);
+        return wrap;
+      }
+      groups.forEach((group) => {
+        const row = document.createElement('div');
+        row.className = 'project-overview-gap-group';
+        const title = document.createElement('div');
+        title.className = 'project-overview-gap-title';
+        title.textContent = `${group.label}: ${formatCount(group.items.length)}`;
+        const items = document.createElement('div');
+        items.className = 'project-overview-gap-items';
+        group.items.forEach(item => items.appendChild(renderGapItem(projectId, item)));
+        row.append(title, items);
+        wrap.appendChild(row);
+      });
+      return wrap;
+    }
+
+    function renderDeliverablesStatus(st) {
+      const status = deliverablesStatus(st);
+      const wrap = document.createElement('section');
+      wrap.className = 'project-overview-deliverables';
+      const grid = document.createElement('div');
+      grid.className = 'project-overview-deliverables-grid';
+      grid.append(
+        summaryCard(
+          'Last package',
+          status.last_package_at ? formatDate(status.last_package_at) : 'No packages',
+          status.last_package_name || status.last_package_id || '',
+        ),
+        summaryCard(
+          'Package build',
+          status.last_package_build_at ? formatDate(status.last_package_build_at) : 'Not built',
+          status.last_package_build_job_id || '',
+        ),
+        summaryCard(
+          'Report saved',
+          status.last_report_saved_at ? formatDate(status.last_report_saved_at) : 'No report',
+          status.last_report_id || '',
+        ),
+        summaryCard(
+          'Report exported',
+          status.last_report_exported_at ? formatDate(status.last_report_exported_at) : 'Not exported',
+          status.last_report_export_job_id || '',
+        ),
+      );
+      const footer = document.createElement('div');
+      footer.className = 'project-overview-deliverables-footer';
+      footer.appendChild(badge(
+        freshnessLabel(status.report_freshness),
+        freshnessTone(status.report_freshness),
+      ));
+      const detail = document.createElement('span');
+      detail.textContent = status.latest_finding_activity_at
+        ? `Latest finding activity ${formatDate(status.latest_finding_activity_at)}`
+        : 'No finding activity yet';
+      footer.appendChild(detail);
+      wrap.append(grid, footer);
+      return wrap;
+    }
+
+    function activityHints(item) {
+      const link = item?.deep_link && typeof item.deep_link === 'object' ? item.deep_link : {};
+      const targetId = String(link.target_id || item?.target_id || '').trim();
+      const targetType = String(link.target_type || item?.target_type || '').trim();
+      const hints = {};
+      if (targetId && (targetType === 'entity' || targetType === 'target')) {
+        hints.target_id = targetId;
+      }
+      if (targetType === 'run' && targetId) hints.run_id = targetId;
+      return hints;
+    }
+
+    function renderActivityItem(projectId, item) {
+      const link = item?.deep_link && typeof item.deep_link === 'object' ? item.deep_link : {};
+      const tab = String(link.tab || '').trim();
+      const node = tab ? document.createElement('button') : document.createElement('span');
+      node.className = 'project-overview-activity-item';
+      if (tab) {
+        node.type = 'button';
+        node.dataset.projectOverviewActivity = tab;
+        node.addEventListener('click', (event) => {
+          event.preventDefault();
+          gotoTab(projectId, tab, activityHints(item));
+        });
+        ctx.bindProjectRuntimePressable?.(node);
+      }
+      const label = document.createElement('strong');
+      label.textContent = eventLabel(item?.event_type);
+      const meta = document.createElement('span');
+      meta.textContent = [
+        formatDate(item?.created),
+        String(item?.summary || ''),
+      ].filter(Boolean).join(' · ');
+      node.append(label, meta);
+      return node;
+    }
+
+    function renderOperationalTempo(projectId, st) {
+      const tempo = operationalTempo(st);
+      const wrap = document.createElement('section');
+      wrap.className = 'project-overview-tempo';
+      const metrics = document.createElement('div');
+      metrics.className = 'project-overview-tempo-grid';
+      metrics.append(
+        summaryCard('Last run', tempo.last_run_at ? formatDate(tempo.last_run_at) : 'No runs', tempo.last_run_id || ''),
+        summaryCard('Runs 7d', formatCount(tempo.runs_last_7d), 'linked runs'),
+        summaryCard('Last triage', tempo.last_finding_triaged_at ? formatDate(tempo.last_finding_triaged_at) : 'No triage', tempo.last_finding_triaged_id || ''),
+        summaryCard('Last artifact', tempo.last_artifact_at ? formatDate(tempo.last_artifact_at) : 'No artifacts', tempo.last_artifact_id || ''),
+      );
+      wrap.appendChild(metrics);
+
+      const activity = recentActivity(st);
+      const strip = document.createElement('div');
+      strip.className = 'project-overview-activity-strip';
+      if (activity.length) {
+        activity.forEach(item => strip.appendChild(renderActivityItem(projectId, item)));
+      } else {
+        const empty = document.createElement('span');
+        empty.className = 'project-overview-activity-empty';
+        empty.textContent = 'No recent activity';
+        strip.appendChild(empty);
+      }
+      wrap.appendChild(strip);
+      return wrap;
     }
 
     function certificateText(certificate) {
@@ -249,7 +609,49 @@ let exportedDarklabProjectOverview = null;
       const services = Array.isArray(target?.services) ? target.services : [];
       const portText = ports.length ? ports.slice(0, 5).join(', ') : 'No ports';
       const serviceText = services.length ? services.slice(0, 4).join(', ') : 'No services';
-      return `${portText} · ${serviceText}`;
+      return `Cached provider ports/services: ${portText} · ${serviceText}`;
+    }
+
+    function providerFreshnessText(target) {
+      const sourceFlags = target?.source_flags && typeof target.source_flags === 'object'
+        ? target.source_flags
+        : {};
+      if (!sourceFlags.has_intel) return 'Cached provider data: none';
+      const checkedAt = String(target?.certificate?.last_checked_at || '');
+      const staleText = sourceFlags.has_stale_intel ? 'stale' : 'current';
+      return checkedAt
+        ? `Cached provider data: ${staleText} · checked ${formatDate(checkedAt)}`
+        : `Cached provider data: ${staleText} · no check time`;
+    }
+
+    function appEvidenceText(target) {
+      const evidence = target?.app_evidence && typeof target.app_evidence === 'object' ? target.app_evidence : {};
+      const state = String(evidence.coverage_state || 'not_scanned');
+      const scanCount = Number(evidence.scan_run_count || 0);
+      const portCount = Number(evidence.port_entity_count || 0);
+      const label = appCoverageLabels[state] || readableToken(state) || 'App scan evidence';
+      if (state === 'app_ports_found') {
+        return `${label}: ${formatCount(portCount)} port hit${portCount === 1 ? '' : 's'} across ${formatCount(scanCount)} run${scanCount === 1 ? '' : 's'}`;
+      }
+      if (state === 'scanned_no_ports_seen') {
+        return `${label}: ${formatCount(scanCount)} run${scanCount === 1 ? '' : 's'}`;
+      }
+      return label;
+    }
+
+    function findingProgressText(target) {
+      const counts = findingCounts(target);
+      const awaitingReview = Number(counts.review.new || 0);
+      const needsVerification = Number(counts.verification.not_started || 0)
+        + Number(counts.verification.ready_to_verify || 0)
+        + Number(counts.verification.needs_retest || 0);
+      const falsePositive = Number(counts.review.false_positive || 0);
+      const parts = [];
+      if (awaitingReview) parts.push(`${formatCount(awaitingReview)} new`);
+      if (needsVerification) parts.push(`${formatCount(needsVerification)} awaiting verification`);
+      if (falsePositive) parts.push(`${formatCount(falsePositive)} false positive`);
+      if (counts.suppressed) parts.push(`${formatCount(counts.suppressed)} suppressed`);
+      return parts.length ? `Findings: ${parts.join(' · ')}` : 'Findings: no open review work';
     }
 
     function applyEntityHints(projectId, hints) {
@@ -334,6 +736,23 @@ let exportedDarklabProjectOverview = null;
       if (target?.source_flags?.has_recent_changes) {
         chips.push(badge('Changed', 'badge-tone-cyan', 'project-overview-chip'));
       }
+      const evidence = target?.app_evidence && typeof target.app_evidence === 'object' ? target.app_evidence : {};
+      const coverageState = String(evidence.coverage_state || 'not_scanned');
+      if (coverageState === 'app_ports_found') {
+        chips.push(badge(
+          'App ports',
+          'badge-tone-green',
+          'project-overview-chip',
+          'App-captured scan output found ports for this target',
+        ));
+      } else if (coverageState === 'scanned_no_ports_seen') {
+        chips.push(badge(
+          'Scanned',
+          'badge-tone-cyan',
+          'project-overview-chip',
+          evidence.coverage_caveat || 'App-captured scan output did not surface ports for this target',
+        ));
+      }
       if (target?.source_flags?.has_stale_intel) {
         chips.push(badge(
           'Intel: Stale',
@@ -368,10 +787,19 @@ let exportedDarklabProjectOverview = null;
       const detail = document.createElement('div');
       detail.className = 'project-overview-target-detail';
       detail.textContent = portServiceText(target);
+      const intelDetail = document.createElement('div');
+      intelDetail.className = 'project-overview-target-detail';
+      intelDetail.textContent = providerFreshnessText(target);
+      const appDetail = document.createElement('div');
+      appDetail.className = 'project-overview-target-detail';
+      appDetail.textContent = appEvidenceText(target);
+      const findingDetail = document.createElement('div');
+      findingDetail.className = 'project-overview-target-detail';
+      findingDetail.textContent = findingProgressText(target);
       const chipWrap = document.createElement('div');
       chipWrap.className = 'project-overview-target-chips';
       targetChips(target).forEach(chip => chipWrap.appendChild(chip));
-      main.append(title, meta, detail, chipWrap);
+      main.append(title, meta, detail, intelDetail, appDetail, findingDetail, chipWrap);
 
       const highlights = providerHighlights(target);
       if (highlights.length) {
@@ -439,6 +867,11 @@ let exportedDarklabProjectOverview = null;
       root.className = mobile ? 'project-overview-root is-mobile' : 'project-overview-root';
       root.dataset.projectOverviewRoot = normalized;
       root.appendChild(renderRollups(st));
+      root.appendChild(renderProviderIntelCaveat());
+      root.appendChild(renderFindingProgress(st));
+      root.appendChild(renderOperationalTempo(normalized, st));
+      root.appendChild(renderCoverageGaps(normalized, st));
+      root.appendChild(renderDeliverablesStatus(st));
       root.appendChild(renderRecentState(st));
       const rows = targets(st);
       if (!rows.length) {

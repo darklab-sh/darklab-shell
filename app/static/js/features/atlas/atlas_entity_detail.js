@@ -1,3 +1,5 @@
+import { formatPortEntityMetadata as importedFormatPortEntityMetadata } from './atlas_entity_row.js';
+
 // Session Entity Atlas detail rendering helpers.
 
 const _darklabGlobal = window;
@@ -34,6 +36,18 @@ const _darklabGlobal = window;
     const row = node('div', 'atlas-detail-meta-row');
     row.append(node('span', 'atlas-detail-meta-label', label), node('span', 'atlas-detail-meta-value', value || '—'));
     return row;
+  }
+
+  function portMetaRows(entity) {
+    const formatPortEntityMetadata = typeof importedFormatPortEntityMetadata === 'function'
+      ? importedFormatPortEntityMetadata
+      : () => [];
+    return formatPortEntityMetadata(entity, { includeHost: true })
+      .map((item) => {
+        const [label, ...rest] = String(item || '').split(' ');
+        const value = rest.join(' ');
+        return metaRow(label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : 'Port', value);
+      });
   }
 
   function renderLabels(labels) {
@@ -455,6 +469,36 @@ const _darklabGlobal = window;
     trigger.setAttribute('aria-expanded', 'false');
     const menu = node('div', 'atlas-detail-action-menu-list save-menu dropdown-surface');
     menu.setAttribute('role', 'menu');
+    let outsideClickHandler = null;
+    let escapeHandler = null;
+    const closeMenu = () => {
+      wrap.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+      menu.removeAttribute('style');
+      if (outsideClickHandler) {
+        document.removeEventListener('click', outsideClickHandler);
+        outsideClickHandler = null;
+      }
+      if (escapeHandler) {
+        document.removeEventListener('keydown', escapeHandler);
+        escapeHandler = null;
+      }
+    };
+    const bindCloseHandlers = () => {
+      if (outsideClickHandler || typeof document === 'undefined') return;
+      outsideClickHandler = (event) => {
+        const target = event.target;
+        if (target && typeof target.closest === 'function') {
+          if (target.closest('.atlas-detail-action-menu') || target.closest('.atlas-detail-action-menu-list')) return;
+        }
+        closeMenu();
+      };
+      escapeHandler = (event) => {
+        if (event.key === 'Escape') closeMenu();
+      };
+      document.addEventListener('click', outsideClickHandler);
+      document.addEventListener('keydown', escapeHandler);
+    };
     activeItems.forEach(item => {
       const button = document.createElement('button');
       button.type = 'button';
@@ -468,18 +512,37 @@ const _darklabGlobal = window;
       }
       button.addEventListener('click', () => {
         if (item.disabled) return;
-        wrap.classList.remove('open');
-        trigger.setAttribute('aria-expanded', 'false');
+        closeMenu();
         item.onSelect();
       });
       menu.appendChild(button);
     });
+    const positionMenu = () => {
+      const rect = trigger.getBoundingClientRect();
+      const menuWidth = Math.max(160, menu.offsetWidth || 160);
+      const margin = 8;
+      const left = Math.min(
+        Math.max(margin, rect.left),
+        Math.max(margin, window.innerWidth - menuWidth - margin),
+      );
+      const top = Math.max(margin, rect.bottom - 1);
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+      menu.style.right = 'auto';
+      menu.style.bottom = 'auto';
+    };
     trigger.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       const open = !wrap.classList.contains('open');
       wrap.classList.toggle('open', open);
       trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        positionMenu();
+        bindCloseHandlers();
+      } else {
+        closeMenu();
+      }
     });
     wrap.append(trigger, menu);
     return wrap;
@@ -618,6 +681,7 @@ const _darklabGlobal = window;
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
       metaRow('Suppression', entity.suppressed ? text(entity.suppressed_reason, 'suppressed') : 'visible'),
+      ...portMetaRows(entity),
       metaRow('Occurrences', Number(entity.occurrence_count || 0).toLocaleString()),
       metaRow('First seen', formatDate(entity.first_seen_at)),
       metaRow('Last seen', formatDate(entity.last_seen_at)),
@@ -626,14 +690,16 @@ const _darklabGlobal = window;
     container.append(header);
     if (!handlers.hideInlineActions) {
       const actions = node('div', 'atlas-detail-actions');
-      const refresh = document.createElement('button');
-      refresh.type = 'button';
-      refresh.className = 'btn btn-secondary btn-compact';
-      refresh.disabled = !!handlers.intelRefreshing;
-      refresh.setAttribute('aria-busy', handlers.intelRefreshing ? 'true' : 'false');
-      refresh.textContent = handlers.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
-      refresh.addEventListener('click', () => handlers.onRefreshIntel?.(entity));
-      actions.appendChild(refresh);
+      if (String(entity.type || '') !== 'port') {
+        const refresh = document.createElement('button');
+        refresh.type = 'button';
+        refresh.className = 'btn btn-secondary btn-compact';
+        refresh.disabled = !!handlers.intelRefreshing;
+        refresh.setAttribute('aria-busy', handlers.intelRefreshing ? 'true' : 'false');
+        refresh.textContent = handlers.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
+        refresh.addEventListener('click', () => handlers.onRefreshIntel?.(entity));
+        actions.appendChild(refresh);
+      }
       if (handlers.activeProject && !handlers.isLinkedToActiveProject?.(entity)) {
         const promote = document.createElement('button');
         promote.type = 'button';

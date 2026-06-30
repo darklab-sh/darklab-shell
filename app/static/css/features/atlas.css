@@ -200,19 +200,22 @@
   min-width: 0;
 }
 
-.atlas-run-filter-select {
+.atlas-run-filter-select,
+.atlas-project-filter-select {
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
-.atlas-run-filter-select + .app-select {
+.atlas-run-filter-select + .app-select,
+.atlas-project-filter-select + .app-select {
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
-.atlas-run-filter-select + .app-select .app-select-trigger {
+.atlas-run-filter-select + .app-select .app-select-trigger,
+.atlas-project-filter-select + .app-select .app-select-trigger {
   width: 100%;
 }
 
@@ -225,18 +228,21 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   display: none !important;
 }
 
-.atlas-run-filter-chip {
+.atlas-run-filter-chip,
+.atlas-project-filter-chip {
   display: flex;
   align-items: center;
   min-width: 0;
   grid-column: 1 / -1;
 }
 
-.atlas-run-filter-chip.u-hidden {
+.atlas-run-filter-chip.u-hidden,
+.atlas-project-filter-chip.u-hidden {
   display: none;
 }
 
-.atlas-run-filter-chip .chip {
+.atlas-run-filter-chip .chip,
+.atlas-project-filter-chip .chip {
   max-width: min(260px, 100%);
   min-height: 28px;
   padding: 4px 12px;
@@ -781,6 +787,12 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   gap: 8px;
   flex-wrap: wrap;
   padding: 12px 0;
+}
+
+.atlas-detail-action-menu-list {
+  position: fixed;
+  min-width: 160px;
+  z-index: 320;
 }
 
 .atlas-detail-action-menu-list .is-destructive {

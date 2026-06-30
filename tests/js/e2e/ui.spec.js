@@ -591,7 +591,7 @@ test.describe('Status Monitor', () => {
 
   test('visual cards open filtered history and restore constellation runs', async ({ page }) => {
     test.setTimeout(60_000)
-    const command = 'ping -c 1 darklab.sh'
+    const command = 'ping -c 1 -W 1 192.0.2.1'
     await runCommand(page, command)
     await waitForHistoryRuns(page, 1)
     await expect.poll(async () => page.evaluate(async () => {

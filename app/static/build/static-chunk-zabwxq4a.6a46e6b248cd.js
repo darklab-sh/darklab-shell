@@ -15,6 +15,26 @@ function defaultBadge(label, tone = "muted") {
 function entityLabelText(label, textFn) {
   return textFn(label && typeof label === "object" ? label.label : label);
 }
+function _portProtocol(canonicalValue) {
+  const match = /\/([a-z0-9_-]+)$/i.exec(text(canonicalValue));
+  return match ? match[1].toLowerCase() : "";
+}
+function formatPortEntityMetadata(entity, { includeHost = false } = {}) {
+  if (String(entity && entity.type || "").toLowerCase() !== "port") return [];
+  const attributes = entity && entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+  const proto = text(attributes.proto || attributes.protocol || _portProtocol(entity && (entity.canonical_value || entity.value)));
+  const service = text(attributes.service);
+  const version = text(attributes.version);
+  const banner = text(attributes.banner);
+  const hostEntityId = text(entity && entity.host_entity_id);
+  return [
+    proto ? `proto ${proto}` : "",
+    service ? `service ${service}` : "",
+    version ? `version ${version}` : "",
+    banner ? `banner ${banner}` : "",
+    includeHost && hostEntityId ? `host ${hostEntityId}` : ""
+  ].filter(Boolean);
+}
 function appendDataset(el, dataset = {}) {
   Object.entries(dataset || {}).forEach(([key, value]) => {
     el.dataset[key] = value;
@@ -66,7 +86,10 @@ function renderAtlasEntityRow({
   meta.className = "atlas-muted";
   const runCount = Number(entity && entity.run_count || 0);
   const occurrenceCount = Number(entity && entity.occurrence_count || 0);
-  meta.textContent = `${countLabel(occurrenceCount, "hit", "hits")} · ${countLabel(runCount, "run", "runs")}`;
+  meta.textContent = [
+    `${countLabel(occurrenceCount, "hit", "hits")} · ${countLabel(runCount, "run", "runs")}`,
+    ...formatPortEntityMetadata(entity)
+  ].join(" · ");
   main.append(value, meta);
   const badges = atlasBadges(entity || {}, { badge, text: textFn });
   if (entity && entity.suppressed) badges.prepend(badge("suppressed", "muted"));
@@ -152,11 +175,13 @@ function renderProjectEntityRow({
   return row;
 }
 var DarklabAtlasEntityRow = {
+  formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow
 };
 
 export {
+  formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,
   DarklabAtlasEntityRow

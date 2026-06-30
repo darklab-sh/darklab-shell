@@ -810,7 +810,53 @@ class _RunFinalizeRecords:
     recorded_entities: list = field(default_factory=list)
     recorded_findings: list = field(default_factory=list)
     recorded_targets: list = field(default_factory=list)
+    scan_observation_count: int = 0
     auto_promote_summary: dict | None = None
+
+
+def _entity_type_counts_for_log(recorded_entities: Sequence[object]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entity in recorded_entities:
+        if not isinstance(entity, dict):
+            continue
+        entity_type = str(entity.get("type") or "")
+        if entity_type:
+            counts[entity_type] = counts.get(entity_type, 0) + 1
+    return counts
+
+
+def _scan_target_observation_count(conn, run_id: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS count FROM scan_target_observations WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return 0
+    try:
+        return int(row["count"] or 0)
+    except (KeyError, TypeError, IndexError):
+        return int(row[0] or 0)
+
+
+def _log_atlas_entities_captured(
+    session_id: str,
+    team_id: str,
+    run_id: str,
+    recorded_entities: Sequence[object],
+    scan_observation_count: int,
+) -> None:
+    if not recorded_entities and scan_observation_count <= 0:
+        return
+    entity_type_counts = _entity_type_counts_for_log(recorded_entities)
+    log.info("ATLAS_ENTITIES_CAPTURED", extra={
+        "run_id": run_id,
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "count": len(recorded_entities),
+        "entity_type_counts": entity_type_counts,
+        "port_entity_count": int(entity_type_counts.get("port") or 0),
+        "scan_observation_count": int(scan_observation_count),
+    })
 
 
 def _completed_run_output_state(run_id, session_id, capture) -> _CompletedRunOutputState:
@@ -1000,6 +1046,7 @@ def _materialize_run_entities_for_finalize(conn, session_id, team_id, run_id, co
                 persisted_entries,
                 team_id=team_id,
                 seen_at=finished_iso,
+                command=command,
             ),
         )
     except Exception:
@@ -1099,12 +1146,13 @@ def _log_run_finalize_records(
             "session": get_log_session_id(session_id),
             "count": len(records.recorded_targets),
         })
-    if records.recorded_entities:
-        log.info("ATLAS_ENTITIES_CAPTURED", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "count": len(records.recorded_entities),
-        })
+    _log_atlas_entities_captured(
+        session_id,
+        team_id,
+        run_id,
+        records.recorded_entities,
+        records.scan_observation_count,
+    )
     auto_promote_results = _auto_promote_summary_results(records.auto_promote_summary)
     auto_promote_project_ids = _auto_promote_summary_ids(auto_promote_results, "project_id")
     auto_promote_rule_ids = _auto_promote_summary_ids(auto_promote_results, "rule_id")
@@ -1249,6 +1297,7 @@ def _save_completed_run(
                 output_state.persisted_entries,
                 finished_iso,
             )
+            records.scan_observation_count = _scan_target_observation_count(conn, run_id)
             records.auto_promote_summary = _apply_auto_promote_for_finalize(
                 conn,
                 session_id,
@@ -1537,8 +1586,10 @@ def save_client_side_run():
             output_search_text=stored_output_search_text,
         )
         replace_run_output_summary(conn, run_id, lines)
+        recorded_entities: list = []
+        scan_observation_count = 0
         try:
-            _run_finalize_savepoint(
+            recorded_entities = _run_finalize_savepoint(
                 conn,
                 "atlas_entities",
                 lambda: materialize_run_entities(
@@ -1548,8 +1599,10 @@ def save_client_side_run():
                     lines,
                     team_id=owner_scope.team_id,
                     seen_at=finished.isoformat(),
+                    command=command,
                 ),
             )
+            scan_observation_count = _scan_target_observation_count(conn, run_id)
         except Exception:
             app_metrics.record_run_finalize_error("entity_materialize")
             log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
@@ -1557,6 +1610,13 @@ def save_client_side_run():
                 "session": get_log_session_id(session_id),
                 "cmd": command,
             })
+        _log_atlas_entities_captured(
+            session_id,
+            owner_scope.team_id,
+            run_id,
+            recorded_entities,
+            scan_observation_count,
+        )
         conn.commit()
 
     elapsed = round((finished - started).total_seconds(), 1)

@@ -299,6 +299,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0033",
         "0034",
         "0035",
+        "0036",
+        "0037",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -1786,6 +1788,25 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             }],
             seen_at="2026-05-17T00:00:01Z",
         )
+        materialize_run_entities(
+            compat_conn,
+            session_id,
+            run_id,
+            [{
+                "text": "443/tcp open https nginx",
+                "entities": [
+                    {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                    {
+                        "type": "port",
+                        "value": "darklab.sh:443/tcp",
+                        "canonical_value": "darklab.sh:443/tcp",
+                        "attributes": {"service": "https", "version": "nginx"},
+                    },
+                ],
+            }],
+            seen_at="2026-05-17T00:00:02Z",
+            command="nmap darklab.sh",
+        )
         recorded_findings = project_findings.record_run_findings(
             compat_conn,
             session_id,
@@ -1819,6 +1840,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
         (session_id,),
     ).fetchone()
+    port_row = conn.execute(
+        "SELECT attributes_json FROM entities WHERE session_id = %s AND type = 'port' AND canonical_value = %s",
+        (session_id, "darklab.sh:443/tcp"),
+    ).fetchone()
 
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
@@ -1835,6 +1860,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     ]
     assert json.loads(findings_review_resp.data)["counts"] == {"updated": 1, "not_found": 1}
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
+    assert port_row is not None
+    assert port_row["attributes_json"] == {"service": "https", "version": "nginx"}
 
 
 @pytest.mark.postgres

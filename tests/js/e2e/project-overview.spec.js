@@ -253,7 +253,9 @@ test.describe('project overview browser contract', () => {
 
     const overview = page.locator('.project-overview-root')
     await expect(overview.locator('.project-overview-target-title')).toHaveText(TARGET_VALUE)
-    await expect(overview.locator('.project-overview-target-detail')).toContainText('80, 443')
+    await expect(overview.locator('.project-overview-target-detail', {
+      hasText: 'Cached provider ports/services:',
+    })).toContainText('80, 443')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
     await expect(overview.locator('.project-overview-target-chips')).not.toContainText('Intel: None')
@@ -291,7 +293,9 @@ test.describe('project overview browser contract', () => {
 
     const overview = page.locator('.project-overview-root')
     await expect(overview.locator('.project-overview-target-title')).toHaveText(fixture.targetValue)
-    await expect(overview.locator('.project-overview-target-detail')).toContainText('443')
+    await expect(overview.locator('.project-overview-target-detail', {
+      hasText: 'Cached provider ports/services:',
+    })).toContainText('443')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
 

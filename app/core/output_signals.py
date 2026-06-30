@@ -7,8 +7,10 @@ can agree on what counts as a finding, warning, error, or summary line.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
 import json
 import ipaddress
 import logging
@@ -23,6 +25,7 @@ from services.intel.canonical import (
     canonical_domain,
     canonical_hash,
     canonical_ip,
+    canonical_port,
     canonical_url,
     detect_hash_algorithm,
 )
@@ -181,8 +184,35 @@ _SSLYZE_FINDING_RE = re.compile(
     r"TLS_FALLBACK_SCSV:\s+OK - Supported|Supported curves:)",
     re.I,
 )
-_HOST_PORT_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}:\d+$", re.I)
-_RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+[0-9a-f:.]+:\d+$", re.I)
+_HOST_PORT_RE = re.compile(
+    r"^(?P<host>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}):(?P<port>\d+)(?:/(?P<proto>tcp|udp))?$",
+    re.I,
+)
+_NAABU_HOST_PORT_RE = re.compile(
+    r"^(?P<host>"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}|"
+    r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)|"
+    r"\[[0-9a-f:.]*:[0-9a-f:.]*\]"
+    r"):(?P<port>\d+)(?:/(?P<proto>tcp|udp))?$",
+    re.I,
+)
+_RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+(?P<host>[0-9a-f:.]+):(?P<port>\d+)(?:/(?P<proto>tcp|udp))?$", re.I)
+_MASSCAN_OPEN_PORT_RE = re.compile(
+    r"^Discovered\s+open\s+port\s+(?P<port>\d+)/(?P<proto>tcp|udp)\s+on\s+(?P<host>\S+)",
+    re.I,
+)
+_NC_OPEN_PORT_RE = re.compile(
+    r"^Connection\s+to\s+(?P<host>\S+)\s+(?P<port>\d+)(?:\s+port)?\s+.*\bsucceeded\b",
+    re.I,
+)
+_NC_BRACKET_OPEN_PORT_RE = re.compile(
+    r"^(?P<host>\S+)\s+\[(?P<ip>[^\]]+)\]\s+(?P<port>\d+)\s+\((?P<service>[^)]+)\)\s+open\b",
+    re.I,
+)
+_CURL_CONNECTED_PORT_RE = re.compile(
+    r"^\*\s+Connected\s+to\s+(?P<host>\S+)\s+\((?P<ip>[^)]+)\)\s+port\s+(?P<port>\d+)\b",
+    re.I,
+)
 _NAABU_FOUND_PORTS_RE = re.compile(r"^\[INF\]\s+Found\s+\d+\s+ports?\s+on host\b", re.I)
 _NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|medium|high|critical)\]\s+\S+", re.I)
 _SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
@@ -340,7 +370,7 @@ _NMAP_VULNERS_ROW_RE = re.compile(
     re.I,
 )
 _NMAP_OPEN_PORT_ROW_RE = re.compile(
-    r"^(?P<port>\d+)/(?:tcp|udp)\s+open\S*\s+(?P<service>\S+)(?:\s+(?P<version>.*\S))?\s*$",
+    r"^(?P<port>\d+)/(?P<proto>tcp|udp)\s+open\S*\s+(?P<service>\S+)(?:\s+(?P<version>.*\S))?\s*$",
     re.I,
 )
 _KILLED_BY_USER_RE = re.compile(r"^\[killed by user(?:\b|[^\w])", re.I)
@@ -454,6 +484,7 @@ def _add_entity(
     source_line: int | None,
     start: int | None = None,
     end: int | None = None,
+    attributes: Mapping[str, object] | None = None,
 ) -> None:
     key = (entity_type, canonical_value)
     if key in seen:
@@ -470,6 +501,8 @@ def _add_entity(
     if start is not None and end is not None and 0 <= start < end:
         item["start"] = start
         item["end"] = end
+    if attributes:
+        item["attributes"] = attributes
     entities.append(item)
 
 
@@ -747,6 +780,140 @@ def _nmap_target_entities(value: str, source_line: int | None) -> list[dict[str,
         "confidence": "high",
         **({"source_line": source_line} if source_line is not None else {}),
     }]
+
+
+def _host_entity_type_and_canonical(host: str) -> tuple[str, str] | None:
+    raw_host = str(host or "").strip().strip("[]")
+    if not raw_host:
+        return None
+    try:
+        return "ip", canonical_ip(raw_host)
+    except CanonicalizationError:
+        try:
+            return "host", canonical_domain(raw_host)
+        except CanonicalizationError:
+            return None
+
+
+def _port_entity_value(host_canonical: str, port: object, proto: object = "tcp") -> str:
+    host_part = f"[{host_canonical}]" if ":" in str(host_canonical or "") else str(host_canonical or "")
+    return f"{host_part}:{str(port or '').strip()}/{str(proto or 'tcp').strip().lower()}"
+
+
+def _port_skip_host_context(host: object) -> dict[str, object]:
+    raw_host = str(host or "").strip().strip("[]")
+    if not raw_host:
+        return {"host_kind": "empty", "host_hash": ""}
+    try:
+        ipaddress.ip_address(raw_host)
+        host_kind = "ip_literal"
+    except ValueError:
+        host_kind = "domain_like" if "." in raw_host else "other"
+    host_hash = hashlib.sha256(raw_host.lower().encode("utf-8", "replace")).hexdigest()[:12]
+    return {"host_kind": host_kind, "host_hash": host_hash}
+
+
+def _log_port_entity_skipped(
+    scanner_root: str,
+    source_line: int | None,
+    reason: str,
+    *,
+    host: object,
+    port: object,
+    proto: object,
+) -> None:
+    if not scanner_root:
+        return
+    log.debug(
+        "OUTPUT_SIGNAL_PORT_ENTITY_SKIPPED",
+        extra={
+            "command_root": scanner_root,
+            "line_index": source_line if source_line is not None else -1,
+            "reason": reason,
+            "port": str(port or "").strip()[:16],
+            "proto": str(proto or "tcp").strip().lower()[:16],
+            **_port_skip_host_context(host),
+        },
+    )
+
+
+def _port_entities_for_host(
+    host: str,
+    port: object,
+    proto: object,
+    source_line: int | None,
+    *,
+    service: str = "",
+    version: str = "",
+    banner: str = "",
+    scanner_root: str = "",
+) -> list[dict[str, object]]:
+    host_identity = _host_entity_type_and_canonical(host)
+    if host_identity is None:
+        _log_port_entity_skipped(scanner_root, source_line, "invalid_host", host=host, port=port, proto=proto)
+        return []
+    host_type, host_canonical = host_identity
+    raw_value = _port_entity_value(host_canonical, port, proto)
+    try:
+        port_canonical = canonical_port(raw_value)
+    except CanonicalizationError:
+        _log_port_entity_skipped(scanner_root, source_line, "invalid_port", host=host, port=port, proto=proto)
+        return []
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    _add_entity(
+        entities,
+        seen,
+        entity_type=host_type,
+        value=str(host or "").strip(),
+        canonical_value=host_canonical,
+        source_line=source_line,
+    )
+    attributes = {
+        key: value
+        for key, value in {
+            "service": str(service or "").strip(),
+            "version": str(version or "").strip(),
+            "banner": str(banner or "").strip(),
+        }.items()
+        if value
+    }
+    _add_entity(
+        entities,
+        seen,
+        entity_type="port",
+        value=raw_value,
+        canonical_value=port_canonical,
+        source_line=source_line,
+        attributes=attributes,
+    )
+    return entities
+
+
+def _nc_bracket_entity_host(display_host: object, bracket_host: object) -> str:
+    display = str(display_host or "").strip()
+    if display.lower() not in {"unknown", "(unknown)"} and _host_entity_type_and_canonical(display) is not None:
+        return display
+    return str(bracket_host or "").strip()
+
+
+def _nmap_port_entities(scan_target: str | None, port_line: str, source_line: int | None) -> list[dict[str, object]]:
+    target = str(scan_target or "").strip()
+    if not target:
+        return []
+    match = _NMAP_OPEN_PORT_ROW_RE.match(str(port_line or "").strip())
+    if not match:
+        return []
+    host = _nmap_target_host(target)
+    return _port_entities_for_host(
+        host,
+        match.group("port"),
+        match.group("proto"),
+        source_line,
+        service=match.group("service") or "",
+        version=match.group("version") or "",
+        scanner_root="nmap",
+    )
 
 
 def _nmap_service_context(scan_target: str | None, port_line: str) -> str:
@@ -1159,7 +1326,7 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root == "sslyze":
         return bool(_SSLYZE_FINDING_RE.search(stripped))
     if root == "naabu":
-        return bool(_HOST_PORT_RE.search(stripped))
+        return bool(_NAABU_HOST_PORT_RE.search(stripped))
     if root == "rustscan":
         return bool(_RUSTSCAN_OPEN_RE.search(stripped))
     if root == "nuclei":
@@ -1297,6 +1464,9 @@ def _extract_entities_for_command(
         nmap_report_entities = _nmap_report_entities(stripped, source_line)
         if nmap_report_entities:
             return nmap_report_entities
+        nmap_port_entities = _nmap_port_entities(line_target or command_target or "", stripped, source_line)
+        if nmap_port_entities:
+            return nmap_port_entities
         if _NMAP_RDNS_RE.search(stripped):
             return extract_entities(text, source_line=source_line, normalized_text=stripped)
         if _is_nmap_vulners_finding(stripped):
@@ -1312,6 +1482,66 @@ def _extract_entities_for_command(
                 entities.append(entity)
             return entities
         return []
+    if root == "masscan":
+        match = _MASSCAN_OPEN_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("host"),
+                match.group("port"),
+                match.group("proto"),
+                source_line,
+                scanner_root=root,
+            )
+        return []
+    if root == "rustscan":
+        match = _RUSTSCAN_OPEN_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("host"),
+                match.group("port"),
+                match.group("proto") or "tcp",
+                source_line,
+                scanner_root=root,
+            )
+        return []
+    if root == "naabu":
+        match = _NAABU_HOST_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("host"),
+                match.group("port"),
+                match.group("proto") or "tcp",
+                source_line,
+                scanner_root=root,
+            )
+        return []
+    if root == "nc":
+        bracket_match = _NC_BRACKET_OPEN_PORT_RE.match(stripped)
+        if bracket_match:
+            return _port_entities_for_host(
+                _nc_bracket_entity_host(bracket_match.group("host"), bracket_match.group("ip")),
+                bracket_match.group("port"),
+                "tcp",
+                source_line,
+                service=bracket_match.group("service"),
+                scanner_root=root,
+            )
+        match = _NC_OPEN_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(match.group("host"), match.group("port"), "tcp", source_line, scanner_root=root)
+        return []
+    if root == "curl":
+        match = _CURL_CONNECTED_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("ip") or match.group("host"),
+                match.group("port"),
+                "tcp",
+                source_line,
+                scanner_root=root,
+            )
+        # Keep curl on the generic extraction path: verbose/header output often
+        # contains useful domains or URLs even when it is not a connect line.
     if root == "tlsx":
         data = _json_object_line(stripped)
         return _tlsx_json_entities(data, source_line) if data else []

@@ -531,6 +531,8 @@ OPENAPI_SPEC: dict = {
                     "session_id": {"type": "string"},
                     "type": {"type": "string"},
                     "canonical_value": {"type": "string"},
+                    "host_entity_id": {"type": "string", "nullable": True},
+                    "attributes": {"type": "object", "additionalProperties": True},
                     "first_seen_at": {"type": "string", "nullable": True},
                     "last_seen_at": {"type": "string", "nullable": True},
                     "occurrence_count": {"type": "integer"},
@@ -1866,7 +1868,7 @@ OPENAPI_SPEC: dict = {
                     {
                         "name": "entity_type",
                         "in": "query",
-                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve"]},
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
                     },
                     {
                         "name": "orphan_filter",
@@ -2128,7 +2130,7 @@ OPENAPI_SPEC: dict = {
                     {
                         "name": "entity_type",
                         "in": "query",
-                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve"]},
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
                     },
                     {
                         "name": "run_id",

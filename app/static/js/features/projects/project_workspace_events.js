@@ -944,6 +944,23 @@ let exportedDarklabProjectWorkspaceEvents = null;
           };
           ctx.openProjectEntityInAtlas(projectId, summary, entity);
           return;
+        } else if (action === 'open-project-finding') {
+          const findingId = String(btn.dataset.findingId || '').trim();
+          if (!projectId || !findingId) throw new Error('Finding is missing its project context.');
+          const project = projectFromRowsOrSummary(projectId);
+          const openAtlas = ctx.openAtlas
+            || (typeof importedOpenAtlas !== 'undefined' && importedOpenAtlas)
+            || null;
+          if (typeof openAtlas !== 'function') throw new Error('Atlas is not available.');
+          ctx.closeProjectWorkspace({ refocus: false });
+          void openAtlas({
+            source: 'project-workspace',
+            projectId,
+            projectName: project ? ctx.projectDisplayName(project) : '',
+            tab: 'findings',
+            findingId,
+          });
+          return;
         } else if (action === 'toggle-project-entity-row') {
           const entityId = String(btn.dataset.entityId || '');
           ctx.entitiesController?.().toggleSelected(entityId);

@@ -485,6 +485,8 @@ MIGRATION = Migration(
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
             occurrence_count BIGINT NOT NULL DEFAULT 0,
+            host_entity_id TEXT,
+            attributes_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             suppressed BOOLEAN NOT NULL DEFAULT FALSE,
             suppressed_reason TEXT NOT NULL DEFAULT '',
             suppressed_at TEXT NOT NULL DEFAULT '',
@@ -499,6 +501,22 @@ MIGRATION = Migration(
             last_seen_at TEXT NOT NULL,
             occurrence_count BIGINT NOT NULL DEFAULT 0,
             PRIMARY KEY (entity_id, run_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS scan_target_observations (
+            session_id TEXT NOT NULL,
+            team_id TEXT NOT NULL DEFAULT '',
+            run_id TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            canonical_value TEXT NOT NULL,
+            scan_kind TEXT NOT NULL DEFAULT 'port_scan',
+            command_root TEXT NOT NULL DEFAULT '',
+            observed_at TEXT NOT NULL,
+            port_entity_count BIGINT NOT NULL DEFAULT 0,
+            created TEXT NOT NULL,
+            PRIMARY KEY (run_id, entity_id, scan_kind)
         )
         """,
         """
@@ -946,10 +964,23 @@ MIGRATION = Migration(
         ON entities (team_id, canonical_value)
         WHERE team_id != ''
         """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_entities_host_entity
+        ON entities (host_entity_id)
+        WHERE host_entity_id IS NOT NULL AND host_entity_id != ''
+        """,
         "CREATE INDEX IF NOT EXISTS idx_entity_run_links_run ON entity_run_links (run_id)",
         """
         CREATE INDEX IF NOT EXISTS idx_entity_run_links_entity_seen
         ON entity_run_links (entity_id, last_seen_at DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_scan_target_observations_entity_seen
+        ON scan_target_observations (entity_id, observed_at DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_scan_target_observations_owner_run
+        ON scan_target_observations (session_id, team_id, run_id)
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_entity_intel_snapshots_entity_fetched

@@ -152,6 +152,7 @@ class LineEntity:
     source_line: int | None = None
     start: int | None = None
     end: int | None = None
+    attributes: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_wire(cls, payload: Mapping[str, object]) -> "LineEntity | None":
@@ -174,6 +175,7 @@ class LineEntity:
             source_line=_optional_int(payload.get("source_line")),
             start=start,
             end=end,
+            attributes=_entity_attributes_from_wire(payload.get("attributes")),
         )
 
     def to_wire(self) -> dict[str, object]:
@@ -189,6 +191,8 @@ class LineEntity:
             payload["start"] = self.start
         if self.end is not None:
             payload["end"] = self.end
+        if self.attributes:
+            payload["attributes"] = dict(self.attributes)
         return payload
 
 
@@ -463,6 +467,26 @@ def _entities_from_wire(value: object) -> tuple[LineEntity, ...]:
         if entity is not None:
             entities.append(entity)
     return tuple(entities)
+
+
+def _entity_attributes_from_wire(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    attributes: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        if not key or raw_value is None:
+            continue
+        if isinstance(raw_value, (str, int, float, bool)):
+            attributes[key] = raw_value
+        elif isinstance(raw_value, Sequence) and not isinstance(raw_value, (str, bytes)):
+            safe_values = [
+                item for item in raw_value
+                if item is None or isinstance(item, (str, int, float, bool))
+            ]
+            if len(safe_values) == len(raw_value):
+                attributes[key] = safe_values
+    return attributes
 
 
 def _optional_int(value: object) -> int | None:

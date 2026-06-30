@@ -637,6 +637,7 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra
     value_order_expr = dialect.case_insensitive_order("e.canonical_value")
     return (
         "SELECT e.id, l.id AS link_id, l.project_id, e.type, e.canonical_value, "  # nosec
+        "e.host_entity_id, e.attributes_json, "
         "COALESCE(("
         "SELECT erl.run_id FROM entity_run_links erl "
         "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "

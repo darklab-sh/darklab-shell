@@ -31,6 +31,8 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [FTS5 Tokenizer: Trigram with Unicode61 Fallback](#fts5-tokenizer-trigram-with-unicode61-fallback)
 - [Observability Decisions](#observability-decisions)
   - [Structured Logging](#structured-logging)
+- [Atlas Decisions](#atlas-decisions)
+  - [Port Entity Identity and Evidence](#port-entity-identity-and-evidence)
 - [Frontend Decisions](#frontend-decisions)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Export Rendering Centralization (ExportHtmlUtils)](#export-rendering-centralization-exporthtmlutils)
@@ -123,6 +125,20 @@ The private-base-URL guard is intentionally conservative. The default use case i
 Suggestion validation sits outside the model. The model may propose only JSON, but the app still checks the command root, command policy, trusted target presence, known open ports for port-scoped suggestions, redaction sentinels, and a small denylist of known hallucinated flags. Accepted suggestions can be copied, and optional Run buttons still submit through the normal composer path so command policy gets the final say. Rejected suggestions are stored and displayed as blocked drafts because they are useful debugging evidence without becoming executable UI.
 
 AI payloads are stored separately from transcripts, findings, Atlas source text, search text, and comparisons. This keeps assistant text additive and auditable while preserving the original command output as the source of truth.
+
+---
+
+## Atlas Decisions
+
+### Port Entity Identity and Evidence
+
+**Ports are first-class Atlas entities, but their identity stays separate from host ownership.**
+
+Port entities use canonical `host:port/proto` values, with IPv6 hosts bracketed as `[2001:db8::1]:443/tcp`. Keeping the host text in the canonical value makes imported and transcript-captured ports stable before any database lookup is available. The linked `host_entity_id` is stored separately when materialization can resolve it, so Atlas can join the port back to the host without making the canonical value depend on a mutable database id.
+
+TCP is the default protocol when a parser or import omits one, and TCP/UDP are the supported protocol values. Service, version, and banner details live in lightweight attributes because they describe the observation, not the entity identity.
+
+Ports do not offer provider intel refresh. They are app-captured scan evidence from command output, while provider-backed domains, IPs, URLs, hashes, and CVEs can ask external or configured providers for fresh data. Project Overview keeps that distinction visible: app-captured port evidence can show that a run saw a port, while scan target observations from supported scanners can show that a target was scanned even when no app-captured ports surfaced.
 
 ---
 

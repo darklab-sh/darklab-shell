@@ -3,7 +3,7 @@ import {
 } from "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import {
   openHistoryRunDetails
-} from "./static-chunk-bq2uwdee.5cc634779df5.js";
+} from "./static-chunk-luxntmsb.800e86ee6e9e.js";
 import {
   DarklabFindingTriageEditor
 } from "./static-chunk-ndtwds5q.291a7a432f16.js";
@@ -42,16 +42,16 @@ import {
 } from "./static-chunk-yo5cjr7d.b86e0c93eff0.js";
 import {
   DarklabAtlasDetail
-} from "./static-chunk-4nkiwrht.8176cfb2b3d4.js";
+} from "./static-chunk-yzcc4kyr.88ac01345411.js";
 import {
   DarklabAtlasEntityRow
-} from "./static-chunk-m4e6ivjw.074a5c89d41e.js";
+} from "./static-chunk-zabwxq4a.6a46e6b248cd.js";
 import {
   resetAtlasMobileTransientState
 } from "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
 import {
   DarklabAtlasTabs
-} from "./static-chunk-y6zchygr.f5ddd7fe938a.js";
+} from "./static-chunk-wkckhpty.7befd18332ed.js";
 
 // app/static/js/features/atlas/atlas_overlay.js
 var exportedDarklabAtlasOverlay = null;
@@ -101,6 +101,8 @@ var exportedCycleAtlasTab = null;
   const runFilterSearch = document.getElementById("atlas-run-filter-search");
   const runFilterSelect = document.getElementById("atlas-run-filter-select");
   const runFilterChip = document.getElementById("atlas-run-filter-chip");
+  const projectFilterSelect = document.getElementById("atlas-project-filter-select");
+  const projectFilterChip = document.getElementById("atlas-project-filter-chip");
   const findingStatusFilter = document.getElementById("atlas-finding-status-filter");
   const orphanFilter = document.getElementById("atlas-orphan-filter");
   const suppressionFilter = document.getElementById("atlas-suppression-filter");
@@ -209,6 +211,9 @@ var exportedCycleAtlasTab = null;
     projectName: "",
     launchProjectId: "",
     launchProjectName: "",
+    projectOptions: [],
+    projectOptionsLoaded: false,
+    projectOptionsLoading: false,
     runId: "",
     runLabel: "",
     runOptions: [],
@@ -223,6 +228,7 @@ var exportedCycleAtlasTab = null;
     loading: false,
     selectedId: "",
     requestedEntityValue: "",
+    requestedFindingId: "",
     requestedView: "",
     requestedViewStarted: 0,
     refreshIntelOnSelect: false,
@@ -439,6 +445,7 @@ var exportedCycleAtlasTab = null;
     state.runLabel = String(options && options.runLabel || "").trim();
     state.runOptionsQuery = "";
     state.requestedEntityValue = String(options && options.entityValue || "").trim();
+    state.requestedFindingId = String(options && options.findingId || "").trim();
     state.requestedView = ["detail", "list"].includes(String(options && options.forceView || "")) ? String(options.forceView) : "list";
     state.requestedViewStarted = state.requestedView === "detail" ? Date.now() : 0;
     state.refreshIntelOnSelect = !!(options && options.refreshIntel);
@@ -466,6 +473,9 @@ var exportedCycleAtlasTab = null;
     });
     loadRunOptions().catch((err) => {
       logImportClientError("failed to load atlas run filters", err);
+    });
+    loadProjectOptions().catch((err) => {
+      logImportClientError("failed to load atlas project filters", err);
     });
     await refreshAtlas({ resetOffset: true });
   }
@@ -636,6 +646,10 @@ var exportedCycleAtlasTab = null;
       runFilterSelect.appendChild(option("Filter by run", ""));
       runFilterSelect.dataset.populated = "1";
     }
+    if (projectFilterSelect && !projectFilterSelect.dataset.populated) {
+      projectFilterSelect.appendChild(option("Filter by project", ""));
+      projectFilterSelect.dataset.populated = "1";
+    }
     syncSelectDisplay(findingStatusFilter);
     if (findingBulkStatus) {
       findingBulkStatus.disabled = state.loading || state.bulkInFlight || !canTriageAtlasRows();
@@ -643,6 +657,7 @@ var exportedCycleAtlasTab = null;
       syncSelectDisplay(findingBulkStatus);
     }
     syncSelectDisplay(runFilterSelect);
+    syncSelectDisplay(projectFilterSelect);
     syncSelectDisplay(orphanFilter);
     syncSelectDisplay(suppressionFilter);
     syncSelectDisplay(savedViewSelect);
@@ -737,6 +752,23 @@ var exportedCycleAtlasTab = null;
       finding_count: Number(item && item.finding_count || 0)
     })).filter((item) => item.id) : [];
   }
+  function normalizeProjectOptions(value) {
+    return Array.isArray(value) ? value.map((item) => ({
+      id: String(item && item.id || "").trim(),
+      name: String(item && (item.name || item.slug || item.id) || "").trim(),
+      slug: String(item && item.slug || "").trim(),
+      status: String(item && item.status || "").trim()
+    })).filter((item) => item.id) : [];
+  }
+  function projectOptionLabel(project) {
+    const name = String(project && project.name || project && project.id || "").trim() || "Project";
+    const status = String(project && project.status || "").trim();
+    return status === "archived" ? `${name} (archived)` : name;
+  }
+  function selectedProjectOption() {
+    const selectedId = String(state.projectId || "");
+    return state.projectOptions.find((project) => String(project.id || "") === selectedId) || null;
+  }
   function runOptionLabel(run) {
     const command = String(run && run.command || "").trim() || "Run";
     const entityCount = Number(run && run.entity_count || 0);
@@ -786,6 +818,39 @@ var exportedCycleAtlasTab = null;
     runFilterSelect.value = state.runId || "";
     runFilterSelect.disabled = state.runOptionsLoading;
     syncSelectDisplay(runFilterSelect);
+  }
+  function renderProjectFilterControls() {
+    if (!projectFilterSelect) return;
+    const optionRows = [...state.projectOptions];
+    if (state.projectId && !optionRows.some((project) => String(project.id || "") === state.projectId)) {
+      optionRows.unshift({
+        id: state.projectId,
+        name: state.projectName || state.projectId,
+        slug: "",
+        status: ""
+      });
+    }
+    const nextValues = ["", ...optionRows.map((project) => String(project.id || ""))].join("\n");
+    const currentValues = Array.from(projectFilterSelect.options || []).map((option) => option.value).join("\n");
+    if (nextValues !== currentValues) {
+      projectFilterSelect.replaceChildren();
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = state.projectOptionsLoading ? "Loading projects..." : "Filter by project";
+      projectFilterSelect.appendChild(placeholder);
+      optionRows.forEach((project) => {
+        const option = document.createElement("option");
+        option.value = String(project.id || "");
+        option.textContent = projectOptionLabel(project);
+        option.dataset.projectName = String(project.name || project.id || "");
+        projectFilterSelect.appendChild(option);
+      });
+    } else if (projectFilterSelect.options[0]) {
+      projectFilterSelect.options[0].textContent = state.projectOptionsLoading ? "Loading projects..." : "Filter by project";
+    }
+    projectFilterSelect.value = state.projectId || "";
+    projectFilterSelect.disabled = state.projectOptionsLoading;
+    syncSelectDisplay(projectFilterSelect);
   }
   function currentSavedViewState(name = "") {
     const tab = visibleActiveTab();
@@ -925,6 +990,30 @@ var exportedCycleAtlasTab = null;
     } finally {
       state.runOptionsLoading = false;
       renderRunFilterControls();
+    }
+  }
+  async function loadProjectOptions({ force = false } = {}) {
+    if (!force && state.projectOptionsLoaded && (!state.projectId || state.projectOptions.some((project) => String(project.id || "") === String(state.projectId || "")))) {
+      return state.projectOptions;
+    }
+    state.projectOptionsLoading = true;
+    renderProjectFilterControls();
+    try {
+      const params = new URLSearchParams({ mode: "switcher", limit: "30" });
+      const resp = await api()(`/projects?${params.toString()}`, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      state.projectOptions = normalizeProjectOptions(data.projects);
+      state.projectOptionsLoaded = true;
+      const selected = selectedProjectOption();
+      if (selected && selected.name && !state.projectName) state.projectName = selected.name;
+      return state.projectOptions;
+    } catch (err) {
+      logImportClientError("failed to load atlas project filters", err);
+      return state.projectOptions;
+    } finally {
+      state.projectOptionsLoading = false;
+      renderProjectFilterControls();
     }
   }
   function updateSavedViewsFromResponse(data) {
@@ -1375,6 +1464,9 @@ var exportedCycleAtlasTab = null;
     loadRunOptions({ force: true }).catch((err) => {
       logImportClientError("failed to load atlas run filters", err);
     });
+    loadProjectOptions({ force: true }).catch((err) => {
+      logImportClientError("failed to load atlas project filters", err);
+    });
     refreshAtlas({ resetOffset: true, force: true });
   }
   function findingStatusLabel(value) {
@@ -1654,6 +1746,8 @@ var exportedCycleAtlasTab = null;
     renderFindingControls();
     renderRunFilterControls();
     renderRunFilterChip();
+    renderProjectFilterControls();
+    renderProjectFilterChip();
     renderTabs();
     renderList();
     renderPagination();
@@ -1673,6 +1767,9 @@ var exportedCycleAtlasTab = null;
   function clearRunFilter() {
     applyRunFilter("", "");
   }
+  function clearProjectFilter() {
+    applyProjectFilter("", "");
+  }
   function clearAtlasFilters() {
     clearTimeout(state.searchTimer);
     clearTimeout(state.runSearchTimer);
@@ -1683,8 +1780,8 @@ var exportedCycleAtlasTab = null;
     state.findingStatus = "";
     state.orphanFilter = "hide";
     state.suppressionFilter = "hide";
-    state.projectId = state.launchProjectId;
-    state.projectName = state.launchProjectName;
+    state.projectId = "";
+    state.projectName = "";
     state.selectedSavedViewId = "";
     state.selectedId = "";
     state.selectedFindingId = "";
@@ -1702,6 +1799,9 @@ var exportedCycleAtlasTab = null;
     render();
     loadRunOptions({ query: "", force: true }).catch((err) => {
       logImportClientError("failed to load atlas run filters", err);
+    });
+    loadProjectOptions({ force: true }).catch((err) => {
+      logImportClientError("failed to load atlas project filters", err);
     });
     refreshAtlas({ resetOffset: true });
   }
@@ -1727,6 +1827,29 @@ var exportedCycleAtlasTab = null;
     state.refreshIntelOnSelect = false;
     state.addActiveProjectOnSelect = false;
     renderRunFilterControls();
+    refreshAtlas({ resetOffset: true });
+  }
+  function applyProjectFilter(projectId, projectName = "") {
+    state.projectId = "";
+    state.projectName = "";
+    const normalizedProjectId = String(projectId || "").trim();
+    if (normalizedProjectId) {
+      const matched = state.projectOptions.find((project) => String(project.id || "") === normalizedProjectId);
+      state.projectId = normalizedProjectId;
+      state.projectName = String(projectName || matched?.name || normalizedProjectId).trim();
+    }
+    state.selectedFindingId = "";
+    state.selectedFindingIds.clear();
+    state.selectedId = "";
+    state.selectedEntityIds.clear();
+    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detail = null;
+    state.requestedEntityValue = "";
+    state.requestedView = "";
+    state.requestedViewStarted = 0;
+    state.refreshIntelOnSelect = false;
+    state.addActiveProjectOnSelect = false;
+    renderProjectFilterControls();
     refreshAtlas({ resetOffset: true });
   }
   function truncateRunFilterLabel(value) {
@@ -1756,6 +1879,20 @@ var exportedCycleAtlasTab = null;
     chip.title = state.runLabel ? `${state.runLabel} (${state.runId})` : state.runId;
     chip.addEventListener("click", clearRunFilter);
     runFilterChip.appendChild(chip);
+  }
+  function renderProjectFilterChip() {
+    if (!projectFilterChip) return;
+    projectFilterChip.replaceChildren();
+    const hasProjectFilter = !!state.projectId;
+    projectFilterChip.classList.toggle("u-hidden", !hasProjectFilter);
+    if (!hasProjectFilter) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip chip-removable";
+    chip.textContent = `Project: ${truncateRunFilterLabel(state.projectName || state.projectId)} ×`;
+    chip.title = state.projectName ? `${state.projectName} (${state.projectId})` : state.projectId;
+    chip.addEventListener("click", clearProjectFilter);
+    projectFilterChip.appendChild(chip);
   }
   async function refreshAtlas({ resetOffset = false, force = false } = {}) {
     if (!overlay || !force && !isOpen()) return;
@@ -1831,6 +1968,11 @@ var exportedCycleAtlasTab = null;
           }
         });
         state.selectedEntityIds.clear();
+        if (state.requestedFindingId) {
+          const requested = state.findings.find((item) => String(item.id || "") === state.requestedFindingId);
+          state.selectedFindingId = requested ? String(requested.id || "") : "";
+          state.requestedFindingId = "";
+        }
         if (!state.selectedFindingId && state.findings[0]) state.selectedFindingId = state.findings[0].id;
         if (state.selectedFindingId && !state.findings.some((item) => String(item.id || "") === state.selectedFindingId)) {
           state.selectedFindingId = state.findings[0]?.id || "";
@@ -2584,6 +2726,16 @@ var exportedCycleAtlasTab = null;
         selected?.dataset?.runCommand || selected?.textContent || ""
       );
     });
+    projectFilterSelect?.addEventListener("focus", () => {
+      loadProjectOptions({ force: !state.projectOptionsLoaded });
+    });
+    projectFilterSelect?.addEventListener("change", () => {
+      const selected = projectFilterSelect.selectedOptions?.[0] || null;
+      applyProjectFilter(
+        projectFilterSelect.value,
+        selected?.dataset?.projectName || selected?.textContent || ""
+      );
+    });
     findingStatusFilter?.addEventListener("change", () => {
       state.findingStatus = String(findingStatusFilter.value || "");
       state.selectedFindingId = "";
@@ -2758,6 +2910,8 @@ var exportedCycleAtlasTab = null;
     exportEntities,
     loadRunOptions,
     applyRunFilter,
+    loadProjectOptions,
+    applyProjectFilter,
     loadSavedViews,
     applySavedView,
     saveCurrentView,

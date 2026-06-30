@@ -6,6 +6,41 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.4] — Unreleased
+
+### Fixed
+
+- E2E coverage no longer depends on external DNS resolving `darklab.sh` before the status monitor and session-token autocomplete checks can finish.
+- `nc -zv` output with failed reverse DNS now records the bracketed IP address as the port host instead of treating `(UNKNOWN)` as the target.
+- Nmap port service/version attributes now survive run-output persistence, so later Project and Atlas port rows can show metadata captured from `-sV` scans.
+- Atlas port detail action menus now open as viewport-positioned dropdowns and close on outside click or Escape, so they stay visible when the port row has no provider intel refresh action.
+
+### Added
+
+- **Atlas port entities from scan output** — Atlas now captures open ports as first-class app-native entities from supported scanner output.
+  - Nmap, masscan, rustscan, naabu domain/IP output, `nc -zv`, and curl connection lines can emit host-linked `port` entities with canonical `host:port/proto` values; nmap service/version/banner data is kept as lightweight port attributes.
+  - Scanner-scoped port extraction records private/internal targets when the user-directed scanner output reports them, while generic entity extraction keeps its separate private-IP filtering policy.
+  - Postgres materialization now writes port attributes through the JSONB adapter path, so service/version/banner metadata saves correctly outside SQLite.
+  - Atlas and Project Entities gain a Ports tab/filter, port rows and detail views surface protocol/service/version/banner and host-link metadata, generic CSV/JSONL imports accept full `host:port/proto` port rows, CSV/JSONL exports include port host metadata plus decoded `attributes`, and provider intel refresh stays hidden for ports because they are app-captured evidence rather than external-provider lookup targets.
+  - Supported port-scan runs record app-native scan target observations, including command-target-only scans that surface no ports, so Project Overview can distinguish untouched targets from targets scanned by the app with no surfaced ports.
+  - Deleted runs now remove their app-native scan target observations, so Project Overview does not count scan evidence after its source run is gone.
+  - Project Overview labels cached-provider ports separately from app-captured scan coverage and shows app-native port evidence without claiming that a scan with no surfaced ports proves no ports exist.
+  - Project Overview now renders finding review and verification progress from app-captured finding counts, with false-positive, suppressed, and not-applicable findings shown outside the main funnels.
+  - Project Overview now shows operational tempo from linked runs, triage updates, and run artifacts, plus a short recent-activity strip that jumps into the matching project workspace tab.
+  - Project Overview now surfaces app-data coverage gaps for targets with no app-captured scan, targets awaiting verification, and targets needing review or follow-up, with deep-links into the existing project tabs.
+  - Project Overview now shows deliverables status for latest package save/build, report save/export, and report freshness against the latest finding activity.
+  - Project Overview now makes the cached-provider boundary clearer by labeling provider-backed port/service counts, adding a cached-provider caveat, and showing each target's provider freshness or no-intel state with the latest checked timestamp when available.
+  - Atlas now exposes project scope as a first-class filter with a project selector and clearable chip. Project-launched Atlas opens show the applied project, saved views keep project scope, and the project chip or **Clear filters** can remove the scope.
+  - Project Findings rows now open the selected finding in project-scoped Atlas instead of dropping straight back into the terminal, while an explicit **See in run** action keeps the raw source-run line highlight available on desktop and mobile.
+  - **Tests:** focused backend coverage verifies port canonicalization, scanner extraction including private/internal scanner targets, SQLite/Postgres attribute materialization, materialized host relationships and attributes, Project Entities port metadata payloads, command-target and quiet-scan observations, run-deletion cleanup, masscan/curl scan-coverage boundaries, Project Overview app-scan evidence, operational tempo, recent activity, coverage gaps, deliverables status, and generic CSV import support; focused browser-module coverage verifies port metadata row/detail rendering, Overview finding progress, provider caveats, provider freshness, tempo, activity, coverage-gap, deliverables rendering, Atlas project-filter controls, and Project Findings row/source-run actions.
+
+### Changed
+
+- Port-entity diagnostics now include bounded DEBUG/WARN breadcrumbs for scanner candidate drops, SQLite compatibility migration failures, malformed Atlas attributes, and scan-observation replacement, plus INFO-level port and scan-observation counts when runs capture Atlas evidence.
+- Port-entity documentation and the v1 API contract now describe host-linked port response metadata, generic import port syntax, Overview scan-coverage boundaries, and the settled port identity rules.
+
+---
+
 ## [2.3.1] — 2026-06-28
 
 ### Fixed

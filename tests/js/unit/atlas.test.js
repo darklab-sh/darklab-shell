@@ -15,6 +15,22 @@ const ENTITY = {
   last_seen_at: '2026-05-15T00:01:00Z',
 }
 
+const PORT_ENTITY = {
+  id: 'ent_port',
+  type: 'port',
+  canonical_value: 'example.com:443/tcp',
+  host_entity_id: 'ent_domain',
+  attributes: { service: 'https', version: 'nginx' },
+  occurrence_count: 1,
+  run_count: 1,
+  project_link_count: 0,
+  project_links: [],
+  labels: [{ label: 'service' }],
+  note: null,
+  first_seen_at: '2026-05-15T00:00:00Z',
+  last_seen_at: '2026-05-15T00:01:00Z',
+}
+
 const FINDING = {
   id: 'fnd_1',
   title: '443/tcp open https',
@@ -76,6 +92,8 @@ function setupAtlasDom() {
         <input id="atlas-run-filter-search" />
         <select id="atlas-run-filter-select" class="form-select form-control-compact"></select>
         <div id="atlas-run-filter-chip" class="atlas-run-filter-chip u-hidden"></div>
+        <select id="atlas-project-filter-select" class="form-select form-control-compact"></select>
+        <div id="atlas-project-filter-chip" class="atlas-project-filter-chip u-hidden"></div>
         <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden"></select>
         <select id="atlas-orphan-filter" class="form-select form-control-compact"></select>
         <select id="atlas-suppression-filter" class="form-select form-control-compact"></select>
@@ -121,6 +139,22 @@ function setupAtlasDom() {
             <button id="atlas-next-btn" type="button">next</button>
           </div>
           <aside id="atlas-detail"></aside>
+          <div id="atlas-mobile-root" class="u-hidden">
+            <div id="atlas-mobile-list-view"></div>
+            <div id="atlas-mobile-entity-view"></div>
+            <div id="atlas-mobile-finding-view"></div>
+            <div id="atlas-mobile-tabs"></div>
+            <div id="atlas-mobile-tools"></div>
+            <div id="atlas-mobile-bulk-bar"></div>
+            <div id="atlas-mobile-list"></div>
+            <div id="atlas-mobile-pagination"></div>
+            <div id="atlas-mobile-entity-topbar"></div>
+            <div id="atlas-mobile-entity-body"></div>
+            <div id="atlas-mobile-entity-footer"></div>
+            <div id="atlas-mobile-finding-topbar"></div>
+            <div id="atlas-mobile-finding-body"></div>
+            <div id="atlas-mobile-finding-footer"></div>
+          </div>
         </div>
         <div id="atlas-import-overlay" class="modal-overlay mobile-sheet-overlay atlas-import-overlay u-hidden" aria-hidden="true">
           <form id="atlas-import-modal" class="modal-card mobile-sheet-surface atlas-import-modal" tabindex="-1">
@@ -209,6 +243,15 @@ function loadAtlas({
         limit: 30,
       }))
     }
+    if (target.startsWith('/projects?')) {
+      return Promise.resolve(jsonResponse({
+        projects: [
+          { id: 'prj_1', name: 'Case Alpha', slug: 'case-alpha', status: 'active' },
+          { id: 'prj_2', name: 'Case Beta', slug: 'case-beta', status: 'active' },
+        ],
+        limit: 30,
+      }))
+    }
     if (target.startsWith('/atlas/findings?')) {
       return Promise.resolve(jsonResponse({
         findings: [FINDING],
@@ -248,6 +291,14 @@ function loadAtlas({
       return Promise.resolve(jsonResponse({ ok: true, entity_id: 'ent_ip', suppressed: true }))
     }
     if (target.startsWith('/atlas/entities?')) {
+      if (target.includes('type=port')) {
+        return Promise.resolve(jsonResponse({
+          entities: [PORT_ENTITY],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        }))
+      }
       return Promise.resolve(jsonResponse({
         entities: [ENTITY],
         total: 1,
@@ -377,6 +428,25 @@ function loadAtlas({
         },
       }))
     }
+    if (target === '/atlas/entities/ent_port') {
+      return Promise.resolve(jsonResponse({
+        entity: PORT_ENTITY,
+        import_sources: [],
+        intel_snapshots: [],
+        intel_summary: { status: 'unsupported', providers_with_data: [], highlights: [] },
+        runs: [{
+          run_id: 'run-port',
+          command: 'nmap example.com',
+          occurrence_count: 1,
+          last_seen_at: '2026-05-15T00:01:00Z',
+        }],
+        findings: [],
+        detail_limits: {
+          runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
+          findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+        },
+      }))
+    }
     if (target === '/atlas/entities/ent_ip/refresh_intel' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({
         ok: true,
@@ -398,6 +468,8 @@ function loadAtlas({
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
         'app/static/js/features/atlas/atlas_overlay.js',
+        'app/static/js/features/atlas/atlas_mobile_bridge.js',
+        'app/static/js/features/atlas/atlas_mobile.js',
       ],
       {
         document,
@@ -519,6 +591,12 @@ describe('Atlas overlay', () => {
         return Promise.resolve(jsonResponse({ ok: true, view: views[0], views }))
       }
       if (target === '/atlas/views') return Promise.resolve(jsonResponse({ views }))
+      if (target.startsWith('/projects?')) {
+        return Promise.resolve(jsonResponse({
+          projects: [{ id: 'prj_keep', name: 'Keep Scope', slug: 'keep-scope', status: 'active' }],
+          limit: 30,
+        }))
+      }
       if (target === '/atlas' || target.startsWith('/atlas?')) {
         return Promise.resolve(jsonResponse({
           total: 1,
@@ -619,7 +697,8 @@ describe('Atlas overlay', () => {
     expect(window.DarklabAtlasOverlay.state.suppressionFilter).toBe('hide')
     expect(window.DarklabAtlasOverlay.state.runId).toBe('')
     expect(window.DarklabAtlasOverlay.state.selectedSavedViewId).toBe('')
-    expect(window.DarklabAtlasOverlay.state.projectId).toBe('prj_keep')
+    expect(window.DarklabAtlasOverlay.state.projectId).toBe('')
+    expect(document.getElementById('atlas-project-filter-chip')?.classList.contains('u-hidden')).toBe(true)
     expect(window.DarklabAtlasOverlay.state.offset).toBe(0)
     expect(window.DarklabAtlasOverlay.state.selectedFindingIds.size).toBe(0)
     expect(document.getElementById('atlas-saved-view-select').value).toBe('')
@@ -628,7 +707,7 @@ describe('Atlas overlay', () => {
       const clearedRequest = apiFetch.mock.calls.some(([url]) => {
         const target = String(url)
         return target.startsWith('/atlas/findings?')
-          && target.includes('project_id=prj_keep')
+          && !target.includes('project_id=')
           && target.includes('orphan_filter=hide')
           && target.includes('suppression_filter=hide')
           && !target.includes('run_id=')
@@ -1171,10 +1250,53 @@ describe('Atlas overlay', () => {
     await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha' })
 
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding · Case Alpha')
+    expect(document.getElementById('atlas-project-filter-select')?.value).toBe('prj_1')
+    expect(document.getElementById('atlas-project-filter-chip')?.textContent).toContain('Project: Case Alpha')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas?orphan_filter=hide&suppression_filter=hide&project_id=prj_1',
       expect.objectContaining({ cache: 'no-store' }),
     )
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+
+    const projectSelect = document.getElementById('atlas-project-filter-select')
+    projectSelect.value = 'prj_2'
+    projectSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+
+    expect(window.DarklabAtlasOverlay.state.projectId).toBe('prj_2')
+    expect(window.DarklabAtlasOverlay.state.projectName).toBe('Case Beta')
+    expect(document.getElementById('atlas-project-filter-chip')?.textContent).toContain('Project: Case Beta')
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url) === '/atlas?orphan_filter=hide&suppression_filter=hide&project_id=prj_2'
+    ))).toBe(true)
+
+    document.querySelector('#atlas-project-filter-chip button')?.click()
+    await flushPromises()
+
+    expect(window.DarklabAtlasOverlay.state.projectId).toBe('')
+    expect(document.getElementById('atlas-project-filter-chip')?.classList.contains('u-hidden')).toBe(true)
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url) === '/atlas?orphan_filter=hide&suppression_filter=hide'
+    ))).toBe(true)
+  })
+
+  it('selects a requested finding when opened from a project finding row', async () => {
+    const { openAtlas, apiFetch } = loadAtlas()
+
+    await openAtlas({
+      source: 'project-workspace',
+      tab: 'findings',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      findingId: 'fnd_1',
+    })
+
+    expect(window.DarklabAtlasOverlay.state.activeTab).toBe('findings')
+    expect(window.DarklabAtlasOverlay.state.projectId).toBe('prj_1')
+    expect(window.DarklabAtlasOverlay.state.selectedFindingId).toBe('fnd_1')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),
@@ -1626,9 +1748,37 @@ describe('Atlas overlay', () => {
   it('exports filtered entity rows without leaving the Atlas surface', async () => {
     const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()
 
-    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'ip' })
+    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'port' })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-detail')?.textContent).toContain('example.com:443/tcp')
+    })
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Prototcp')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Servicehttps')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Versionnginx')
+    expect(document.querySelector('#atlas-detail .atlas-detail-actions')?.textContent).not.toContain('Refresh intel')
+    document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.click()
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.position).toBe('')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.left).not.toBe('')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.top).not.toBe('')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.getAttribute('aria-expanded')).toBe('true')
+    document.getElementById('atlas-detail')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu')?.classList.contains('open')).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes('/refresh_intel'))).toBe(false)
+
+    document.body.classList.add('mobile-terminal-mode')
+    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'port' })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('example.com:443/tcp')
+    })
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Servicehttps')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Versionnginx')
+    expect(document.getElementById('atlas-mobile-entity-footer')?.textContent).not.toContain('Refresh intel')
+    document.body.classList.remove('mobile-terminal-mode')
+
     const search = document.getElementById('atlas-search')
-    search.value = '107.178'
+    search.value = '443'
     search.dispatchEvent(new Event('input', { bubbles: true }))
     document.getElementById('atlas-export-menu-btn')?.click()
     expect(document.getElementById('atlas-export-menu')?.parentElement).toBe(document.body)
@@ -1639,7 +1789,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-export-menu')?.parentElement).toBe(document.getElementById('atlas-export-wrap'))
     expect(document.getElementById('atlas-export-menu-btn')?.getAttribute('aria-expanded')).toBe('false')
     expect(apiFetch).toHaveBeenCalledWith(
-      '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
+      '/atlas/entities/export?format=csv&type=port&q=443&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(downloadBlobAsAttachment).toHaveBeenCalledWith(

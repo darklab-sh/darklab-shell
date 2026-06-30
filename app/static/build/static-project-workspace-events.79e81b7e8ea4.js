@@ -1,11 +1,11 @@
 import {
   exportedOpenAtlas
-} from "./static-chunk-chqbks7e.9f2e150d66e2.js";
+} from "./static-chunk-evo2j66v.0f1e08dadf7e.js";
 import {
   exportedOpenFindingsBoard
 } from "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-bq2uwdee.5cc634779df5.js";
+import "./static-chunk-luxntmsb.800e86ee6e9e.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -28,10 +28,10 @@ import "./static-chunk-2bgb52uq.a327269283bb.js";
 import "./static-chunk-yo5cjr7d.b86e0c93eff0.js";
 import "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-4nkiwrht.8176cfb2b3d4.js";
-import "./static-chunk-m4e6ivjw.074a5c89d41e.js";
+import "./static-chunk-yzcc4kyr.88ac01345411.js";
+import "./static-chunk-zabwxq4a.6a46e6b248cd.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
-import "./static-chunk-y6zchygr.f5ddd7fe938a.js";
+import "./static-chunk-wkckhpty.7befd18332ed.js";
 
 // app/static/js/features/projects/project_workspace_events.js
 var exportedDarklabProjectWorkspaceEvents = null;
@@ -897,6 +897,21 @@ var exportedDarklabProjectWorkspaceEvents = null;
             canonical_value: String(btn.dataset.entityValue || "")
           };
           ctx.openProjectEntityInAtlas(projectId, summary, entity);
+          return;
+        } else if (action === "open-project-finding") {
+          const findingId = String(btn.dataset.findingId || "").trim();
+          if (!projectId || !findingId) throw new Error("Finding is missing its project context.");
+          const project = projectFromRowsOrSummary(projectId);
+          const openAtlas = ctx.openAtlas || typeof exportedOpenAtlas !== "undefined" && exportedOpenAtlas || null;
+          if (typeof openAtlas !== "function") throw new Error("Atlas is not available.");
+          ctx.closeProjectWorkspace({ refocus: false });
+          void openAtlas({
+            source: "project-workspace",
+            projectId,
+            projectName: project ? ctx.projectDisplayName(project) : "",
+            tab: "findings",
+            findingId
+          });
           return;
         } else if (action === "toggle-project-entity-row") {
           const entityId = String(btn.dataset.entityId || "");

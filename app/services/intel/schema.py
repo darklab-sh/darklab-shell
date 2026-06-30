@@ -6,7 +6,8 @@ from copy import deepcopy
 from typing import Any
 
 
-ENTITY_TYPES = {"ip", "domain", "hash", "cve", "url"}
+INTEL_ENTITY_TYPES = frozenset({"ip", "domain", "hash", "cve", "url"})
+ENTITY_TYPES = INTEL_ENTITY_TYPES
 
 EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
     "ip": {

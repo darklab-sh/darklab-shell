@@ -1186,14 +1186,16 @@ let exportedDarklabAtlasMobile = null;
       ? links.find(link => String(link.project_id || '') === activeId)
       : null;
 
-    const refresh = document.createElement('button');
-    refresh.type = 'button';
-    refresh.className = 'btn btn-secondary btn-compact';
-    refresh.disabled = !!state.intelRefreshing;
-    refresh.setAttribute('aria-busy', state.intelRefreshing ? 'true' : 'false');
-    refresh.textContent = state.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
-    refresh.addEventListener('click', () => controller.refreshIntel());
-    entityFooter.appendChild(refresh);
+    if (String(entity.type || '') !== 'port') {
+      const refresh = document.createElement('button');
+      refresh.type = 'button';
+      refresh.className = 'btn btn-secondary btn-compact';
+      refresh.disabled = !!state.intelRefreshing;
+      refresh.setAttribute('aria-busy', state.intelRefreshing ? 'true' : 'false');
+      refresh.textContent = state.intelRefreshing ? 'Refreshing...' : 'Refresh intel';
+      refresh.addEventListener('click', () => controller.refreshIntel());
+      entityFooter.appendChild(refresh);
+    }
 
     if (activeId) {
       const link = document.createElement('button');

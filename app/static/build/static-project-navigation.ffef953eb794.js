@@ -5,10 +5,10 @@ import {
 } from "./static-chunk-ebgxhzia.8240f1614c32.js";
 import {
   exportedOpenAtlas
-} from "./static-chunk-chqbks7e.9f2e150d66e2.js";
+} from "./static-chunk-evo2j66v.0f1e08dadf7e.js";
 import "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-bq2uwdee.5cc634779df5.js";
+import "./static-chunk-luxntmsb.800e86ee6e9e.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -24,10 +24,10 @@ import "./static-chunk-2bgb52uq.a327269283bb.js";
 import "./static-chunk-yo5cjr7d.b86e0c93eff0.js";
 import "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-4nkiwrht.8176cfb2b3d4.js";
-import "./static-chunk-m4e6ivjw.074a5c89d41e.js";
+import "./static-chunk-yzcc4kyr.88ac01345411.js";
+import "./static-chunk-zabwxq4a.6a46e6b248cd.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
-import "./static-chunk-y6zchygr.f5ddd7fe938a.js";
+import "./static-chunk-wkckhpty.7befd18332ed.js";
 
 // app/static/js/features/projects/project_navigation.js
 var exportedDarklabProjectNavigation = null;

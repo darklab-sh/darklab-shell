@@ -3,18 +3,39 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from core.database_backend import DatabaseBackend, dialect_for_backend, parse_database_backend
+from core.helpers import get_log_session_id
+from core.output_signals import command_root, extract_target
 from core.redaction import REDACTED_ENTITY_SENTINEL
 from services.atlas.recalculation import recalculate_atlas_entities
-from services.intel.canonical import CanonicalizationError, canonical_entity, entity_signature
-from services.intel.schema import ENTITY_TYPES
+from services.atlas.schema import ATLAS_ENTITY_TYPES
+from services.intel.canonical import (
+    CanonicalizationError,
+    canonical_domain,
+    canonical_entity,
+    canonical_ip,
+    entity_signature,
+    parse_canonical_port,
+)
+
+PORT_SCAN_OBSERVATION_ROOTS = frozenset({"nmap", "masscan", "rustscan", "naabu", "nc"})
+log = logging.getLogger("shell")
 
 
-ATLAS_ENTITY_TYPES = frozenset(ENTITY_TYPES)
+def _conn_dialect(conn):
+    backend = getattr(conn, "database_backend", DatabaseBackend.SQLITE)
+    return dialect_for_backend(parse_database_backend(backend))
+
+
+def _json_param(conn, value: Any) -> Any:
+    return _conn_dialect(conn).json_param(_json_dict(value))
 
 
 def atlas_entity_id(session_id: str, entity_type: str, canonical_value: str, *, team_id: str = "") -> str:
@@ -52,6 +73,109 @@ def canonicalize_entity_record(entity: Mapping[str, Any]) -> tuple[str, str] | N
     return entity_type, canonical_value
 
 
+def _log_extra(session_id: str = "", team_id: str = "", run_id: str = "", **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if session_id:
+        payload["session"] = get_log_session_id(session_id)
+    if team_id:
+        payload["team_id"] = team_id
+    if run_id:
+        payload["run_id"] = run_id
+    payload.update(extra)
+    return payload
+
+
+def _json_dict(
+    value: Any,
+    *,
+    source: str = "",
+    log_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = dict(log_context or {})
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items() if str(key)}
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value or "{}")
+        except ValueError:
+            if source == "stored":
+                log.warning("ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED", extra={
+                    **context,
+                    "value_type": type(value).__name__,
+                    "reason": "invalid_json",
+                })
+            elif source == "incoming" and value:
+                log.debug("ATLAS_ENTITY_ATTRIBUTES_DROPPED", extra={
+                    **context,
+                    "value_type": type(value).__name__,
+                    "reason": "invalid_json",
+                })
+            return {}
+        if isinstance(parsed, Mapping):
+            return {str(key): item for key, item in parsed.items() if str(key)}
+        if source == "stored":
+            log.warning("ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED", extra={
+                **context,
+                "value_type": type(parsed).__name__,
+                "reason": "non_object_json",
+            })
+        elif source == "incoming" and value:
+            log.debug("ATLAS_ENTITY_ATTRIBUTES_DROPPED", extra={
+                **context,
+                "value_type": type(parsed).__name__,
+                "reason": "non_object_json",
+            })
+        return {}
+    if source == "incoming" and value is not None:
+        log.debug("ATLAS_ENTITY_ATTRIBUTES_DROPPED", extra={
+            **context,
+            "value_type": type(value).__name__,
+            "reason": "non_object",
+        })
+    return {}
+
+
+def _port_host_entity_id(
+    session_id: str,
+    canonical_value: str,
+    *,
+    team_id: str = "",
+) -> str:
+    try:
+        host_type, host_canonical, _, _ = parse_canonical_port(canonical_value)
+    except CanonicalizationError:
+        return ""
+    return atlas_entity_id(session_id, host_type, host_canonical, team_id=team_id)
+
+
+def _host_identity(value: str) -> tuple[str, str] | None:
+    raw = str(value or "").strip().strip("[]")
+    if not raw:
+        return None
+    try:
+        return "ip", canonical_ip(raw)
+    except CanonicalizationError:
+        try:
+            return "domain", canonical_domain(raw)
+        except CanonicalizationError:
+            return None
+
+
+def _merge_attributes(existing: Mapping[str, Any] | None, incoming: Mapping[str, Any] | None) -> dict[str, Any]:
+    merged = dict(existing or {})
+    for key, value in dict(incoming or {}).items():
+        if not str(key) or value is None or value == "":
+            continue
+        if isinstance(value, (list, dict)) and not value:
+            continue
+        if isinstance(value, tuple) and not value:
+            continue
+        if isinstance(value, set) and not value:
+            continue
+        merged[str(key)] = value
+    return merged
+
+
 def upsert_entity(
     conn,
     session_id: str,
@@ -61,11 +185,27 @@ def upsert_entity(
     team_id: str = "",
     seen_at: str = "",
     occurrence_count: int = 0,
+    host_entity_id: str = "",
+    attributes: Mapping[str, Any] | None = None,
 ) -> str:
     timestamp = str(seen_at or _now())
     team_id = str(team_id or "").strip()
     signature_hash = entity_signature(entity_type, canonical_value)
     entity_id = atlas_entity_id(session_id, entity_type, canonical_value, team_id=team_id)
+    if not host_entity_id and entity_type == "port":
+        host_entity_id = _port_host_entity_id(session_id, canonical_value, team_id=team_id)
+    attributes_payload = _json_param(conn, attributes)
+    if team_id:
+        existing_row = conn.execute(
+            "SELECT id, attributes_json FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
+            (team_id, entity_type, signature_hash),
+        ).fetchone()
+    else:
+        existing_row = conn.execute(
+            "SELECT id, attributes_json FROM entities "
+            "WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
+            (session_id, entity_type, signature_hash),
+        ).fetchone()
     conflict_target = (
         "ON CONFLICT(team_id, type, signature_hash) WHERE team_id != '' DO UPDATE SET "
         if team_id
@@ -74,12 +214,14 @@ def upsert_entity(
     conn.execute(
         "INSERT INTO entities "
         "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
-        "occurrence_count, created) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "occurrence_count, host_entity_id, attributes_json, created) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         f"{conflict_target}"  # nosec
         "last_seen_at = CASE "
         "WHEN excluded.last_seen_at > entities.last_seen_at THEN excluded.last_seen_at ELSE entities.last_seen_at END, "
-        "occurrence_count = entities.occurrence_count + excluded.occurrence_count",
+        "occurrence_count = entities.occurrence_count + excluded.occurrence_count, "
+        "host_entity_id = CASE "
+        "WHEN COALESCE(entities.host_entity_id, '') = '' THEN excluded.host_entity_id ELSE entities.host_entity_id END",
         (
             entity_id,
             session_id,
@@ -90,20 +232,158 @@ def upsert_entity(
             timestamp,
             timestamp,
             max(0, int(occurrence_count or 0)),
+            str(host_entity_id or ""),
+            attributes_payload,
             timestamp,
         ),
     )
-    if team_id:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
-            (team_id, entity_type, signature_hash),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
-            (session_id, entity_type, signature_hash),
-        ).fetchone()
-    return str(row["id"]) if row else entity_id
+    stored_id = str(existing_row["id"]) if existing_row else entity_id
+    if attributes and existing_row:
+        merged = _merge_attributes(
+            _json_dict(existing_row["attributes_json"], source="stored", log_context=_log_extra(
+                session_id,
+                team_id,
+                entity_id=stored_id,
+                entity_type=entity_type,
+            )),
+            _json_dict(attributes, source="incoming", log_context=_log_extra(
+                session_id,
+                team_id,
+                entity_id=stored_id,
+                entity_type=entity_type,
+            )),
+        )
+        conn.execute(
+            "UPDATE entities SET attributes_json = ? WHERE id = ?",
+            (_json_param(conn, merged), stored_id),
+        )
+    return stored_id
+
+
+def _command_target_values(command: str) -> list[str]:
+    target = extract_target(command) or ""
+    values: list[str] = []
+    for item in str(target).split(","):
+        normalized = item.strip()
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return values
+
+
+def _port_host_counts(
+    session_id: str,
+    counts: Counter[tuple[str, str]],
+    *,
+    team_id: str = "",
+) -> Counter[str]:
+    result: Counter[str] = Counter()
+    for (entity_type, canonical_value), occurrence_count in counts.items():
+        if entity_type != "port":
+            continue
+        host_entity_id = _port_host_entity_id(session_id, canonical_value, team_id=team_id)
+        if host_entity_id:
+            result[host_entity_id] += int(occurrence_count or 0)
+    return result
+
+
+def _scan_observation_targets(
+    session_id: str,
+    command: str,
+    counts: Counter[tuple[str, str]],
+    *,
+    team_id: str = "",
+) -> dict[str, tuple[str, str]]:
+    root = command_root(command)
+    if root not in PORT_SCAN_OBSERVATION_ROOTS:
+        return {}
+    targets: dict[str, tuple[str, str]] = {}
+    for entity_type, canonical_value in counts:
+        if entity_type not in {"ip", "domain"}:
+            continue
+        entity_id = atlas_entity_id(session_id, entity_type, canonical_value, team_id=team_id)
+        targets[entity_id] = (entity_type, canonical_value)
+    for value in _command_target_values(command):
+        identity = _host_identity(value)
+        if identity is None:
+            continue
+        entity_type, canonical_value = identity
+        entity_id = atlas_entity_id(session_id, entity_type, canonical_value, team_id=team_id)
+        targets[entity_id] = (entity_type, canonical_value)
+    return targets
+
+
+def _record_scan_target_observations(
+    conn,
+    session_id: str,
+    run_id: str,
+    command: str,
+    counts: Counter[tuple[str, str]],
+    *,
+    team_id: str = "",
+    observed_at: str = "",
+) -> int:
+    root = command_root(command)
+    deleted = conn.execute("DELETE FROM scan_target_observations WHERE run_id = ?", (run_id,))
+    deleted_count = max(0, int(deleted.rowcount or 0))
+    log_context = _log_extra(
+        session_id,
+        team_id,
+        run_id,
+        command_root=root,
+        deleted_count=deleted_count,
+    )
+    if root not in PORT_SCAN_OBSERVATION_ROOTS:
+        reason = "missing_command" if not str(command or "").strip() or not root else "unsupported_command_root"
+        if deleted_count:
+            log.warning("SCAN_TARGET_OBSERVATIONS_DROPPED", extra={
+                **log_context,
+                "reason": reason,
+            })
+        else:
+            log.debug("SCAN_TARGET_OBSERVATIONS_SKIPPED", extra={
+                **log_context,
+                "reason": reason,
+            })
+        return 0
+    timestamp = str(observed_at or _now())
+    port_counts = _port_host_counts(session_id, counts, team_id=team_id)
+    targets = _scan_observation_targets(session_id, command, counts, team_id=team_id)
+    if not targets:
+        if deleted_count:
+            log.warning("SCAN_TARGET_OBSERVATIONS_DROPPED", extra={
+                **log_context,
+                "reason": "no_scan_targets",
+            })
+        else:
+            log.debug("SCAN_TARGET_OBSERVATIONS_SKIPPED", extra={
+                **log_context,
+                "reason": "no_scan_targets",
+            })
+        return 0
+    for entity_id, (entity_type, canonical_value) in sorted(targets.items()):
+        conn.execute(
+            "INSERT INTO scan_target_observations "
+            "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
+            "command_root, observed_at, port_entity_count, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'port_scan', ?, ?, ?, ?) "
+            "ON CONFLICT(run_id, entity_id, scan_kind) DO UPDATE SET "
+            "observed_at = excluded.observed_at, "
+            "command_root = excluded.command_root, "
+            "port_entity_count = excluded.port_entity_count",
+            (
+                session_id,
+                str(team_id or ""),
+                run_id,
+                entity_id,
+                entity_type,
+                canonical_value,
+                root,
+                timestamp,
+                int(port_counts.get(entity_id, 0)),
+                timestamp,
+            ),
+        )
+    return len(targets)
 
 
 def recalculate_entities(conn, entity_ids: Iterable[str]) -> None:
@@ -130,6 +410,7 @@ def materialize_run_entities(
     *,
     team_id: str = "",
     seen_at: str = "",
+    command: str = "",
 ):
     """Store unique normalized entities and run links for a completed run."""
     timestamp = str(seen_at or _now())
@@ -141,13 +422,48 @@ def materialize_run_entities(
     conn.execute("DELETE FROM entity_run_links WHERE run_id = ?", (run_id,))
     recalculate_entities(conn, existing_entity_ids)
     counts: Counter[tuple[str, str]] = Counter()
+    attributes_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    invalid_entity_count = 0
     for entity in _iter_entry_entities(entries):
         normalized = canonicalize_entity_record(entity)
         if normalized:
             counts[normalized] += 1
+            raw_attributes = entity.get("attributes") or entity.get("attributes_json")
+            attributes = _json_dict(raw_attributes, source="incoming", log_context=_log_extra(
+                session_id,
+                team_id,
+                run_id,
+                entity_type=normalized[0],
+            ))
+            if attributes:
+                attributes_by_key[normalized] = _merge_attributes(attributes_by_key.get(normalized), attributes)
+        else:
+            invalid_entity_count += 1
+    scan_observation_count = _record_scan_target_observations(
+        conn,
+        session_id,
+        run_id,
+        command,
+        counts,
+        team_id=team_id,
+        observed_at=timestamp,
+    )
+    log.debug("ATLAS_ENTITY_MATERIALIZATION_SUMMARY", extra=_log_extra(
+        session_id,
+        team_id,
+        run_id,
+        command_root=command_root(command),
+        entity_count=len(counts),
+        total_occurrence_count=sum(int(count or 0) for count in counts.values()),
+        invalid_entity_count=invalid_entity_count,
+        port_entity_count=sum(int(count or 0) for (kind, _), count in counts.items() if kind == "port"),
+        attribute_entity_count=len(attributes_by_key),
+        scan_observation_count=scan_observation_count,
+    ))
 
     materialized = []
-    for (entity_type, canonical_value), occurrence_count in sorted(counts.items()):
+    sorted_items = sorted(counts.items(), key=lambda item: (item[0][0] == "port", item[0][0], item[0][1]))
+    for (entity_type, canonical_value), occurrence_count in sorted_items:
         entity_id = upsert_entity(
             conn,
             session_id,
@@ -156,6 +472,7 @@ def materialize_run_entities(
             team_id=team_id,
             seen_at=timestamp,
             occurrence_count=int(occurrence_count),
+            attributes=attributes_by_key.get((entity_type, canonical_value), {}),
         )
         conn.execute(
             "INSERT INTO entity_run_links "

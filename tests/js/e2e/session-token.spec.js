@@ -188,7 +188,14 @@ test.describe('session-token lifecycle', () => {
     await expect.poll(async () => currentSessionId(page)).toBe(token)
     await ensureAutocompleteReady(page, { timeout: 30_000 })
 
-    await runCommand(page, 'ping -c 1 darklab.sh')
+    await page.evaluate(async () => {
+      await apiFetch('/session/recent-values', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [{ kind: 'domain', value: 'darklab.sh' }] }),
+      })
+    })
+    await runCommand(page, 'ping -c 1 -W 1 192.0.2.1')
     await page.evaluate(async () => {
       if (typeof flushRecentValues === 'function') await flushRecentValues()
     })

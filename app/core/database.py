@@ -802,7 +802,7 @@ def _create_project_workspace_schema(conn):
             CHECK (cadence_preset IN ('hourly', 'daily', 'weekly'))
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS entities (
             id               TEXT PRIMARY KEY,
             session_id       TEXT NOT NULL,
@@ -813,6 +813,8 @@ def _create_project_workspace_schema(conn):
             first_seen_at    TEXT NOT NULL,
             last_seen_at     TEXT NOT NULL,
             occurrence_count INTEGER NOT NULL DEFAULT 0,
+            host_entity_id   TEXT,
+            attributes_json  {_json_column_sql("{}")},
             suppressed       INTEGER NOT NULL DEFAULT 0,
             suppressed_reason TEXT NOT NULL DEFAULT '',
             suppressed_at    TEXT NOT NULL DEFAULT '',
@@ -827,6 +829,22 @@ def _create_project_workspace_schema(conn):
             last_seen_at     TEXT NOT NULL,
             occurrence_count INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (entity_id, run_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scan_target_observations (
+            session_id         TEXT NOT NULL,
+            team_id            TEXT NOT NULL DEFAULT '',
+            run_id             TEXT NOT NULL,
+            entity_id          TEXT NOT NULL,
+            entity_type        TEXT NOT NULL,
+            canonical_value    TEXT NOT NULL,
+            scan_kind          TEXT NOT NULL DEFAULT 'port_scan',
+            command_root       TEXT NOT NULL DEFAULT '',
+            observed_at        TEXT NOT NULL,
+            port_entity_count  INTEGER NOT NULL DEFAULT 0,
+            created            TEXT NOT NULL,
+            PRIMARY KEY (run_id, entity_id, scan_kind)
         )
     """)
     conn.execute(f"""
@@ -1333,12 +1351,24 @@ def _create_indexes(conn):
         "ON entities (team_id, canonical_value) WHERE team_id != ''"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_host_entity "
+        "ON entities (host_entity_id) WHERE host_entity_id IS NOT NULL AND host_entity_id != ''"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_run_links_run "
         "ON entity_run_links (run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_run_links_entity_seen "
         "ON entity_run_links (entity_id, last_seen_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scan_target_observations_entity_seen "
+        "ON scan_target_observations (entity_id, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scan_target_observations_owner_run "
+        "ON scan_target_observations (session_id, team_id, run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_intel_snapshots_entity_fetched "
@@ -1854,7 +1884,7 @@ def _migrate_atlas_team_scope(conn) -> None:
         entity_columns = sqlite_table_columns(conn, "entities")
         if "team_id" not in entity_columns or "UNIQUE (session_id, type, signature_hash)" in create_sql:
             conn.execute("ALTER TABLE entities RENAME TO entities_legacy_team_scope")
-            conn.execute("""
+            conn.execute(f"""
                 CREATE TABLE entities (
                     id               TEXT PRIMARY KEY,
                     session_id       TEXT NOT NULL,
@@ -1865,6 +1895,8 @@ def _migrate_atlas_team_scope(conn) -> None:
                     first_seen_at    TEXT NOT NULL,
                     last_seen_at     TEXT NOT NULL,
                     occurrence_count INTEGER NOT NULL DEFAULT 0,
+                    host_entity_id   TEXT,
+                    attributes_json  {_json_column_sql("{}")},
                     suppressed       INTEGER NOT NULL DEFAULT 0,
                     suppressed_reason TEXT NOT NULL DEFAULT '',
                     suppressed_at    TEXT NOT NULL DEFAULT '',
@@ -1879,7 +1911,8 @@ def _migrate_atlas_team_scope(conn) -> None:
             entity_insert_sql = f"""
                 INSERT INTO entities (
                     id, session_id, team_id, type, canonical_value, signature_hash,
-                    first_seen_at, last_seen_at, occurrence_count, suppressed,
+                    first_seen_at, last_seen_at, occurrence_count, host_entity_id,
+                    attributes_json, suppressed,
                     suppressed_reason, suppressed_at, created
                 )
                 SELECT
@@ -1892,6 +1925,8 @@ def _migrate_atlas_team_scope(conn) -> None:
                     first_seen_at,
                     last_seen_at,
                     COALESCE({entity_column_expr("occurrence_count", "0")}, 0),
+                    NULLIF(COALESCE({entity_column_expr("host_entity_id", "''")}, ''), ''),
+                    COALESCE({entity_column_expr("attributes_json", "'{}'")}, '{{}}'),
                     COALESCE({entity_column_expr("suppressed", "0")}, 0),
                     COALESCE({entity_column_expr("suppressed_reason", "''")}, ''),
                     COALESCE({entity_column_expr("suppressed_at", "''")}, ''),
@@ -2034,26 +2069,50 @@ def _migrate_team_code_hash_uniqueness(conn) -> None:
     )
 
 
+def _sqlite_add_column_context(stmt: str, *, migration_area: str) -> dict[str, str]:
+    tokens = str(stmt or "").strip().split()
+    normalized = [token.upper() for token in tokens]
+    table = tokens[2] if len(tokens) >= 6 and normalized[0:2] == ["ALTER", "TABLE"] else ""
+    column = tokens[5] if len(tokens) >= 6 and normalized[3:5] == ["ADD", "COLUMN"] else ""
+    return {
+        "table": table.strip('"`[]'),
+        "column": column.strip('"`[]'),
+        "migration_area": migration_area,
+    }
+
+
+def _apply_sqlite_add_column_compat(conn, stmt: str, *, migration_area: str) -> None:
+    try:
+        conn.execute(stmt)
+    except SQLiteOperationalError as exc:
+        extra = _sqlite_add_column_context(stmt, migration_area=migration_area)
+        if "duplicate column name" in str(exc).lower():
+            log.debug("SQLITE_SCHEMA_COMPAT_COLUMN_EXISTS", extra=extra)
+            return
+        log.warning(
+            "SQLITE_SCHEMA_COMPAT_COLUMN_FAILED",
+            exc_info=True,
+            extra={**extra, "error": str(exc)},
+        )
+
+
 def _migrate_schema(conn):
     """Apply one-time schema migrations for databases from older versions."""
     try:
         conn.execute("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
     except SQLiteOperationalError:
         pass  # Column already exists
-    for stmt in (
-        "ALTER TABLE runs ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'external'",
-        "ALTER TABLE runs ADD COLUMN owner_tab_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE runs ADD COLUMN output_preview TEXT",
-        "ALTER TABLE runs ADD COLUMN preview_truncated INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE runs ADD COLUMN output_line_count INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE runs ADD COLUMN full_output_available INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE runs ADD COLUMN full_output_truncated INTEGER NOT NULL DEFAULT 0",
+    for stmt, migration_area in (
+        ("ALTER TABLE runs ADD COLUMN team_id TEXT NOT NULL DEFAULT ''", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'external'", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN owner_tab_id TEXT NOT NULL DEFAULT ''", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN output_preview TEXT", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN preview_truncated INTEGER NOT NULL DEFAULT 0", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN output_line_count INTEGER NOT NULL DEFAULT 0", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN full_output_available INTEGER NOT NULL DEFAULT 0", "runs_compat"),
+        ("ALTER TABLE runs ADD COLUMN full_output_truncated INTEGER NOT NULL DEFAULT 0", "runs_compat"),
     ):
-        try:
-            conn.execute(stmt)
-        except SQLiteOperationalError:
-            pass
+        _apply_sqlite_add_column_compat(conn, stmt, migration_area=migration_area)
 
     try:
         conn.execute(
@@ -2404,25 +2463,24 @@ def _migrate_schema(conn):
         """)
     except SQLiteOperationalError:
         pass
-    for stmt in (
-        "ALTER TABLE projects ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE project_links ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0",
-        "ALTER TABLE project_links ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'",
-        f"ALTER TABLE project_links ADD COLUMN source_detail {_json_column_sql('{}')}",
-        "ALTER TABLE project_links ADD COLUMN updated TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE entities ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE entities ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE entities ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE entities ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE findings ADD COLUMN team_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE findings ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE findings ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE findings ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''",
+    for stmt, migration_area in (
+        ("ALTER TABLE projects ADD COLUMN team_id TEXT NOT NULL DEFAULT ''", "project_workspace_compat"),
+        ("ALTER TABLE project_links ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0", "project_workspace_compat"),
+        ("ALTER TABLE project_links ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'", "project_workspace_compat"),
+        (f"ALTER TABLE project_links ADD COLUMN source_detail {_json_column_sql('{}')}", "project_workspace_compat"),
+        ("ALTER TABLE project_links ADD COLUMN updated TEXT NOT NULL DEFAULT ''", "project_workspace_compat"),
+        ("ALTER TABLE entities ADD COLUMN team_id TEXT NOT NULL DEFAULT ''", "atlas_entity_compat"),
+        ("ALTER TABLE entities ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0", "atlas_entity_compat"),
+        ("ALTER TABLE entities ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''", "atlas_entity_compat"),
+        ("ALTER TABLE entities ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''", "atlas_entity_compat"),
+        ("ALTER TABLE entities ADD COLUMN host_entity_id TEXT", "atlas_port_entity_metadata"),
+        (f"ALTER TABLE entities ADD COLUMN attributes_json {_json_column_sql('{}')}", "atlas_port_entity_metadata"),
+        ("ALTER TABLE findings ADD COLUMN team_id TEXT NOT NULL DEFAULT ''", "atlas_finding_compat"),
+        ("ALTER TABLE findings ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0", "atlas_finding_compat"),
+        ("ALTER TABLE findings ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''", "atlas_finding_compat"),
+        ("ALTER TABLE findings ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''", "atlas_finding_compat"),
     ):
-        try:
-            conn.execute(stmt)
-        except SQLiteOperationalError:
-            pass
+        _apply_sqlite_add_column_compat(conn, stmt, migration_area=migration_area)
     try:
         _migrate_project_slug_scope(conn)
     except SQLiteOperationalError:
@@ -2521,6 +2579,10 @@ def delete_run_artifacts(conn, run_ids):
     recalculate_atlas_findings(conn, finding_ids)
     conn.execute(
         f"DELETE FROM entity_run_links WHERE run_id IN ({placeholders})",  # nosec
+        ids,
+    )
+    conn.execute(
+        f"DELETE FROM scan_target_observations WHERE run_id IN ({placeholders})",  # nosec
         ids,
     )
     recalculate_atlas_entities(conn, entity_ids)

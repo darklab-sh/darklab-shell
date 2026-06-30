@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,860
+- behavior tests: 3,877
 - docs/inventory meta-tests: 48
-- `pytest`: 2181 (2146 behavior + 35 meta)
-- `vitest`: 1460 (1447 behavior + 13 meta)
+- `pytest`: 2193 (2158 behavior + 35 meta)
+- `vitest`: 1463 (1450 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,910
+- total: 3,925
 
 This document is organized in two parts:
 
@@ -509,11 +509,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPackagePresetCatalog.test_package_preset_loader_falls_back_to_defaults_for_bad_override` | Verifies invalid operator package preset overrides log a warning and fall back to the shipped catalog. |
 | `TestPackagePresetCatalog.test_package_preset_loader_caps_display_lengths_and_default_labels` | Verifies package preset display text and default labels are bounded. |
 | `TestPackagePresetCatalog.test_package_preset_loader_rejects_too_many_presets` | Verifies package preset catalogs reject more entries than the configured catalog cap. |
-| `TestProjectOverviewContract.test_payload_contract_and_overview_helpers_pin_phase_one_decisions` | Verifies the Project overview payload skeleton, certificate buckets, and severity order match the Phase 1 contract. |
+| `TestProjectOverviewContract.test_payload_contract_and_overview_helpers_pin_phase_one_decisions` | Verifies the Project overview payload skeleton, certificate buckets, app-scan coverage defaults, operational-tempo defaults, recent-activity defaults, coverage-gap defaults, deliverables defaults, and severity order match the Overview contract. |
 | `TestProjectOverviewContract.test_finding_rollup_uses_review_suppression_and_verification_axes` | Verifies overview finding rollups keep review state, suppression, and verification state as distinct axes. |
 | `TestProjectOverviewContract.test_target_identity_uses_existing_atlas_entity_contract` | Verifies overview target identity follows the existing Atlas entity contract and host-to-domain/IP canonicalization. |
 | `TestProjectOverviewContract.test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects` | Verifies overview recent-change states and deep-link hints use existing monitoring and filter contracts. |
-| `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, and deep-link rollups. |
+| `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, app-scan evidence, operational tempo, recent activity, coverage gaps, deliverables status, and deep-link rollups. |
+| `TestProjectOverviewContract.test_project_intel_overview_drops_deleted_run_scan_observations` | Verifies deleted runs remove app-scan observations so Project Overview no longer counts removed scan evidence. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_marks_stale_provider_data` | Verifies Project Overview marks fully expired provider snapshots as stale while keeping mixed fresh/stale provider data fresh. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate` | Verifies Project Overview ignores stale expired provider certificate data when a fresh provider snapshot is available for the same target. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_logs_build_and_truncation_context` | Verifies Project Overview aggregation emits bounded build logs and warns when target rows exceed the overview limit. |
@@ -917,6 +918,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeAssetLoading.test_mobile_hints_overlay_appends_entries` | Checks that mobile hints overlay appends entries. |
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
+| `TestOutputSignals.test_scan_output_emits_port_entities_with_hosts` | Verifies common scanner output emits app-native port entities together with their host entity and service metadata when available. |
 | `TestOutputSignals.test_help_output_does_not_feed_signals_or_entities` | Verifies that registry-declared external help output stays visible without feeding finding signals or Atlas entity extraction, while non-help uses of `-h` / `-H` still classify normally. |
 | `TestOutputSignals.test_classifies_dns_enumeration_findings_by_command` | Verifies that DNS and subdomain enumeration tools classify command-scoped host, record, and network-range findings without making hostnames global findings. |
 | `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, gobuster, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
@@ -1029,6 +1031,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_run_source_cleanup_preserves_import_backed_atlas_records` | Verifies run-source cleanup keeps Atlas rows that still have import provenance and recomputes them from import links. |
 | `TestDatabaseInit.test_delete_atlas_entities_removes_import_links` | Verifies direct Atlas entity deletion removes entity import-source links instead of leaving orphan provenance rows. |
 | `TestDatabaseInit.test_atlas_import_parser_normalizes_generic_csv` | Verifies the Atlas import parser normalizes generic CSV entity and finding rows into canonical Atlas rows. |
+| `TestDatabaseInit.test_atlas_import_parser_accepts_generic_port_entities` | Verifies generic CSV imports accept full `host:port/proto` values as canonical Atlas port entities. |
 | `TestDatabaseInit.test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows` | Verifies generic JSONL imports keep valid rows while returning bounded row warnings for malformed JSON and invalid entity kinds. |
 | `TestDatabaseInit.test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity` | Verifies generic JSONL imports normalize URL, host/IP, CVE, hash, and unlinked finding rows while dropping invalid severities. |
 | `TestDatabaseInit.test_atlas_import_parser_keeps_duplicate_generic_rows_stable_for_later_dedupe` | Verifies duplicate generic finding rows keep stable canonical subjects and signatures for later idempotent apply. |
@@ -1040,6 +1043,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_atlas_import_parser_enforces_row_and_element_limits` | Verifies import parsing enforces row limits and streaming XML element limits. |
 | `TestDatabaseInit.test_atlas_import_parser_enforces_upload_and_warning_limits` | Verifies import parsing enforces upload byte limits and caps returned row warnings. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
+| `TestDatabaseInit.test_materializes_port_entities_with_host_relationship_and_attributes` | Verifies Atlas materialization stores port host relationships, merges service attributes, and preserves host-before-port ordering. |
+| `TestDatabaseInit.test_materializes_command_target_scan_observation_without_port_entities` | Verifies port-scan command targets create app-native scan observations even when the run surfaces no port entities. |
+| `TestDatabaseInit.test_materializes_quiet_port_scan_target_observations_by_command_root` | Verifies quiet nmap, rustscan, naabu, and nc scan commands record target observations without inventing port entities. |
+| `TestDatabaseInit.test_materializes_no_scan_target_observation_when_command_target_is_unknown` | Verifies unsupported command-target shapes do not create scan observations without concrete host evidence. |
+| `TestDatabaseInit.test_materializes_curl_port_entities_without_scan_target_observation` | Verifies curl connection output can materialize port entities without counting as app-native port-scan coverage. |
 | `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
 | `TestDatabaseInit.test_materializes_new_external_tool_entities_from_classifier_metadata` | Verifies tlsx, cdncheck, and puredns classifier metadata materializes into Atlas entities. |
 | `TestDatabaseInit.test_materializer_deduplicates_team_entities_across_members` | Verifies team-owned Atlas entity materialization deduplicates the same canonical entity across team members. |
@@ -1061,7 +1069,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_auto_promote_rule_preview_filters_by_source_run_id` | Verifies auto-promote previews can restrict matches to entities seen in a specific source run. |
 | `TestDatabaseInit.test_auto_promote_apply_skips_suppressed_count_rescan` | Verifies auto-promote apply avoids the extra suppressed-count scan used only by interactive previews. |
 | `TestDatabaseInit.test_auto_promote_contains_treats_sql_wildcards_literally` | Verifies contains-mode auto-promote rules treat SQL wildcard characters as literal pattern text. |
-| `TestDatabaseInit.test_auto_promote_exact_any_matches_canonical_entity_values` | Verifies exact Any-kind auto-promote rules compare user-entered patterns against canonical Atlas entity values. |
+| `TestDatabaseInit.test_auto_promote_exact_any_matches_canonical_entity_values` | Verifies exact Any-kind auto-promote rules compare user-entered domain, port, and URL patterns against canonical Atlas entity values. |
 | `TestDatabaseInit.test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs` | Verifies backend matching accepts the domain-suffix and CIDR entity-kind pairs exposed by the rule editor. |
 | `TestDatabaseInit.test_auto_promote_first_seen_after_rule_created_uses_preview_timestamp_for_drafts` | Verifies first-seen-after-rule-created previews use a server timestamp for unsaved draft rules. |
 | `TestDatabaseInit.test_auto_promote_first_seen_after_rule_created_uses_stored_rule_timestamp` | Verifies first-seen-after-rule-created previews use the saved rule timestamp for stored rules. |
@@ -1587,6 +1595,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
 | `TestAtlasImportRoutes.test_preview_and_apply_import_without_creating_history_run` | Verifies Atlas import preview/apply creates imported Atlas records, import provenance, and high-level apply audit rows without creating a History run, while over-quota Project linking is rejected. |
 | `TestAtlasImportRoutes.test_create_project_targets_only_reports_target_entity_side_effects` | Verifies target-only Atlas import apply creates the backing Atlas entity and import source while reporting Project target counts separately from generic Project link counts. |
+| `TestAtlasImportRoutes.test_port_import_links_entity_without_creating_project_target` | Verifies a generic JSONL port import can create and link a host-associated Atlas port entity without creating a Project target when target creation is requested. |
 | `TestAtlasImportRoutes.test_create_project_targets_quota_rejects_without_partial_import_rows` | Verifies target-creation quota failures return a structured import error without leaving partial Atlas import batches, source links, findings, entities, or project targets. |
 | `TestAtlasImportRoutes.test_apply_updates_existing_scan_records_and_preserves_import_provenance` | Verifies duplicate import rows update existing scan-discovered Atlas rows, preserve import source provenance, and recompute aggregate occurrence counts. |
 | `TestAtlasImportRoutes.test_import_routes_keep_uploaded_filename_and_text_fields_as_safe_json_data` | Verifies Atlas import routes clean path-like upload filenames while preserving imported HTML-like finding text as JSON data. |
@@ -2659,7 +2668,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
 | `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations only show optional same-run cleanup when non-curated sibling rows can be removed. |
 | `disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings` | Verifies that view-only team scope disables Atlas delete and suppression affordances before a confirmation can open while still allowing read-only triage details. |
-| `applies the project filter when opened from a project` | Verifies that project-launched Atlas requests entities filtered to that project. |
+| `applies the project filter when opened from a project` | Verifies that project-launched Atlas shows the project filter select/chip, requests rows filtered to that project, can switch to another project from inside Atlas, and clears project scope from the chip. |
+| `selects a requested finding when opened from a project finding row` | Verifies that project-launched Atlas can open to Findings, keep project scope, and select the requested finding after the list loads. |
 | `opens Findings scoped to a run and clears the run filter chip` | Verifies that run-launched Atlas requests summary, Findings, and entity rows for one source run and exposes a clearable run filter chip. |
 | `applies a source-run filter from the Atlas run selector` | Verifies that the Atlas run selector applies the selected source run to summary and Findings requests. |
 | `enables entity pagination once the list loads even when detail is still loading` | Verifies that Atlas entity pagination unlocks after the list response even if the selected entity detail request is still pending. |
@@ -2864,6 +2874,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `opens Atlas entity chips through the imported bridge without a global opener` | Verifies output entity chips can open Atlas through the imported bridge when the old global opener is absent. |
 | `loads session-scoped lazy data through imported runtime fetch without a global mirror` | Verifies session-scoped lazy fetches can load through the imported runtime bridge when no legacy `window.apiFetch` mirror exists. |
 | `returns loaded lazy module API objects through the runtime loader contract` | Verifies the lazy asset loader resolves configured module entries and returns the API object the runtime expects. |
+| `renders port metadata in Atlas and Project entity rows` | Verifies Atlas rows and Project Entity rows surface port protocol, service, version, and host metadata. |
+| `renders port metadata in Atlas entity detail` | Verifies Atlas entity detail surfaces port protocol, service, version, and host metadata. |
 | `logs a bounded error when a lazy module API contract is missing` | Verifies missing lazy module exports reject with safe client-error context instead of leaking raw asset config. |
 | `exports UI and feature helper primitives as direct imports` | Verifies representative UI and feature helpers expose direct ESM imports. |
 
@@ -3271,9 +3283,9 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 
 | Test | Description |
 | --- | --- |
-| `loads and renders bounded target overview rows with rollups` | Verifies Project Overview loads the scoped endpoint and renders target rollups, ports, services, certificate badges, severity chips, and provider highlights. |
+| `loads and renders bounded target overview rows with rollups` | Verifies Project Overview loads the scoped endpoint and renders target rollups, cached-provider caveats and freshness, app-scan coverage, finding review/verification progress, operational tempo, recent activity, coverage gaps, deliverables status, ports, services, certificate badges, severity chips, and provider highlights. |
 | `renders the empty target state from an empty overview payload` | Verifies Project Overview renders the no-targets empty state when the overview payload contains no target rows. |
-| `renders unknown certificate, no-intel, and not-monitored states neutrally` | Verifies Project Overview renders unknown certificates, missing intel, and unmonitored recent-change state with neutral labels and muted badge styling. |
+| `renders unknown certificate, no-intel, and not-monitored states neutrally` | Verifies Project Overview renders unknown certificates, missing intel freshness, and unmonitored recent-change state with neutral labels and muted badge styling. |
 | `uses existing Project filters when target actions open Entities and Findings` | Verifies Project Overview target actions switch to existing Entities/Findings tabs while applying the backend-provided filter hints through the current Project filter sets. |
 | `clears stale filters when Findings hints only include a target` | Verifies Project Overview clears old target, run, severity, and review-state filters before applying a target-only Findings hint. |
 | `applies run and review-state hints through existing filter sets` | Verifies Project Overview applies target, run, severity, review-state, and orphan hints through the existing Entities and Findings filter sets. |
@@ -3618,7 +3630,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `autosaves project notes while editing` | Verifies that project notes save automatically from the Details tab without an explicit Save button. |
 | `edits project labels from the details tab` | Verifies that project labels can be edited from the project Details tab and reflected in project header/sidebar chips. |
 | `hides project artifacts and raw package artifact inclusion when Files are disabled` | Verifies the Projects modal hides the Artifacts tab/run artifact jump chips and prevents configured package presets from including raw artifacts when Files are unavailable. |
-| `opens a finding source run at the recorded line` | Verifies that project finding rows show target/review metadata, update review state without opening the run, and restore the source run at the persisted finding line number when clicked. |
+| `opens a finding source run at the recorded line` | Verifies that Project Findings rows show target/review metadata, update review state without opening the run, open the finding in project-scoped Atlas as the primary row action, and keep explicit source-run restore at the persisted finding line number. |
 | `reorders project findings when the sort control changes` | Verifies that Projects modal finding sort modes visibly reorder finding rows by severity, target, and newest run. |
 | `loads Findings Board project data with a separate cap for each review column` | Verifies that the Findings Board loads each Project review column with its own page cap so a large New column does not hide reviewed, false-positive, or follow-up findings. |
 | `locks finding review dropdowns and board dragging for view-only team members` | Verifies that view-only team scope disables Projects select mode, finding review controls, and Findings Board drag/drop triage. |

@@ -13,6 +13,7 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.atlas.scope import entity_exists_in_scope, metadata_owner_id
+from services.intel.schema import INTEL_ENTITY_TYPES
 from services.intel.canonical import entity_signature
 from services.intel.lookup import IntelLookupResult, lookup_entity
 from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
@@ -100,6 +101,13 @@ def refresh_entity_intel(session_id: str, entity_id: str, *, team_id: str = "") 
             (entity_id,),
         ).fetchone()
         if not entity:
+            return None
+        if str(entity["type"] or "").strip().lower() not in INTEL_ENTITY_TYPES:
+            log.debug("INTEL_LOOKUP_SKIPPED_UNSUPPORTED_ENTITY_TYPE", extra={
+                "session": get_log_session_id(session_id),
+                "entity_id": entity_id,
+                "entity_type": entity["type"],
+            })
             return None
 
     lookup = lookup_entity(
