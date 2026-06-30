@@ -1097,6 +1097,7 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
     return {
       hints: workspaceHints,
       filterQuery: ctx.currentToken,
+      workspaceFlagActive: true,
       workspacePathActive: false,
     };
   }
@@ -1117,6 +1118,7 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
   return {
     hints: workspaceTargetHints !== null ? workspaceTargetHints : baseHints,
     filterQuery: ctx.currentToken,
+    workspaceFlagActive: false,
     workspacePathActive: false,
   };
 }
@@ -1428,6 +1430,13 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
+    if (resolved.workspaceFlagActive) {
+      const wordlistHandler = _valueTypeHandler('wordlist');
+      if (wordlistHandler && valueSlots.wordlist && valueSlots.wordlist.active) {
+        return wordlistHandler.applySuggestions(ctx, directItems, valueSlots.wordlist);
+      }
+      return directItems;
+    }
     return _withTypedValueSlotSuggestions(ctx, directItems, valueSlots);
   }
 

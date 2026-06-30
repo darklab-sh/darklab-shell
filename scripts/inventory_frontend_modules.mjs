@@ -7,18 +7,14 @@
  * rely on another app file publishing a browser global.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { Linter } from 'eslint';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const args = process.argv.slice(2);
-const jsonOutput = args.includes('--json');
-const checkOnly = args.includes('--check');
-const help = args.includes('--help') || args.includes('-h');
-const ALLOWLIST_PATH = resolve(ROOT, process.env.FRONTEND_GLOBALS_ALLOWLIST || 'frontend-globals.allowlist.json');
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ALLOWLIST_PURPOSES = new Set([
   'intentional_bootstrap',
   'vendor_global',
@@ -177,8 +173,8 @@ const PUBLISHER_HELPER_REGISTRY = Object.freeze({
 });
 const PUBLISHER_HELPER_NAMES = new Set(Object.keys(PUBLISHER_HELPER_REGISTRY));
 
-if (help) {
-  console.log(`Usage: node scripts/inventory_frontend_modules.mjs [--json] [--check]
+function usageText() {
+  return `Usage: node scripts/inventory_frontend_modules.mjs [--json] [--check]
 
 Prints a per-file inventory of frontend browser-global boundaries:
   - top-level function/var/let/const/class names
@@ -196,24 +192,25 @@ registered by its bridge.
 It also fails when a tracked app window publish/read is not covered by the
 frontend globals allowlist, or when an allowlist entry no longer matches any
 current publish/read boundary. Set FRONTEND_GLOBALS_ALLOWLIST to test another
-allowlist file.
-`);
-  process.exit(0);
+allowlist file.`;
 }
 
-const unknownArgs = args.filter((arg) => !['--json', '--check'].includes(arg));
-if (unknownArgs.length) {
-  throw new Error(`Unknown argument: ${unknownArgs.join(', ')}`);
+function printUsage() {
+  console.log(`${usageText()}\n`);
 }
 
-function loadAllowlist() {
-  if (!existsSync(ALLOWLIST_PATH)) {
+function defaultAllowlistPath(root = ROOT) {
+  return resolve(root, process.env.FRONTEND_GLOBALS_ALLOWLIST || 'frontend-globals.allowlist.json');
+}
+
+function loadAllowlist(allowlistPath = defaultAllowlistPath()) {
+  if (!existsSync(allowlistPath)) {
     return {
       version: 1,
       globals: [],
     };
   }
-  const raw = JSON.parse(readFileSync(ALLOWLIST_PATH, 'utf8'));
+  const raw = JSON.parse(readFileSync(allowlistPath, 'utf8'));
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('frontend-globals.allowlist.json must be a JSON object');
   }
@@ -1072,7 +1069,15 @@ function collectComputedPublisherWrites(ast) {
   };
 }
 
-function analyzeSource(source, file) {
+const analyzedSourceCache = new Map();
+
+function cloneInventoryValue(value) {
+  return typeof globalThis.structuredClone === 'function'
+    ? globalThis.structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+
+function analyzeSource(source, file, root = ROOT) {
   const content = readFileSync(file, 'utf8');
   const linter = new Linter({ configType: 'flat' });
 
@@ -1152,7 +1157,7 @@ function analyzeSource(source, file) {
   const activePublisherNames = new Set(computedPublisherWrites.discovered);
   return {
     source,
-    file: relative(ROOT, file),
+    file: relative(root, file),
     import_source_names: Array.from(new Set(Array.from(importBindings.values())
       .map((binding) => binding.imported)
       .filter((name) => name && name !== 'default' && name !== '*'))).sort(),
@@ -1167,6 +1172,22 @@ function analyzeSource(source, file) {
     computed_publisher_writes: computedPublisherWrites,
     bare_reads: bareReads,
   };
+}
+
+function analyzeSourceCached(source, file, root = ROOT) {
+  const stats = statSync(file);
+  const key = `${root}:${file}`;
+  const signature = `${stats.mtimeMs}:${stats.size}`;
+  const cached = analyzedSourceCache.get(key);
+  if (cached && cached.signature === signature) {
+    return cloneInventoryValue(cached.module);
+  }
+  const module = analyzeSource(source, file, root);
+  analyzedSourceCache.set(key, {
+    signature,
+    module: cloneInventoryValue(module),
+  });
+  return module;
 }
 
 function summarizeReads(reads, providerMap, ownNames) {
@@ -1611,59 +1632,6 @@ function printMarkdown(report) {
   }
 }
 
-const allowlist = loadAllowlist();
-const jsRoot = resolve(ROOT, 'app/static/js');
-const sources = collectFiles(jsRoot).map((rel) => ({
-  source: `/static/js/${rel}`,
-  file: resolve(jsRoot, rel),
-}));
-const modules = sources.map(({ source, file }) => analyzeSource(source, file));
-const definitionMap = new Map();
-const publishMap = new Map();
-for (const module of modules) {
-  for (const definition of module.top_level_definitions) {
-    if (!definitionMap.has(definition.name)) definitionMap.set(definition.name, new Set());
-    definitionMap.get(definition.name).add(module.source);
-  }
-  for (const publish of module.window_publishes) {
-    if (!publishMap.has(publish.name)) publishMap.set(publish.name, new Set());
-    publishMap.get(publish.name).add(module.source);
-  }
-}
-
-for (const module of modules) {
-  const ownNames = new Set([
-    ...module.top_level_definitions.map((definition) => definition.name),
-    ...module.window_publishes.map((publish) => publish.name),
-  ]);
-  module.window_publishes = module.window_publishes.map((publish) => (
-    classifyPublish(publish, module.source, allowlist)
-  ));
-  module.foreign_bare_reads = summarizeReads(module.bare_reads, publishMap, ownNames);
-  module.foreign_bare_reads = module.foreign_bare_reads.map((read) => (
-    classifyRead(read, module.source, read.providers, allowlist)
-  ));
-  module.unresolved_app_bare_reads = summarizeUnresolvedAppReads(module.bare_reads, definitionMap, publishMap, ownNames);
-  module.window_property_reads = summarizeWindowReads(
-    module.window_reads,
-    publishMap,
-    ownNames,
-    module.source,
-    allowlist,
-  );
-  module.resolver_helper_calls = resolveResolverHelperCalls(module, publishMap, allowlist);
-  delete module.import_source_names;
-  delete module.bare_reads;
-  delete module.window_reads;
-  module.classification = classifyModule(module);
-}
-
-const classifications = {};
-for (const module of modules) {
-  classifications[module.classification] = (classifications[module.classification] || 0) + 1;
-}
-const bridgeDispatchSummary = summarizeBridgeDispatch(modules);
-
 function reconcileResolverDiscovery(allModules) {
   const discovered = new Set();
   for (const module of allModules) {
@@ -1708,159 +1676,207 @@ function reconcilePublisherDiscovery(allModules) {
   };
 }
 
-const resolverDiscovery = reconcileResolverDiscovery(modules);
-const publisherDiscovery = reconcilePublisherDiscovery(modules);
-const untrackedComputedPublishers = modules.flatMap((module) => (
-  ((module.computed_publisher_writes || {}).untracked || []).map((entry) => ({ ...entry, source: module.source }))
-));
-for (const module of modules) delete module.computed_publisher_writes;
+function buildFrontendInventoryReport({ root = ROOT, allowlistPath = defaultAllowlistPath(root) } = {}) {
+  const allowlist = loadAllowlist(allowlistPath);
+  const jsRoot = resolve(root, 'app/static/js');
+  const sources = collectFiles(jsRoot).map((rel) => ({
+    source: `/static/js/${rel}`,
+    file: resolve(jsRoot, rel),
+  }));
+  const modules = sources.map(({ source, file }) => analyzeSourceCached(source, file, root));
+  const definitionMap = new Map();
+  const publishMap = new Map();
+  for (const module of modules) {
+    for (const definition of module.top_level_definitions) {
+      if (!definitionMap.has(definition.name)) definitionMap.set(definition.name, new Set());
+      definitionMap.get(definition.name).add(module.source);
+    }
+    for (const publish of module.window_publishes) {
+      if (!publishMap.has(publish.name)) publishMap.set(publish.name, new Set());
+      publishMap.get(publish.name).add(module.source);
+    }
+  }
 
-const report = {
-  generated_by: 'scripts/inventory_frontend_modules.mjs',
-  allowlist: {
-    path: relative(ROOT, ALLOWLIST_PATH),
-    entry_count: allowlist.globals.length,
-    purposes: Object.fromEntries(
-      Array.from(ALLOWLIST_PURPOSES).map((purpose) => [
-        purpose,
-        allowlist.globals.filter((entry) => entry.purpose === purpose).length,
-      ]),
-    ),
-    unused_entries: unusedAllowlistEntries(allowlist, modules),
-  },
-  module_count: modules.length,
-  summary: {
-    classifications,
-    unresolved_app_bare_read_count: modules.reduce((total, module) => total + module.unresolved_app_bare_reads.length, 0),
-    resolver_helper_call_count: modules.reduce((total, module) => total + module.resolver_helper_calls.length, 0),
-    resolver_helper_calls_by_class: countResolverCallsByClass(modules),
-    resolver_helper_calls_by_final_resolution: countResolverCallsByFinalResolution(modules),
-    resolver_helper_discovery: resolverDiscovery,
-    publisher_helper_discovery: publisherDiscovery,
-    untracked_computed_publisher_count: untrackedComputedPublishers.length,
-    resolver_helper_calls_by_resolution: countResolverCallsByResolution(modules),
-    bridge_dispatch: bridgeDispatchSummary,
-    unused_allowlist_entry_count: unusedAllowlistEntries(allowlist, modules).length,
-    window_publish_purposes: countByPurpose(modules, 'window_publishes'),
-    foreign_bare_read_purposes: countByPurpose(modules, 'foreign_bare_reads'),
-    window_property_read_purposes: countByPurpose(modules, 'window_property_reads'),
-  },
-  modules,
-};
+  for (const module of modules) {
+    const ownNames = new Set([
+      ...module.top_level_definitions.map((definition) => definition.name),
+      ...module.window_publishes.map((publish) => publish.name),
+    ]);
+    module.window_publishes = module.window_publishes.map((publish) => (
+      classifyPublish(publish, module.source, allowlist)
+    ));
+    module.foreign_bare_reads = summarizeReads(module.bare_reads, publishMap, ownNames);
+    module.foreign_bare_reads = module.foreign_bare_reads.map((read) => (
+      classifyRead(read, module.source, read.providers, allowlist)
+    ));
+    module.unresolved_app_bare_reads = summarizeUnresolvedAppReads(module.bare_reads, definitionMap, publishMap, ownNames);
+    module.window_property_reads = summarizeWindowReads(
+      module.window_reads,
+      publishMap,
+      ownNames,
+      module.source,
+      allowlist,
+    );
+    module.resolver_helper_calls = resolveResolverHelperCalls(module, publishMap, allowlist);
+    delete module.import_source_names;
+    delete module.bare_reads;
+    delete module.window_reads;
+    module.classification = classifyModule(module);
+  }
 
-if (checkOnly && report.summary.unresolved_app_bare_read_count > 0) {
-  const details = modules
-    .filter((module) => module.unresolved_app_bare_reads.length)
-    .flatMap((module) => module.unresolved_app_bare_reads.map((read) => (
-      `${module.source}: ${read.name} lines ${read.lines.join(', ')} defined by ${read.definitions.join(', ')} but not published`
-    )));
-  console.error(`Frontend inventory found unresolved app bare reads:\n${details.map((line) => `  ${line}`).join('\n')}`);
-  process.exit(1);
+  const classifications = {};
+  for (const module of modules) {
+    classifications[module.classification] = (classifications[module.classification] || 0) + 1;
+  }
+  const bridgeDispatchSummary = summarizeBridgeDispatch(modules);
+  const resolverDiscovery = reconcileResolverDiscovery(modules);
+  const publisherDiscovery = reconcilePublisherDiscovery(modules);
+  const untrackedComputedPublishers = modules.flatMap((module) => (
+    ((module.computed_publisher_writes || {}).untracked || []).map((entry) => ({ ...entry, source: module.source }))
+  ));
+  for (const module of modules) delete module.computed_publisher_writes;
+  const unusedAllowlist = unusedAllowlistEntries(allowlist, modules);
+
+  const report = {
+    generated_by: 'scripts/inventory_frontend_modules.mjs',
+    allowlist: {
+      path: relative(root, allowlistPath),
+      entry_count: allowlist.globals.length,
+      purposes: Object.fromEntries(
+        Array.from(ALLOWLIST_PURPOSES).map((purpose) => [
+          purpose,
+          allowlist.globals.filter((entry) => entry.purpose === purpose).length,
+        ]),
+      ),
+      unused_entries: unusedAllowlist,
+    },
+    module_count: modules.length,
+    summary: {
+      classifications,
+      unresolved_app_bare_read_count: modules.reduce((total, module) => total + module.unresolved_app_bare_reads.length, 0),
+      resolver_helper_call_count: modules.reduce((total, module) => total + module.resolver_helper_calls.length, 0),
+      resolver_helper_calls_by_class: countResolverCallsByClass(modules),
+      resolver_helper_calls_by_final_resolution: countResolverCallsByFinalResolution(modules),
+      resolver_helper_discovery: resolverDiscovery,
+      publisher_helper_discovery: publisherDiscovery,
+      untracked_computed_publisher_count: untrackedComputedPublishers.length,
+      resolver_helper_calls_by_resolution: countResolverCallsByResolution(modules),
+      bridge_dispatch: bridgeDispatchSummary,
+      unused_allowlist_entry_count: unusedAllowlist.length,
+      window_publish_purposes: countByPurpose(modules, 'window_publishes'),
+      foreign_bare_read_purposes: countByPurpose(modules, 'foreign_bare_reads'),
+      window_property_read_purposes: countByPurpose(modules, 'window_property_reads'),
+    },
+    modules,
+  };
+  Object.defineProperty(report.summary, 'untracked_computed_publishers', {
+    value: untrackedComputedPublishers,
+    enumerable: false,
+  });
+  return report;
 }
 
-if (checkOnly) {
+function frontendInventoryCheckFailures(report) {
+  const failures = [];
+  const { modules } = report;
+  if (report.summary.unresolved_app_bare_read_count > 0) {
+    const details = modules
+      .filter((module) => module.unresolved_app_bare_reads.length)
+      .flatMap((module) => module.unresolved_app_bare_reads.map((read) => (
+        `${module.source}: ${read.name} lines ${read.lines.join(', ')} defined by ${read.definitions.join(', ')} but not published`
+      )));
+    failures.push(`Frontend inventory found unresolved app bare reads:\n${details.map((line) => `  ${line}`).join('\n')}`);
+  }
+
   const unresolvedResolverCalls = unresolvedResolverHelperCalls(modules);
   if (unresolvedResolverCalls.length) {
-    console.error(
+    failures.push(
       'Frontend inventory found unresolved ESM resolver helper calls:\n'
       + unresolvedResolverCalls.map((entry) => `  ${formatResolverHelperCall(entry)}`).join('\n'),
     );
-    process.exit(1);
   }
-}
 
-if (checkOnly) {
   const issues = [];
-  if (resolverDiscovery.uncovered.length) {
+  if (report.summary.resolver_helper_discovery.uncovered.length) {
     issues.push(
       'Resolver-shaped helpers missing a RESOLVER_HELPER_REGISTRY classification (add a registry entry or an audited RESOLVER_HELPER_IGNORE entry):\n'
-      + resolverDiscovery.uncovered.map((name) => `  ${name}`).join('\n'),
+      + report.summary.resolver_helper_discovery.uncovered.map((name) => `  ${name}`).join('\n'),
     );
   }
-  if (resolverDiscovery.dead_registry_entries.length) {
+  if (report.summary.resolver_helper_discovery.dead_registry_entries.length) {
     issues.push(
       'RESOLVER_HELPER_REGISTRY entries that structural discovery no longer finds (remove the dead classification):\n'
-      + resolverDiscovery.dead_registry_entries.map((name) => `  ${name}`).join('\n'),
+      + report.summary.resolver_helper_discovery.dead_registry_entries.map((name) => `  ${name}`).join('\n'),
     );
   }
-  if (resolverDiscovery.dead_ignore_entries.length) {
+  if (report.summary.resolver_helper_discovery.dead_ignore_entries.length) {
     issues.push(
       'RESOLVER_HELPER_IGNORE entries that structural discovery no longer finds (remove the dead ignore):\n'
-      + resolverDiscovery.dead_ignore_entries.map((name) => `  ${name}`).join('\n'),
+      + report.summary.resolver_helper_discovery.dead_ignore_entries.map((name) => `  ${name}`).join('\n'),
     );
   }
   if (issues.length) {
-    console.error(`Frontend inventory found resolver-helper registry drift:\n${issues.join('\n')}`);
-    process.exit(1);
+    failures.push(`Frontend inventory found resolver-helper registry drift:\n${issues.join('\n')}`);
   }
-}
 
-if (checkOnly && untrackedComputedPublishers.length) {
-  console.error(
+  if (report.summary.untracked_computed_publishers.length) {
+    failures.push(
     'Frontend inventory found computed browser-global publishers not registered in PUBLISHER_HELPER_REGISTRY '
     + '(their published names are invisible to the read-side check):\n'
-    + untrackedComputedPublishers
+    + report.summary.untracked_computed_publishers
       .map((entry) => `  ${entry.source}: ${entry.object}[…] = … in ${entry.enclosing} (line ${entry.line})`)
       .join('\n'),
-  );
-  process.exit(1);
-}
-
-if (checkOnly) {
-  const issues = [];
-  if (publisherDiscovery.dead_registry_entries.length) {
-    issues.push(
-      'PUBLISHER_HELPER_REGISTRY entries that no longer wrap a computed browser-global write (remove the dead classification):\n'
-      + publisherDiscovery.dead_registry_entries.map((name) => `  ${name}`).join('\n'),
     );
   }
-  if (publisherDiscovery.dynamic_or_non_literal_calls.length) {
-    issues.push(
+
+  const publisherIssues = [];
+  if (report.summary.publisher_helper_discovery.dead_registry_entries.length) {
+    publisherIssues.push(
+      'PUBLISHER_HELPER_REGISTRY entries that no longer wrap a computed browser-global write (remove the dead classification):\n'
+      + report.summary.publisher_helper_discovery.dead_registry_entries.map((name) => `  ${name}`).join('\n'),
+    );
+  }
+  if (report.summary.publisher_helper_discovery.dynamic_or_non_literal_calls.length) {
+    publisherIssues.push(
       'Registered publisher helper calls whose published name is dynamic or non-literal (the publish is invisible to static consumers):\n'
-      + publisherDiscovery.dynamic_or_non_literal_calls
+      + report.summary.publisher_helper_discovery.dynamic_or_non_literal_calls
         .map((entry) => `  ${entry.source}: ${entry.helper}(…) line ${entry.line}`)
         .join('\n'),
     );
   }
-  if (issues.length) {
-    console.error(`Frontend inventory found publisher-helper registry drift:\n${issues.join('\n')}`);
-    process.exit(1);
+  if (publisherIssues.length) {
+    failures.push(`Frontend inventory found publisher-helper registry drift:\n${publisherIssues.join('\n')}`);
   }
-}
 
-if (checkOnly) {
   const bridgeIssues = [];
-  if (bridgeDispatchSummary.dispatched_missing_declarations.length) {
+  if (report.summary.bridge_dispatch.dispatched_missing_declarations.length) {
     bridgeIssues.push(
       'Dispatched bridge keys missing declared handler slots:\n'
-      + bridgeDispatchSummary.dispatched_missing_declarations
+      + report.summary.bridge_dispatch.dispatched_missing_declarations
         .map((entry) => `  ${formatBridgeKeyIssue(entry)}`)
         .join('\n'),
     );
   }
-  if (bridgeDispatchSummary.dispatched_missing_registrations.length) {
+  if (report.summary.bridge_dispatch.dispatched_missing_registrations.length) {
     bridgeIssues.push(
       'Dispatched bridge keys missing handler registration:\n'
-      + bridgeDispatchSummary.dispatched_missing_registrations
+      + report.summary.bridge_dispatch.dispatched_missing_registrations
         .map((entry) => `  ${formatBridgeKeyIssue(entry)}`)
         .join('\n'),
     );
   }
-  if (bridgeDispatchSummary.registered_not_declared.length) {
+  if (report.summary.bridge_dispatch.registered_not_declared.length) {
     bridgeIssues.push(
       'Registered bridge keys missing declared handler slots:\n'
-      + bridgeDispatchSummary.registered_not_declared
+      + report.summary.bridge_dispatch.registered_not_declared
         .map((entry) => `  ${formatBridgeKeyIssue(entry)}`)
         .join('\n'),
     );
   }
   if (bridgeIssues.length) {
-    console.error(`Frontend inventory found invalid bridge-dispatch contracts:\n${bridgeIssues.join('\n')}`);
-    process.exit(1);
+    failures.push(`Frontend inventory found invalid bridge-dispatch contracts:\n${bridgeIssues.join('\n')}`);
   }
-}
 
-if (checkOnly) {
   const nonAllowlistedPublishes = nonAllowlistedItems(modules, 'window_publishes', 'compatibility_export');
   const nonAllowlistedReads = nonAllowlistedItems(modules, 'window_property_reads', 'compatibility_read');
   if (nonAllowlistedPublishes.length || nonAllowlistedReads.length) {
@@ -1871,26 +1887,69 @@ if (checkOnly) {
     if (nonAllowlistedReads.length) {
       sections.push(`Non-allowlisted window reads:\n${nonAllowlistedReads.map((entry) => `  ${formatInventoryItem(entry)}`).join('\n')}`);
     }
-    console.error(`Frontend inventory found browser globals missing from frontend-globals.allowlist.json:\n${sections.join('\n')}`);
-    process.exit(1);
+    failures.push(`Frontend inventory found browser globals missing from frontend-globals.allowlist.json:\n${sections.join('\n')}`);
   }
+
+  if (report.allowlist.unused_entries.length) {
+    failures.push(
+      'Frontend inventory found unused frontend-globals.allowlist.json entries:\n'
+      + report.allowlist.unused_entries.map((entry) => `  ${formatAllowlistEntry(entry)}`).join('\n'),
+    );
+  }
+  return failures;
 }
 
-if (checkOnly && report.allowlist.unused_entries.length) {
-  console.error(
-    'Frontend inventory found unused frontend-globals.allowlist.json entries:\n'
-    + report.allowlist.unused_entries.map((entry) => `  ${formatAllowlistEntry(entry)}`).join('\n'),
-  );
-  process.exit(1);
+function formatFrontendInventoryCheckResult(report) {
+  const failures = frontendInventoryCheckFailures(report);
+  if (failures.length) {
+    return {
+      ok: false,
+      output: `${failures.join('\n')}\n`,
+    };
+  }
+  return {
+    ok: true,
+    output: 'Frontend inventory check passed: all app bare reads, ESM resolver helper calls, '
+      + 'and bridge-dispatch contracts have resolution paths, and the browser-boundary allowlist is current.\n',
+  };
 }
 
-if (jsonOutput) {
-  console.log(JSON.stringify(report, null, 2));
-} else if (checkOnly) {
-  console.log(
-    'Frontend inventory check passed: all app bare reads, ESM resolver helper calls, '
-    + 'and bridge-dispatch contracts have resolution paths, and the browser-boundary allowlist is current.',
-  );
-} else {
-  printMarkdown(report);
+function runCli(args = process.argv.slice(2)) {
+  const help = args.includes('--help') || args.includes('-h');
+  if (help) {
+    printUsage();
+    return 0;
+  }
+  const unknownArgs = args.filter((arg) => !['--json', '--check'].includes(arg));
+  if (unknownArgs.length) {
+    throw new Error(`Unknown argument: ${unknownArgs.join(', ')}`);
+  }
+  const report = buildFrontendInventoryReport();
+  const jsonOutput = args.includes('--json');
+  const checkOnly = args.includes('--check');
+  if (checkOnly) {
+    const result = formatFrontendInventoryCheckResult(report);
+    if (!result.ok) {
+      process.stderr.write(result.output);
+      return 1;
+    }
+    if (!jsonOutput) process.stdout.write(result.output);
+  }
+  if (jsonOutput) {
+    console.log(JSON.stringify(report, null, 2));
+  } else if (!checkOnly) {
+    printMarkdown(report);
+  }
+  return 0;
+}
+
+export {
+  buildFrontendInventoryReport,
+  formatFrontendInventoryCheckResult,
+  frontendInventoryCheckFailures,
+  runCli,
+};
+
+if (process.argv[1] && resolve(process.argv[1]) === SCRIPT_PATH) {
+  process.exitCode = runCli();
 }

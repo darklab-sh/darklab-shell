@@ -2773,7 +2773,7 @@ describe('autocomplete helpers', () => {
   })
 
   it('uses live workspace file hints for workspace read flags instead of static examples', () => {
-    const { getAutocompleteMatches } = fromDomScripts(
+    const { getAutocompleteMatches, setProjectAutocompleteTargets } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -2789,7 +2789,7 @@ describe('autocomplete helpers', () => {
             expects_value: ['-iL'],
             workspace_file_flags: ['-iL'],
             arg_hints: {
-              '-iL': [{ value: 'targets.txt', description: 'Static registry example' }],
+              '-iL': [{ value: 'targets.txt', description: 'Static registry example', value_type: 'target' }],
             },
           },
         },
@@ -2802,8 +2802,13 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
+      setProjectAutocompleteTargets,
     }`,
     )
+    setProjectAutocompleteTargets([
+      { type: 'domain', value: 'darklab.sh' },
+      { type: 'ip', value: '192.0.2.10' },
+    ])
 
     const items = getAutocompleteMatches('nmap -iL ', 10)
 

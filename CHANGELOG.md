@@ -18,6 +18,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Project Overview app-native port totals now count all distinct captured ports for a target even when the visible per-target port list is capped.
 - Project Findings row clicks now carry project context into Atlas, and **See in run** opens Run Details instead of restoring the source run into a terminal tab.
 - Atlas entity rows now keep their compact default height but expand when long ports, hashes, URLs, or metadata need to wrap.
+- Autocomplete for workspace file input flags such as `nmap -iL`, `masscan -iL`, and `nuclei -l` now stays scoped to session files instead of prepending active project targets before a filename is typed.
 
 ### Added
 
@@ -43,6 +44,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- Frontend inventory checks now share the scanner in-process during Vitest runs and cache per-file analysis between fixture cases, cutting the inventory unit file from about 46 seconds to about 7 seconds locally while keeping the CLI output path intact.
 - Port-entity diagnostics now include bounded DEBUG/WARN breadcrumbs for scanner candidate drops, SQLite compatibility migration failures, malformed Atlas attributes, and scan-observation replacement, plus INFO-level port and scan-observation counts when runs capture Atlas evidence.
 - Port-entity documentation and the v1 API contract now describe host-linked port response metadata, generic import port syntax, Overview scan-coverage boundaries, and the settled port identity rules.
 

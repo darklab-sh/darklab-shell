@@ -1,8 +1,24 @@
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# Isolate run-output artifacts and SQLite databases in a fresh per-session temp
+# directory. Without this, resolve_data_dir() falls back to a shared /tmp on dev
+# machines, so every test run leaks artifacts into /tmp/run-output that are never
+# fully cleaned. That directory grows without bound across runs, and class-level
+# teardowns that os.walk() it (e.g. TestRunOutputCapture) get slower every run --
+# the cause of the suite's runtime creeping upward. A fresh dir per session keeps
+# the walked tree small and constant. setdefault() so CI/explicit APP_DATA_DIR wins.
+# Must run before any app module imports, since RUN_OUTPUT_DIR is resolved once at
+# import time from APP_DATA_DIR.
+_OWNED_TEST_DATA_DIR = None
+if not os.environ.get("APP_DATA_DIR"):
+    _OWNED_TEST_DATA_DIR = tempfile.mkdtemp(prefix="darklab-test-data-")
+    os.environ["APP_DATA_DIR"] = _OWNED_TEST_DATA_DIR
 
 # Change to the app/ directory so module-level file reads in app.py work correctly
 # (templates/, conf/, etc.), and add it to sys.path so app modules are importable.
@@ -33,6 +49,13 @@ def _configured_postgres_dsn(config) -> str:
     option_value = str(config.getoption("--postgres-dsn") or "").strip()
     env_value = str(os.environ.get(POSTGRES_DSN_ENV) or "").strip()
     return option_value or env_value
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # Remove the per-session data dir we created so successive runs start clean
+    # and nothing lingers in the system temp directory.
+    if _OWNED_TEST_DATA_DIR:
+        shutil.rmtree(_OWNED_TEST_DATA_DIR, ignore_errors=True)
 
 
 def pytest_addoption(parser):
