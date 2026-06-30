@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.fc77be44c80c.css",
-      "hash": "fc77be44c80cc351bf0adc0f08f285ef73265e4c235b3a70af3e497d57b2f660",
+      "path": "/static/build/app.f50f74e8b6d9.css",
+      "hash": "f50f74e8b6d9e85f24bc14e78c85a066da2165199e4b60bc56cd23d5cb854896",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -39,7 +39,7 @@
         "/static/css/features/projects.css": "80085e9aa11b12b782d03537127d182d722a8a7985c2c4118cdb4b14577eeafa",
         "/static/css/features/atlas.css": "13b723e54c863223cd67b55d443d95871475003cee0ca794f60336ee38ad9156",
         "/static/css/features/atlas-mobile.css": "36e1c88ff62c24877a0307de8c3fe6b39f854423a91229ad1bf9b8d7042c892c",
-        "/static/css/features/command-registry.css": "d45f7d3fa1709d60236f0c9932e63d8c8ac1d3df18387640773164dd2d8a5a54",
+        "/static/css/features/command-registry.css": "d11acc8c2718bc0f21fa296cdbe8eee8d13f6db4bfb6dac6ddec8f66833ecea9",
         "/static/css/features/faq-shortcuts.css": "7f496747969affaa77c6b89b6decdb80946504c61e35314e32fd408f13f186b2",
         "/static/css/features/history.css": "c4fce016a788bcb53d480496e2f62fa460b617a89d951aab041c2816f5d7d9c8",
         "/static/css/features/run-comparison.css": "4a23942692a2d9fed3c58ec9e04624a8c6b6f250c6954c41b8e2147fdacc9095",
@@ -498,8 +498,8 @@
       "hash": "ce564a8dc18a220fd789264f68620c04450dfe75fbfcf4690f1ad99e4849215e"
     },
     "/static/js/features/command-registry/command_registry.js": {
-      "path": "/static/build/static-command-registry.a117cd1f91a1.js",
-      "hash": "1a376263cbbf60c99f97336f704cda064923833d76a4c2fb75fe8167c9f42fb2"
+      "path": "/static/build/static-command-registry.50d65aed3d12.js",
+      "hash": "73d9170ce6724d1ea2d5ee303ee13681a4139cd2f8ffbd1cc91967c6684a7e90"
     },
     "/static/js/features/findings/findings_board_modal.js": {
       "path": "/static/build/static-findings-board-modal.41cee7fad6c9.js",

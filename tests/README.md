@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,891
+- behavior tests: 3,892
 - docs/inventory meta-tests: 48
 - `pytest`: 2202 (2167 behavior + 35 meta)
-- `vitest`: 1468 (1455 behavior + 13 meta)
+- `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,939
+- total: 3,940
 
 This document is organized in two parts:
 
@@ -2852,6 +2852,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `returns null when pipe_helpers is an empty array` | Verifies that the pipe-helpers section builder returns null for an empty pipe list. |
 | `returns null when pipe_helpers is absent` | Verifies that the pipe-helpers section builder returns null for null or undefined input. |
 | `binds generated command rows through the shared pressable primitive` | Verifies that generated Command Registry rows compose through the shared pressable activation helper. |
+| `shows arrow controls only when categories overflow and scrolls the chip strip` | Verifies that the Command Registry category strip exposes arrow scrollers only for overflowing category chips and scrolls the strip from the right arrow. |
 
 #### `config.test.js`
 

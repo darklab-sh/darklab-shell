@@ -1151,7 +1151,11 @@
     </div>
     <div class="command-registry-toolbar">
       <input id="command-registry-search" class="form-control form-control-compact" type="search" placeholder="Search commands" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="search" aria-label="Search commands">
-      <div id="command-registry-categories" class="command-registry-categories" role="list" aria-label="Command categories"></div>
+      <div class="command-registry-category-scroll">
+        <button id="command-registry-categories-scroll-left" type="button" class="command-registry-category-scroll-btn tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll command categories left" title="Scroll command categories left" aria-hidden="true">◀</button>
+        <div id="command-registry-categories" class="command-registry-categories" role="list" aria-label="Command categories"></div>
+        <button id="command-registry-categories-scroll-right" type="button" class="command-registry-category-scroll-btn tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll command categories right" title="Scroll command categories right" aria-hidden="true">▶</button>
+      </div>
     </div>
     <div id="command-registry-body" class="command-registry-body nice-scroll" aria-live="polite"></div>
   </div>

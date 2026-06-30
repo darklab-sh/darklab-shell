@@ -253,7 +253,9 @@ export async function loadAppFns({
         <div id="command-registry-subtitle"></div>
         <button class="command-registry-close"></button>
         <input id="command-registry-search" />
+        <button id="command-registry-categories-scroll-left" class="tabs-scroll-btn u-hidden"></button>
         <div id="command-registry-categories"></div>
+        <button id="command-registry-categories-scroll-right" class="tabs-scroll-btn u-hidden"></button>
         <div id="command-registry-body"></div>
       </div>
     </div>

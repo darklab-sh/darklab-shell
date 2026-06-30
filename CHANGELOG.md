@@ -20,6 +20,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Atlas entity rows now keep their compact default height but expand when long ports, hashes, URLs, or metadata need to wrap.
 - Autocomplete for workspace file input flags such as `nmap -iL`, `masscan -iL`, and `nuclei -l` now stays scoped to session files instead of prepending active project targets before a filename is typed.
 - Command output flags now prepare workspace write targets as `scanner:appuser` files, so scanner tools can truncate app-created placeholders without hitting permission errors.
+- The Commands modal category strip now hides the native horizontal scrollbar and uses tab-style arrow scrollers when the category list overflows.
 
 ### Added
 

@@ -45,6 +45,8 @@ function _commandRegistryGlobalData() {
 var commandRegistryData = _commandRegistryGlobalData();
 var commandRegistryCategory = "All";
 var commandRegistryQuery = "";
+var commandRegistryCategoryResizeBound = false;
+var COMMAND_REGISTRY_CATEGORY_SCROLL_EPSILON = 2;
 function _commandRegistryOverlay() {
   if (typeof commandRegistryOverlay !== "undefined" && commandRegistryOverlay) return commandRegistryOverlay;
   return COMMAND_REGISTRY_GLOBAL.commandRegistryOverlay || null;
@@ -60,6 +62,12 @@ function _commandRegistrySearch() {
 function _commandRegistryCategoriesEl() {
   if (typeof commandRegistryCategories !== "undefined" && commandRegistryCategories) return commandRegistryCategories;
   return COMMAND_REGISTRY_GLOBAL.commandRegistryCategories || null;
+}
+function _commandRegistryCategoryScrollLeftBtn() {
+  return document.getElementById("command-registry-categories-scroll-left");
+}
+function _commandRegistryCategoryScrollRightBtn() {
+  return document.getElementById("command-registry-categories-scroll-right");
 }
 function _commandRegistrySubtitleEl() {
   if (typeof commandRegistrySubtitle !== "undefined" && commandRegistrySubtitle) return commandRegistrySubtitle;
@@ -97,6 +105,69 @@ function _commandRegistryApiFetch(...args) {
 function _commandRegistryClientError(context, err) {
   const log = (typeof hasRuntimeHandler === "function" && hasRuntimeHandler("logClientError") && typeof logClientError === "function" ? logClientError : null) || (typeof COMMAND_REGISTRY_GLOBAL.logClientError === "function" ? COMMAND_REGISTRY_GLOBAL.logClientError : null);
   if (log) log(context, err);
+}
+function _afterCommandRegistryCategoryPaint(callback) {
+  if (typeof callback !== "function") return;
+  callback();
+  const raf = typeof COMMAND_REGISTRY_GLOBAL.requestAnimationFrame === "function" ? COMMAND_REGISTRY_GLOBAL.requestAnimationFrame : null;
+  if (raf) {
+    raf(callback);
+  } else if (typeof COMMAND_REGISTRY_GLOBAL.setTimeout === "function") {
+    COMMAND_REGISTRY_GLOBAL.setTimeout(callback, 0);
+  }
+}
+function _updateCommandRegistryCategoryScrollers() {
+  const categoriesEl = _commandRegistryCategoriesEl();
+  const left = _commandRegistryCategoryScrollLeftBtn();
+  const right = _commandRegistryCategoryScrollRightBtn();
+  if (!categoriesEl || !left || !right) return;
+  const maxScrollLeft = Math.max(0, (categoriesEl.scrollWidth || 0) - (categoriesEl.clientWidth || 0));
+  const hasOverflow = maxScrollLeft > COMMAND_REGISTRY_CATEGORY_SCROLL_EPSILON;
+  [left, right].forEach((button) => {
+    button.classList.toggle("u-hidden", !hasOverflow);
+    button.setAttribute("aria-hidden", hasOverflow ? "false" : "true");
+  });
+  left.disabled = !hasOverflow || categoriesEl.scrollLeft <= COMMAND_REGISTRY_CATEGORY_SCROLL_EPSILON;
+  right.disabled = !hasOverflow || categoriesEl.scrollLeft >= maxScrollLeft - COMMAND_REGISTRY_CATEGORY_SCROLL_EPSILON;
+}
+function _scrollCommandRegistryCategories(direction) {
+  const categoriesEl = _commandRegistryCategoriesEl();
+  if (!categoriesEl) return;
+  const amount = Math.max(128, Math.floor((categoriesEl.clientWidth || 180) * 0.75));
+  const delta = direction * amount;
+  if (typeof categoriesEl.scrollBy === "function") {
+    categoriesEl.scrollBy({ left: delta, behavior: "smooth" });
+  } else {
+    categoriesEl.scrollLeft += delta;
+  }
+  _afterCommandRegistryCategoryPaint(_updateCommandRegistryCategoryScrollers);
+}
+function _bindCommandRegistryCategoryScrollers() {
+  const categoriesEl = _commandRegistryCategoriesEl();
+  const left = _commandRegistryCategoryScrollLeftBtn();
+  const right = _commandRegistryCategoryScrollRightBtn();
+  if (categoriesEl && categoriesEl.dataset.categoryScrollBound !== "true") {
+    categoriesEl.dataset.categoryScrollBound = "true";
+    categoriesEl.addEventListener("scroll", _updateCommandRegistryCategoryScrollers, { passive: true });
+  }
+  if (left && left.dataset.categoryScrollBound !== "true") {
+    left.dataset.categoryScrollBound = "true";
+    left.addEventListener("click", (event) => {
+      event.preventDefault();
+      _scrollCommandRegistryCategories(-1);
+    });
+  }
+  if (right && right.dataset.categoryScrollBound !== "true") {
+    right.dataset.categoryScrollBound = "true";
+    right.addEventListener("click", (event) => {
+      event.preventDefault();
+      _scrollCommandRegistryCategories(1);
+    });
+  }
+  if (COMMAND_REGISTRY_GLOBAL && !commandRegistryCategoryResizeBound) {
+    commandRegistryCategoryResizeBound = true;
+    COMMAND_REGISTRY_GLOBAL.addEventListener?.("resize", _updateCommandRegistryCategoryScrollers, { passive: true });
+  }
 }
 function showCommandRegistryOverlay() {
   const overlay = _commandRegistryOverlay();
@@ -162,7 +233,9 @@ function _commandRegistrySummaryText(command) {
 function renderCommandRegistryCategories() {
   const categoriesEl = _commandRegistryCategoriesEl();
   if (!categoriesEl) return;
+  _bindCommandRegistryCategoryScrollers();
   categoriesEl.replaceChildren();
+  let activeButton = null;
   _commandRegistryCategories().forEach((category) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -170,12 +243,21 @@ function renderCommandRegistryCategories() {
     button.dataset.commandRegistryCategory = category;
     button.textContent = category;
     button.setAttribute("aria-pressed", category === commandRegistryCategory ? "true" : "false");
-    if (category === commandRegistryCategory) button.classList.add("active");
+    if (category === commandRegistryCategory) {
+      button.classList.add("active");
+      activeButton = button;
+    }
     button.addEventListener("click", () => {
       commandRegistryCategory = category;
       renderCommandRegistry();
     });
     categoriesEl.appendChild(button);
+  });
+  _afterCommandRegistryCategoryPaint(() => {
+    if (activeButton && typeof activeButton.scrollIntoView === "function") {
+      activeButton.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    _updateCommandRegistryCategoryScrollers();
   });
 }
 function makeCommandRegistryRow(command) {

@@ -4650,6 +4650,11 @@ commands:
         - chaos -dL
         - chaos -up
         - chaos -update
+    workspace_flags:
+      - flag: -o
+        mode: write
+        value: separate_or_attached
+        format: text
     requires_secrets:
       - env: PDCP_API_KEY
     autocomplete:
@@ -4683,6 +4688,13 @@ commands:
           description: Print JSON output
         - value: -duc
           description: Disable update checks
+        - value: -o
+          description: Write normal output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: chaos_subs.txt
+              description: Save scan output for the Files panel
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.
     category: Vulnerability Scanning
