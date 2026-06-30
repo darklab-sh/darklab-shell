@@ -12120,13 +12120,29 @@ class TestSessionWorkspace:
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
 
-    def test_prepare_workspace_file_for_command_falls_back_for_scanner_owned_outputs(self):
+    def test_prepare_workspace_file_for_command_prefers_scanner_owned_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
             write_workspace_text_file("session-1", "output.txt", "", cfg)
             path = resolve_workspace_path("session-1", "output.txt", cfg)
 
-            with mock.patch("services.workspace.files._appuser_gid", return_value=996), \
+            with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
+                    mock.patch("services.workspace.files._appuser_gid", return_value=996), \
+                    mock.patch("services.workspace.files.os.chown") as chown, \
+                    mock.patch("services.workspace.files.os.chmod") as chmod:
+                prepare_workspace_file_for_command(path, mode="write")
+
+            chown.assert_called_once_with(path, 995, 996)
+            chmod.assert_called_once_with(path, WORKSPACE_COMMAND_WRITE_FILE_MODE)
+
+    def test_prepare_workspace_file_for_command_recreates_app_owned_outputs_as_scanner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "output.txt", "", cfg)
+            path = resolve_workspace_path("session-1", "output.txt", cfg)
+
+            with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
+                    mock.patch("services.workspace.files._appuser_gid", return_value=996), \
                     mock.patch("services.workspace.files.os.chown", side_effect=PermissionError), \
                     mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
                     mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
@@ -12135,7 +12151,7 @@ class TestSessionWorkspace:
 
             commands = [call.args[0] for call in run.call_args_list]
             assert commands == [
-                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "touch", str(path)],
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "660", str(path)],
             ]
 

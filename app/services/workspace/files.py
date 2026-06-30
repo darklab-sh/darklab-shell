@@ -480,6 +480,54 @@ def _chmod_workspace_entry(path: Path, mode: int) -> None:
         log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
 
 
+def _prepare_workspace_write_file_owner(path: Path, mode: int) -> bool:
+    """Own command output files by scanner so tools can truncate them reliably."""
+    scanner_uid = _scanner_uid()
+    appuser_gid = _appuser_gid()
+    if scanner_uid is None:
+        return False
+    try:
+        os.chown(path, scanner_uid, appuser_gid if appuser_gid is not None else -1)
+        os.chmod(path, mode)
+        return True
+    except PermissionError:
+        return _recreate_workspace_write_file_as_scanner(path, mode)
+    except OSError as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
+        return False
+
+
+def _recreate_workspace_write_file_as_scanner(path: Path, mode: int) -> bool:
+    sudo_bin = _sudo_bin()
+    if not sudo_bin or not _scanner_user_exists():
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    try:
+        subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "touch", str(path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{mode:o}", str(path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        return True
+    except (subprocess.SubprocessError, OSError) as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
+        return False
+
+
 def _workspace_repair_dir_if_needed(path: Path, path_stat: os.stat_result) -> None:
     repair_mode = _workspace_child_dir_repair_mode(path_stat)
     if repair_mode is not None:
@@ -588,6 +636,8 @@ def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
     """Make a validated workspace path usable by the unprivileged scanner user."""
     if path.exists() and path.is_file():
         target_mode = WORKSPACE_COMMAND_WRITE_FILE_MODE if mode in {"write", "read_write"} else WORKSPACE_FILE_MODE
+        if mode == "write" and _prepare_workspace_write_file_owner(path, target_mode):
+            return
         try:
             _chmod_workspace_entry(path, target_mode)
         except WorkspacePermissionDenied:

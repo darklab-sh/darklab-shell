@@ -19,6 +19,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Project Findings row clicks now carry project context into Atlas, and **See in run** opens Run Details instead of restoring the source run into a terminal tab.
 - Atlas entity rows now keep their compact default height but expand when long ports, hashes, URLs, or metadata need to wrap.
 - Autocomplete for workspace file input flags such as `nmap -iL`, `masscan -iL`, and `nuclei -l` now stays scoped to session files instead of prepending active project targets before a filename is typed.
+- Command output flags now prepare workspace write targets as `scanner:appuser` files, so scanner tools can truncate app-created placeholders without hitting permission errors.
 
 ### Added
 

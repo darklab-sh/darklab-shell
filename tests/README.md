@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,890
+- behavior tests: 3,891
 - docs/inventory meta-tests: 48
-- `pytest`: 2201 (2166 behavior + 35 meta)
+- `pytest`: 2202 (2167 behavior + 35 meta)
 - `vitest`: 1468 (1455 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,938
+- total: 3,939
 
 This document is organized in two parts:
 
@@ -680,7 +680,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
-| `TestSessionWorkspace.test_prepare_workspace_file_for_command_falls_back_for_scanner_owned_outputs` | Verifies that scanner-owned command output files are repaired through the scanner sudo path before another command writes them. |
+| `TestSessionWorkspace.test_prepare_workspace_file_for_command_prefers_scanner_owned_outputs` | Verifies that command output targets are prepared as scanner-owned files when ownership can be updated directly. |
+| `TestSessionWorkspace.test_prepare_workspace_file_for_command_recreates_app_owned_outputs_as_scanner` | Verifies that app-owned command output placeholders are recreated through the scanner sudo path when direct ownership repair is denied. |
 | `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
 | `TestSessionWorkspace.test_scanner_owned_workspace_entry_with_scanner_group_needs_repair` | Verifies that scanner-owned workspace entries are repaired when their mode bits look correct but their group drifted away from the shared app group. |
 | `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
