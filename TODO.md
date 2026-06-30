@@ -29,38 +29,28 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Enhance the project Overview tab with app-captured data.**
-  - The Overview payload (`app/services/projects/overview.py`) is built almost entirely from `entity_intel_snapshots` (cached external provider data). Ports, services, certificates, provider count, and target highlights are all provider-sourced; only the high-risk finding count and watcher recent-changes are app-native. The tab reads as a mirror of external intel rather than the state of the engagement.
-  - Completion note: The finding-count rendering slice is implemented. Overview now renders project-wide triage and verification progress from the existing per-target `finding_counts`, and target rows summarize new, awaiting-verification, false-positive, and suppressed finding work without changing the backend payload.
-  - North star: the Overview tab should answer what targets have been touched, what still needs review, what has been verified, what has no scan evidence, and whether the project deliverables are stale.
-  - Render the per-target `finding_counts` block (`by_review_state`, `by_verification_state`, `suppressed`) that the backend already computes and the frontend (`project_overview.js`) currently discards.
-    - Add a project-wide triage funnel rollup: New → Reviewed → Important/Needs-followup, plus suppressed and false-positive counts.
-    - Add a verification progress funnel: not_started → ready → verified → needs_retest. Show `not_applicable` as an aside count, not a funnel stage (like suppressed/false-positive in the triage funnel), so the funnel math reconciles with the total. The backend `FINDING_VERIFICATION_STATE_ORDER` is not_started → ready_to_verify → verified → needs_retest → not_applicable.
-    - Frontend-only; no backend change needed since the data is already on the wire.
-  - Add operational tempo from runs and the audit timeline as a bounded backend summary in the Overview payload.
-    - Last run time, runs in the last 7d, last finding triaged, last artifact captured.
-    - A short recent-activity strip with deep-links, reusing the Activity tab's target-type → workspace-tab mapping.
-  - Completion note: The operational-tempo slice is implemented. Overview now returns a bounded `operational_tempo` summary for linked runs, triage, and artifacts, plus a short `recent_activity` strip sourced from scoped audit events. The UI renders those fields as compact cards and activity jump buttons that reuse the existing workspace tabs.
-  - Add coverage/gap signals by crossing app-captured runs and findings against the target list. Split these into what is answerable now versus what is gated on future capture.
-    - Answerable now from app data (ship first): targets no app run has touched (targets carry `source_run_id`, and findings/runs link back — no provider port data needed), targets with findings awaiting verification, and targets with stale or missing follow-up.
-    - Gated on future app-native port/service capture: "scanned but nothing found" style gaps. The Overview's ports/services come only from `entity_intel_snapshots` today; there is no per-target app-native port rollup (nmap-import parsing lands in findings/entities, not a port structure), so this gap waits on that capture work.
-    - Negative evidence is a distinct requirement: port entities prove "this scan found open ports," but they cannot by themselves prove "this host was scanned and had none." Distinguishing "scanned, no open ports" from "untouched" needs scan-observation evidence (which host a run actually scanned), tracked as its own stream — see the port entity TODO's scan-observation item. Caveat: even with that evidence we usually do not know the scan's port coverage, so the honest claim is "scanned in a run that surfaced no ports," not "no open ports exist."
-    - Treat provider-derived ports/services separately from app-captured evidence. If a gap uses cached provider ports, label it clearly as provider-derived until the backend has app-native port evidence for that target.
-    - Turns Overview into an actionable worklist instead of just a read-only intel summary.
-  - Completion note: The answerable coverage-gap slice is implemented. Overview now returns bounded `coverage_gaps` for targets with no app-captured scan, targets awaiting verification, and targets needing review/follow-up, plus rollup counts for targets awaiting verification and needing follow-up. The UI renders those gaps as a compact worklist with existing Entities/Findings deep-links.
-  - Add a deliverables status line for Packages/Report as another bounded backend summary.
-    - Last package built, last report saved/exported, and report freshness versus the latest finding or triage update.
-  - Completion note: The deliverables-status slice is implemented. Overview now returns a bounded `deliverables_status` summary for latest package save/build, latest report save/export, latest finding activity, and report freshness. The UI renders it as compact deliverable cards with a freshness badge.
-  - Demote external intel honestly: keep the ports/services/cert panel, but make provider freshness more visible.
-    - `last_checked_at`, stale flags, and `Intel: Stale`/`Intel: None` already exist; surface them more clearly in summary and row details.
-    - Add a clear "cached provider data" caveat anywhere the UI might otherwise imply live app-captured state.
-  - Completion note: The cached-provider polish slice is implemented. Overview now labels provider-backed port/service counts as cached provider data, shows a visible cached-provider caveat before target rows, and includes per-target provider freshness details with stale/no-intel states and the latest checked timestamp when available.
-  - Suggested sequencing:
-    - First: render finding triage and verification rollups from existing `finding_counts`.
-    - Second: add backend overview summaries for app-captured runs, artifacts, and recent activity.
-    - Third: add the coverage gaps that are answerable now from run/finding linkage (untouched targets, awaiting verification, stale follow-up); defer the port-dependent "scanned but nothing found" gap until app-native port capture exists.
-    - Fourth: add deliverables status for Packages/Report.
-    - Fifth: polish copy and visual treatment around cached provider intel.
+- **Improve Overview tab readability and triage density (UI/UX pass).**
+  - Motivation: with many targets (e.g. 105, 89 unscanned) the per-target list (`project_overview.js` `renderTargetRow`) renders ~7 labeled lines each, and on scan-light projects most read "No app-captured ports / No ports · No services / Intel none / No app scan". The page becomes a wall of negatives; the real signal (finding counts + severity) is buried, and the same emptiness is repeated across the `Provider:` row, `Intel:` row, `Cert: Unknown` chip, and `Intel: None` chip.
+  - Collapse empty per-target detail rows (highest-impact change).
+    - Render `Ports`/`Provider`/`Intel`/`Scan` rows only when they carry data; for an all-empty target, replace them with a single muted tail (e.g. `not scanned · no provider intel`) or omit entirely.
+    - De-duplicate negatives: the `Provider:`/`Intel:` rows and the `Cert: Unknown`/`Intel: None` chips restate the same "nothing here"; show `Cert`/`Intel` chips only when actionable (expiring, stale), not on every row.
+    - Lead with the real content (finding summary + severity) rather than ending with it.
+    - Target a compact ~2-line row: title + type/review-state + severity + actions on line 1; a single muted detail line that shows only present data (ports/services inline when available) on line 2.
+  - Make severity the primary visual signal.
+    - Add a severity-colored left accent/border per target card driven by `top_finding_severity`, using the semantic `--red`/`--amber` tokens, so Critical/High targets are immediately scannable instead of uniform gray.
+  - Add prioritization controls for long target lists.
+    - Sort/group targets by top finding severity (Critical → High → …) — note `_overview_target_sort_key` already sorts by severity then cert then label, so confirm the UI reflects it and consider grouping headers.
+    - Add a filter toggle such as "hide unscanned targets with no findings" to clear the empty cards in one action.
+  - Fix the summary's two-tier layout (`renderRollups`).
+    - The bordered "primary" cards vs borderless "secondary" items read as unfinished, and the "Watcher context / Recent changes" item floats right with no number — give the secondary row consistent alignment/treatment.
+    - Reconsider grouping by theme rather than card size: Coverage (targets, scanned, unscanned), Evidence (app ports, provider ports, drift), Risk/Work (high-risk, verification gaps, certs).
+    - Render "App scan coverage" as a ratio or mini progress bar (`16 of 105 · 15%`) rather than a bare count.
+  - Reorder sections so aggregate panels are reachable.
+    - `renderOverview` currently renders the per-target list immediately after the summary, pushing `renderFindingProgress`/`renderOperationalTempo`/`renderCoverageGaps`/`renderDeliverablesStatus` below up to `OVERVIEW_TARGET_LIMIT` (200) rows. Place aggregates directly under the summary, above the per-target worklist, or make the worklist collapsible.
+  - Condense the persistent "Cached provider data" caveat (`renderProviderIntelCaveat`) to one line or an info tooltip on the badge; it partly duplicates the secondary "Cached provider ports" card copy.
+  - Related data-correctness flag (cross-reference `docs/overview_update_code_review.md`): the screenshots show "Cached provider ports: 2" but "Provider/app drift: 8 targets differ" (≈ every app-port target), confirming the drift over-flag where `_overview_port_provenance` counts `app_only` as drift even when the provider has no intel (`overview.py` `has_drift`). Gate `app_only` drift on `has_intel` so the drift metric is trustworthy before leaning on it visually.
+  - Apply the same density improvements to the mobile Overview surface for parity.
+  - Keep all changes within the design system: passive metadata as `.badge`/`.badge-tone-*`, severity color via the semantic tokens, no one-off pill classes (see the existing `.project-overview-port-chip` vs `.badge` note in `docs/overview_update_code_review.md`).
 
 - **Add a project filter to the Atlas modal and surface the project scope as a clearable chip.**
   - "Open in Atlas" from the Projects modal (`project_navigation.js` → `openAtlas`) launches the Atlas overlay scoped to the project, but the scope is invisible: it lives only in `state.projectId`/`state.projectName` (`atlas_overlay.js`) and surfaces faintly in the subtitle. There is no filter control or chip, no way to clear it, and no way to filter by project from within Atlas — the Projects-modal button is the only entry point.

@@ -254,7 +254,7 @@ test.describe('project overview browser contract', () => {
     const overview = page.locator('.project-overview-root')
     await expect(overview.locator('.project-overview-target-title')).toHaveText(TARGET_VALUE)
     await expect(overview.locator('.project-overview-target-detail', {
-      hasText: 'Cached provider ports/services:',
+      hasText: 'Provider:',
     })).toContainText('80, 443')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
@@ -294,10 +294,18 @@ test.describe('project overview browser contract', () => {
     const overview = page.locator('.project-overview-root')
     await expect(overview.locator('.project-overview-target-title')).toHaveText(fixture.targetValue)
     await expect(overview.locator('.project-overview-target-detail', {
-      hasText: 'Cached provider ports/services:',
+      hasText: 'Provider:',
     })).toContainText('443')
+    await expect(overview.locator('.project-overview-target-detail', {
+      hasText: 'Ports:',
+    })).toContainText('8443/tcp')
+    await expect(overview.locator('.project-overview-target-detail', {
+      hasText: 'Ports:',
+    })).toContainText('https-alt')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Finding: High')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Cert: <=30d')
+    await expect(overview.locator('.project-overview-target-chips')).toContainText('App ports')
+    await expect(overview.locator('.project-overview-target-chips')).toContainText('Provider/app drift')
 
     const findingsResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
@@ -311,6 +319,23 @@ test.describe('project overview browser contract', () => {
     await expect(page.locator('[data-project-tab="findings"]')).toHaveClass(/\bis-active\b/)
     await expect(page.locator('.project-explorer-item-title')).toContainText('Real Overview filtered finding')
     await expect(page.locator('#project-explorer-body')).not.toContainText('No findings')
+
+    await overviewTab.click()
+    const portsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${fixture.projectId}/entities`
+        && url.searchParams.get('type') === 'port'
+        && url.searchParams.get('host_entity_id') === fixture.targetId
+    })
+    await overview.locator('[data-project-overview-action="entities"]', { hasText: 'Ports' }).click()
+    expect((await portsResponse).ok()).toBe(true)
+    await expect(page.locator('[data-project-tab="entities"]')).toHaveClass(/\bis-active\b/)
+    const desktopProjectBody = page.locator('#project-explorer-body')
+    await expect(desktopProjectBody.locator('.project-entity-type-tab.is-active')).toContainText('Ports')
+    await expect(desktopProjectBody.locator('[data-project-host-filter-clear]')).toContainText(fixture.targetValue)
+    await expect(desktopProjectBody.locator('.project-explorer-item-title')).toContainText(`${fixture.targetValue}:8443/tcp`)
+    await expect(desktopProjectBody.locator('.project-entity-row')).toContainText('https-alt')
   })
 })
 

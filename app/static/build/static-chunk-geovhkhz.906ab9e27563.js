@@ -19,6 +19,25 @@ function _portProtocol(canonicalValue) {
   const match = /\/([a-z0-9_-]+)$/i.exec(text(canonicalValue));
   return match ? match[1].toLowerCase() : "";
 }
+function _portNumber(entity) {
+  const direct = Number(entity && entity.port || 0);
+  if (direct > 0) return direct;
+  const match = /:(\d+)\/[a-z0-9_-]+$/i.exec(text(entity && (entity.canonical_value || entity.value)));
+  return match ? Number(match[1] || 0) : 0;
+}
+function formatCompactPortLabel(entity) {
+  const attributes = entity && entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+  const port = _portNumber(entity);
+  if (!port) return "";
+  const proto = text(entity && entity.proto || attributes.proto || attributes.protocol || _portProtocol(entity && (entity.canonical_value || entity.value)));
+  const base = `${port}${proto ? `/${proto}` : ""}`;
+  const service = text(entity && entity.service || attributes.service);
+  const version = text(entity && entity.version || attributes.version);
+  if (service && version) return `${base} ${service} (${version})`;
+  if (service) return `${base} ${service}`;
+  if (version) return `${base} (${version})`;
+  return base;
+}
 function formatPortEntityMetadata(entity, { includeHost = false } = {}) {
   if (String(entity && entity.type || "").toLowerCase() !== "port") return [];
   const attributes = entity && entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
@@ -175,12 +194,14 @@ function renderProjectEntityRow({
   return row;
 }
 var DarklabAtlasEntityRow = {
+  formatCompactPortLabel,
   formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow
 };
 
 export {
+  formatCompactPortLabel,
   formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,

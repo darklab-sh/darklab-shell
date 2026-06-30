@@ -2815,6 +2815,11 @@ class TestProjectOverviewContract:
                     "low": 0,
                     "info": 0,
                 },
+                "open_port_count": 0,
+                "service_count": 0,
+                "provider_count": 0,
+                "app_port_count": 0,
+                "port_divergence_target_count": 0,
                 "app_scan_target_count": 0,
                 "app_port_target_count": 0,
                 "scanned_no_ports_seen_count": 0,
@@ -3109,7 +3114,15 @@ class TestProjectOverviewContract:
                             {
                                 "type": "port",
                                 "value": "api.example.com:443/tcp",
-                                "attributes": {"service": "https"},
+                                "attributes": {"service": "https", "version": "nginx"},
+                            },
+                            {
+                                "type": "port",
+                                "value": "api.example.com:8443/tcp",
+                                "attributes": {
+                                    "service": "https-alt",
+                                    "banner": "x" * 220,
+                                },
                             },
                         ],
                     }
@@ -3245,6 +3258,8 @@ class TestProjectOverviewContract:
         assert overview["rollups"]["finding_severities"]["high"] == 1
         assert overview["rollups"]["app_scan_target_count"] == 2
         assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["app_port_count"] == 2
+        assert overview["rollups"]["port_divergence_target_count"] == 1
         assert overview["rollups"]["scanned_no_ports_seen_count"] == 1
         assert overview["rollups"]["unscanned_target_count"] == 0
         assert overview["rollups"]["awaiting_verification_target_count"] == 1
@@ -3321,6 +3336,24 @@ class TestProjectOverviewContract:
         quiet_row = rows_by_id[quiet_target["id"]]
         assert target_row["open_ports"] == [80, 443]
         assert target_row["services"] == ["http", "https"]
+        assert target_row["app_ports"] == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": "nginx"},
+            {
+                "port": 8443,
+                "proto": "tcp",
+                "service": "https-alt",
+                "version": "",
+                "banner": "x" * 157 + "...",
+            },
+        ]
+        assert target_row["app_port_count"] == 2
+        assert target_row["app_services"] == ["https (nginx)", "https-alt"]
+        assert target_row["source_flags"]["has_app_ports"] is True
+        assert target_row["port_provenance"]["divergence"] == {
+            "app_only": [8443],
+            "provider_only": [80],
+            "has_drift": True,
+        }
         assert target_row["certificate"]["status"] == "healthy"
         assert target_row["top_finding_severity"] == "high"
         assert target_row["finding_counts"]["by_review_state"]["new"] == 1
@@ -3334,15 +3367,414 @@ class TestProjectOverviewContract:
         assert target_row["source_flags"]["has_app_scan_evidence"] is True
         assert target_row["app_evidence"]["coverage_state"] == "app_ports_found"
         assert target_row["app_evidence"]["scan_run_count"] == 1
-        assert target_row["app_evidence"]["port_entity_count"] == 1
+        assert target_row["app_evidence"]["port_entity_count"] == 2
         assert target_row["app_evidence"]["command_roots"] == ["nmap"]
         assert quiet_row["certificate"]["status"] == "unknown"
         assert quiet_row["source_flags"]["has_intel"] is False
         assert quiet_row["source_flags"]["has_app_scan_evidence"] is True
+        assert quiet_row["source_flags"]["has_app_ports"] is False
+        assert quiet_row["app_ports"] == []
+        assert quiet_row["app_port_count"] == 0
+        assert quiet_row["app_services"] == []
+        assert quiet_row["port_provenance"]["divergence"]["has_drift"] is False
         assert quiet_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
         assert quiet_row["app_evidence"]["scan_run_count"] == 1
         assert quiet_row["app_evidence"]["port_entity_count"] == 0
         assert "does not prove no ports exist" in quiet_row["app_evidence"]["coverage_caveat"]
+
+    def test_project_intel_overview_does_not_mark_app_ports_as_drift_without_provider_intel(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_app_only", {"name": "App Only Ports"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_app_only",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-app-only",
+                    "tok_overview_app_only",
+                    "nmap api.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_app_only",
+                "run-overview-app-only",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_app_only", project["id"])
+
+        assert overview is not None
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["rollups"]["port_divergence_target_count"] == 0
+        row = overview["targets"][0]
+        assert row["source_flags"]["has_intel"] is False
+        assert row["source_flags"]["has_app_ports"] is True
+        assert row["open_ports"] == []
+        assert row["port_provenance"]["divergence"] == {
+            "app_only": [443],
+            "provider_only": [],
+            "has_drift": False,
+        }
+
+    def test_project_intel_overview_omits_ports_deep_link_for_unlinked_port_entities(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_unlinked_ports", {"name": "Unlinked Ports"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_unlinked_ports",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, 'censys', 'ok', '', ?, ?, ?)",
+                (
+                    "snap-overview-unlinked-provider",
+                    "tok_overview_unlinked_ports",
+                    target["id"],
+                    json.dumps({
+                        "providers": {"censys": {"ports": [80]}},
+                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                    }),
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-unlinked-port",
+                    "tok_overview_unlinked_ports",
+                    "nmap api.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_unlinked_ports",
+                "run-overview-unlinked-port",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_unlinked_ports", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert row["port_provenance"]["divergence"] == {
+            "app_only": [443],
+            "provider_only": [80],
+            "has_drift": True,
+        }
+        assert row["app_evidence"]["project_entity_port_count"] == 0
+        assert "ports" not in row["deep_link_hints"]
+
+    def test_project_intel_overview_separates_curl_port_evidence_from_scan_coverage(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_curl_port", {"name": "Curl Port"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_curl_port",
+            project["id"],
+            {"type": "ip", "value": "93.184.216.34"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-curl-port",
+                    "tok_overview_curl_port",
+                    "curl -v https://example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_curl_port",
+                "run-overview-curl-port",
+                [{
+                    "entities": [
+                        {"type": "ip", "value": "93.184.216.34"},
+                        {
+                            "type": "port",
+                            "value": "93.184.216.34:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="curl -v https://example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_curl_port", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert row["source_flags"]["has_app_scan_evidence"] is False
+        assert row["source_flags"]["has_app_ports"] is True
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["scan_run_count"] == 0
+        assert row["app_evidence"]["app_port_run_count"] == 1
+        assert row["app_evidence"]["port_entity_count"] == 0
+        assert overview["rollups"]["app_scan_target_count"] == 0
+        assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["rollups"]["unscanned_target_count"] == 1
+        assert overview["coverage_gaps"]["untouched_targets"][0]["entity_id"] == target["id"]
+
+    def test_project_intel_overview_defensively_filters_unusable_app_port_rows(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_port_edges", {"name": "Port Edges"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_port_edges",
+            project["id"],
+            {"type": "domain", "value": "edge.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-port-edges",
+                    "tok_overview_port_edges",
+                    "nmap edge.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_port_edges",
+                "run-overview-port-edges",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "edge.example.com"},
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:444/tcp",
+                            "attributes": {"service": "will-be-invalid-json"},
+                        },
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:445/tcp",
+                            "attributes": {"service": "suppressed"},
+                        },
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:446/tcp",
+                            "attributes": {"service": "malformed"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap edge.example.com",
+            )
+            conn.execute(
+                "UPDATE entities SET attributes_json = ? WHERE canonical_value = ?",
+                ("not-json", "edge.example.com:444/tcp"),
+            )
+            conn.execute(
+                "UPDATE entities SET suppressed = 1, suppressed_reason = ?, suppressed_at = ? "
+                "WHERE canonical_value = ?",
+                ("reviewed", now, "edge.example.com:445/tcp"),
+            )
+            conn.execute(
+                "UPDATE entities SET canonical_value = ? WHERE canonical_value = ?",
+                ("not-a-canonical-port", "edge.example.com:446/tcp"),
+            )
+            for entity_id, session_id, team_id, canonical_value, run_id in (
+                (
+                    "ent-overview-foreign-port",
+                    "tok_overview_port_edges_foreign",
+                    "",
+                    "edge.example.com:447/tcp",
+                    "run-overview-foreign-port",
+                ),
+                (
+                    "ent-overview-team-port",
+                    "tok_overview_port_edges",
+                    "team-overview-port-edges",
+                    "edge.example.com:448/tcp",
+                    "run-overview-team-port",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                    "occurrence_count, host_entity_id, attributes_json, created) "
+                    "VALUES (?, ?, ?, 'port', ?, ?, ?, ?, 1, ?, ?, ?)",
+                    (
+                        entity_id,
+                        session_id,
+                        team_id,
+                        canonical_value,
+                        f"sig-{entity_id}",
+                        now,
+                        now,
+                        target["id"],
+                        json.dumps({"service": "foreign"}),
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, now, now),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_port_edges", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert row["app_ports"] == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""},
+            {"port": 444, "proto": "tcp", "service": "", "version": ""},
+        ]
+        assert row["app_port_count"] == 2
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["scan_run_count"] == 1
+        assert row["app_evidence"]["port_entity_count"] == 4
+        assert overview["rollups"]["app_port_count"] == 2
+        assert overview["rollups"]["app_port_target_count"] == 1
+
+    def test_project_intel_overview_counts_app_ports_beyond_visible_limit(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.projects import overview as overview_service
+
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_port_limit", {"name": "Port Limit"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_port_limit",
+            project["id"],
+            {"type": "domain", "value": "busy.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        total_port_count = overview_service._APP_PORT_LIST_LIMIT + 1
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-port-limit",
+                    "tok_overview_port_limit",
+                    "nmap busy.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_port_limit",
+                "run-overview-port-limit",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "busy.example.com"},
+                        *[
+                            {
+                                "type": "port",
+                                "value": f"busy.example.com:{8000 + index}/tcp",
+                                "attributes": {"service": f"svc-{index}"},
+                            }
+                            for index in range(total_port_count)
+                        ],
+                    ],
+                }],
+                seen_at=now,
+                command="nmap busy.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_port_limit", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert len(row["app_ports"]) == overview_service._APP_PORT_LIST_LIMIT
+        assert [item["port"] for item in row["app_ports"]] == [
+            8000 + index for index in range(overview_service._APP_PORT_LIST_LIMIT)
+        ]
+        assert row["app_port_count"] == total_port_count
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["port_entity_count"] == total_port_count
+        assert overview["rollups"]["app_port_count"] == total_port_count
+        assert overview["rollups"]["app_port_target_count"] == 1
 
     def test_project_intel_overview_drops_deleted_run_scan_observations(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -3390,8 +3822,12 @@ class TestProjectOverviewContract:
         assert overview is not None
         assert overview["rollups"]["app_scan_target_count"] == 1
         assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["app_port_count"] == 1
         assert overview["rollups"]["unscanned_target_count"] == 0
         assert overview["targets"][0]["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert overview["targets"][0]["app_ports"] == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""}
+        ]
 
         with database.db_connect() as conn:
             database.delete_run_artifacts(conn, ["run-overview-deleted-scan"])
@@ -3401,8 +3837,11 @@ class TestProjectOverviewContract:
         assert refreshed is not None
         assert refreshed["rollups"]["app_scan_target_count"] == 0
         assert refreshed["rollups"]["app_port_target_count"] == 0
+        assert refreshed["rollups"]["app_port_count"] == 0
         assert refreshed["rollups"]["unscanned_target_count"] == 1
         assert refreshed["targets"][0]["source_flags"]["has_app_scan_evidence"] is False
+        assert refreshed["targets"][0]["source_flags"]["has_app_ports"] is False
+        assert refreshed["targets"][0]["app_ports"] == []
         assert refreshed["targets"][0]["app_evidence"]["coverage_state"] == "not_scanned"
         assert refreshed["targets"][0]["app_evidence"]["scan_run_count"] == 0
         assert refreshed["targets"][0]["app_evidence"]["port_entity_count"] == 0
@@ -3412,6 +3851,205 @@ class TestProjectOverviewContract:
                 ("run-overview-deleted-scan",),
             ).fetchone()["count"]
         assert stale_count == 0
+
+    def test_project_intel_overview_uses_latest_app_port_service_attributes(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_service_update", {"name": "Service Update"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_service_update",
+            project["id"],
+            {"type": "ip", "value": "192.0.2.10"},
+        )
+        assert target is not None
+        first_seen = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        second_seen = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            for run_id, command, seen_at, attributes in (
+                ("run-overview-service-plain", "nmap 192.0.2.10", first_seen, {}),
+                (
+                    "run-overview-service-version",
+                    "nmap -sV -p 22 192.0.2.10",
+                    second_seen,
+                    {"service": "ssh", "version": "OpenSSH 10.0 (protocol 2.0)"},
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                    (run_id, "tok_overview_service_update", command, seen_at, seen_at),
+                )
+                materialize_run_entities(
+                    conn,
+                    "tok_overview_service_update",
+                    run_id,
+                    [{
+                        "entities": [
+                            {"type": "ip", "value": "192.0.2.10"},
+                            {"type": "port", "value": "192.0.2.10:22/tcp", "attributes": attributes},
+                        ],
+                    }],
+                    seen_at=seen_at,
+                    command=command,
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_service_update", project["id"])
+
+        assert overview is not None
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["targets"][0]["app_ports"] == [{
+            "port": 22,
+            "proto": "tcp",
+            "service": "ssh",
+            "version": "OpenSSH 10.0 (protocol 2.0)",
+        }]
+        assert overview["targets"][0]["app_services"] == ["ssh (OpenSSH 10.0 (protocol 2.0))"]
+        assert overview["targets"][0]["app_evidence"]["port_entity_count"] == 2
+
+    def test_project_intel_overview_uses_url_host_app_port_evidence(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_url_ports", {"name": "URL Ports"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_url_ports",
+            project["id"],
+            {"type": "url", "value": "https://api.example.com/login"},
+        )
+        assert target is not None
+        second_url_target = project_workspace.add_project_target(
+            "tok_overview_url_ports",
+            project["id"],
+            {"type": "url", "value": "https://api.example.com/admin"},
+        )
+        assert second_url_target is not None
+        host_target = project_workspace.add_project_target(
+            "tok_overview_url_ports",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert host_target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                ("run-overview-url-host", "tok_overview_url_ports", "nmap api.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_url_ports",
+                "run-overview-url-host",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            host_id = conn.execute(
+                "SELECT id FROM entities WHERE type = 'domain' AND canonical_value = ?",
+                ("api.example.com",),
+            ).fetchone()["id"]
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_url_ports", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        row = rows_by_id[target["id"]]
+        second_url_row = rows_by_id[second_url_target["id"]]
+        host_row = rows_by_id[host_target["id"]]
+        assert row["type"] == "url"
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["host_entity_id"] == host_id
+        assert row["app_evidence"]["scope_note"] == "App ports are tracked on the URL host entity, not the URL itself."
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert second_url_row["type"] == "url"
+        assert second_url_row["app_evidence"]["host_entity_id"] == host_id
+        assert second_url_row["app_ports"] == row["app_ports"]
+        assert host_row["type"] == "domain"
+        assert host_row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert host_row["app_ports"] == row["app_ports"]
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["coverage_gaps"]["untouched_targets"] == []
+
+    def test_project_intel_overview_keeps_url_host_scan_states_honest(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_url_scan_states", {"name": "URL Scan States"})
+        assert project is not None
+        scanned_url = project_workspace.add_project_target(
+            "tok_overview_url_scan_states",
+            project["id"],
+            {"type": "url", "value": "https://scanned.example.com/login"},
+        )
+        assert scanned_url is not None
+        unresolved_url = project_workspace.add_project_target(
+            "tok_overview_url_scan_states",
+            project["id"],
+            {"type": "url", "value": "https://unresolved.example.com/login"},
+        )
+        assert unresolved_url is not None
+        host_target = project_workspace.add_project_target(
+            "tok_overview_url_scan_states",
+            project["id"],
+            {"type": "domain", "value": "scanned.example.com"},
+        )
+        assert host_target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                ("run-overview-url-no-ports", "tok_overview_url_scan_states", "nmap scanned.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_url_scan_states",
+                "run-overview-url-no-ports",
+                [{"entities": [{"type": "domain", "value": "scanned.example.com"}]}],
+                seen_at=now,
+                command="nmap scanned.example.com",
+            )
+            host_id = conn.execute(
+                "SELECT id FROM entities WHERE type = 'domain' AND canonical_value = ?",
+                ("scanned.example.com",),
+            ).fetchone()["id"]
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_url_scan_states", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        scanned_row = rows_by_id[scanned_url["id"]]
+        unresolved_row = rows_by_id[unresolved_url["id"]]
+        host_row = rows_by_id[host_target["id"]]
+        assert scanned_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert scanned_row["app_evidence"]["host_entity_id"] == host_id
+        assert scanned_row["app_evidence"]["scope_note"] == "App ports are tracked on the URL host entity, not the URL itself."
+        assert scanned_row["app_evidence"]["scan_run_count"] == 1
+        assert scanned_row["app_evidence"]["port_entity_count"] == 0
+        assert scanned_row["app_ports"] == []
+        assert scanned_row["app_port_count"] == 0
+        assert unresolved_row["app_evidence"]["coverage_state"] == "not_scanned"
+        assert unresolved_row["app_evidence"]["host_entity_id"] == ""
+        assert unresolved_row["app_evidence"]["scope_note"] == (
+            "App ports are tracked on host entities; resolve this URL's host to show app port evidence."
+        )
+        assert unresolved_row["app_ports"] == []
+        assert unresolved_row["app_port_count"] == 0
+        assert host_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert host_row["app_ports"] == []
+        assert overview["rollups"]["app_scan_target_count"] == 2
+        assert overview["rollups"]["app_port_target_count"] == 0
+        assert overview["rollups"]["app_port_count"] == 0
+        assert {item["entity_id"] for item in overview["coverage_gaps"]["untouched_targets"]} == {unresolved_url["id"]}
 
     def test_get_project_intel_overview_marks_stale_provider_data(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -3577,6 +4215,8 @@ class TestProjectOverviewContract:
             "target_count": overview_service.OVERVIEW_TARGET_LIMIT,
             "snapshot_entity_count": 0,
             "finding_entity_count": 0,
+            "app_port_host_count": 0,
+            "url_host_entity_count": 0,
             "recent_change_state": "not-monitored",
             "recent_change_count": 0,
             "payload_target_count": overview_service.OVERVIEW_TARGET_LIMIT,
@@ -3596,6 +4236,12 @@ class TestProjectOverviewContract:
             {"type": "domain", "value": "degraded.example.com"},
         )
         assert target is not None
+        url_target = project_workspace.add_project_target(
+            "tok_overview_degraded",
+            project["id"],
+            {"type": "url", "value": "https://url-target.example.com/path?secret=hidden"},
+        )
+        assert url_target is not None
         now = datetime.now(timezone.utc).isoformat()
         with database.db_connect() as conn:
             conn.execute(
@@ -3633,6 +4279,42 @@ class TestProjectOverviewContract:
                     now,
                     now,
                 ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-degraded-port",
+                    "tok_overview_degraded",
+                    "nmap degraded.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_degraded",
+                "run-overview-degraded-port",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "degraded.example.com"},
+                        {
+                            "type": "port",
+                            "value": "degraded.example.com:443/tcp",
+                            "attributes": {"service": "https", "banner": "do-not-log-this-banner"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap degraded.example.com",
+            )
+            conn.execute(
+                "UPDATE entities SET canonical_value = ? WHERE type = 'port' AND host_entity_id = ?",
+                ("not-a-canonical-port", target["id"]),
+            )
+            conn.execute(
+                "UPDATE entities SET canonical_value = ? WHERE id = ?",
+                ("https://bad host/path?secret=hidden", url_target["id"]),
             )
             conn.commit()
 
@@ -3703,6 +4385,64 @@ class TestProjectOverviewContract:
             "status": "error",
             "shape": "str",
         }]
+        app_port_skips = [
+            call.kwargs["extra"] for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_APP_PORT_ROW_SKIPPED",)
+        ]
+        assert app_port_skips == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "port_entity_id": mock.ANY,
+            "host_entity_id": target["id"],
+            "reason": "invalid_canonical_port",
+        }]
+        assert "do-not-log-this-banner" not in str(app_port_skips)
+        url_host_skips = [
+            call.kwargs["extra"] for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SKIPPED",)
+        ]
+        assert url_host_skips == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_id": url_target["id"],
+            "reason": "invalid_host",
+            "derived_host_type": "",
+        }]
+        assert "secret=hidden" not in str(url_host_skips)
+        app_port_summary = next(
+            call.kwargs["extra"]
+            for call in debug_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_APP_PORT_SCAN_SUMMARY",)
+        )
+        assert app_port_summary == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "lookup_host_count": 2,
+            "raw_port_row_count": 1,
+            "parsed_port_count": 0,
+            "host_count": 0,
+            "skipped_missing_host_count": 0,
+            "skipped_malformed_count": 1,
+            "duplicate_port_count": 0,
+            "truncated_host_count": 0,
+        }
+        url_summary = next(
+            call.kwargs["extra"]
+            for call in debug_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY",)
+        )
+        assert url_summary == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "url_target_count": 1,
+            "resolved_host_count": 0,
+            "missing_host_entity_count": 0,
+            "invalid_url_host_count": 1,
+        }
 
     def test_get_project_intel_overview_marks_recent_changes_from_monitoring_targets(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
@@ -21416,6 +22156,33 @@ SQL syntax error near q</response>
                     "2026-05-14T00:00:00+00:00",
                 ),
             )
+            materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-other-port-atlas",
+                [{
+                    "entities": [
+                        {"type": "host", "value": "other.example.com"},
+                        {"type": "port", "value": "other.example.com:8080/tcp"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:00+00:00",
+                command="nmap other.example.com",
+            )
+            other_port_id = conn.execute(
+                "SELECT id FROM entities WHERE type = 'port' AND canonical_value = ?",
+                ("other.example.com:8080/tcp",),
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, ?)",
+                (
+                    "plink-other-port-atlas",
+                    "prj-port-atlas",
+                    other_port_id,
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
             conn.commit()
             export_rows = atlas_entities_export(conn, "atlas-session", entity_type="port")
             export_csv = atlas_entities_export_csv(export_rows)
@@ -21425,6 +22192,12 @@ SQL syntax error near q</response>
                 project_entity_page = project_queries.list_project_entities(
                     "atlas-session",
                     "prj-port-atlas",
+                    entity_type="port",
+                )
+                project_host_filtered_page = project_queries.list_project_entities(
+                    "atlas-session",
+                    "prj-port-atlas",
+                    {"host_entity_id": [rows["domain"]["id"]]},
                     entity_type="port",
                 )
 
@@ -21464,8 +22237,11 @@ SQL syntax error near q</response>
         assert observation["command_root"] == "nmap"
         assert observation["port_entity_count"] == 2
         assert project_entity_page is not None
-        assert project_entity_page["entities"][0]["host_entity_id"] == rows["domain"]["id"]
-        assert project_entity_page["entities"][0]["attributes"] == {"service": "https", "version": "nginx"}
+        assert len(project_entity_page["entities"]) == 2
+        assert project_host_filtered_page is not None
+        assert [item["canonical_value"] for item in project_host_filtered_page["entities"]] == ["example.com:443/tcp"]
+        assert project_host_filtered_page["entities"][0]["host_entity_id"] == rows["domain"]["id"]
+        assert project_host_filtered_page["entities"][0]["attributes"] == {"service": "https", "version": "nginx"}
 
         with tempfile.TemporaryDirectory() as tmp:
             import services.atlas.intel_bridge as intel_bridge

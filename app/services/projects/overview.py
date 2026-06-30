@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from core.database import db_connect
 from core.database_backend import dialect_for_backend
@@ -17,6 +18,7 @@ from core.helpers import get_log_session_id
 from core import database
 from services.atlas.lookup import _row_to_intel_snapshot, _snapshot_has_intel, summarize_intel_snapshots
 from services.atlas.scope import metadata_owner_id
+from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip, parse_canonical_port
 from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES
 from services.projects.metadata import _metadata_owner_where
 from services.projects.models import row_to_project, row_to_target
@@ -67,10 +69,13 @@ FINDING_VERIFICATION_STATE_ORDER = (
 )
 _TARGET_ENTITY_TYPES = {"domain", "ip", "url"}
 _PORT_LIST_LIMIT = 24
+_APP_PORT_LIST_LIMIT = _PORT_LIST_LIMIT
+_APP_PORT_BANNER_LIMIT = 160
 _SERVICE_LIST_LIMIT = 24
 _RECENT_CHANGE_LIMIT = 10
 _OVERVIEW_ACTIVITY_LIMIT = 5
 _OVERVIEW_GAP_LIMIT = 5
+_OVERVIEW_LOG_SAMPLE_LIMIT = 5
 
 _ACTIVITY_TARGET_TABS = {
     "entity": "entities",
@@ -98,6 +103,11 @@ def overview_payload_contract(project: Mapping[str, Any] | None = None) -> dict[
             "target_count": 0,
             "certificate_statuses": {status: 0 for status in CERT_STATUS_ORDER},
             "finding_severities": {severity: 0 for severity in FINDING_SEVERITY_RANK},
+            "open_port_count": 0,
+            "service_count": 0,
+            "provider_count": 0,
+            "app_port_count": 0,
+            "port_divergence_target_count": 0,
             "app_scan_target_count": 0,
             "app_port_target_count": 0,
             "scanned_no_ports_seen_count": 0,
@@ -324,7 +334,10 @@ def get_project_intel_overview(
         target_ids = [str(target["id"]) for target in targets if target.get("id")]
         snapshots_by_entity = _overview_snapshots_by_entity(conn, metadata_session, target_ids)
         findings_by_entity = _overview_findings_by_entity(conn, session_id, team_id, target_ids)
-        observations_by_entity = _overview_scan_observations_by_entity(conn, session_id, team_id, target_ids)
+        url_host_entity_ids = _overview_url_host_entity_ids(conn, session_id, team_id, targets, log_context)
+        app_lookup_ids = sorted({*target_ids, *url_host_entity_ids.values()})
+        observations_by_entity = _overview_scan_observations_by_entity(conn, session_id, team_id, app_lookup_ids)
+        app_ports_by_host = _overview_app_ports_by_host(conn, session_id, team_id, project_id, app_lookup_ids, log_context)
         operational_tempo = _overview_operational_tempo(conn, session_id, team_id, project_id, target_ids)
         recent_activity = _overview_recent_activity(conn, session_id, team_id, project_id)
         deliverables_status = _overview_deliverables_status(conn, session_id, team_id, project_id, target_ids)
@@ -346,6 +359,8 @@ def get_project_intel_overview(
         snapshots_by_entity,
         findings_by_entity,
         observations_by_entity,
+        app_ports_by_host,
+        url_host_entity_ids,
         recent_changes,
         log_context=log_context,
     )
@@ -360,6 +375,8 @@ def get_project_intel_overview(
         "target_count": len(targets),
         "snapshot_entity_count": len(snapshots_by_entity),
         "finding_entity_count": len(findings_by_entity),
+        "app_port_host_count": len(app_ports_by_host),
+        "url_host_entity_count": len(url_host_entity_ids),
         "recent_change_state": recent_change_state,
         "recent_change_count": len(recent_changes),
         "payload_target_count": len(payload["targets"]),
@@ -803,11 +820,315 @@ def _overview_scan_observations_by_entity(
     return grouped
 
 
+def _overview_app_ports_by_host(
+    conn,
+    session_id: str,
+    team_id: str,
+    project_id: str,
+    target_ids: list[str],
+    log_context: Mapping[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    if not target_ids:
+        return {}
+    event_extra = dict(log_context)
+    placeholders = ",".join("?" for _ in target_ids)
+    owner_sql = "e.team_id = ?" if team_id else "e.session_id = ? AND COALESCE(e.team_id, '') = ''"
+    owner_params = (team_id,) if team_id else (session_id,)
+    rows = conn.execute(
+        "SELECT e.id, e.host_entity_id, e.canonical_value, e.attributes_json, e.last_seen_at, "
+        "EXISTS ("
+        "SELECT 1 FROM project_links pl "
+        "WHERE pl.project_id = ? AND pl.entity_type = 'atlas_entity' AND pl.entity_id = e.id"
+        ") AS project_linked "
+        "FROM entities e "
+        f"WHERE e.type = 'port' AND e.host_entity_id IN ({placeholders}) AND " + owner_sql + " "  # nosec
+        "AND COALESCE(e.suppressed, FALSE) = FALSE "
+        "AND EXISTS (SELECT 1 FROM entity_run_links erl WHERE erl.entity_id = e.id) "
+        "ORDER BY e.host_entity_id ASC, e.last_seen_at DESC, e.id DESC",
+        (project_id, *target_ids, *owner_params),
+    ).fetchall()
+    run_ids_by_entity = _overview_app_port_run_ids_by_entity(
+        conn,
+        session_id,
+        team_id,
+        [str(row["id"] or "") for row in rows],
+    )
+    dialect = dialect_for_backend(database.DB_BACKEND)
+    by_host: dict[str, dict[tuple[int, str], dict[str, Any]]] = defaultdict(dict)
+    skipped_missing_host_count = 0
+    skipped_malformed_count = 0
+    duplicate_port_count = 0
+    warn_count = 0
+    for row in rows:
+        host_entity_id = str(row["host_entity_id"] or "")
+        if not host_entity_id:
+            skipped_missing_host_count += 1
+            if warn_count < _OVERVIEW_LOG_SAMPLE_LIMIT:
+                _overview_log_app_port_skip(event_extra, row, reason="missing_host_entity_id")
+                warn_count += 1
+            continue
+        port_record, skip_reason = _overview_app_port_record(row, dialect=dialect)
+        if not port_record:
+            skipped_malformed_count += 1
+            if warn_count < _OVERVIEW_LOG_SAMPLE_LIMIT:
+                _overview_log_app_port_skip(event_extra, row, reason=skip_reason or "invalid_canonical_port")
+                warn_count += 1
+            continue
+        port_record["_run_ids"] = set(run_ids_by_entity.get(str(row["id"] or ""), set()))
+        key = (int(port_record["port"]), str(port_record["proto"]))
+        existing = by_host[host_entity_id].get(key)
+        if existing is None:
+            existing = port_record
+            by_host[host_entity_id][key] = existing
+        else:
+            duplicate_port_count += 1
+        existing["_project_linked"] = bool(existing.get("_project_linked")) or bool(port_record.get("_project_linked"))
+        existing_run_ids = existing.get("_run_ids")
+        if isinstance(existing_run_ids, set):
+            existing_run_ids.update(port_record.get("_run_ids", set()))
+    parsed_by_host = {
+        host_id: sorted(records.values(), key=lambda item: (int(item["port"]), str(item["proto"])))
+        for host_id, records in by_host.items()
+    }
+    truncated_host_count = sum(1 for records in parsed_by_host.values() if len(records) > _APP_PORT_LIST_LIMIT)
+    result = {}
+    for host_id, records in parsed_by_host.items():
+        total_count = len(records)
+        visible_records = records[:_APP_PORT_LIST_LIMIT]
+        for record in visible_records:
+            record["_host_total_count"] = total_count
+        result[host_id] = visible_records
+    log.debug("PROJECT_OVERVIEW_APP_PORT_SCAN_SUMMARY", extra={
+        **event_extra,
+        "lookup_host_count": len(target_ids),
+        "raw_port_row_count": len(rows),
+        "parsed_port_count": sum(len(records) for records in parsed_by_host.values()),
+        "host_count": len(result),
+        "skipped_missing_host_count": skipped_missing_host_count,
+        "skipped_malformed_count": skipped_malformed_count,
+        "duplicate_port_count": duplicate_port_count,
+        "truncated_host_count": truncated_host_count,
+    })
+    return result
+
+
+def _overview_log_app_port_skip(event_extra: Mapping[str, Any], row: Mapping[str, Any], *, reason: str) -> None:
+    log.warning("PROJECT_OVERVIEW_APP_PORT_ROW_SKIPPED", extra={
+        **dict(event_extra),
+        "port_entity_id": str(row["id"] or "") if "id" in row.keys() else "",
+        "host_entity_id": str(row["host_entity_id"] or "") if "host_entity_id" in row.keys() else "",
+        "reason": reason,
+    })
+
+
+def _overview_app_port_run_ids_by_entity(
+    conn,
+    session_id: str,
+    team_id: str,
+    entity_ids: list[str],
+) -> dict[str, set[str]]:
+    ids = sorted({str(entity_id or "") for entity_id in entity_ids if str(entity_id or "")})
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="er")
+    rows = conn.execute(
+        "SELECT erl.entity_id, erl.run_id "
+        "FROM entity_run_links erl "
+        "JOIN runs er ON er.id = erl.run_id AND " + run_owner_sql + " "  # nosec
+        f"WHERE erl.entity_id IN ({placeholders})",  # nosec
+        (*run_owner_params, *ids),
+    ).fetchall()
+    result: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        entity_id = str(row["entity_id"] or "")
+        run_id = str(row["run_id"] or "")
+        if entity_id and run_id:
+            result[entity_id].add(run_id)
+    return result
+
+
+def _overview_app_port_record(row: Mapping[str, Any], *, dialect) -> tuple[dict[str, Any], str]:
+    try:
+        _host_type, _host, port_text, proto = parse_canonical_port(str(row["canonical_value"] or ""))
+    except CanonicalizationError:
+        return {}, "invalid_canonical_port"
+    try:
+        port = int(port_text)
+    except (TypeError, ValueError):
+        return {}, "invalid_port_number"
+    attributes = dialect.decode_json_dict(row["attributes_json"] if "attributes_json" in row.keys() else "{}")
+    service = _overview_trim_text(attributes.get("service"))
+    version = _overview_trim_text(attributes.get("version"))
+    banner = _overview_trim_text(attributes.get("banner"), limit=_APP_PORT_BANNER_LIMIT)
+    result: dict[str, Any] = {
+        "port": port,
+        "proto": proto,
+        "service": service,
+        "version": version,
+    }
+    if banner:
+        result["banner"] = banner
+    result["_project_linked"] = bool(row["project_linked"]) if "project_linked" in row.keys() else False
+    return result, ""
+
+
+def _overview_public_app_port_record(port: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in port.items() if not str(key).startswith("_")}
+
+
+def _overview_app_port_run_count(app_ports: list[dict[str, Any]]) -> int:
+    run_ids: set[str] = set()
+    for port in app_ports:
+        raw_run_ids = port.get("_run_ids") if isinstance(port, Mapping) else None
+        if isinstance(raw_run_ids, set):
+            run_ids.update(str(run_id) for run_id in raw_run_ids if str(run_id or ""))
+    return len(run_ids)
+
+
+def _overview_trim_text(value: Any, *, limit: int = 120) -> str:
+    text = str(value or "").strip()
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[:max(0, limit - 3)].rstrip() + "..."
+
+
+def _overview_app_services(app_ports: list[dict[str, Any]]) -> list[str]:
+    services: list[str] = []
+    for port in app_ports:
+        service = str(port.get("service") or "").strip()
+        if not service:
+            continue
+        version = str(port.get("version") or "").strip()
+        label = f"{service} ({version})" if version else service
+        if label not in services:
+            services.append(label)
+        if len(services) >= _SERVICE_LIST_LIMIT:
+            break
+    return services
+
+
+def _overview_url_host_entity_ids(
+    conn,
+    session_id: str,
+    team_id: str,
+    targets: list[dict[str, Any]],
+    log_context: Mapping[str, Any],
+) -> dict[str, str]:
+    url_hosts: dict[str, tuple[str, str]] = {}
+    url_target_count = 0
+    invalid_url_host_count = 0
+    warn_count = 0
+    event_extra = dict(log_context)
+    for target in targets:
+        if str(target.get("type") or "") != "url":
+            continue
+        url_target_count += 1
+        target_id = str(target.get("id") or "")
+        host_type, host_value, skip_reason, derived_host_type = _overview_url_host_identity(
+            str(target.get("value") or target.get("canonical_value") or "")
+        )
+        if target_id and host_type and host_value:
+            url_hosts[target_id] = (host_type, host_value)
+        else:
+            invalid_url_host_count += 1
+            if target_id and warn_count < _OVERVIEW_LOG_SAMPLE_LIMIT:
+                log.warning("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SKIPPED", extra={
+                    **event_extra,
+                    "target_id": target_id,
+                    "reason": skip_reason or "invalid_host",
+                    "derived_host_type": derived_host_type,
+                })
+                warn_count += 1
+    if not url_hosts:
+        log.debug("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY", extra={
+            **event_extra,
+            "url_target_count": url_target_count,
+            "resolved_host_count": 0,
+            "missing_host_entity_count": 0,
+            "invalid_url_host_count": invalid_url_host_count,
+        })
+        return {}
+    owner_sql = "team_id = ?" if team_id else "session_id = ? AND COALESCE(team_id, '') = ''"
+    owner_params = (team_id,) if team_id else (session_id,)
+    host_pairs = sorted({pair for pair in url_hosts.values()})
+    pair_clause = " OR ".join("(type = ? AND canonical_value = ?)" for _ in host_pairs)
+    pair_params = tuple(value for pair in host_pairs for value in pair)
+    rows = conn.execute(
+        "SELECT id, type, canonical_value FROM entities "
+        "WHERE (" + pair_clause + ") AND " + owner_sql + " "  # nosec
+        "AND COALESCE(suppressed, FALSE) = FALSE "
+        "ORDER BY type ASC, canonical_value ASC, last_seen_at DESC, id DESC",
+        (*pair_params, *owner_params),
+    ).fetchall()
+    host_entity_ids: dict[tuple[str, str], str] = {}
+    for row in rows:
+        key = (str(row["type"] or ""), str(row["canonical_value"] or ""))
+        if key not in host_entity_ids and str(row["id"] or ""):
+            host_entity_ids[key] = str(row["id"])
+    result: dict[str, str] = {}
+    for target_id, (host_type, host_value) in url_hosts.items():
+        host_entity_id = host_entity_ids.get((host_type, host_value), "")
+        if host_entity_id:
+            result[target_id] = host_entity_id
+    log.debug("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY", extra={
+        **event_extra,
+        "url_target_count": url_target_count,
+        "resolved_host_count": len(result),
+        "missing_host_entity_count": max(0, len(url_hosts) - len(result)),
+        "invalid_url_host_count": invalid_url_host_count,
+    })
+    return result
+
+
+def _overview_url_host_identity(value: str) -> tuple[str, str, str, str]:
+    try:
+        host = str(urlsplit(value).hostname or "")
+    except ValueError:
+        return "", "", "invalid_url", ""
+    if not host:
+        return "", "", "missing_host", ""
+    try:
+        return "ip", canonical_ip(host), "", "ip"
+    except CanonicalizationError:
+        pass
+    try:
+        return "domain", canonical_domain(host), "", "domain"
+    except CanonicalizationError:
+        return "", "", "invalid_host", ""
+
+
+def _overview_port_provenance(
+    app_ports: list[dict[str, Any]],
+    provider_ports: list[int],
+    app_evidence: Mapping[str, Any],
+    *,
+    has_provider_intel: bool,
+) -> dict[str, Any]:
+    app_numbers = {int(port["port"]) for port in app_ports if isinstance(port.get("port"), int)}
+    provider_numbers = {int(port) for port in provider_ports if isinstance(port, int)}
+    app_only = sorted(app_numbers - provider_numbers)
+    provider_only = sorted(provider_numbers - app_numbers)
+    has_app_scan = int(app_evidence.get("scan_run_count") or 0) > 0
+    has_drift = has_app_scan and (bool(provider_only) or (has_provider_intel and bool(app_only)))
+    return {
+        "app": app_ports,
+        "provider": provider_ports,
+        "divergence": {
+            "app_only": app_only,
+            "provider_only": provider_only,
+            "has_drift": has_drift,
+        },
+    }
+
+
 def _overview_target_rows(
     targets: list[dict[str, Any]],
     snapshots_by_entity: dict[str, list[dict[str, Any]]],
     findings_by_entity: dict[str, list[dict[str, Any]]],
     observations_by_entity: dict[str, dict[str, Any]],
+    app_ports_by_host: dict[str, list[dict[str, Any]]],
+    url_host_entity_ids: dict[str, str],
     recent_changes: list[dict[str, Any]],
     *,
     log_context: Mapping[str, Any] | None = None,
@@ -823,13 +1144,49 @@ def _overview_target_rows(
         has_intel = str(intel_summary.get("status") or "") == "available"
         has_stale_intel = has_intel and _overview_snapshots_are_stale(snapshots)
         findings = findings_by_entity.get(entity_id, [])
-        app_evidence = _overview_app_evidence(observations_by_entity.get(entity_id))
+        app_host_entity_id = url_host_entity_ids.get(entity_id, "") if entity_type == "url" else entity_id
+        raw_app_ports = app_ports_by_host.get(app_host_entity_id, []) if app_host_entity_id else []
+        app_port_total_count = 0
+        if raw_app_ports:
+            first_app_port = raw_app_ports[0]
+            if isinstance(first_app_port, Mapping):
+                app_port_total_count = int(first_app_port.get("_host_total_count") or len(raw_app_ports))
+        project_entity_port_count = sum(
+            1 for port in raw_app_ports if isinstance(port, Mapping) and bool(port.get("_project_linked"))
+        )
+        app_port_run_count = _overview_app_port_run_count(raw_app_ports)
+        app_ports = [_overview_public_app_port_record(port) for port in raw_app_ports if isinstance(port, Mapping)]
+        app_evidence = _overview_app_evidence(
+            observations_by_entity.get(app_host_entity_id),
+            app_port_count=app_port_total_count,
+            app_port_run_count=app_port_run_count,
+            project_entity_port_count=project_entity_port_count,
+            host_entity_id=app_host_entity_id if entity_type == "url" else "",
+            scope_note=(
+                "App ports are tracked on the URL host entity, not the URL itself."
+                if entity_type == "url" and app_host_entity_id else
+                "App ports are tracked on host entities; resolve this URL's host to show app port evidence."
+                if entity_type == "url" else ""
+            ),
+        )
+        app_services = _overview_app_services(app_ports)
+        port_provenance = _overview_port_provenance(
+            app_ports,
+            intel_extract["open_ports"],
+            app_evidence,
+            has_provider_intel=has_intel,
+        )
         top_severity = highest_actionable_finding_severity(findings)
         hints = target_deep_link_hints(
             entity_id,
             run_id=str(target.get("source_run_id") or ""),
             severity=top_severity,
         )
+        if project_entity_port_count > 0 and app_host_entity_id:
+            hints["ports"] = {
+                "entity_type": "port",
+                "host_entity_id": app_host_entity_id,
+            }
         rows.append({
             "entity_id": entity_id,
             "id": entity_id,
@@ -843,9 +1200,14 @@ def _overview_target_rows(
                 "has_stale_intel": has_stale_intel,
                 "has_findings": bool(findings),
                 "has_app_scan_evidence": int(app_evidence.get("scan_run_count") or 0) > 0,
+                "has_app_ports": bool(app_ports),
                 "has_recent_changes": entity_id in recent_targets,
             },
             "app_evidence": app_evidence,
+            "app_ports": app_ports,
+            "app_port_count": app_port_total_count,
+            "app_services": app_services,
+            "port_provenance": port_provenance,
             "open_ports": intel_extract["open_ports"],
             "services": intel_extract["services"],
             "certificate": intel_extract["certificate"],
@@ -864,11 +1226,20 @@ def _overview_target_rows(
     return rows
 
 
-def _overview_app_evidence(observation: Mapping[str, Any] | None) -> dict[str, Any]:
+def _overview_app_evidence(
+    observation: Mapping[str, Any] | None,
+    *,
+    app_port_count: int | None = None,
+    app_port_run_count: int = 0,
+    project_entity_port_count: int = 0,
+    host_entity_id: str = "",
+    scope_note: str = "",
+) -> dict[str, Any]:
     source = observation if isinstance(observation, Mapping) else {}
     scan_run_count = int(source.get("scan_run_count") or 0)
     port_entity_count = int(source.get("port_entity_count") or 0)
-    if port_entity_count > 0:
+    visible_port_count = port_entity_count if app_port_count is None else int(app_port_count or 0)
+    if visible_port_count > 0:
         coverage_state = "app_ports_found"
     elif scan_run_count > 0:
         coverage_state = "scanned_no_ports_seen"
@@ -881,7 +1252,11 @@ def _overview_app_evidence(observation: Mapping[str, Any] | None) -> dict[str, A
         "scan_run_count": scan_run_count,
         "last_observed_at": str(source.get("last_observed_at") or ""),
         "port_entity_count": port_entity_count,
+        "app_port_run_count": max(0, int(app_port_run_count or 0)),
+        "project_entity_port_count": max(0, int(project_entity_port_count or 0)),
         "command_roots": [root for root in command_roots if root],
+        "host_entity_id": str(host_entity_id or ""),
+        "scope_note": str(scope_note or ""),
         "coverage_caveat": (
             "No app-captured ports were surfaced by the observed scan runs; this does not prove no ports exist."
             if coverage_state == "scanned_no_ports_seen" else ""
@@ -925,8 +1300,10 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
     ports: set[int] = set()
     services: set[str] = set()
     provider_ids: set[str] = set()
+    app_port_totals_by_host: dict[str, int] = {}
     app_scan_target_count = 0
     app_port_target_count = 0
+    port_divergence_target_count = 0
     scanned_no_ports_seen_count = 0
     awaiting_verification_target_count = 0
     needs_followup_target_count = 0
@@ -948,8 +1325,20 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
         app_evidence = raw_app_evidence if isinstance(raw_app_evidence, Mapping) else {}
         if int(app_evidence.get("scan_run_count") or 0) > 0:
             app_scan_target_count += 1
-        if int(app_evidence.get("port_entity_count") or 0) > 0:
+        raw_app_ports = target.get("app_ports")
+        app_ports = raw_app_ports if isinstance(raw_app_ports, list) else []
+        host_id = str(app_evidence.get("host_entity_id") or target.get("entity_id") or target.get("id") or "")
+        app_port_total = max(0, int(target.get("app_port_count") or len(app_ports)))
+        if app_port_total > 0:
+            app_port_totals_by_host[host_id] = max(app_port_totals_by_host.get(host_id, 0), app_port_total)
+        if app_port_total > 0:
             app_port_target_count += 1
+        raw_provenance = target.get("port_provenance")
+        provenance = raw_provenance if isinstance(raw_provenance, Mapping) else {}
+        raw_divergence = provenance.get("divergence")
+        divergence = raw_divergence if isinstance(raw_divergence, Mapping) else {}
+        if bool(divergence.get("has_drift")):
+            port_divergence_target_count += 1
         if str(app_evidence.get("coverage_state") or "") == "scanned_no_ports_seen":
             scanned_no_ports_seen_count += 1
         raw_counts = target.get("finding_counts")
@@ -973,6 +1362,8 @@ def _overview_rollups(targets: list[dict[str, Any]], recent_change_state: str) -
         "open_port_count": len(ports),
         "service_count": len(services),
         "provider_count": len(provider_ids),
+        "app_port_count": sum(app_port_totals_by_host.values()),
+        "port_divergence_target_count": port_divergence_target_count,
         "app_scan_target_count": app_scan_target_count,
         "app_port_target_count": app_port_target_count,
         "scanned_no_ports_seen_count": scanned_no_ports_seen_count,

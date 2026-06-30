@@ -6,7 +6,7 @@ import "./static-chunk-zaw72qsx.c14c0dd33852.js";
 import "./static-chunk-stwbj4nh.9ff7cb09b03c.js";
 import {
   openHistoryRunDetails
-} from "./static-chunk-luxntmsb.800e86ee6e9e.js";
+} from "./static-chunk-su6lrvju.f76caa9fc9c2.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -41,7 +41,7 @@ import {
   hasRuntimeHandler,
   logClientError
 } from "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-zabwxq4a.6a46e6b248cd.js";
+import "./static-chunk-geovhkhz.906ab9e27563.js";
 import "./static-chunk-wkckhpty.7befd18332ed.js";
 
 // app/static/js/features/watchers/watchers_modal.js

@@ -1738,6 +1738,7 @@ let importedProjectWorkspaceShell;
       projectTargetItems: _projectTargetItems,
       projectTargetFilterSet: _projectTargetFilterSet,
       projectRunFilterSet: _projectRunFilterSet,
+      projectHostFilterSet: _projectHostFilterSet,
       projectResponseError: _projectResponseError,
       projectWorkspaceRequest: _projectWorkspaceRequest,
       refreshProjectWorkspace,
@@ -1897,8 +1898,10 @@ let importedProjectWorkspaceShell;
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       setProjectWorkspaceTab: projectWorkspaceState.setTab,
+      setProjectEntityTab: projectWorkspaceState.setEntityTab,
       projectTargetFilterSet: _projectTargetFilterSet,
       projectRunFilterSet: _projectRunFilterSet,
+      projectHostFilterSet: _projectHostFilterSet,
       projectFindingSeverityFilterSet: _projectFindingSeverityFilterSet,
       projectFindingStatusFilterSet: _projectFindingStatusFilterSet,
       setProjectFindingOrphanFilter: (projectId, value) => _projectFiltersController().setFindingOrphanFilter(projectId, value),
@@ -2859,6 +2862,7 @@ let importedProjectWorkspaceShell;
       projectRunFilterSet: _projectRunFilterSet,
       projectRunItems: _projectRunItems,
       projectSummary: _projectSummary,
+      projectHostFilterSet: _projectHostFilterSet,
       projectTargetFilterSet: _projectTargetFilterSet,
       projectTargetPage: projectId => _projectDetailsController().targetPage(projectId),
       projectTargetById: (projectId, targetId) => _projectDetailsController().targetById(projectId, targetId),
@@ -2929,6 +2933,10 @@ let importedProjectWorkspaceShell;
 
   function _projectRunFilterSet(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().runFilterSet(projectId);
+  }
+
+  function _projectHostFilterSet(projectId = projectWorkspaceState.selectedId()) {
+    return _projectFiltersController().hostFilterSet(projectId);
   }
 
   function _projectRunFilterIds(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {

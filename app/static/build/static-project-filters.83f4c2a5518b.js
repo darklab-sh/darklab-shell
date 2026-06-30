@@ -6,6 +6,7 @@ var exportedDarklabProjectFilters = null;
     const ctx = context || {};
     const targetFilters = /* @__PURE__ */ new Map();
     const runFilters = /* @__PURE__ */ new Map();
+    const hostFilters = /* @__PURE__ */ new Map();
     const commandFilters = /* @__PURE__ */ new Map();
     const severityFilters = /* @__PURE__ */ new Map();
     const scopeFilters = /* @__PURE__ */ new Map();
@@ -69,6 +70,28 @@ var exportedDarklabProjectFilters = null;
     }
     function runFilterActive(projectId = "", summary = ctx.projectSummary?.(projectId)) {
       return runFilterIds(projectId, summary).length > 0;
+    }
+    function hostFilterSet(projectId = "") {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return /* @__PURE__ */ new Set();
+      let filters = hostFilters.get(normalized);
+      if (!filters) {
+        filters = /* @__PURE__ */ new Set();
+        hostFilters.set(normalized, filters);
+      }
+      return filters;
+    }
+    function hostFilterIds(projectId = "") {
+      return [...hostFilterSet(projectId)].map((id) => String(id || "").trim()).filter(Boolean);
+    }
+    function hostFilterLabel(hostEntityId, summary = ctx.projectSummary?.()) {
+      const normalized = String(hostEntityId || "").trim();
+      if (!normalized) return "host";
+      const targets = ctx.projectTargetItems(summary);
+      const target = (Array.isArray(targets) ? targets : []).find((item) => String(item && (item.entity_id || item.id) || "") === normalized);
+      if (target) return targetFilterLabel(target);
+      const shortId = normalized.length > 12 ? `${normalized.slice(0, 8)}...` : normalized;
+      return `entity ${shortId}`;
     }
     function runFilterLabel(run) {
       if (!run) return "run";
@@ -465,6 +488,7 @@ var exportedDarklabProjectFilters = null;
       const normalized = normalizedProjectId(projectId);
       targetFilterSet(normalized).clear();
       runFilterSet(normalized).clear();
+      hostFilterSet(normalized).clear();
       findingCommandFilterSet(normalized).clear();
       findingSeverityFilterSet(normalized).clear();
       findingScopeFilterSet(normalized).clear();
@@ -570,6 +594,7 @@ var exportedDarklabProjectFilters = null;
       });
       controls.appendChild(filterDropdown("Filter by target", selectedTargets.size, targetOptions));
       const selectedRuns = new Set(runFilterIds(projectId, summary));
+      const selectedHosts = new Set(hostFilterIds(projectId));
       const runOptions = ctx.projectRunItems(summary).map((run) => {
         const runId = String(run && run.id || "");
         return filterOption({
@@ -699,6 +724,14 @@ var exportedDarklabProjectFilters = null;
           clearAttr: "projectRunFilterClear"
         }));
       });
+      selectedHosts.forEach((hostEntityId) => {
+        chips.appendChild(filterChip({
+          projectId,
+          label: `host: ${hostFilterLabel(hostEntityId, summary)}`,
+          value: hostEntityId,
+          clearAttr: "projectHostFilterClear"
+        }));
+      });
       selectedStatuses.forEach((status) => {
         chips.appendChild(filterChip({
           projectId,
@@ -763,7 +796,7 @@ var exportedDarklabProjectFilters = null;
           clearAttr: "projectFindingOrphanClear"
         }));
       }
-      const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size || selectedCommands.size || selectedSeverities.size || selectedScopes.size || showMetadataFilters && (selectedLabels.size || noteState !== "all") || orphanState !== "hide";
+      const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size || selectedHosts.size || selectedCommands.size || selectedSeverities.size || selectedScopes.size || showMetadataFilters && (selectedLabels.size || noteState !== "all") || orphanState !== "hide";
       if (hasFilters) {
         const clearAll = document.createElement("button");
         clearAll.type = "button";
@@ -847,6 +880,9 @@ var exportedDarklabProjectFilters = null;
       findingScopeFilterValues,
       findingScopeOptions,
       runDirectTargetIds,
+      hostFilterIds,
+      hostFilterLabel,
+      hostFilterSet,
       runFilterActive,
       runFilterChipLabel,
       runFilterIds,

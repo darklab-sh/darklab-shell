@@ -1,11 +1,11 @@
 import {
   exportedOpenAtlas
-} from "./static-chunk-evo2j66v.0f1e08dadf7e.js";
+} from "./static-chunk-2lqvgxi2.0eb8956dece5.js";
 import {
   exportedOpenFindingsBoard
 } from "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-luxntmsb.800e86ee6e9e.js";
+import "./static-chunk-su6lrvju.f76caa9fc9c2.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -28,8 +28,8 @@ import "./static-chunk-2bgb52uq.a327269283bb.js";
 import "./static-chunk-yo5cjr7d.b86e0c93eff0.js";
 import "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-yzcc4kyr.88ac01345411.js";
-import "./static-chunk-zabwxq4a.6a46e6b248cd.js";
+import "./static-chunk-db3mpkvp.8160da32b718.js";
+import "./static-chunk-geovhkhz.906ab9e27563.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
 import "./static-chunk-wkckhpty.7befd18332ed.js";
 
@@ -586,6 +586,18 @@ var exportedDarklabProjectWorkspaceEvents = null;
         const filters = ctx.projectRunFilterSet(projectId);
         if (runId === "all") filters.clear();
         else if (runId) filters.delete(runId);
+        ctx.renderProjectExplorer();
+        return;
+      }
+      const hostFilterClear = event.target.closest?.("[data-project-host-filter-clear]");
+      if (hostFilterClear) {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = String(hostFilterClear.dataset.projectId || selectedProjectId() || "");
+        const hostEntityId = String(hostFilterClear.dataset.projectHostFilterClear || "");
+        const filters = ctx.projectHostFilterSet(projectId);
+        if (hostEntityId === "all") filters.clear();
+        else if (hostEntityId) filters.delete(hostEntityId);
         ctx.renderProjectExplorer();
         return;
       }

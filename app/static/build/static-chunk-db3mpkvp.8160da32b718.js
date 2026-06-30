@@ -1,6 +1,6 @@
 import {
   formatPortEntityMetadata
-} from "./static-chunk-zabwxq4a.6a46e6b248cd.js";
+} from "./static-chunk-geovhkhz.906ab9e27563.js";
 
 // app/static/js/features/atlas/atlas_entity_detail.js
 var _darklabGlobal = window;

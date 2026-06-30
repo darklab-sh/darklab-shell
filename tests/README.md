@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,877
+- behavior tests: 3,890
 - docs/inventory meta-tests: 48
-- `pytest`: 2193 (2158 behavior + 35 meta)
-- `vitest`: 1463 (1450 behavior + 13 meta)
+- `pytest`: 2201 (2166 behavior + 35 meta)
+- `vitest`: 1468 (1455 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,925
+- total: 3,938
 
 This document is organized in two parts:
 
@@ -514,7 +514,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestProjectOverviewContract.test_target_identity_uses_existing_atlas_entity_contract` | Verifies overview target identity follows the existing Atlas entity contract and host-to-domain/IP canonicalization. |
 | `TestProjectOverviewContract.test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects` | Verifies overview recent-change states and deep-link hints use existing monitoring and filter contracts. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, app-scan evidence, operational tempo, recent activity, coverage gaps, deliverables status, and deep-link rollups. |
+| `TestProjectOverviewContract.test_project_intel_overview_does_not_mark_app_ports_as_drift_without_provider_intel` | Verifies Project Overview does not flag app-captured ports as provider/app drift when no cached provider intel exists for the target. |
+| `TestProjectOverviewContract.test_project_intel_overview_omits_ports_deep_link_for_unlinked_port_entities` | Verifies Project Overview still shows owner-scoped app port evidence but omits the Ports drill-in when those port entities are not linked into the project. |
+| `TestProjectOverviewContract.test_project_intel_overview_separates_curl_port_evidence_from_scan_coverage` | Verifies curl-derived positive port evidence shows app port run counts without counting as app scan coverage. |
+| `TestProjectOverviewContract.test_project_intel_overview_defensively_filters_unusable_app_port_rows` | Verifies Project Overview skips suppressed, malformed, foreign-session, and team-scoped app port rows while tolerating bad JSON metadata. |
+| `TestProjectOverviewContract.test_project_intel_overview_counts_app_ports_beyond_visible_limit` | Verifies Project Overview caps displayed app ports while counting the full distinct app-captured port total. |
 | `TestProjectOverviewContract.test_project_intel_overview_drops_deleted_run_scan_observations` | Verifies deleted runs remove app-scan observations so Project Overview no longer counts removed scan evidence. |
+| `TestProjectOverviewContract.test_project_intel_overview_uses_latest_app_port_service_attributes` | Verifies Project Overview shows updated app-captured service/version metadata when a later scan enriches an existing port entity. |
+| `TestProjectOverviewContract.test_project_intel_overview_uses_url_host_app_port_evidence` | Verifies URL targets use their host entity's app-captured port evidence instead of appearing silently unscanned. |
+| `TestProjectOverviewContract.test_project_intel_overview_keeps_url_host_scan_states_honest` | Verifies URL targets distinguish host scans with no app ports from unresolved URL hosts. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_marks_stale_provider_data` | Verifies Project Overview marks fully expired provider snapshots as stale while keeping mixed fresh/stale provider data fresh. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate` | Verifies Project Overview ignores stale expired provider certificate data when a fresh provider snapshot is available for the same target. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_logs_build_and_truncation_context` | Verifies Project Overview aggregation emits bounded build logs and warns when target rows exceed the overview limit. |
@@ -2875,6 +2883,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `loads session-scoped lazy data through imported runtime fetch without a global mirror` | Verifies session-scoped lazy fetches can load through the imported runtime bridge when no legacy `window.apiFetch` mirror exists. |
 | `returns loaded lazy module API objects through the runtime loader contract` | Verifies the lazy asset loader resolves configured module entries and returns the API object the runtime expects. |
 | `renders port metadata in Atlas and Project entity rows` | Verifies Atlas rows and Project Entity rows surface port protocol, service, version, and host metadata. |
+| `applies host entity filters only to Project port entity requests` | Verifies Project Entities requests include the host-scoped filter for Ports while leaving other entity tabs unfiltered by lingering host scope. |
+| `renders and clears host entity filter chips in Project filters` | Verifies host-scoped Project Entity filters show a clearable chip with a friendly host label. |
 | `renders port metadata in Atlas entity detail` | Verifies Atlas entity detail surfaces port protocol, service, version, and host metadata. |
 | `logs a bounded error when a lazy module API contract is missing` | Verifies missing lazy module exports reject with safe client-error context instead of leaking raw asset config. |
 | `exports UI and feature helper primitives as direct imports` | Verifies representative UI and feature helpers expose direct ESM imports. |
@@ -3284,9 +3294,12 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | Test | Description |
 | --- | --- |
 | `loads and renders bounded target overview rows with rollups` | Verifies Project Overview loads the scoped endpoint and renders target rollups, cached-provider caveats and freshness, app-scan coverage, finding review/verification progress, operational tempo, recent activity, coverage gaps, deliverables status, ports, services, certificate badges, severity chips, and provider highlights. |
+| `previews long target lists so aggregate panels stay reachable` | Verifies Project Overview caps long target lists by default, keeps aggregate panels reachable, and lets users expand the full target list. |
 | `renders the empty target state from an empty overview payload` | Verifies Project Overview renders the no-targets empty state when the overview payload contains no target rows. |
 | `renders unknown certificate, no-intel, and not-monitored states neutrally` | Verifies Project Overview renders unknown certificates, missing intel freshness, and unmonitored recent-change state with neutral labels and muted badge styling. |
 | `uses existing Project filters when target actions open Entities and Findings` | Verifies Project Overview target actions switch to existing Entities/Findings tabs while applying the backend-provided filter hints through the current Project filter sets. |
+| `hides the Ports action when Overview app ports are not project-linked` | Verifies Project Overview keeps app port evidence visible but suppresses the Ports drill-in when the backend does not provide a project-backed port hint. |
+| `uses app port run counts when positive port evidence has no scan coverage` | Verifies Project Overview describes curl-style positive port evidence using app port run counts instead of rendering contradictory zero-run scan copy. |
 | `clears stale filters when Findings hints only include a target` | Verifies Project Overview clears old target, run, severity, and review-state filters before applying a target-only Findings hint. |
 | `applies run and review-state hints through existing filter sets` | Verifies Project Overview applies target, run, severity, review-state, and orphan hints through the existing Entities and Findings filter sets. |
 | `settles into an error state after overview load failures without retry looping` | Verifies Project Overview shows a stable error panel after load failures instead of repeatedly retrying the failed request. |

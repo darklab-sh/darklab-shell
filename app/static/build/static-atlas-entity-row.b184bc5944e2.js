@@ -1,11 +1,13 @@
 import {
   DarklabAtlasEntityRow,
+  formatCompactPortLabel,
   formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow
-} from "./static-chunk-zabwxq4a.6a46e6b248cd.js";
+} from "./static-chunk-geovhkhz.906ab9e27563.js";
 export {
   DarklabAtlasEntityRow,
+  formatCompactPortLabel,
   formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow

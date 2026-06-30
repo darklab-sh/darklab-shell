@@ -1077,15 +1077,16 @@ def _project_entity_filter_clause(conn, session_id, project_id, filters, *, team
     filters = filters if isinstance(filters, dict) else {}
     run_ids = set(_metadata_filter_values(filters, "run_id", MAX_ENTITY_ID_LEN))
     target_ids = _metadata_filter_values(filters, "target_id", MAX_ENTITY_ID_LEN)
+    host_entity_ids = _metadata_filter_values(filters, "host_entity_id", MAX_ENTITY_ID_LEN)
     target_run_ids = _project_target_filter_run_ids(conn, session_id, project_id, target_ids, team_id=team_id)
     candidate_run_ids = None
     if run_ids:
         candidate_run_ids = set(run_ids)
     if target_run_ids is not None:
         candidate_run_ids = set(target_run_ids) if candidate_run_ids is None else candidate_run_ids.intersection(target_run_ids)
-    if candidate_run_ids is None and not target_ids:
+    if candidate_run_ids is None and not target_ids and not host_entity_ids:
         return "", []
-    if candidate_run_ids is not None and not candidate_run_ids and not target_ids:
+    if candidate_run_ids is not None and not candidate_run_ids and not target_ids and not host_entity_ids:
         return "AND 1 = 0", []
 
     clauses = []
@@ -1117,6 +1118,10 @@ def _project_entity_filter_clause(conn, session_id, project_id, filters, *, team
         target_placeholders = ",".join("?" for _ in target_ids)
         clauses.append(f"e.id IN ({target_placeholders})")  # nosec
         params.extend(target_ids)
+    if host_entity_ids:
+        host_placeholders = ",".join("?" for _ in host_entity_ids)
+        clauses.append(f"e.host_entity_id IN ({host_placeholders})")  # nosec
+        params.extend(host_entity_ids)
     if not clauses:
         return "AND 1 = 0", []
     return "AND (" + " OR ".join(clauses) + ")", params

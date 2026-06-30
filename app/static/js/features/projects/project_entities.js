@@ -450,6 +450,14 @@ let exportedDarklabProjectEntities = null;
       runFilters.forEach((runId) => {
         if (runId) params.append('run_id', runId);
       });
+      const hostFilters = typeof ctx.projectHostFilterSet === 'function'
+        ? ctx.projectHostFilterSet(normalizedProjectId)
+        : new Set();
+      if (activeType() === 'port') {
+        hostFilters.forEach((hostEntityId) => {
+          if (hostEntityId) params.append('host_entity_id', hostEntityId);
+        });
+      }
     }
 
     function entityFilterScopeKey(projectId) {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatCompactPortLabel } from '../../../app/static/js/features/atlas/atlas_entity_row.js'
 import { fromDomScripts } from './helpers/extract.js'
 
 function apiResponse(payload = {}, { ok = true, status = ok ? 200 : 500 } = {}) {
@@ -22,6 +23,7 @@ function loadOverviewModule() {
 function makeContext(projectWorkspaceRequest, overrides = {}) {
   const targetFilters = new Map()
   const runFilters = new Map()
+  const hostFilters = new Map()
   const severityFilters = new Map()
   const statusFilters = new Map()
   const setFor = (source, projectId) => {
@@ -52,15 +54,17 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     renderProjectExplorer: vi.fn(),
     renderProjectMobileDetail: vi.fn(),
     setProjectWorkspaceTab: vi.fn(),
+    setProjectEntityTab: vi.fn(),
     projectTargetFilterSet: vi.fn(projectId => setFor(targetFilters, projectId)),
     projectRunFilterSet: vi.fn(projectId => setFor(runFilters, projectId)),
+    projectHostFilterSet: vi.fn(projectId => setFor(hostFilters, projectId)),
     projectFindingSeverityFilterSet: vi.fn(projectId => setFor(severityFilters, projectId)),
     projectFindingStatusFilterSet: vi.fn(projectId => setFor(statusFilters, projectId)),
     setProjectFindingOrphanFilter: vi.fn(),
     invalidateProjectFilteredFindings: vi.fn(),
     logClientError: vi.fn(),
     mobileView: vi.fn(() => 'desktop'),
-    _sets: { targetFilters, runFilters, severityFilters, statusFilters },
+    _sets: { targetFilters, runFilters, hostFilters, severityFilters, statusFilters },
     ...overrides,
   }
 }
@@ -73,6 +77,8 @@ const overviewPayload = {
     open_port_count: 2,
     service_count: 2,
     provider_count: 1,
+    app_port_count: 2,
+    port_divergence_target_count: 1,
     app_scan_target_count: 1,
     app_port_target_count: 1,
     scanned_no_ports_seen_count: 0,
@@ -170,6 +176,7 @@ const overviewPayload = {
       has_stale_intel: true,
       has_findings: true,
       has_app_scan_evidence: true,
+      has_app_ports: true,
       has_recent_changes: true,
     },
     app_evidence: {
@@ -177,8 +184,30 @@ const overviewPayload = {
       scan_run_count: 1,
       last_observed_at: '2026-06-24T00:00:00+00:00',
       port_entity_count: 2,
+      app_port_run_count: 1,
+      project_entity_port_count: 1,
       command_roots: ['nmap'],
+      host_entity_id: '',
+      scope_note: '',
       coverage_caveat: '',
+    },
+    app_ports: [
+      { port: 443, proto: 'tcp', service: 'https', version: 'nginx' },
+      { port: 8443, proto: 'tcp', service: 'https-alt', version: '' },
+    ],
+    app_port_count: 2,
+    app_services: ['https (nginx)', 'https-alt'],
+    port_provenance: {
+      app: [
+        { port: 443, proto: 'tcp', service: 'https', version: 'nginx' },
+        { port: 8443, proto: 'tcp', service: 'https-alt', version: '' },
+      ],
+      provider: [80, 443],
+      divergence: {
+        app_only: [8443],
+        provider_only: [80],
+        has_drift: true,
+      },
     },
     open_ports: [80, 443],
     services: ['http', 'https'],
@@ -214,6 +243,7 @@ const overviewPayload = {
     deep_link_hints: {
       entities: { target_id: 'ent_1' },
       findings: { target_id: 'ent_1', orphan_filter: 'all', severity: 'high' },
+      ports: { entity_type: 'port', host_entity_id: 'ent_1' },
     },
   }],
 }
@@ -239,15 +269,21 @@ describe('project overview controller', () => {
       '/projects/prj_1/overview',
       { cache: 'no-store' },
     )
-    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('Targets')
-    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('cached providers')
-    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('Cached provider ports')
-    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('App scan coverage')
-    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('Verification gaps')
-    expect(container.querySelector('.project-overview-summary-grid')?.textContent).toContain('High-risk targets')
+    const summary = container.querySelector('.project-overview-summary')
+    const summaryText = summary?.textContent || ''
+    expect(summary?.querySelector('.project-overview-summary-grid.is-primary')).toBeTruthy()
+    expect(summary?.querySelector('.project-overview-summary-grid.is-secondary')).toBeTruthy()
+    expect(summaryText).toContain('Targets')
+    expect(summaryText).toContain('cached providers')
+    expect(summaryText).toContain('App-native ports')
+    expect(summaryText).toContain('Cached provider ports')
+    expect(summaryText).toContain('Provider/app drift')
+    expect(summaryText).toContain('App scan coverage')
+    expect(summaryText).toContain('Verification gaps')
+    expect(summaryText).toContain('High-risk targets')
     const caveatText = container.querySelector('.project-overview-provider-caveat')?.textContent || ''
     expect(caveatText).toContain('Cached provider data')
-    expect(caveatText).toContain('Ports, services, certificates, and provider highlights come from saved intel snapshots')
+    expect(caveatText).toContain('App-captured ports and services are shown first when available')
     const progressText = container.querySelector('.project-overview-progress')?.textContent || ''
     expect(progressText).toContain('Triage')
     expect(progressText).toContain('New')
@@ -293,17 +329,28 @@ describe('project overview controller', () => {
     expect(recentCard?.textContent).toContain('Windowed')
     expect(recentCard?.classList.contains('is-windowed')).toBe(false)
     expect(container.querySelector('.project-overview-target-title')?.textContent).toBe('api.example.com')
-    const detailText = [...container.querySelectorAll('.project-overview-target-detail')]
-      .map(node => node.textContent)
-      .join('\n')
-    expect(detailText).toContain('Cached provider ports/services: 80, 443')
-    expect(detailText).toContain('Cached provider data: stale · checked 2026-06-24 00:00:00+00:00')
-    expect(detailText).toContain('App ports found: 2 port hits across 1 run')
+    const detailRows = [...container.querySelectorAll('.project-overview-target-detail')]
+    const portsDetail = detailRows.find(row => row.querySelector('.project-overview-target-detail-label')?.textContent === 'Ports: ')
+    expect(portsDetail).toBeTruthy()
+    expect(portsDetail.querySelector('.project-overview-port-badge-list')).toBeTruthy()
+    expect(portsDetail.querySelector('.project-overview-target-value-muted')).toBeNull()
+    const detailText = detailRows.map(node => node.textContent).join('\n')
+    expect(detailText).toContain('Provider: 80, 443 · http, https')
+    expect(detailText).toContain('Intel: stale · checked 2026-06-24 00:00:00+00:00')
+    expect(detailText).toContain('Scan: App ports found: 2 ports from 1 app run')
     expect(detailText).toContain('Findings: 1 new · 3 awaiting verification · 1 false positive · 1 suppressed')
+    const portChips = [...container.querySelectorAll('.project-overview-port-badge')]
+    expect(portChips.map(chip => chip.textContent)).toEqual(
+      overviewPayload.targets[0].app_ports.map(formatCompactPortLabel),
+    )
+    expect(portChips.every(chip => chip.classList.contains('badge'))).toBe(true)
+    expect(portChips.every(chip => chip.classList.contains('badge-tone-muted'))).toBe(true)
+    expect(portChips[0]?.getAttribute('title')).toBe('443/tcp https (nginx)')
     const chipText = container.querySelector('.project-overview-target-chips')?.textContent || ''
     expect(chipText).toContain('Finding: High')
     expect(chipText).toContain('Cert: <=30d')
     expect(chipText).toContain('App ports')
+    expect(chipText).toContain('Provider/app drift')
     expect(chipText).toContain('Intel: Stale')
     expect(container.querySelector('.project-overview-chip')?.getAttribute('title'))
       .toBe('Highest actionable finding severity for this target')
@@ -318,6 +365,42 @@ describe('project overview controller', () => {
     expect([...ctx._sets.targetFilters.get('prj_1')]).toEqual(['ent_1'])
     expect([...ctx._sets.severityFilters.get('prj_1')]).toEqual(['high'])
     expect(ctx.setProjectFindingOrphanFilter).toHaveBeenLastCalledWith('prj_1', 'all')
+  })
+
+  it('previews long target lists so aggregate panels stay reachable', async () => {
+    const overviewApi = loadOverviewModule()
+    const longPayload = JSON.parse(JSON.stringify(overviewPayload))
+    longPayload.rollups.target_count = 8
+    longPayload.targets = Array.from({ length: 8 }, (_item, index) => ({
+      ...longPayload.targets[0],
+      id: `ent_${index + 1}`,
+      entity_id: `ent_${index + 1}`,
+      value: `api-${index + 1}.example.com`,
+      display_label: `domain:api-${index + 1}.example.com`,
+    }))
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse(longPayload))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = overviewApi.createProjectOverviewController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+
+    controller.renderOverview(container, 'prj_1', {})
+
+    expect(container.querySelectorAll('.project-overview-target-row')).toHaveLength(6)
+    expect(container.querySelector('.project-overview-progress')).toBeTruthy()
+    expect(container.querySelector('.project-overview-gaps')).toBeTruthy()
+    expect(container.querySelector('.project-overview-target-list')?.textContent).not.toContain('api-8.example.com')
+    const showAll = container.querySelector('[data-project-overview-action="toggle-targets"]')
+    expect(showAll?.textContent).toBe('Show all 8 targets')
+
+    showAll.click()
+    expect(ctx.renderProjectExplorer).toHaveBeenCalled()
+    controller.renderOverview(container, 'prj_1', {})
+
+    expect(container.querySelectorAll('.project-overview-target-row')).toHaveLength(8)
+    expect(container.querySelector('.project-overview-target-list')?.textContent).toContain('api-8.example.com')
+    const showFewer = container.querySelector('[data-project-overview-action="toggle-targets"]')
+    expect(showFewer?.textContent).toBe('Show fewer targets')
   })
 
   it('renders the empty target state from an empty overview payload', async () => {
@@ -418,7 +501,7 @@ describe('project overview controller', () => {
     expect(intelChip?.getAttribute('title')).toBe('No cached provider data for this target')
     expect([...container.querySelectorAll('.project-overview-target-detail')]
       .map(node => node.textContent)
-      .join('\n')).toContain('Cached provider data: none')
+      .join('\n')).toContain('Intel: none')
     expect(container.querySelector('.project-overview-highlights')).toBeNull()
   })
 
@@ -441,6 +524,107 @@ describe('project overview controller', () => {
     expect([...ctx._sets.severityFilters.get('prj_1')]).toEqual(['high'])
     expect(ctx.setProjectFindingOrphanFilter).toHaveBeenCalledWith('prj_1', 'all')
     expect(ctx.invalidateProjectFilteredFindings).toHaveBeenCalledWith('prj_1')
+
+    const portsButton = [...container.querySelectorAll('[data-project-overview-action="entities"]')]
+      .find(button => button.textContent === 'Ports')
+    portsButton.click()
+    expect(ctx.setProjectWorkspaceTab).toHaveBeenLastCalledWith('entities')
+    expect(ctx.setProjectEntityTab).toHaveBeenCalledWith('port')
+    expect([...ctx._sets.targetFilters.get('prj_1')]).toEqual([])
+    expect([...ctx._sets.hostFilters.get('prj_1')]).toEqual(['ent_1'])
+    const portNavLog = ctx.logClientError.mock.calls.find(([message]) => (
+      message.includes('PROJECT_OVERVIEW_NAVIGATION_APPLIED')
+      && message.includes('"destination_tab":"entities"')
+      && message.includes('"entity_type":"port"')
+      && message.includes('"host_filter_count":1')
+    ))
+    expect(portNavLog?.[1]).toBeNull()
+    expect(portNavLog?.[2]).toEqual({
+      event: 'PROJECT_OVERVIEW_NAVIGATION_APPLIED',
+      level: 'debug',
+      page: 'project_overview',
+      phase: 'navigate',
+      selection_key: 'project:prj_1',
+      status: 0,
+    })
+
+    const degradedCtx = makeContext(projectWorkspaceRequest, { setProjectEntityTab: undefined })
+    const degradedController = overviewApi.createProjectOverviewController(degradedCtx)
+    await degradedController.load('prj_1', { render: false })
+    const degradedContainer = document.createElement('div')
+    degradedController.renderOverview(degradedContainer, 'prj_1', {})
+    const degradedPortsButton = [...degradedContainer.querySelectorAll('[data-project-overview-action="entities"]')]
+      .find(button => button.textContent === 'Ports')
+    degradedPortsButton.click()
+    const degradedLog = degradedCtx.logClientError.mock.calls.find(([message]) => (
+      message.includes('PROJECT_OVERVIEW_NAVIGATION_DEGRADED')
+      && message.includes('"destination_tab":"entities"')
+      && message.includes('"entity_type":"port"')
+      && message.includes('"has_host_filter":true')
+    ))
+    expect(degradedLog?.[1]).toBeNull()
+    expect(degradedLog?.[2]).toEqual({
+      event: 'PROJECT_OVERVIEW_NAVIGATION_DEGRADED',
+      level: 'warn',
+      page: 'project_overview',
+      phase: 'navigate',
+      selection_key: 'project:prj_1',
+      status: 0,
+    })
+  })
+
+  it('hides the Ports action when Overview app ports are not project-linked', async () => {
+    const overviewApi = loadOverviewModule()
+    const payload = {
+      ...overviewPayload,
+      targets: [{
+        ...overviewPayload.targets[0],
+        deep_link_hints: {
+          entities: { target_id: 'ent_1' },
+          findings: { target_id: 'ent_1', orphan_filter: 'all', severity: 'high' },
+        },
+      }],
+    }
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse(payload))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = overviewApi.createProjectOverviewController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderOverview(container, 'prj_1', {})
+
+    const portsButton = [...container.querySelectorAll('[data-project-overview-action="entities"]')]
+      .find(button => button.textContent === 'Ports')
+    expect(portsButton).toBeUndefined()
+    expect(container.textContent).toContain('443/tcp https (nginx)')
+    expect(container.textContent).toContain('Provider/app drift')
+  })
+
+  it('uses app port run counts when positive port evidence has no scan coverage', async () => {
+    const overviewApi = loadOverviewModule()
+    const payload = {
+      ...overviewPayload,
+      targets: [{
+        ...overviewPayload.targets[0],
+        app_evidence: {
+          ...overviewPayload.targets[0].app_evidence,
+          scan_run_count: 0,
+          app_port_run_count: 1,
+          port_entity_count: 0,
+        },
+      }],
+    }
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse(payload))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = overviewApi.createProjectOverviewController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderOverview(container, 'prj_1', {})
+    const detailText = [...container.querySelectorAll('.project-overview-target-detail')]
+      .map(node => node.textContent)
+      .join('\n')
+
+    expect(detailText).toContain('Scan: App ports found: 2 ports from 1 app run')
+    expect(detailText).not.toContain('0 runs')
   })
 
   it('clears stale filters when Findings hints only include a target', async () => {

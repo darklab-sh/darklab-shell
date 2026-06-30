@@ -5918,6 +5918,12 @@ class TestProjectRoutes:
             "team_id": "",
             "project_id": project["id"],
             "target_count": 0,
+            "app_scan_target_count": 0,
+            "app_port_target_count": 0,
+            "app_port_count": 0,
+            "port_divergence_target_count": 0,
+            "scanned_no_ports_seen_count": 0,
+            "unscanned_target_count": 0,
             "recent_change_state": "not-monitored",
             "windowed": False,
             "duration_ms": mock.ANY,
@@ -15656,22 +15662,33 @@ class TestAtlasRoutes:
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},
         )
-        entities_resp = client.get(
-            f"/projects/{project['id']}/entities?type=cve&limit=1&offset=0",
-            headers={"X-Session-ID": session_id},
-        )
-        run_filtered_resp = client.get(
-            f"/projects/{project['id']}/entities?run_id={run_id}&limit=10&offset=0",
-            headers={"X-Session-ID": session_id},
-        )
-        target_filtered_resp = client.get(
-            f"/projects/{project['id']}/entities?target_id={domain_id}&limit=10&offset=0",
-            headers={"X-Session-ID": session_id},
-        )
+        with mock.patch.object(project_routes.log, "debug") as debug_log, \
+             mock.patch.object(project_routes.log, "warning") as warning_log:
+            entities_resp = client.get(
+                f"/projects/{project['id']}/entities?type=cve&limit=1&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
+            run_filtered_resp = client.get(
+                f"/projects/{project['id']}/entities?run_id={run_id}&limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
+            target_filtered_resp = client.get(
+                f"/projects/{project['id']}/entities?target_id={domain_id}&limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
+            host_filtered_resp = client.get(
+                f"/projects/{project['id']}/entities?host_entity_id=&host_entity_id={domain_id}&limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
+            missing_entities_resp = client.get(
+                f"/projects/missing-entity-project/entities?host_entity_id={domain_id}&limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
         data = json.loads(summary_resp.data)
         entity_page = json.loads(entities_resp.data)
         run_filtered = json.loads(run_filtered_resp.data)
         target_filtered = json.loads(target_filtered_resp.data)
+        host_filtered = json.loads(host_filtered_resp.data)
 
         assert bulk_resp.status_code == 200
         assert json.loads(bulk_resp.data)["counts"]["added"] == 3
@@ -15679,6 +15696,8 @@ class TestAtlasRoutes:
         assert entities_resp.status_code == 200
         assert run_filtered_resp.status_code == 200
         assert target_filtered_resp.status_code == 200
+        assert host_filtered_resp.status_code == 200
+        assert missing_entities_resp.status_code == 404
         assert data["counts"]["targets"] == 2
         assert data["counts"]["entities"] == 3
         assert data["entities"] == []
@@ -15699,6 +15718,57 @@ class TestAtlasRoutes:
         assert run_filtered["counts_by_type"] == {"cve": 1, "domain": 1}
         assert {item["id"] for item in target_filtered["entities"]} == {domain_id, cve_id}
         assert target_filtered["counts_by_type"] == {"cve": 1, "domain": 1}
+        assert host_filtered["entities"] == []
+        host_viewed = next(
+            call for call in debug_log.call_args_list
+            if call.args == ("PROJECT_ENTITIES_VIEWED",)
+            and call.kwargs["extra"]["host_filter_count"] == 1
+        )
+        assert host_viewed.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "entity_type": "",
+            "limit": 10,
+            "offset": 0,
+            "target_filter_count": 0,
+            "run_filter_count": 0,
+            "host_filter_count": 1,
+            "filter_active": True,
+            "duration_ms": mock.ANY,
+            "result_count": 0,
+            "total": 0,
+        }
+        miss = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_ENTITIES_MISS",))
+        assert miss.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": "missing-entity-project",
+            "entity_type": "",
+            "limit": 10,
+            "offset": 0,
+            "target_filter_count": 0,
+            "run_filter_count": 0,
+            "host_filter_count": 1,
+            "filter_active": True,
+            "duration_ms": mock.ANY,
+        }
+        warning_log.assert_called_once()
+        assert warning_log.call_args.args == ("PROJECT_ENTITIES_FILTER_REJECTED",)
+        assert warning_log.call_args.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": project_routes.get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "filter_name": "host_entity_id",
+            "reason": "empty_or_too_long",
+            "requested_count": 2,
+            "host_filter_count": 1,
+            "dropped_empty_count": 1,
+            "trimmed_count": 0,
+        }
 
     def test_project_findings_include_linked_entity_findings_without_linked_run(self):
         client = get_client()

@@ -30,6 +30,7 @@ from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
     EvidencePackageBuildError,
     EvidencePackageTooLarge,
+    MAX_ENTITY_ID_LEN,
     MAX_BULK_RUN_ACTION_ITEMS,
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
@@ -184,6 +185,29 @@ def _parse_int(value, default, *, minimum=0, maximum=100):
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _route_filter_stats(values, *, max_len=MAX_ENTITY_ID_LEN):
+    seen = set()
+    normalized_count = 0
+    dropped_empty_count = 0
+    trimmed_count = 0
+    for raw_value in values:
+        raw_text = str(raw_value or "").strip()
+        if not raw_text:
+            dropped_empty_count += 1
+            continue
+        normalized = raw_text[:max_len]
+        if normalized != raw_text:
+            trimmed_count += 1
+        if normalized not in seen:
+            seen.add(normalized)
+            normalized_count += 1
+    return {
+        "count": normalized_count,
+        "dropped_empty_count": dropped_empty_count,
+        "trimmed_count": trimmed_count,
+    }
 
 
 def _parse_optional_iso_datetime(value, *, name: str) -> str:
@@ -739,6 +763,12 @@ def projects_overview(project_id):
         "team_id": team_id,
         "project_id": project_id,
         "target_count": int(rollups.get("target_count") or 0),
+        "app_scan_target_count": int(rollups.get("app_scan_target_count") or 0),
+        "app_port_target_count": int(rollups.get("app_port_target_count") or 0),
+        "app_port_count": int(rollups.get("app_port_count") or 0),
+        "port_divergence_target_count": int(rollups.get("port_divergence_target_count") or 0),
+        "scanned_no_ports_seen_count": int(rollups.get("scanned_no_ports_seen_count") or 0),
+        "unscanned_target_count": int(rollups.get("unscanned_target_count") or 0),
         "recent_change_state": str(rollups.get("recent_change_state") or ""),
         "windowed": windowed,
         "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -1090,20 +1120,68 @@ def projects_entities_list(project_id):
     session_id, team_id, error_response = _project_owner()
     if error_response:
         return error_response
+    started = time.perf_counter()
+    entity_type = request.args.get("type") or ""
+    safe_limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
+    safe_offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
+        "host_entity_id": request.args.getlist("host_entity_id"),
         "q": request.args.get("q") or "",
     }
+    run_filter_stats = _route_filter_stats(filters["run_id"])
+    target_filter_stats = _route_filter_stats(filters["target_id"])
+    host_filter_stats = _route_filter_stats(filters["host_entity_id"])
+    if host_filter_stats["dropped_empty_count"] or host_filter_stats["trimmed_count"]:
+        log.warning("PROJECT_ENTITIES_FILTER_REJECTED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "filter_name": "host_entity_id",
+            "reason": "empty_or_too_long",
+            "requested_count": len(filters["host_entity_id"]),
+            "host_filter_count": host_filter_stats["count"],
+            "dropped_empty_count": host_filter_stats["dropped_empty_count"],
+            "trimmed_count": host_filter_stats["trimmed_count"],
+        })
     entities = list_project_entities(
         session_id,
         project_id,
         filters,
-        entity_type=request.args.get("type") or "",
-        limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
-        offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+        entity_type=entity_type,
+        limit=safe_limit,
+        offset=safe_offset,
         team_id=team_id,
     )
+    log_extra = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "project_id": project_id,
+        "entity_type": str(entity_type or "").strip()[:32].lower(),
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "target_filter_count": target_filter_stats["count"],
+        "run_filter_count": run_filter_stats["count"],
+        "host_filter_count": host_filter_stats["count"],
+        "filter_active": bool(
+            target_filter_stats["count"]
+            or run_filter_stats["count"]
+            or host_filter_stats["count"]
+            or str(filters["q"] or "").strip()
+        ),
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+    }
+    if entities is None:
+        log.debug("PROJECT_ENTITIES_MISS", extra=log_extra)
+        return _project_json_or_404(entities)
+    log.debug("PROJECT_ENTITIES_VIEWED", extra={
+        **log_extra,
+        "result_count": len(entities.get("entities") or []),
+        "total": int(entities.get("total") or 0),
+    })
     return _project_json_or_404(entities)
 
 

@@ -368,6 +368,7 @@ import {
 } from '../../../app/static/js/features/atlas/atlas_tabs.js'
 import {
   DarklabAtlasEntityRow,
+  formatCompactPortLabel,
   formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,
@@ -1022,6 +1023,13 @@ describe('core ESM exports', () => {
       'banner nginx TLS',
       'host ent-host-example',
     ])
+    expect(formatCompactPortLabel(entity)).toBe('443/tcp https (nginx)')
+    expect(formatCompactPortLabel({
+      port: 8443,
+      proto: 'tcp',
+      service: 'https-alt',
+      version: '',
+    })).toBe('8443/tcp https-alt')
 
     const atlasRow = renderAtlasEntityRow({ entity })
     expect(atlasRow.textContent).toContain('2 hits · 1 run')
@@ -1044,6 +1052,94 @@ describe('core ESM exports', () => {
     expect(projectRow.textContent).toContain('version nginx')
     expect(projectRow.textContent).toContain('banner nginx TLS')
     expect(projectRow.textContent).toContain('host ent-host-example')
+  })
+
+  it('applies host entity filters only to Project port entity requests', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        entities: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+        has_more: false,
+        counts_by_type: {},
+      }),
+    }))
+    const hostFilters = new Map([['project-1', new Set(['ent-host-example'])]])
+    let activeEntityTab = 'ip'
+    const projectController = DarklabProjectEntities.createProjectEntitiesController({
+      apiFetch,
+      getActiveTab: () => activeEntityTab,
+      setActiveTab: tabId => { activeEntityTab = String(tabId || 'ip') },
+      getSelectedProjectId: () => 'project-1',
+      getSummary: () => ({ project: { id: 'project-1' }, targets: [] }),
+      projectHostFilterSet: projectId => hostFilters.get(projectId) || new Set(),
+      projectResponseError: async (_resp, fallback) => new Error(fallback),
+    })
+
+    projectController.setActiveTab('ip')
+    await projectController.load('project-1', { skipFinalRender: true })
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/entities?limit=50&offset=0&type=ip',
+      { cache: 'no-store' },
+    )
+
+    projectController.setActiveTab('port')
+    await projectController.load('project-1', { force: true, skipFinalRender: true })
+
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/projects/project-1/entities?host_entity_id=ent-host-example&limit=50&offset=0&type=port',
+      { cache: 'no-store' },
+    )
+  })
+
+  it('renders and clears host entity filter chips in Project filters', async () => {
+    const projectSummary = {
+      project: { id: 'project-1' },
+      runs: [],
+      targets: [{
+        id: 'target-1',
+        entity_id: 'ent-host-example',
+        type: 'domain',
+        value: 'example.com',
+      }],
+    }
+    const filtersController = DarklabProjectFilters.createProjectFiltersController({
+      bindProjectRuntimePressable: vi.fn(),
+      entityLabelValues: () => [],
+      findingReviewStates: [],
+      projectFindingItems: () => [],
+      projectFindingNoteStateOptions: [{ value: 'all', label: 'All notes' }],
+      projectFindingOrphanOptions: [{ value: 'hide', label: 'Hide orphaned' }],
+      projectFindingScopeOptions: [],
+      projectFindingSeverityOptions: [],
+      projectRunById: () => null,
+      projectRunItems: () => [],
+      projectSummary: () => projectSummary,
+      projectTargetItems: summary => summary.targets || [],
+      projectWorkspaceTab: () => 'entities',
+    })
+    filtersController.hostFilterSet('project-1').add('ent-host-example')
+    const eventsController = DarklabProjectWorkspaceEvents.createProjectWorkspaceEventsController({
+      projectHostFilterSet: projectId => filtersController.hostFilterSet(projectId),
+      renderProjectExplorer: vi.fn(),
+      selectedProjectId: () => 'project-1',
+      workspaceTab: () => 'entities',
+    })
+
+    const filterBar = filtersController.renderFilterBar('project-1', projectSummary)
+    document.body.appendChild(filterBar)
+    const chip = filterBar.querySelector('[data-project-host-filter-clear="ent-host-example"]')
+    expect(chip?.textContent).toContain('host: domain: example.com')
+
+    await eventsController.handleClick({
+      target: chip,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+    expect([...filtersController.hostFilterSet('project-1')]).toEqual([])
   })
 
   it('renders port metadata in Atlas entity detail', () => {

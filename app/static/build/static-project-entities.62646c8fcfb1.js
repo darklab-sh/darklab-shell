@@ -1,9 +1,9 @@
 import {
   exportedOpenAtlas
-} from "./static-chunk-evo2j66v.0f1e08dadf7e.js";
+} from "./static-chunk-2lqvgxi2.0eb8956dece5.js";
 import "./static-chunk-ie6xro2m.d35c2596c34d.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-luxntmsb.800e86ee6e9e.js";
+import "./static-chunk-su6lrvju.f76caa9fc9c2.js";
 import "./static-chunk-jeg4baui.9d6201e6a078.js";
 import "./static-chunk-flbvf45u.b289f40bdd3d.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -28,11 +28,11 @@ import "./static-chunk-gwztcp24.e58b5ff85d88.js";
 import {
   logClientError
 } from "./static-chunk-2kxtimik.c9801087c7a7.js";
-import "./static-chunk-yzcc4kyr.88ac01345411.js";
+import "./static-chunk-db3mpkvp.8160da32b718.js";
 import {
   DarklabAtlasEntityRow,
   formatPortEntityMetadata
-} from "./static-chunk-zabwxq4a.6a46e6b248cd.js";
+} from "./static-chunk-geovhkhz.906ab9e27563.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
 import {
   DarklabAtlasTabs
@@ -419,6 +419,12 @@ var exportedDarklabProjectEntities = null;
       runFilters.forEach((runId) => {
         if (runId) params.append("run_id", runId);
       });
+      const hostFilters = typeof ctx.projectHostFilterSet === "function" ? ctx.projectHostFilterSet(normalizedProjectId) : /* @__PURE__ */ new Set();
+      if (activeType() === "port") {
+        hostFilters.forEach((hostEntityId) => {
+          if (hostEntityId) params.append("host_entity_id", hostEntityId);
+        });
+      }
     }
     function entityFilterScopeKey(projectId) {
       const params = new URLSearchParams();

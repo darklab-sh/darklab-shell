@@ -2660,6 +2660,21 @@
   gap: 10px;
 }
 
+.project-overview-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-overview-summary-grid.is-primary {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.project-overview-summary-grid.is-secondary {
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  gap: 8px;
+}
+
 
 
 .project-overview-summary-card {
@@ -2672,6 +2687,17 @@
   background: var(--theme-chrome-row-bg);
 }
 
+.project-overview-summary-card.is-primary {
+  min-height: 78px;
+  padding: 14px;
+}
+
+.project-overview-summary-card.is-compact {
+  gap: 2px;
+  padding: 9px 10px;
+  background: transparent;
+}
+
 
 
 .project-overview-summary-card strong {
@@ -2680,6 +2706,19 @@
   font-size: 20px;
   line-height: 1.1;
   overflow-wrap: anywhere;
+}
+
+.project-overview-summary-card.is-primary strong {
+  font-size: 22px;
+}
+
+.project-overview-summary-card.is-compact strong {
+  font-size: 15px;
+}
+
+.project-overview-summary-card.is-compact span,
+.project-overview-summary-card.is-compact .project-overview-summary-detail {
+  font-size: 11px;
 }
 
 
@@ -2949,11 +2988,11 @@
   gap: 2px;
   min-width: 0;
   max-width: min(100%, 280px);
-  padding: 6px 8px;
-  border: 1px solid var(--theme-chrome-border);
-  border-radius: 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--muted);
-  background: var(--theme-chrome-row-bg);
+  background: transparent;
   font: inherit;
   font-size: 12px;
   line-height: 1.25;
@@ -3005,9 +3044,23 @@
 
 
 
+.project-overview-target-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+
+
 .project-overview-target-list {
   display: grid;
   gap: 8px;
+}
+
+.project-overview-target-list-footer {
+  display: flex;
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 
@@ -3032,7 +3085,7 @@
 
 .project-overview-target-main {
   display: grid;
-  gap: 5px;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -3054,6 +3107,47 @@
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
+}
+
+.project-overview-target-details {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-overview-target-detail {
+  display: grid;
+  grid-template-columns: minmax(62px, auto) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.project-overview-target-detail-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.project-overview-target-detail-value {
+  min-width: 0;
+}
+
+.project-overview-target-value-muted {
+  color: var(--muted);
+}
+
+.project-overview-port-badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.project-overview-port-badge.badge {
+  max-width: min(100%, 310px);
+  min-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 

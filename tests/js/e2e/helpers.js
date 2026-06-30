@@ -274,12 +274,70 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 import sys
+import uuid
+sys.path.insert(0, str(Path.cwd() / "app"))
+from services.atlas.materializer import materialize_run_entities
 
 data_dir, session_id, project_id, target_id, target_value = sys.argv[1:6]
 now = datetime.now(timezone.utc).replace(microsecond=0)
 expires_at = now + timedelta(days=21)
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+conn.row_factory = sqlite3.Row
 try:
+    run_id = "run_e2e_overview_ports_" + uuid.uuid4().hex[:16]
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, 3, 0, 0)",
+        (
+            run_id,
+            session_id,
+            "nmap -sV " + target_value,
+            now.isoformat(),
+            now.isoformat(),
+            json.dumps([
+                {"text": "$ nmap -sV " + target_value, "cls": "prompt-echo", "line_index": 0},
+                {"text": "8443/tcp open https-alt Example edge", "cls": "", "line_index": 1},
+                {"text": "[process exited with code 0]", "cls": "exit-ok", "line_index": 2},
+            ]),
+        ),
+    )
+    materialized = materialize_run_entities(
+        conn,
+        session_id,
+        run_id,
+        [{
+            "text": "8443/tcp open https-alt Example edge on " + target_value,
+            "entities": [
+                {"type": "domain", "value": target_value, "canonical_value": target_value},
+                {
+                    "type": "port",
+                    "value": target_value + ":8443/tcp",
+                    "canonical_value": target_value + ":8443/tcp",
+                    "attributes": {"service": "https-alt", "version": "Example edge"},
+                },
+            ],
+        }],
+        seen_at=now.isoformat(),
+        command="nmap -sV " + target_value,
+    )
+    port_ids = [item["id"] for item in materialized if item.get("type") == "port"]
+    link_rows = [
+        ("run", run_id),
+        *[("atlas_entity", port_id) for port_id in port_ids],
+    ]
+    for entity_type, entity_id in link_rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, ?, ?, 'e2e', ?)",
+            (
+                "pl_e2e_overview_" + entity_type + "_" + entity_id,
+                project_id,
+                entity_type,
+                entity_id,
+                now.isoformat(),
+            ),
+        )
     conn.execute(
         "INSERT OR REPLACE INTO entity_intel_snapshots "
         "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
@@ -322,7 +380,7 @@ try:
     conn.commit()
 finally:
     conn.close()
-print(json.dumps({"targetId": target_id}))
+print(json.dumps({"targetId": target_id, "runId": run_id, "portIds": port_ids}))
 `
   const result = spawnSync(
     pythonForE2EFixture(),

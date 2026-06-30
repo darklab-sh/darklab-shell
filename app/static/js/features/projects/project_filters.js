@@ -7,6 +7,7 @@ let exportedDarklabProjectFilters = null;
     const ctx = context || {};
     const targetFilters = new Map();
     const runFilters = new Map();
+    const hostFilters = new Map();
     const commandFilters = new Map();
     const severityFilters = new Map();
     const scopeFilters = new Map();
@@ -79,6 +80,32 @@ let exportedDarklabProjectFilters = null;
 
     function runFilterActive(projectId = '', summary = ctx.projectSummary?.(projectId)) {
       return runFilterIds(projectId, summary).length > 0;
+    }
+
+    function hostFilterSet(projectId = '') {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return new Set();
+      let filters = hostFilters.get(normalized);
+      if (!filters) {
+        filters = new Set();
+        hostFilters.set(normalized, filters);
+      }
+      return filters;
+    }
+
+    function hostFilterIds(projectId = '') {
+      return [...hostFilterSet(projectId)].map(id => String(id || '').trim()).filter(Boolean);
+    }
+
+    function hostFilterLabel(hostEntityId, summary = ctx.projectSummary?.()) {
+      const normalized = String(hostEntityId || '').trim();
+      if (!normalized) return 'host';
+      const targets = ctx.projectTargetItems(summary);
+      const target = (Array.isArray(targets) ? targets : [])
+        .find(item => String(item && (item.entity_id || item.id) || '') === normalized);
+      if (target) return targetFilterLabel(target);
+      const shortId = normalized.length > 12 ? `${normalized.slice(0, 8)}...` : normalized;
+      return `entity ${shortId}`;
     }
 
     function runFilterLabel(run) {
@@ -529,6 +556,7 @@ let exportedDarklabProjectFilters = null;
       const normalized = normalizedProjectId(projectId);
       targetFilterSet(normalized).clear();
       runFilterSet(normalized).clear();
+      hostFilterSet(normalized).clear();
       findingCommandFilterSet(normalized).clear();
       findingSeverityFilterSet(normalized).clear();
       findingScopeFilterSet(normalized).clear();
@@ -644,6 +672,7 @@ let exportedDarklabProjectFilters = null;
       controls.appendChild(filterDropdown('Filter by target', selectedTargets.size, targetOptions));
 
       const selectedRuns = new Set(runFilterIds(projectId, summary));
+      const selectedHosts = new Set(hostFilterIds(projectId));
       const runOptions = ctx.projectRunItems(summary).map(run => {
         const runId = String(run && run.id || '');
         return filterOption({
@@ -782,6 +811,14 @@ let exportedDarklabProjectFilters = null;
           clearAttr: 'projectRunFilterClear',
         }));
       });
+      selectedHosts.forEach((hostEntityId) => {
+        chips.appendChild(filterChip({
+          projectId,
+          label: `host: ${hostFilterLabel(hostEntityId, summary)}`,
+          value: hostEntityId,
+          clearAttr: 'projectHostFilterClear',
+        }));
+      });
       selectedStatuses.forEach((status) => {
         chips.appendChild(filterChip({
           projectId,
@@ -847,7 +884,7 @@ let exportedDarklabProjectFilters = null;
         }));
       }
       const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size
-        || selectedCommands.size || selectedSeverities.size || selectedScopes.size
+        || selectedHosts.size || selectedCommands.size || selectedSeverities.size || selectedScopes.size
         || (showMetadataFilters && (selectedLabels.size || noteState !== 'all'))
         || orphanState !== 'hide';
       if (hasFilters) {
@@ -942,6 +979,9 @@ let exportedDarklabProjectFilters = null;
       findingScopeFilterValues,
       findingScopeOptions,
       runDirectTargetIds,
+      hostFilterIds,
+      hostFilterLabel,
+      hostFilterSet,
       runFilterActive,
       runFilterChipLabel,
       runFilterIds,

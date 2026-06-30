@@ -623,6 +623,18 @@ let exportedDarklabProjectWorkspaceEvents = null;
         ctx.renderProjectExplorer();
         return;
       }
+      const hostFilterClear = event.target.closest?.('[data-project-host-filter-clear]');
+      if (hostFilterClear) {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = String(hostFilterClear.dataset.projectId || selectedProjectId() || '');
+        const hostEntityId = String(hostFilterClear.dataset.projectHostFilterClear || '');
+        const filters = ctx.projectHostFilterSet(projectId);
+        if (hostEntityId === 'all') filters.clear();
+        else if (hostEntityId) filters.delete(hostEntityId);
+        ctx.renderProjectExplorer();
+        return;
+      }
       const statusFilterClear = event.target.closest?.('[data-project-finding-status-filter-clear]');
       if (statusFilterClear) {
         event.preventDefault();
