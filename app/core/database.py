@@ -2766,6 +2766,56 @@ def _audit_project_target_host_type_collapse(conn) -> None:
         log.debug("PROJECT_TARGET_HOST_TYPE_AUDIT_FAILED", exc_info=True)
 
 
+def _backfill_url_host_entity_links(conn) -> None:
+    try:
+        from services.atlas.materializer import upsert_entity, url_host_identity  # noqa: PLC0415
+    except Exception:
+        log.debug("ATLAS_URL_HOST_BACKFILL_IMPORT_FAILED", exc_info=True)
+        return
+    try:
+        rows = conn.execute(
+            "SELECT id, session_id, team_id, canonical_value, first_seen_at, last_seen_at "
+            "FROM entities "
+            "WHERE type = 'url' AND COALESCE(host_entity_id, '') = ''"
+        ).fetchall()
+    except Exception:
+        log.debug("ATLAS_URL_HOST_BACKFILL_QUERY_FAILED", exc_info=True)
+        return
+    updated_count = 0
+    skipped_count = 0
+    for row in rows:
+        identity = url_host_identity(str(row["canonical_value"] or ""))
+        if identity is None:
+            skipped_count += 1
+            continue
+        host_type, host_canonical = identity
+        seen_at = str(row["first_seen_at"] or row["last_seen_at"] or "")
+        host_entity_id = upsert_entity(
+            conn,
+            str(row["session_id"] or ""),
+            host_type,
+            host_canonical,
+            team_id=str(row["team_id"] or ""),
+            seen_at=seen_at,
+            occurrence_count=0,
+        )
+        if not host_entity_id:
+            skipped_count += 1
+            continue
+        result = conn.execute(
+            "UPDATE entities SET host_entity_id = ? "
+            "WHERE id = ? AND type = 'url' AND COALESCE(host_entity_id, '') = ''",
+            (host_entity_id, row["id"]),
+        )
+        updated_count += max(0, int(result.rowcount or 0))
+    if updated_count or skipped_count:
+        log.info("ATLAS_URL_HOST_BACKFILL_COMPLETED", extra={
+            "url_entity_count": len(rows),
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+        })
+
+
 def db_init():
     """Create the runs and snapshots tables if they don't exist, and prune old records."""
     ensure_run_output_dir()
@@ -2784,6 +2834,7 @@ def db_init():
             warn_if_disabled()
             prune_events(conn=conn)
             _audit_project_target_host_type_collapse(conn)
+            _backfill_url_host_entity_links(conn)
             conn.commit()
         return
     with _db_init_lock():
@@ -2801,6 +2852,7 @@ def db_init():
             warn_if_disabled()
             prune_events(conn=conn)
             _audit_project_target_host_type_collapse(conn)
+            _backfill_url_host_entity_links(conn)
             conn.commit()
 
 

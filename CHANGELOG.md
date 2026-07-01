@@ -24,6 +24,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **URL entities now stay linked to their host** — Captured or imported URL entities now create and store a scoped relationship to the matching domain or IP entity, so Project Overview and Atlas can roll URL evidence up through the host without reparsing every URL later.
+  - Generic output extraction records the URL itself plus its host, direct URL target discovery such as `curl https://ip.darklab.sh` creates the Atlas URL and host link, and startup backfills older URL rows on SQLite and Postgres when the host can be resolved safely.
+  - **Tests:** focused backend coverage verifies URL extraction, materialized URL host relationships, direct URL upserts, Project target discovery, URL-host backfill, and Overview's stored host-link behavior.
+
 - **Atlas port entities from scan output** — Atlas now captures open ports as first-class app-native entities from supported scanner output.
   - Nmap, masscan, rustscan, naabu domain/IP output, `nc -zv`, and curl connection lines can emit host-linked `port` entities with canonical `host:port/proto` values; nmap service/version/banner data is kept as lightweight port attributes.
   - Scanner-scoped port extraction records private/internal targets when the user-directed scanner output reports them, while generic entity extraction keeps its separate private-IP filtering policy.

@@ -140,6 +140,12 @@ TCP is the default protocol when a parser or import omits one, and TCP/UDP are t
 
 Ports do not offer provider intel refresh. They are app-captured scan evidence from command output, while provider-backed domains, IPs, URLs, hashes, and CVEs can ask external or configured providers for fresh data. Project Overview keeps that distinction visible: app-captured port evidence can show that a run saw a port, while scan target observations from supported scanners can show that a target was scanned even when no app-captured ports surfaced.
 
+### URL Entity Host Links
+
+**URL entities reuse the host relationship instead of introducing a URL-only link.**
+
+URL entities belong to a host in the same way port entities do, so they use the existing `host_entity_id` field. The relationship points at the scoped `domain` or `ip` entity derived from the canonical URL host. That keeps the URL canonical value stable and readable while letting Atlas and Project Overview roll URL evidence up through the host.
+
 ---
 
 ## Security and Isolation Decisions

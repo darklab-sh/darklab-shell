@@ -599,20 +599,44 @@ def extract_entities(
         if not host or "\\" in host or _looks_like_file_hostname(host):
             continue
         try:
-            canonical = canonical_domain(host)
+            canonical_url_value = canonical_url(raw_url)
         except CanonicalizationError:
             continue
+        _add_entity(
+            entities,
+            seen,
+            entity_type="url",
+            value=raw_url,
+            canonical_value=canonical_url_value,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
         host_offset = raw_url.lower().find(host.lower())
         start = match.start() + host_offset if host_offset >= 0 else match.start()
         end = start + len(host) if host_offset >= 0 else match.end()
         if host_offset >= 0 and end < match.end():
             url_tail_spans.append((end, match.end()))
+        try:
+            canonical_ip_value = canonical_ip(host.strip("[]"))
+        except CanonicalizationError:
+            try:
+                canonical = canonical_domain(host)
+            except CanonicalizationError:
+                continue
+            host_entity_type = "domain"
+            host_canonical = canonical
+        else:
+            if not include_private_ips and not _is_public_ip(canonical_ip_value):
+                continue
+            host_entity_type = "ip"
+            host_canonical = canonical_ip_value
         _add_entity(
             entities,
             seen,
-            entity_type="domain",
+            entity_type=host_entity_type,
             value=host,
-            canonical_value=canonical,
+            canonical_value=host_canonical,
             source_line=source_line,
             start=start,
             end=end,
@@ -1475,6 +1499,10 @@ def _extract_entities_for_command(
             for entity in extract_entities(text, source_line=source_line, normalized_text=stripped):
                 if str(entity.get("type") or "") == "domain" and str(entity.get("canonical_value") or "") == "vulners.com":
                     continue
+                if str(entity.get("type") or "") == "url":
+                    parsed_url = urlparse(str(entity.get("canonical_value") or ""))
+                    if (parsed_url.hostname or "").lower() == "vulners.com":
+                        continue
                 key = (str(entity.get("type") or ""), str(entity.get("canonical_value") or ""))
                 if key in seen:
                     continue

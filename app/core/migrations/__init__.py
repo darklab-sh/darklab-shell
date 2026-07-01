@@ -42,6 +42,7 @@ from . import (
     v0035_project_digest_schedule_dispatch,
     v0036_atlas_port_entity_metadata,
     v0037_scan_target_observations,
+    v0038_url_host_entity_links,
 )
 from .runner import Migration
 
@@ -83,4 +84,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0035_project_digest_schedule_dispatch.MIGRATION,
     v0036_atlas_port_entity_metadata.MIGRATION,
     v0037_scan_target_observations.MIGRATION,
+    v0038_url_host_entity_links.MIGRATION,
 )

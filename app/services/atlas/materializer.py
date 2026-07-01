@@ -9,6 +9,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 from core.database_backend import DatabaseBackend, dialect_for_backend, parse_database_backend
 from core.helpers import get_log_session_id
@@ -21,6 +22,7 @@ from services.intel.canonical import (
     canonical_domain,
     canonical_entity,
     canonical_ip,
+    canonical_url,
     entity_signature,
     parse_canonical_port,
 )
@@ -161,6 +163,34 @@ def _host_identity(value: str) -> tuple[str, str] | None:
             return None
 
 
+def url_host_identity(value: str) -> tuple[str, str] | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        canonical_value = canonical_url(raw)
+    except CanonicalizationError:
+        return None
+    try:
+        host = str(urlsplit(canonical_value).hostname or "")
+    except ValueError:
+        return None
+    return _host_identity(host)
+
+
+def url_host_entity_id(
+    session_id: str,
+    canonical_value: str,
+    *,
+    team_id: str = "",
+) -> str:
+    identity = url_host_identity(canonical_value)
+    if identity is None:
+        return ""
+    host_type, host_canonical = identity
+    return atlas_entity_id(session_id, host_type, host_canonical, team_id=team_id)
+
+
 def _merge_attributes(existing: Mapping[str, Any] | None, incoming: Mapping[str, Any] | None) -> dict[str, Any]:
     merged = dict(existing or {})
     for key, value in dict(incoming or {}).items():
@@ -190,10 +220,24 @@ def upsert_entity(
 ) -> str:
     timestamp = str(seen_at or _now())
     team_id = str(team_id or "").strip()
+    entity_type = _normalize_entity_type(entity_type)
     signature_hash = entity_signature(entity_type, canonical_value)
     entity_id = atlas_entity_id(session_id, entity_type, canonical_value, team_id=team_id)
     if not host_entity_id and entity_type == "port":
         host_entity_id = _port_host_entity_id(session_id, canonical_value, team_id=team_id)
+    if not host_entity_id and entity_type == "url":
+        host_identity = url_host_identity(canonical_value)
+        if host_identity is not None:
+            host_type, host_canonical = host_identity
+            host_entity_id = upsert_entity(
+                conn,
+                session_id,
+                host_type,
+                host_canonical,
+                team_id=team_id,
+                seen_at=timestamp,
+                occurrence_count=max(0, int(occurrence_count or 0)),
+            )
     attributes_payload = _json_param(conn, attributes)
     if team_id:
         existing_row = conn.execute(
@@ -423,11 +467,17 @@ def materialize_run_entities(
     recalculate_entities(conn, existing_entity_ids)
     counts: Counter[tuple[str, str]] = Counter()
     attributes_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    url_host_keys: dict[tuple[str, str], tuple[str, str]] = {}
     invalid_entity_count = 0
     for entity in _iter_entry_entities(entries):
         normalized = canonicalize_entity_record(entity)
         if normalized:
             counts[normalized] += 1
+            if normalized[0] == "url":
+                host_identity = url_host_identity(normalized[1])
+                if host_identity is not None:
+                    url_host_keys[normalized] = host_identity
+                    counts[host_identity] += 1
             raw_attributes = entity.get("attributes") or entity.get("attributes_json")
             attributes = _json_dict(raw_attributes, source="incoming", log_context=_log_extra(
                 session_id,
@@ -457,6 +507,7 @@ def materialize_run_entities(
         total_occurrence_count=sum(int(count or 0) for count in counts.values()),
         invalid_entity_count=invalid_entity_count,
         port_entity_count=sum(int(count or 0) for (kind, _), count in counts.items() if kind == "port"),
+        url_host_link_count=len(url_host_keys),
         attribute_entity_count=len(attributes_by_key),
         scan_observation_count=scan_observation_count,
     ))
@@ -464,6 +515,16 @@ def materialize_run_entities(
     materialized = []
     sorted_items = sorted(counts.items(), key=lambda item: (item[0][0] == "port", item[0][0], item[0][1]))
     for (entity_type, canonical_value), occurrence_count in sorted_items:
+        host_entity_id = ""
+        if entity_type == "url":
+            host_identity = url_host_keys.get((entity_type, canonical_value))
+            if host_identity is not None:
+                host_entity_id = atlas_entity_id(
+                    session_id,
+                    host_identity[0],
+                    host_identity[1],
+                    team_id=team_id,
+                )
         entity_id = upsert_entity(
             conn,
             session_id,
@@ -472,6 +533,7 @@ def materialize_run_entities(
             team_id=team_id,
             seen_at=timestamp,
             occurrence_count=int(occurrence_count),
+            host_entity_id=host_entity_id,
             attributes=attributes_by_key.get((entity_type, canonical_value), {}),
         )
         conn.execute(

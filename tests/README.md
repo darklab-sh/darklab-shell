@@ -24,10 +24,10 @@ Current totals:
 
 - behavior tests: 3,893
 - docs/inventory meta-tests: 48
-- `pytest`: 2203 (2168 behavior + 35 meta)
+- `pytest`: 2207 (2172 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,941
+- total: 3,945
 
 This document is organized in two parts:
 
@@ -513,6 +513,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestProjectOverviewContract.test_finding_rollup_uses_review_suppression_and_verification_axes` | Verifies overview finding rollups keep review state, suppression, and verification state as distinct axes. |
 | `TestProjectOverviewContract.test_target_identity_uses_existing_atlas_entity_contract` | Verifies overview target identity follows the existing Atlas entity contract and host-to-domain/IP canonicalization. |
 | `TestProjectOverviewContract.test_legacy_host_value_type_auto_discovery_records_bare_domains` | Verifies legacy host-typed command and input-file discovery records bare hostnames as domain targets while skipping invalid values. |
+| `TestProjectOverviewContract.test_url_project_target_discovery_creates_atlas_url_and_host_link` | Verifies URL command-target discovery creates an Atlas URL entity and stores its host relationship. |
 | `TestProjectOverviewContract.test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects` | Verifies overview recent-change states and deep-link hints use existing monitoring and filter contracts. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, app-scan evidence, operational tempo, recent activity, coverage gaps, deliverables status, and deep-link rollups. |
 | `TestProjectOverviewContract.test_project_intel_overview_does_not_mark_app_ports_as_drift_without_provider_intel` | Verifies Project Overview does not flag app-captured ports as provider/app drift when no cached provider intel exists for the target. |
@@ -552,6 +553,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
 | `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
 | `TestPostgresMigrations.test_watcher_monitoring_incremental_migration_adds_enum_constraints` | Verifies the incremental watcher-monitoring Postgres migration normalizes legacy watcher-fire enum values and adds fire-kind and acknowledgement-state CHECK constraints. |
+| `TestPostgresMigrations.test_url_host_entity_link_migration_backfills_existing_postgres_links` | Verifies the URL host-link Postgres migration updates existing URL entities when matching scoped host entities exist. |
 | `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
@@ -945,8 +947,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_classifies_nmap_vulners_exploit_and_cve_rows_as_findings` | Verifies that Nmap Vulners CVE and exploit reference rows classify as findings while keeping the affected service context. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
-| `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
-| `TestOutputSignals.test_extract_entities_ignores_file_names_inside_url_paths` | Verifies that entity extraction keeps URL hostnames while ignoring file-like names inside URL paths. |
+| `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts URLs, public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
+| `TestOutputSignals.test_extract_entities_ignores_file_names_inside_url_paths` | Verifies that entity extraction keeps URL entities and hostnames while ignoring file-like names inside URL paths. |
 | `TestOutputSignals.test_extract_entities_can_include_private_ips_when_requested` | Verifies that entity extraction can opt into private and loopback IP metadata for explicit caller-controlled contexts. |
 | `TestOutputSignals.test_classifier_adds_entity_metadata_to_real_output` | Verifies that real command output lines carry structured entity metadata with source-line indexes. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
@@ -1053,6 +1055,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_atlas_import_parser_enforces_row_and_element_limits` | Verifies import parsing enforces row limits and streaming XML element limits. |
 | `TestDatabaseInit.test_atlas_import_parser_enforces_upload_and_warning_limits` | Verifies import parsing enforces upload byte limits and caps returned row warnings. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
+| `TestDatabaseInit.test_url_entities_create_and_link_host_entities` | Verifies URL materialization and direct URL upserts create scoped host entities and store URL host links. |
+| `TestDatabaseInit.test_backfills_url_host_entity_links_for_existing_rows` | Verifies startup backfill links existing URL entities to created host entities without adding fresh observations. |
 | `TestDatabaseInit.test_materializes_port_entities_with_host_relationship_and_attributes` | Verifies Atlas materialization stores port host relationships, merges service attributes, and preserves host-before-port ordering. |
 | `TestDatabaseInit.test_materializes_command_target_scan_observation_without_port_entities` | Verifies port-scan command targets create app-native scan observations even when the run surfaces no port entities. |
 | `TestDatabaseInit.test_materializes_quiet_port_scan_target_observations_by_command_root` | Verifies quiet nmap, rustscan, naabu, and nc scan commands record target observations without inventing port entities. |
