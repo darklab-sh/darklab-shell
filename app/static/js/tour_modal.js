@@ -363,7 +363,7 @@ let exportedRenderTourIllustration = null;
       tabs.className = 'tour-atlas-tabs';
       [
         ['Findings', '79'],
-        ['Hosts/IPs', '3'],
+        ['IPs', '3'],
         ['Domains', '22'],
       ].forEach(([label, count], index) => {
         const tab = document.createElement('span');
@@ -379,7 +379,7 @@ let exportedRenderTourIllustration = null;
       value.textContent = '104.21.4.35';
       const meta = document.createElement('span');
       meta.className = 'tour-atlas-meta';
-      meta.textContent = 'Hosts/IPs · 4 hits · 2 runs';
+      meta.textContent = 'IPs · 4 hits · 2 runs';
       const tags = document.createElement('div');
       tags.className = 'tour-mini-chip-row';
       tags.append(_createMiniPill('linked project', 'is-green'), _createMiniPill('intel ready'));

@@ -46,6 +46,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Project targets now use the same `domain`, `url`, and `ip` vocabulary as Atlas** — `host` is no longer presented as a separate target type, while legacy `host` API/import inputs are still accepted as aliases and resolve to `domain` or `ip`.
 - Frontend inventory checks now share the scanner in-process during Vitest runs and cache per-file analysis between fixture cases, cutting the inventory unit file from about 46 seconds to about 7 seconds locally while keeping the CLI output path intact.
 - Port-entity diagnostics now include bounded DEBUG/WARN breadcrumbs for scanner candidate drops, SQLite compatibility migration failures, malformed Atlas attributes, and scan-observation replacement, plus INFO-level port and scan-observation counts when runs capture Atlas evidence.
 - Port-entity documentation and the v1 API contract now describe host-linked port response metadata, generic import port syntax, Overview scan-coverage boundaries, and the settled port identity rules.

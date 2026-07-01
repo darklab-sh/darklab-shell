@@ -34,7 +34,7 @@ const FINDING = {
 
 const TABS = [
   { id: 'findings', label: 'Findings' },
-  { id: 'ip', label: 'Hosts/IPs' },
+  { id: 'ip', label: 'IPs' },
   { id: 'domain', label: 'Domains' },
 ]
 
@@ -282,7 +282,7 @@ describe('Mobile Atlas controller', () => {
 
     expect(document.body.classList.contains('atlas-mobile-ready')).toBe(true)
     expect(document.getElementById('atlas-mobile-root')?.classList.contains('u-hidden')).toBe(false)
-    expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('Hosts/IPs(1)')
+    expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('IPs(1)')
     expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('Domains(999+)')
     expect(document.getElementById('atlas-mobile-list')?.textContent).toContain('107.178.109.44')
     expect(mobile.currentView()).toBe('list')

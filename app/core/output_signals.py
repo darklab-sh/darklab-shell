@@ -719,7 +719,7 @@ def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[s
             _add_entity(
                 entities,
                 seen,
-                entity_type="host",
+                entity_type="domain",
                 value=value,
                 canonical_value=canonical,
                 source_line=source_line,
@@ -767,7 +767,7 @@ def _nmap_target_entities(value: str, source_line: int | None) -> list[dict[str,
         except CanonicalizationError:
             return []
         return [{
-            "type": "host",
+            "type": "domain",
             "value": host,
             "canonical_value": canonical,
             "confidence": "medium",
@@ -790,7 +790,7 @@ def _host_entity_type_and_canonical(host: str) -> tuple[str, str] | None:
         return "ip", canonical_ip(raw_host)
     except CanonicalizationError:
         try:
-            return "host", canonical_domain(raw_host)
+            return "domain", canonical_domain(raw_host)
         except CanonicalizationError:
             return None
 

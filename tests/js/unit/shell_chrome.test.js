@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { stripEsmExports } from './helpers/extract.js'
+import { TARGET_TYPES as PROJECT_TARGET_TYPES } from '../../../app/static/js/features/projects/project_target_validation.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -205,7 +206,6 @@ function loadShellChrome({
             <select id="project-target-type">
               <option value="domain">domain</option>
               <option value="url">url</option>
-              <option value="host">host</option>
               <option value="ip">ip</option>
             </select>
             <input id="project-target-value">
@@ -2718,13 +2718,16 @@ describe('shell chrome project workspace', () => {
     const typeSelect = document.getElementById('project-target-type')
     const valueInput = document.getElementById('project-target-value')
     const valueHelp = document.getElementById('project-target-value-help')
+    const expectedTargetTypes = ['domain', 'url', 'ip']
+    expect(PROJECT_TARGET_TYPES.map(type => type.value)).toEqual(expectedTargetTypes)
+    expect(Array.from(typeSelect.options).map(option => option.value)).toEqual(expectedTargetTypes)
     expect(valueInput.placeholder).toBe('target.example.com')
     expect(valueHelp.textContent).toContain('darklab.sh')
-    typeSelect.value = 'host'
+    typeSelect.value = 'ip'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(valueInput.placeholder).toBe('host.example.com')
-    expect(valueHelp.textContent).toContain('Hostname or IP address')
-    valueInput.value = 'api.darklab.sh'
+    expect(valueInput.placeholder).toBe('192.0.2.10')
+    expect(valueHelp.textContent).toContain('Single IPv4 or IPv6 address')
+    valueInput.value = '192.0.2.10'
     document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     await tick()
@@ -2733,15 +2736,15 @@ describe('shell chrome project workspace', () => {
     document.querySelector('[data-project-action="new-target"]').click()
     await tick()
 
-    expect(typeSelect.value).toBe('host')
+    expect(typeSelect.value).toBe('ip')
     expect(syncAppSelect).toHaveBeenCalledWith(typeSelect)
-    expect(valueInput.placeholder).toBe('host.example.com')
+    expect(valueInput.placeholder).toBe('192.0.2.10')
     expect(valueHelp.textContent).toContain('192.0.2.10')
     typeSelect.value = 'url'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(valueInput.placeholder).toBe('https://target.example.com/path')
     expect(valueHelp.textContent).toContain('https://darklab.sh')
-    typeSelect.value = 'host'
+    typeSelect.value = 'domain'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     valueInput.value = 'www.darklab.sh'
     document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -2750,7 +2753,7 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
-        type: 'host',
+        type: 'domain',
         value: 'www.darklab.sh',
       }),
     }))
@@ -3289,7 +3292,7 @@ describe('shell chrome project workspace', () => {
       },
       {
         id: 'target-2',
-        type: 'host',
+        type: 'domain',
         value: 'api.darklab.sh',
       },
       {
@@ -3624,7 +3627,7 @@ describe('shell chrome project workspace', () => {
             total: targetStates.length,
             limit: 50,
             offset: 0,
-            counts_by_type: { domain: 1, host: 1, ip: 1 },
+            counts_by_type: { domain: 2, ip: 1 },
           }),
         })
       }
@@ -4101,7 +4104,7 @@ describe('shell chrome project workspace', () => {
 
     document.querySelector('[data-project-tab="entities"]').click()
     await tick()
-    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('Hosts/IPs')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('IPs')
     expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1')
     expect(document.getElementById('project-explorer-body').textContent).toContain('107.178.109.44')
     expect(document.getElementById('project-explorer-body').textContent).toContain('Shodan')
@@ -4449,7 +4452,7 @@ describe('shell chrome project workspace', () => {
     apiTargetFilter.checked = true
     apiTargetFilter.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('target: host: api.darklab.sh')
+    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('target: domain: api.darklab.sh')
     expect(document.getElementById('project-explorer-body').textContent).toContain('api host responded')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('missing security header')
 

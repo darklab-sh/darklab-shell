@@ -5,7 +5,7 @@ import {
   tabById,
   tabs,
   totalEntityCount
-} from "./static-chunk-wkckhpty.7befd18332ed.js";
+} from "./static-chunk-3ftojl3p.96e64f27bcbd.js";
 export {
   DarklabAtlasTabs,
   countForTab,

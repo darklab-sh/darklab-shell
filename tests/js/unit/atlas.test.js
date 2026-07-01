@@ -750,7 +750,7 @@ describe('Atlas overlay', () => {
     expect(isAtlasOverlayOpen()).toBe(true)
     expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding')
-    expect(document.getElementById('atlas-tabs')?.textContent).toContain('Hosts/IPs(1)')
+    expect(document.getElementById('atlas-tabs')?.textContent).toContain('IPs(1)')
     expect(document.getElementById('atlas-tabs')?.classList.contains('tab-strip')).toBe(true)
     expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('tab-strip-item')).toBe(true)
     expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('is-active')).toBe(true)
@@ -1332,7 +1332,7 @@ describe('Atlas overlay', () => {
     await flushPromises()
 
     expect(document.getElementById('atlas-run-filter-chip')?.textContent).toContain('Run: nmap 107.178.1...')
-    expect(document.getElementById('atlas-tabs')?.textContent).toContain('Hosts/IPs(1/1)')
+    expect(document.getElementById('atlas-tabs')?.textContent).toContain('IPs(1/1)')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/entities?type=ip&limit=50&offset=0&run_id=run1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),

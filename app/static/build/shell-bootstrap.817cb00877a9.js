@@ -1520,12 +1520,10 @@ var ProjectTargetValidation = /* @__PURE__ */ (() => {
   const TARGET_TYPES2 = [
     { value: "domain", label: "domain" },
     { value: "url", label: "url" },
-    { value: "host", label: "host" },
     { value: "ip", label: "ip" }
   ];
   const TARGET_NOTES_MAX_LENGTH2 = 2e4;
   const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
-  const HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\.?$/i;
   const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
   const TARGET_VALUE_HELP2 = {
     domain: {
@@ -1537,11 +1535,6 @@ var ProjectTargetValidation = /* @__PURE__ */ (() => {
       placeholder: "https://target.example.com/path",
       help: "Full URL including scheme. Examples: https://darklab.sh, https://api.darklab.sh/login",
       error: "Use a full HTTP or HTTPS URL, such as https://darklab.sh/login."
-    },
-    host: {
-      placeholder: "host.example.com",
-      help: "Hostname or IP address. Examples: api.darklab.sh, 192.0.2.10",
-      error: "Use a hostname or IP address, such as api.darklab.sh or 192.0.2.10."
     },
     ip: {
       placeholder: "192.0.2.10",
@@ -1565,11 +1558,6 @@ var ProjectTargetValidation = /* @__PURE__ */ (() => {
   function isValidDomain(value) {
     return DOMAIN_RE.test(String(value || "").trim());
   }
-  function isValidHost(value) {
-    const candidate = String(value || "").trim();
-    if (!candidate || /[:/?#@\s]/.test(candidate)) return isValidIpAddress(candidate);
-    return HOST_RE.test(candidate);
-  }
   function isValidUrl(value) {
     const candidate = String(value || "").trim();
     if (!candidate || /\s/.test(candidate)) return false;
@@ -1591,7 +1579,6 @@ var ProjectTargetValidation = /* @__PURE__ */ (() => {
     const validators = {
       domain: isValidDomain,
       url: isValidUrl,
-      host: isValidHost,
       ip: isValidIpAddress
     };
     const validator = validators[normalized] || validators.domain;

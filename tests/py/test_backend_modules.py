@@ -2900,18 +2900,31 @@ class TestProjectOverviewContract:
         project = project_workspace.create_project("tok_overview_contract", {"name": "Overview Contract"})
         assert project is not None
 
-        host_ip = project_workspace.add_project_target(
-            "tok_overview_contract",
-            project["id"],
-            {"type": "host", "value": "192.0.2.25"},
-        )
-        assert host_ip is not None
-        host_domain = project_workspace.add_project_target(
-            "tok_overview_contract",
-            project["id"],
-            {"type": "host", "value": "Api.Example.COM"},
-        )
+        with mock.patch("services.projects.targets.log.debug") as debug_log, \
+                mock.patch("services.projects.targets.log.warning") as warning_log:
+            host_ip = project_workspace.add_project_target(
+                "tok_overview_contract",
+                project["id"],
+                {"type": "host", "value": "192.0.2.25"},
+            )
+            assert host_ip is not None
+            host_domain = project_workspace.add_project_target(
+                "tok_overview_contract",
+                project["id"],
+                {"type": "host", "value": "Api.Example.COM"},
+            )
         assert host_domain is not None
+        assert [call.args[0] for call in debug_log.call_args_list] == [
+            "PROJECT_TARGET_TYPE_CANONICALIZED",
+            "PROJECT_TARGET_TYPE_CANONICALIZED",
+        ]
+        assert [call.args[0] for call in warning_log.call_args_list] == [
+            "PROJECT_TARGET_LEGACY_TYPE_ALIAS_USED",
+            "PROJECT_TARGET_LEGACY_TYPE_ALIAS_USED",
+        ]
+        assert [call.kwargs["extra"]["resolved_type"] for call in warning_log.call_args_list] == ["ip", "domain"]
+        assert all(call.kwargs["extra"]["input_type"] == "host" for call in warning_log.call_args_list)
+        assert all(call.kwargs["extra"]["value_hash"] for call in warning_log.call_args_list)
         duplicate_domain = project_workspace.add_project_target(
             "tok_overview_contract",
             project["id"],
@@ -2968,12 +2981,132 @@ class TestProjectOverviewContract:
             "canonical_value": "api.example.com",
             "display_label": "domain:api.example.com",
         }
-        with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, host, or ip"):
+        with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, or ip"):
             project_workspace.add_project_target(
                 "tok_overview_contract",
                 project["id"],
                 {"type": "cidr", "value": "192.0.2.0/24"},
             )
+
+    def test_legacy_host_value_type_auto_discovery_records_bare_domains(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_host_value_type", {"name": "Host Value Type"})
+        assert project is not None
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run_host_value_type",
+                    "tok_host_value_type",
+                    "ping localhost",
+                    "2026-06-30T00:00:00Z",
+                    "2026-06-30T00:00:01Z",
+                ),
+            )
+            import services.projects.targets as project_targets
+
+            monkeypatch.setattr(
+                project_targets,
+                "read_workspace_text_file",
+                lambda *_args, **_kwargs: "intranet\nedge.example.com.\n192.0.2.11\nbad/path\n# skipped\n",
+            )
+            with mock.patch("services.projects.targets.log.warning") as warning_log:
+                recorded = project_workspace.record_project_target_discoveries(
+                    conn,
+                    "tok_host_value_type",
+                    project["id"],
+                    "run_host_value_type",
+                    [
+                        {
+                            "value": "localhost",
+                            "value_type": "host",
+                            "source_kind": "positional",
+                            "source_name": "argument_1",
+                        },
+                        {
+                            "value": "api.example.com.",
+                            "value_type": "host",
+                            "source_kind": "positional",
+                            "source_name": "argument_2",
+                        },
+                        {
+                            "value": "192.0.2.10",
+                            "value_type": "host",
+                            "source_kind": "positional",
+                            "source_name": "argument_3",
+                        },
+                        {
+                            "value": "hosts.txt",
+                            "value_type": "host",
+                            "source_kind": "flag",
+                            "source_name": "--hosts",
+                            "target_list_file": "1",
+                        },
+                    ],
+                )
+            assert "PROJECT_TARGET_DISCOVERY_FILE_READ_FAILED" not in [
+                call.args[0] for call in warning_log.call_args_list
+            ]
+            monkeypatch.setattr(
+                project_targets,
+                "read_workspace_text_file",
+                mock.Mock(side_effect=project_targets.WorkspaceError("permission denied")),
+            )
+            with mock.patch("services.projects.targets.log.warning") as warning_log:
+                skipped = project_workspace.record_project_target_discoveries(
+                    conn,
+                    "tok_host_value_type",
+                    project["id"],
+                    "run_host_value_type_read_fail",
+                    [
+                        {
+                            "value": "missing-hosts.txt",
+                            "value_type": "host",
+                            "source_kind": "flag",
+                            "source_name": "--hosts",
+                            "target_list_file": "1",
+                        },
+                    ],
+                )
+            assert skipped == []
+            warning_log.assert_called_once()
+            assert warning_log.call_args.args == ("PROJECT_TARGET_DISCOVERY_FILE_READ_FAILED",)
+            assert warning_log.call_args.kwargs["extra"]["value_type"] == "host"
+            assert warning_log.call_args.kwargs["extra"]["error_type"] == "WorkspaceError"
+            conn.commit()
+
+        assert {item["value"] for item in recorded} == {
+            "localhost",
+            "api.example.com",
+            "192.0.2.10",
+            "intranet",
+            "edge.example.com",
+            "192.0.2.11",
+        }
+        target_page = project_workspace.list_project_targets("tok_host_value_type", project["id"], limit=10)
+        assert target_page is not None
+        targets = {item["value"]: item for item in target_page["targets"]}
+        assert targets["localhost"]["type"] == "domain"
+        assert targets["localhost"]["source"] == "auto_command"
+        assert targets["localhost"]["source_detail"]["value_type"] == "host"
+        assert targets["api.example.com"]["type"] == "domain"
+        assert targets["api.example.com"]["source"] == "auto_command"
+        assert targets["api.example.com"]["source_detail"]["value_type"] == "host"
+        assert targets["192.0.2.10"]["type"] == "ip"
+        assert targets["192.0.2.10"]["source"] == "auto_command"
+        assert targets["192.0.2.10"]["source_detail"]["value_type"] == "host"
+        assert targets["intranet"]["type"] == "domain"
+        assert targets["intranet"]["source"] == "auto_input_file"
+        assert targets["intranet"]["source_detail"]["value_type"] == "host"
+        assert targets["edge.example.com"]["type"] == "domain"
+        assert targets["edge.example.com"]["source"] == "auto_input_file"
+        assert targets["edge.example.com"]["source_detail"]["value_type"] == "host"
+        assert targets["192.0.2.11"]["type"] == "ip"
+        assert targets["192.0.2.11"]["source"] == "auto_input_file"
+        assert targets["192.0.2.11"]["source_detail"]["value_type"] == "host"
+        assert "bad/path" not in targets
+        assert {item["type"] for item in targets.values()} == {"domain", "ip"}
 
     def test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects(self):
         assert project_workspace.classify_recent_change_state({
@@ -17675,8 +17808,9 @@ class TestOutputSignals:
                 )
                 entities = classified_entities or entities
             expected_host = port_value.rsplit(":", 1)[0].strip("[]")
+            expected_host_type = "ip" if ":" in expected_host or expected_host.replace(".", "").isdigit() else "domain"
             assert any(
-                entity["type"] in {"host", "ip"} and entity["canonical_value"] == expected_host
+                entity["type"] == expected_host_type and entity["canonical_value"] == expected_host
                 for entity in entities
             ), command
             port_entities = [entity for entity in entities if entity["type"] == "port"]
@@ -18639,7 +18773,7 @@ class TestOutputSignals:
             nmap_port_entities = metadata["entities"]
             assert isinstance(nmap_port_entities, list)
             nmap_port_values = {(item["type"], item["canonical_value"]) for item in nmap_port_entities}
-            assert ("host", "darklab.sh") in nmap_port_values
+            assert ("domain", "darklab.sh") in nmap_port_values
             assert ("port", port_value) in nmap_port_values
             assert all(item["canonical_value"] not in {"http.server", "3.1.9.q3"} for item in nmap_port_entities)
 
@@ -18647,7 +18781,7 @@ class TestOutputSignals:
         nmap_report_entities = nmap_report["entities"]
         assert isinstance(nmap_report_entities, list)
         nmap_report_values = {(item["type"], item["canonical_value"]) for item in nmap_report_entities}
-        assert ("host", "web.darklab.sh") in nmap_report_values
+        assert ("domain", "web.darklab.sh") in nmap_report_values
         assert ("ip", "104.21.4.35") in nmap_report_values
         nmap_rdns = nmap_classifier.classify_line("rDNS record for 104.21.4.35: web.darklab.sh")
         nmap_rdns_entities = nmap_rdns["entities"]
@@ -18728,7 +18862,7 @@ class TestOutputSignals:
             (item["type"], item["canonical_value"])
             for item in first_entities
         } == {
-            ("host", "ip.darklab.sh"),
+            ("domain", "ip.darklab.sh"),
             ("ip", "192.168.20.5"),
         }
         assert first_port["target"] == "ip.darklab.sh"
@@ -18740,7 +18874,7 @@ class TestOutputSignals:
             (item["type"], item["canonical_value"])
             for item in second_entities
         } == {
-            ("host", "h.darklab.sh"),
+            ("domain", "h.darklab.sh"),
             ("ip", "108.79.194.246"),
         }
         assert second_port["target"] == "h.darklab.sh"
@@ -23001,7 +23135,8 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
 
-            self._create_tables(db_path)
+            with mock.patch("core.database.log.info") as info_log:
+                self._create_tables(db_path)
 
             conn = sqlite3.connect(db_path)
             tables = {
@@ -23020,6 +23155,13 @@ SQL syntax error near q</response>
         assert "findings_occurrences" in tables
         assert {"signature_hash", "last_seen_at", "run_id"}.issubset(finding_columns)
         assert finding_count == 0
+        audit_log = next(call for call in info_log.call_args_list if call.args == ("PROJECT_TARGET_HOST_TYPE_AUDIT",))
+        assert audit_log.kwargs["extra"] == {
+            "host_entity_rows": 0,
+            "legacy_target_tables_present": False,
+            "legacy_target_table_count": 0,
+            "migration_required": False,
+        }
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
         assert database.validate_project_entity_type("run") == "run"

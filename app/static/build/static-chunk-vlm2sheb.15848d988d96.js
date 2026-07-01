@@ -64,7 +64,7 @@ import {
 } from "./static-chunk-b3etjcu4.ab70b0c41ed7.js";
 import {
   DarklabAtlasTabs
-} from "./static-chunk-wkckhpty.7befd18332ed.js";
+} from "./static-chunk-3ftojl3p.96e64f27bcbd.js";
 
 // app/static/js/features/history/history_run_details.js
 var HISTORY_RUN_GLOBAL = typeof window !== "undefined" ? window : globalThis;
@@ -745,7 +745,7 @@ function _historyRunCanUseAi(run = _historyRunPrimary()) {
 }
 function _historyRunEntityTabs() {
   const atlasTabs = DarklabAtlasTabs2 && Array.isArray(DarklabAtlasTabs2.tabs) ? DarklabAtlasTabs2.tabs : [
-    { id: "ip", label: "Hosts/IPs", type: "ip", countKey: "ip" },
+    { id: "ip", label: "IPs", type: "ip", countKey: "ip" },
     { id: "domain", label: "Domains", type: "domain", countKey: "domain" },
     { id: "hash", label: "Hashes", type: "hash", countKey: "hash" },
     { id: "cve", label: "CVEs", type: "cve", countKey: "cve" },
@@ -756,7 +756,7 @@ function _historyRunEntityTabs() {
 function _historyRunActiveEntityTab() {
   const tabs = _historyRunEntityTabs();
   const activeId = String(_historyRunModalState.activeEntityTab || "");
-  return tabs.find((tab) => tab.id === activeId) || tabs[0] || { id: "ip", label: "Hosts/IPs", type: "ip", countKey: "ip" };
+  return tabs.find((tab) => tab.id === activeId) || tabs[0] || { id: "ip", label: "IPs", type: "ip", countKey: "ip" };
 }
 function _historyRunEntityCount(type) {
   const summary = _historyRunModalState.entitySummary || {};

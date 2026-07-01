@@ -29,6 +29,58 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
+- **Relate URL entities to their domain, and auto-create the domain on capture.**
+  - Scope:
+    - Depends on the `host` to `domain` collapse above so URLs, ports, and domains all converge on `domain` or `ip` host entities.
+    - Reuse the existing `host_entity_id` relationship column. It already represents "the host this entity belongs to" for ports, and URLs fit that relationship without a schema rename.
+    - Apply the relationship to live command capture, imports, package re-import paths, and existing stored URL entities where practical.
+  - Phase 1: Define URL host identity once.
+    - Add a shared URL host derivation helper in the Atlas materialization layer or nearby utility code.
+    - Parse the canonical URL host, then canonicalize it to either `ip` or `domain`.
+    - Cover ports, userinfo, mixed-case hostnames, bracketed IPv6 addresses, invalid URLs, and URLs with no host.
+  - Phase 2: Link URL entities during materialization.
+    - Extend the current port-only `host_entity_id` derivation so `url` entities can derive their host entity ID.
+    - Avoid dangling relationships: either ensure the derived host entity exists before storing `host_entity_id`, or only store the link when the host entity is present.
+    - Resolve the host entity id within the URL entity's own scope (`session_id` for personal rows, `team_id` for team rows), matching how entity identity and uniqueness are already keyed, so a URL never links to a same-value host entity from another scope.
+    - Do not rely only on extraction co-emission. Materialization must handle URL-only callers, imports, and package paths by either ensuring/counting the URL host entity before URL upsert or intentionally leaving `host_entity_id` blank until a matching host entity exists.
+    - Keep the existing port behavior intact and avoid changing port canonical values or port relationship semantics.
+  - Phase 3: Co-create host entities when URLs are captured.
+    - Co-emit the URL's `domain` or `ip` host entity when a URL entity is captured, matching the port host co-emit pattern.
+    - Apply this to generic output extraction and scanner-specific extraction paths that produce URL entities.
+    - De-duplicate co-emitted host entities with the existing entity de-dupe behavior so URL lines do not create duplicate same-line host observations.
+  - Phase 4: Cover import and package paths.
+    - Update import parsing and package re-import paths that materialize URL entities so they also create or link the URL host entity.
+    - Preserve legacy `host` import inputs as aliases after the host-to-domain collapse.
+    - Add tests for imported URL entities so the feature is not limited to live command output.
+  - Phase 5: Backfill existing URL entities.
+    - Add an idempotent backfill for stored `entities.type = 'url'` rows with missing `host_entity_id`.
+    - Match and create host entities within each URL row's own `(session_id, team_id)` scope so team and personal rows stay isolated and no cross-scope link is written.
+    - Create missing host entities only if the backfill can assign sensible owner, first/last seen, occurrence, and provenance values; otherwise link only to host entities that already exist and log/measure skipped rows.
+    - Land the backfill on both backends with matching semantics (SQLite compatibility migration in `database.py` and the paired Postgres migration under `core/migrations/`) and cover both under the Postgres test lane.
+    - Include IP-host URLs and invalid URL rows in backfill tests.
+  - Phase 6: Replace Overview's URL host resolver carefully.
+    - Prefer stored `host_entity_id` when building Overview app-data rollups.
+    - Retire `overview._overview_url_host_entity_ids` only after URL Project targets are guaranteed to have URL entities with stored host links.
+    - If Project URL targets can exist without matching Atlas URL entities, keep a small fallback resolver for those targets.
+  - Phase 7: Verification and UX payoff.
+    - Update Atlas lookup/detail payloads and UI affordances so `domain`/`ip` entities can show and pivot to related URL entities through `host_entity_id`.
+    - Add backend tests for URL host derivation, URL materialization links, co-created host entities, imports, package re-imports, backfill, IP-host URLs, and invalid URLs.
+    - Add Overview tests proving URL targets roll up app-captured ports/services through stored host relationships.
+    - Verify Atlas domain detail views can pivot to related URLs, and that host-grouped comparisons/monitoring consume the relationship consistently.
+    - Update docs and test-count documentation if new tests change documented totals.
+  - Open TODO: Materialize auto-discovered Project targets into Atlas when run-entity linking is enabled.
+    - When an active-project-linked run discovers Project targets from command arguments or supported input files, materialize those `domain`, `ip`, and `url` target values as Atlas entities for the same run when **Also add Atlas entities from auto-linked runs** is enabled.
+    - Treat legacy `host` command metadata as a compatibility alias that resolves to `domain` or `ip`, matching the Project target collapse rules.
+    - Preserve provenance clearly so these Atlas rows are marked as command-target evidence, not as values observed in command output.
+    - De-duplicate against entities already captured from run output and avoid duplicate project links when the same entity is produced by both target discovery and transcript extraction.
+    - For URL targets, create/link the URL host entity through the URL host relationship work above so Project URL targets, Atlas URL rows, and host rollups stay consistent.
+    - Add tests covering plain command URL targets such as `curl https://ip.darklab.sh`, URL target-list files, IP/domain targets, disabled run-entity linking, and duplicate output-captured entities.
+  - Open Decisions:
+    - Recommended: keep the column name `host_entity_id`. It is already the established relationship field and describes the role, not the entity type.
+    - Recommended: during live capture, ensure the URL host entity exists before storing the URL's `host_entity_id`; this avoids invisible dangling relationships.
+    - Recommended: during retroactive backfill, link to existing host entities first. Only create missing host entities when provenance can be preserved clearly enough that the new row does not look like a fresh scan observation.
+    - Recommended: keep an Overview fallback for URL Project targets until tests prove every URL target has a materialized URL entity with `host_entity_id`.
+
 ---
 
 ## Known Issues

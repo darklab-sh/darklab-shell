@@ -48,7 +48,7 @@ let exportedCycleAtlasTab = null;
   const tabsApi = (typeof importedAtlasTabs !== 'undefined' && importedAtlasTabs) || {};
   const fallbackAtlasTabs = [
     { id: 'findings', type: '', label: 'Findings' },
-    { id: 'ip', type: 'ip', label: 'Hosts/IPs' },
+    { id: 'ip', type: 'ip', label: 'IPs' },
     { id: 'domain', type: 'domain', label: 'Domains' },
     { id: 'hash', type: 'hash', label: 'Hashes' },
     { id: 'cve', type: 'cve', label: 'CVEs' },

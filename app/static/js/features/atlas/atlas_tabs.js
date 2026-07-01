@@ -2,7 +2,7 @@
 
 const tabs = [
   { id: 'findings', label: 'Findings', type: '', countKey: 'findings' },
-  { id: 'ip', label: 'Hosts/IPs', type: 'ip', countKey: 'ip' },
+  { id: 'ip', label: 'IPs', type: 'ip', countKey: 'ip' },
   { id: 'domain', label: 'Domains', type: 'domain', countKey: 'domain' },
   { id: 'port', label: 'Ports', type: 'port', countKey: 'port' },
   { id: 'hash', label: 'Hashes', type: 'hash', countKey: 'hash' },

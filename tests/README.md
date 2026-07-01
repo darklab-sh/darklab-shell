@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,892
+- behavior tests: 3,893
 - docs/inventory meta-tests: 48
-- `pytest`: 2202 (2167 behavior + 35 meta)
+- `pytest`: 2203 (2168 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,940
+- total: 3,941
 
 This document is organized in two parts:
 
@@ -512,6 +512,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestProjectOverviewContract.test_payload_contract_and_overview_helpers_pin_phase_one_decisions` | Verifies the Project overview payload skeleton, certificate buckets, app-scan coverage defaults, operational-tempo defaults, recent-activity defaults, coverage-gap defaults, deliverables defaults, and severity order match the Overview contract. |
 | `TestProjectOverviewContract.test_finding_rollup_uses_review_suppression_and_verification_axes` | Verifies overview finding rollups keep review state, suppression, and verification state as distinct axes. |
 | `TestProjectOverviewContract.test_target_identity_uses_existing_atlas_entity_contract` | Verifies overview target identity follows the existing Atlas entity contract and host-to-domain/IP canonicalization. |
+| `TestProjectOverviewContract.test_legacy_host_value_type_auto_discovery_records_bare_domains` | Verifies legacy host-typed command and input-file discovery records bare hostnames as domain targets while skipping invalid values. |
 | `TestProjectOverviewContract.test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects` | Verifies overview recent-change states and deep-link hints use existing monitoring and filter contracts. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_returns_bounded_target_rollups` | Verifies the Project overview aggregator returns bounded target rows with intel, certificate, finding, app-scan evidence, operational tempo, recent activity, coverage gaps, deliverables status, and deep-link rollups. |
 | `TestProjectOverviewContract.test_project_intel_overview_does_not_mark_app_ports_as_drift_without_provider_intel` | Verifies Project Overview does not flag app-captured ports as provider/app drift when no cached provider intel exists for the target. |
@@ -1660,7 +1661,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_activity_route_allows_team_viewer_for_team_project_only` | Verifies team viewers can read safe Project Activity for their team project but cannot read foreign project activity. |
 | `TestProjectRoutes.test_project_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed project-delete audit failures roll back the project deletion. |
 | `TestProjectRoutes.test_package_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed package-delete audit failures roll back the package deletion. |
-| `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
+| `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies legacy host target payloads that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
 | `TestProjectRoutes.test_project_targets_list_supports_pagination_type_search_and_auto_filter` | Verifies the project target list supports paging, type filters, search, and the auto-discovered target review filter. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
@@ -3639,7 +3640,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `unarchives archived projects without changing the active project` | Verifies that archived projects can be restored from the Projects modal without claiming the active project slot. |
 | `deletes a project from the project explorer after confirmation` | Verifies that the Projects modal confirms destructive project deletion and refreshes the list afterward. |
 | `toggles the active project external run capture preference` | Verifies that the Projects modal can disable automatic active-project capture for external command runs. |
-| `keeps the target editor dropdown value in sync with the last saved target type` | Verifies that the project target editor initializes and submits the same target type that the custom dropdown displays. |
+| `keeps the target editor dropdown value in sync with the last saved target type` | Verifies that the project target editor offers only domain, URL, and IP targets, then initializes and submits the same target type that the custom dropdown displays. |
 | `validates project target values before saving` | Verifies that project target values are validated client-side before the modal saves a new or edited target. |
 | `reloads project findings after linked runs change` | Verifies that project findings refresh after runs are linked or unlinked from the project. |
 | `autosaves project notes while editing` | Verifies that project notes save automatically from the Details tab without an explicit Save button. |

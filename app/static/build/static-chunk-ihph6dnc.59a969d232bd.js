@@ -3,7 +3,7 @@ import {
 } from "./static-chunk-tpp5q7ek.af0eda8fe31e.js";
 import {
   openHistoryRunDetails
-} from "./static-chunk-a2skky4v.fdc26127db92.js";
+} from "./static-chunk-vlm2sheb.15848d988d96.js";
 import {
   DarklabFindingTriageEditor
 } from "./static-chunk-bhfvp6qr.b192c5d40729.js";
@@ -51,7 +51,7 @@ import {
 } from "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
 import {
   DarklabAtlasTabs
-} from "./static-chunk-wkckhpty.7befd18332ed.js";
+} from "./static-chunk-3ftojl3p.96e64f27bcbd.js";
 
 // app/static/js/features/atlas/atlas_overlay.js
 var exportedDarklabAtlasOverlay = null;
@@ -64,7 +64,7 @@ var exportedCycleAtlasTab = null;
   const tabsApi = typeof DarklabAtlasTabs !== "undefined" && DarklabAtlasTabs || {};
   const fallbackAtlasTabs = [
     { id: "findings", type: "", label: "Findings" },
-    { id: "ip", type: "ip", label: "Hosts/IPs" },
+    { id: "ip", type: "ip", label: "IPs" },
     { id: "domain", type: "domain", label: "Domains" },
     { id: "hash", type: "hash", label: "Hashes" },
     { id: "cve", type: "cve", label: "CVEs" },

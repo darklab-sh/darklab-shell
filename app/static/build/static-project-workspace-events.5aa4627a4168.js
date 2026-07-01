@@ -1,11 +1,11 @@
 import {
   exportedOpenAtlas
-} from "./static-chunk-mimavljz.a8ddb53c480e.js";
+} from "./static-chunk-ihph6dnc.59a969d232bd.js";
 import {
   exportedOpenFindingsBoard
 } from "./static-chunk-tpp5q7ek.af0eda8fe31e.js";
 import "./static-chunk-wkdqs5l5.75c18d0d56e7.js";
-import "./static-chunk-a2skky4v.fdc26127db92.js";
+import "./static-chunk-vlm2sheb.15848d988d96.js";
 import "./static-chunk-l5ozudqx.6450e1dfd2f8.js";
 import "./static-chunk-jt52ywso.e4ed3d5d01eb.js";
 import "./static-chunk-tda3zjlz.ba4d349f2998.js";
@@ -34,7 +34,7 @@ import "./static-chunk-2kxtimik.c9801087c7a7.js";
 import "./static-chunk-vup3nxbi.29ebe5c76a40.js";
 import "./static-chunk-b3etjcu4.ab70b0c41ed7.js";
 import "./static-chunk-6ep7jfeg.e8819f5c9afc.js";
-import "./static-chunk-wkckhpty.7befd18332ed.js";
+import "./static-chunk-3ftojl3p.96e64f27bcbd.js";
 
 // app/static/js/features/projects/project_workspace_events.js
 var exportedDarklabProjectWorkspaceEvents = null;

@@ -1192,7 +1192,7 @@ class TestRunStreaming:
         )
         data = json.loads(target_resp.data)
         assert target_resp.status_code == 400
-        assert data["error"] == "target type must be domain, url, host, or ip"
+        assert data["error"] == "target type must be domain, url, or ip"
 
     def test_project_targets_reject_port_set_targets(self):
         client = get_client()
@@ -1216,7 +1216,7 @@ class TestRunStreaming:
         )
         data = json.loads(ports_resp.data)
         assert ports_resp.status_code == 400
-        assert data["error"] == "target type must be domain, url, host, or ip"
+        assert data["error"] == "target type must be domain, url, or ip"
 
     def test_active_project_auto_discovers_typed_command_targets(self):
         client = get_client()

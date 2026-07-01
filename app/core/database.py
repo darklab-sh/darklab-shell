@@ -2732,6 +2732,40 @@ def prune_retention(conn, *, cfg=None) -> dict[str, int]:
     return _prune_retention(conn, cfg=cfg)
 
 
+def _table_exists_for_backend(conn, table_name: str) -> bool:
+    if DB_BACKEND == DatabaseBackend.SQLITE:
+        return sqlite_table_exists(conn, table_name)
+    row = conn.execute("SELECT to_regclass(?) AS table_name", (table_name,)).fetchone()
+    if not row:
+        return False
+    try:
+        value = row["table_name"]
+    except (TypeError, KeyError, IndexError):
+        value = row[0]
+    return bool(value)
+
+
+def _audit_project_target_host_type_collapse(conn) -> None:
+    try:
+        host_entity_count = 0
+        if _table_exists_for_backend(conn, "entities"):
+            row = conn.execute("SELECT COUNT(*) AS count FROM entities WHERE type = ?", ("host",)).fetchone()
+            host_entity_count = int(row["count"] or 0) if row else 0
+        legacy_target_table_count = sum(
+            1
+            for table_name in ("project_targets", "finding_targets")
+            if _table_exists_for_backend(conn, table_name)
+        )
+        log.info("PROJECT_TARGET_HOST_TYPE_AUDIT", extra={
+            "host_entity_rows": host_entity_count,
+            "legacy_target_tables_present": legacy_target_table_count > 0,
+            "legacy_target_table_count": legacy_target_table_count,
+            "migration_required": bool(host_entity_count or legacy_target_table_count),
+        })
+    except Exception:
+        log.debug("PROJECT_TARGET_HOST_TYPE_AUDIT_FAILED", exc_info=True)
+
+
 def db_init():
     """Create the runs and snapshots tables if they don't exist, and prune old records."""
     ensure_run_output_dir()
@@ -2749,6 +2783,7 @@ def db_init():
 
             warn_if_disabled()
             prune_events(conn=conn)
+            _audit_project_target_host_type_collapse(conn)
             conn.commit()
         return
     with _db_init_lock():
@@ -2765,6 +2800,7 @@ def db_init():
 
             warn_if_disabled()
             prune_events(conn=conn)
+            _audit_project_target_host_type_collapse(conn)
             conn.commit()
 
 

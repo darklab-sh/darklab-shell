@@ -31,7 +31,7 @@ let exportedDarklabProjectEntities = null;
     const atlasTabs = atlasTabsApi && Array.isArray(atlasTabsApi.tabs)
       ? atlasTabsApi.tabs
       : [
-          { id: 'ip', label: 'Hosts/IPs', type: 'ip' },
+          { id: 'ip', label: 'IPs', type: 'ip' },
           { id: 'domain', label: 'Domains', type: 'domain' },
           { id: 'port', label: 'Ports', type: 'port' },
           { id: 'hash', label: 'Hashes', type: 'hash' },
