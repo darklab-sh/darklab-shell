@@ -474,24 +474,24 @@
       "hash": "73693a9d3c46aa82186761251f8ae8c0b339e230d48e2abcec2400d54dbcc1a6"
     },
     "/static/js/features/atlas/atlas_entity_detail.js": {
-      "path": "/static/build/static-atlas-entity-detail.bf8167a76fa5.js",
-      "hash": "ec3c1047025f5192606bd81efb35505fe83ce3346bb42e702fbedc97a9f821ea"
+      "path": "/static/build/static-atlas-entity-detail.46c5fe86afcc.js",
+      "hash": "1d3ae171103df432f0110ce1d4722b37c6ac7ddebe1449c8fcf543ece1d44d17"
     },
     "/static/js/features/atlas/atlas_entity_row.js": {
       "path": "/static/build/static-atlas-entity-row.a5abbc664a6a.js",
       "hash": "eec81e5b6331ca0afb313bfde012322a79522b5da2c4811f69cbefd636a939c6"
     },
     "/static/js/features/atlas/atlas_mobile.js": {
-      "path": "/static/build/static-atlas-mobile.c5bf28277958.js",
-      "hash": "da24082902c1c826908d715076d99b1b1355f6b65d169edfe1dc6769306235bd"
+      "path": "/static/build/static-atlas-mobile.50d7b3fb0b00.js",
+      "hash": "66daad2f01d4a9c47dfcb855f9dbc5a45100d3c079575a95d237ce063b374756"
     },
     "/static/js/features/atlas/atlas_mobile_bridge.js": {
       "path": "/static/build/static-atlas-mobile-bridge.68d660b80c55.js",
       "hash": "8f8a889c4ca1686f46e138102e5d53c09e4681952933261143bb0d59c06cd8bf"
     },
     "/static/js/features/atlas/atlas_overlay.js": {
-      "path": "/static/build/static-atlas-overlay.1fcb8aad8865.js",
-      "hash": "573aa30e7fe0ebe035db03285e9e8362f61750e4074a7d16e25d9fa9a9195315"
+      "path": "/static/build/static-atlas-overlay.03550e0df376.js",
+      "hash": "01533864ea2aca9028a46a26ba29a291bb521d1b3aee4f6ee5906c29a30e6f86"
     },
     "/static/js/features/atlas/atlas_tabs.js": {
       "path": "/static/build/static-atlas-tabs.93b6a35ff4c9.js",
@@ -542,8 +542,8 @@
       "hash": "4c2cc5eba16f3b0e6f565c4e45b0c84e6311216485133427145ebc375bcc7afc"
     },
     "/static/js/features/projects/project_entities.js": {
-      "path": "/static/build/static-project-entities.56ba1cee418c.js",
-      "hash": "0fa9e6b7fec4404d9a1773c7386f8897872b19820fce776bdb354e2a5a49caf1"
+      "path": "/static/build/static-project-entities.c87778914537.js",
+      "hash": "7ca34a971f090fe07b56c40b7663092a51d433638b2cd07b6d1d065348941ee7"
     },
     "/static/js/features/projects/project_entity_editor.js": {
       "path": "/static/build/static-project-entity-editor.9307c52daec4.js",
@@ -586,8 +586,8 @@
       "hash": "15ad4a29dfa5b01843e5adcc0288577ace1b724661a65253f3ef0ce960fae9f9"
     },
     "/static/js/features/projects/project_navigation.js": {
-      "path": "/static/build/static-project-navigation.c1a1567ea871.js",
-      "hash": "aa6dcfb8199f72dd734ee053b076f3d93e62e076289191c4aa56fa4e6a2dc2b7"
+      "path": "/static/build/static-project-navigation.7534701fa3fa.js",
+      "hash": "07816f88056a06c5f3983a264c69720c734053ac8c138e81bd7c81efecaa540e"
     },
     "/static/js/features/projects/project_nested_sheets.js": {
       "path": "/static/build/static-project-nested-sheets.3d2f1c7c1e3d.js",
@@ -622,8 +622,8 @@
       "hash": "abc5aef77f6330e3f72171e1cf20f902127f420a88bc870ca36ea6d269d4707d"
     },
     "/static/js/features/projects/project_workspace_events.js": {
-      "path": "/static/build/static-project-workspace-events.5aa4627a4168.js",
-      "hash": "8fd6bbcf2ca493b45210bfb93410cdd04a3e8e35d3be2e27844e077e20b5f7b4"
+      "path": "/static/build/static-project-workspace-events.e9df5fef05db.js",
+      "hash": "901c9829d06926caf71e27428239b9ec8aaf6607142ef3082cd0d3e9019f4418"
     },
     "/static/js/features/projects/project_workspace_lifecycle.js": {
       "path": "/static/build/static-project-workspace-lifecycle.eae3cd4b4fb3.js",
@@ -694,8 +694,8 @@
       "hash": "993a7cb918ab9931a2ef7c6f1208fb3ee7a0a7e85d8234a7b5739e2f663e783a"
     },
     "/static/js/tour_modal.js": {
-      "path": "/static/build/static-tour-modal.81ed3293952c.js",
-      "hash": "9be44a14d7e35d4cb2df4ce0a2c7a65c1e364e9ca38a3d3449339a5f4fc1b048"
+      "path": "/static/build/static-tour-modal.9813a4930399.js",
+      "hash": "9857fd31e556b7265dc95070f2eec70c80bf786e35bf9d5aee6095c7bc33da3b"
     },
     "/static/css/styles.css": {
       "path": "/static/build/static-styles.5ebac6464907.css",

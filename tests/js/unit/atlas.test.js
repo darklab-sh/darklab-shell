@@ -31,6 +31,21 @@ const PORT_ENTITY = {
   last_seen_at: '2026-05-15T00:01:00Z',
 }
 
+const URL_ENTITY = {
+  id: 'ent_url',
+  type: 'url',
+  canonical_value: 'https://107.178.109.44/login',
+  host_entity_id: 'ent_ip',
+  occurrence_count: 1,
+  run_count: 1,
+  project_link_count: 0,
+  project_links: [],
+  labels: [],
+  note: null,
+  first_seen_at: '2026-05-15T00:03:00Z',
+  last_seen_at: '2026-05-15T00:03:00Z',
+}
+
 const FINDING = {
   id: 'fnd_1',
   title: '443/tcp open https',
@@ -299,6 +314,14 @@ function loadAtlas({
           offset: 0,
         }))
       }
+      if (target.includes('type=url')) {
+        return Promise.resolve(jsonResponse({
+          entities: [URL_ENTITY],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        }))
+      }
       return Promise.resolve(jsonResponse({
         entities: [ENTITY],
         total: 1,
@@ -421,9 +444,32 @@ function loadAtlas({
           occurrence_count: 2,
           last_seen_at: '2026-05-15T00:01:00Z',
         }],
+        related_urls: [URL_ENTITY],
         findings: [],
         detail_limits: {
+          related_urls: { limit: 25, offset: 0, shown: 1, total: 1, has_more: false },
           runs: { limit: 50, offset: 0, shown: 1, total: 55, has_more: true },
+          findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+        },
+      }))
+    }
+    if (target === '/atlas/entities/ent_url') {
+      return Promise.resolve(jsonResponse({
+        entity: URL_ENTITY,
+        import_sources: [],
+        intel_snapshots: [],
+        intel_summary: { status: 'unsupported', providers_with_data: [], highlights: [] },
+        runs: [{
+          run_id: 'run-url',
+          command: 'curl https://107.178.109.44/login',
+          occurrence_count: 1,
+          last_seen_at: '2026-05-15T00:03:00Z',
+        }],
+        related_urls: [],
+        findings: [],
+        detail_limits: {
+          related_urls: { limit: 25, offset: 0, shown: 0, total: 0, has_more: false },
+          runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
           findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
         },
       }))
@@ -765,6 +811,8 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Open ports')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('80, 443')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Created by Nuclei JSONL import')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Related URLs')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('https://107.178.109.44/login')
     expect(document.querySelectorAll('.atlas-intel-highlight-provider')).toHaveLength(2)
     expect(document.querySelector('.atlas-intel-highlight-provider')?.textContent).toContain('CVE-2026-0001')
     const intelToggle = document.querySelector('.atlas-intel-card-toggle')
@@ -799,6 +847,14 @@ describe('Atlas overlay', () => {
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', expect.objectContaining({ cache: 'no-store' }))
+    document.querySelector('#atlas-detail .atlas-related-url-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/entities?type=url&limit=50&offset=0&orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_url', expect.objectContaining({ cache: 'no-store' }))
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('curl https://107.178.109.44/login')
   })
 
   it('previews and applies an Atlas import from a project-scoped Atlas surface', async () => {

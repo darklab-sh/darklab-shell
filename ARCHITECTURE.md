@@ -1320,7 +1320,7 @@ The Atlas UI sends the same `type`, search text, project filter, orphan-source f
 | `id` | string | string | Atlas entity id. |
 | `type` | string | string | Entity type: `ip`, `domain`, `port`, `url`, `hash`, or `cve`. |
 | `canonical_value` | string | string | Normalized entity value. |
-| `host_entity_id` | string | string | Host entity id for port rows. Empty for other entity types. |
+| `host_entity_id` | string | string | Host entity id for host-owned rows. Port rows point at the scanned host; URL rows point at the scoped domain or IP derived from the canonical URL host. Empty for entity types without a host relationship. |
 | `attributes_json` | JSON string | object | Port service/version/banner attributes when known. Empty for rows without app-captured attributes. |
 | `first_seen_at` | string | string | First time Atlas saw the entity in this session. |
 | `last_seen_at` | string | string | Most recent time Atlas saw the entity in this session. |
@@ -1854,7 +1854,10 @@ The current event inventory is:
 | DEBUG | `PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, source filter counts, linked/promoted/already-linked/new/quota/cap counts, limit, truncated |
 | DEBUG | `OUTPUT_SIGNAL_PORT_ENTITY_SKIPPED` | output signal classifier | command_root, line_index, reason, port, proto, host_kind, host_hash |
 | DEBUG | `SQLITE_SCHEMA_COMPAT_COLUMN_EXISTS` | SQLite schema compatibility migration | table, column, migration_area |
-| DEBUG | `ATLAS_ENTITY_MATERIALIZATION_SUMMARY` | Atlas entity materializer | session, team_id, run_id, command_root, entity/occurrence/invalid/port/attribute/scan-observation counts |
+| DEBUG | `ATLAS_ENTITY_MATERIALIZATION_SUMMARY` | Atlas entity materializer | session, team_id, run_id, command_root, entity/occurrence/invalid/port/url/url-host/attribute/scan-observation counts |
+| INFO | `ATLAS_URL_HOST_BACKFILL_COMPLETED` | startup URL host-link backfill | backend, url_entity_count, updated_count, skipped_count |
+| WARN | `ATLAS_URL_HOST_BACKFILL_SKIPPED_ROWS` | startup URL host-link backfill | backend, url_entity_count, invalid_url_count, host_upsert_miss_count, update_miss_count |
+| ERROR | `ATLAS_URL_HOST_BACKFILL_ROW_FAILED` | startup URL host-link backfill | backend, stage, url_entity_id, session, team_id, host_entity_type |
 | DEBUG | `SCAN_TARGET_OBSERVATIONS_SKIPPED` | Atlas entity materializer | session, team_id, run_id, command_root, deleted_count, reason |
 | DEBUG | `ATLAS_ENTITY_ATTRIBUTES_DROPPED` | Atlas entity materializer | session, team_id, run_id, entity_id, entity_type, value_type, reason |
 | DEBUG | `ATLAS_IMPORT_PARSE_STARTED` | Atlas import parser | format_id, upload_bytes, max_rows, max_warnings, max_xml_elements |
@@ -2143,12 +2146,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,893
+- behavior tests: 3,897
 - docs/inventory meta-tests: 48
-- `pytest`: 2207 (2172 behavior + 35 meta)
+- `pytest`: 2211 (2176 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,945
+- total: 3,949
 
 ### Testing Architecture
 

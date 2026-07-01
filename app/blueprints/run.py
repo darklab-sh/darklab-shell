@@ -1273,13 +1273,6 @@ def _save_completed_run(
                 workspace_artifacts,
                 workspace_owner,
             )
-            records.recorded_targets = _discover_project_targets_for_finalize(
-                conn,
-                session_id,
-                run_id,
-                command,
-                records.active_project_link,
-            )
             records.recorded_findings = _record_run_findings_for_finalize(
                 conn,
                 session_id,
@@ -1296,6 +1289,13 @@ def _save_completed_run(
                 command,
                 output_state.persisted_entries,
                 finished_iso,
+            )
+            records.recorded_targets = _discover_project_targets_for_finalize(
+                conn,
+                session_id,
+                run_id,
+                command,
+                records.active_project_link,
             )
             records.scan_observation_count = _scan_target_observation_count(conn, run_id)
             records.auto_promote_summary = _apply_auto_promote_for_finalize(

@@ -168,27 +168,15 @@ def url_host_identity(value: str) -> tuple[str, str] | None:
     if not raw:
         return None
     try:
-        canonical_value = canonical_url(raw)
-    except CanonicalizationError:
-        return None
-    try:
-        host = str(urlsplit(canonical_value).hostname or "")
+        parts = urlsplit(raw)
+        host = str(parts.hostname or "")
     except ValueError:
         return None
+    try:
+        canonical_url(raw)
+    except CanonicalizationError:
+        return None
     return _host_identity(host)
-
-
-def url_host_entity_id(
-    session_id: str,
-    canonical_value: str,
-    *,
-    team_id: str = "",
-) -> str:
-    identity = url_host_identity(canonical_value)
-    if identity is None:
-        return ""
-    host_type, host_canonical = identity
-    return atlas_entity_id(session_id, host_type, host_canonical, team_id=team_id)
 
 
 def _merge_attributes(existing: Mapping[str, Any] | None, incoming: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -227,7 +215,14 @@ def upsert_entity(
         host_entity_id = _port_host_entity_id(session_id, canonical_value, team_id=team_id)
     if not host_entity_id and entity_type == "url":
         host_identity = url_host_identity(canonical_value)
-        if host_identity is not None:
+        if host_identity is None:
+            log.debug("ATLAS_URL_HOST_LINK_SKIPPED", extra=_log_extra(
+                session_id,
+                team_id,
+                entity_id=entity_id,
+                reason="host_identity_unresolved",
+            ))
+        else:
             host_type, host_canonical = host_identity
             host_entity_id = upsert_entity(
                 conn,
@@ -468,16 +463,24 @@ def materialize_run_entities(
     counts: Counter[tuple[str, str]] = Counter()
     attributes_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     url_host_keys: dict[tuple[str, str], tuple[str, str]] = {}
+    derived_url_host_counts: Counter[tuple[str, str]] = Counter()
+    url_entity_count = 0
+    url_host_unresolved_count = 0
+    url_host_type_counts: Counter[str] = Counter()
     invalid_entity_count = 0
     for entity in _iter_entry_entities(entries):
         normalized = canonicalize_entity_record(entity)
         if normalized:
             counts[normalized] += 1
             if normalized[0] == "url":
+                url_entity_count += 1
                 host_identity = url_host_identity(normalized[1])
                 if host_identity is not None:
                     url_host_keys[normalized] = host_identity
-                    counts[host_identity] += 1
+                    url_host_type_counts[host_identity[0]] += 1
+                    derived_url_host_counts[host_identity] += 1
+                else:
+                    url_host_unresolved_count += 1
             raw_attributes = entity.get("attributes") or entity.get("attributes_json")
             attributes = _json_dict(raw_attributes, source="incoming", log_context=_log_extra(
                 session_id,
@@ -489,6 +492,9 @@ def materialize_run_entities(
                 attributes_by_key[normalized] = _merge_attributes(attributes_by_key.get(normalized), attributes)
         else:
             invalid_entity_count += 1
+    for host_identity, occurrence_count in derived_url_host_counts.items():
+        if host_identity not in counts:
+            counts[host_identity] += int(occurrence_count or 0)
     scan_observation_count = _record_scan_target_observations(
         conn,
         session_id,
@@ -507,7 +513,11 @@ def materialize_run_entities(
         total_occurrence_count=sum(int(count or 0) for count in counts.values()),
         invalid_entity_count=invalid_entity_count,
         port_entity_count=sum(int(count or 0) for (kind, _), count in counts.items() if kind == "port"),
+        url_entity_count=url_entity_count,
         url_host_link_count=len(url_host_keys),
+        url_host_unresolved_count=url_host_unresolved_count,
+        url_host_domain_count=url_host_type_counts.get("domain", 0),
+        url_host_ip_count=url_host_type_counts.get("ip", 0),
         attribute_entity_count=len(attributes_by_key),
         scan_observation_count=scan_observation_count,
     ))

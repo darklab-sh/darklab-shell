@@ -10,8 +10,8 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from typing import Any, cast
+from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit
 import uuid
 
 import pytest
@@ -41,12 +41,12 @@ def _load_migration_module():
 
 
 def _postgres_dsn_with_search_path(dsn: str, schema: str) -> str:
-    parts = urlsplit(dsn)
+    parts = cast(SplitResult, urlsplit(cast(Any, dsn)))
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     existing_options = str(query.get("options") or "").strip()
     search_path_option = f"-csearch_path={schema}"
     query["options"] = f"{existing_options} {search_path_option}".strip()
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    return parts._replace(query=urlencode(query)).geturl()
 
 
 @pytest.fixture
@@ -1257,18 +1257,24 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
         "SELECT * FROM project_links WHERE project_id = %s AND entity_type = 'run' AND entity_id = %s",
         (project_id, run_id),
     ).fetchone()
-    entity_row = conn.execute(
-        "SELECT e.* FROM entities e JOIN entity_run_links erl ON erl.entity_id = e.id WHERE erl.run_id = %s",
-        (run_id,),
-    ).fetchone()
-    entity_project_link_row = conn.execute(
-        "SELECT l.*, e.canonical_value "
-        "FROM project_links l "
-        "JOIN entity_run_links erl ON erl.entity_id = l.entity_id "
-        "JOIN entities e ON e.id = l.entity_id "
-        "WHERE l.project_id = %s AND l.entity_type = 'atlas_entity' AND erl.run_id = %s",
-        (project_id, run_id),
-    ).fetchone()
+    entity_rows = {
+        (row["type"], row["canonical_value"]): row
+        for row in conn.execute(
+            "SELECT e.* FROM entities e JOIN entity_run_links erl ON erl.entity_id = e.id WHERE erl.run_id = %s",
+            (run_id,),
+        ).fetchall()
+    }
+    entity_project_link_rows = {
+        (row["type"], row["canonical_value"]): row
+        for row in conn.execute(
+            "SELECT l.*, e.type, e.canonical_value, e.host_entity_id "
+            "FROM project_links l "
+            "JOIN entity_run_links erl ON erl.entity_id = l.entity_id "
+            "JOIN entities e ON e.id = l.entity_id "
+            "WHERE l.project_id = %s AND l.entity_type = 'atlas_entity' AND erl.run_id = %s",
+            (project_id, run_id),
+        ).fetchall()
+    }
     finding_row = conn.execute(
         "SELECT f.* FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id WHERE fo.run_id = %s",
         (run_id,),
@@ -1282,7 +1288,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     assert active_project_link is not None
     assert active_project_link["project_id"] == project_id
     assert active_project_link["linked_entity_count"] == 1
-    assert active_project_link["available_entity_count"] == 1
+    assert active_project_link["available_entity_count"] == 2
     assert run_row["session_id"] == session_id
     assert run_row["run_kind"] == "external"
     assert run_row["owner_tab_id"] == "tab-postgres-external"
@@ -1292,13 +1298,14 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     assert artifact_row["byte_size"] == 192
     assert file_artifact_row["workspace_path"] == "reports/postgres-result.txt"
     assert project_link_row["source"] == "active_project"
-    assert entity_row["type"] == "domain"
-    assert entity_row["canonical_value"] == "darklab.sh"
-    assert entity_project_link_row is not None
-    assert entity_project_link_row["canonical_value"] == "darklab.sh"
-    assert entity_project_link_row["source"] == "active_project"
+    domain_row = entity_rows[("domain", "darklab.sh")]
+    url_row = entity_rows[("url", "https://darklab.sh")]
+    assert url_row["host_entity_id"] == domain_row["id"]
+    assert entity_project_link_rows[("domain", "darklab.sh")]["source"] == "active_project"
+    assert entity_project_link_rows[("url", "https://darklab.sh")]["source"] == "auto_command"
+    assert entity_project_link_rows[("url", "https://darklab.sh")]["host_entity_id"] == domain_row["id"]
     assert finding_row["run_id"] == run_id
-    assert finding_row["target_id"] == entity_row["id"]
+    assert finding_row["target_id"] == domain_row["id"]
     assert finding_row["severity"] == "high"
     assert history_resp.status_code == 200
     assert history_data["total_count"] == 1

@@ -599,10 +599,19 @@ OPENAPI_SPEC: dict = {
             },
             "AtlasEntityDetail": {
                 "type": "object",
-                "required": ["entity", "runs", "findings", "intel_snapshots", "intel_summary", "detail_limits"],
+                "required": [
+                    "entity",
+                    "runs",
+                    "related_urls",
+                    "findings",
+                    "intel_snapshots",
+                    "intel_summary",
+                    "detail_limits",
+                ],
                 "properties": {
                     "entity": _ref("AtlasEntity"),
                     "runs": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    "related_urls": {"type": "array", "items": _ref("AtlasEntity")},
                     "findings": {"type": "array", "items": _ref("AtlasFinding")},
                     "intel_snapshots": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
                     "intel_summary": {"type": "object", "additionalProperties": True},

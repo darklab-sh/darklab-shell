@@ -29,7 +29,32 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open Open TODOs are currently tracked.
+- **Reduce false-positive domain entities in output extraction with a Public Suffix List gate.**
+  - Problem: auto-discovered `domain` entities from command output capture many false positives. The current mitigation is a hand-maintained denylist of file-like suffixes (`_ENTITY_FILELIKE_SUFFIXES` in `output_signals.py`), which is open-ended and leaks the dominant false-positive class: dotted code identifiers in tool/verbose output such as `os.path`, `obj.method`, `Array.prototype`, and `config.default`. Invert the model: accept a domain only when its suffix is a real public suffix.
+  - Approach: use the `tldextract` package (Public Suffix List) so the check understands effective TLDs and registrable domains (`co.uk`, `github.io`) rather than only the last label. A bare IANA last-label list would be simpler but does not handle multi-level suffixes; the PSL is the better fit here.
+  - Scope:
+    - Gate auto-extraction only. Apply the suffix check in `output_signals` domain emission, never in the shared `canonical_domain`, which also serves user-entered Project targets and imports where the user asserts validity.
+    - Keep the existing file-suffix denylist as a second layer. Many file extensions are valid TLDs (`sh`, `py`, `md`, `rs`, `zip`, `app`, `dev`, `ai`), so `main.sh`, `lib.rs`, and `notes.md` still pass a PSL gate and must be rejected by the denylist. The two layers are complementary, not a replacement.
+    - Do not fetch the PSL at container boot or app start-up. This is a self-hosted tool that often runs offline, and evidence extraction should be deterministic per release.
+  - Phase 1: Add `tldextract` as a bundled, offline dependency.
+    - Add `tldextract` to `app/requirements.txt`.
+    - Configure it to use only its bundled PSL snapshot with no live network fetch (no runtime suffix-list URL lookups, no writable cache dependency).
+    - Add a `scripts/` maintenance helper to refresh the bundled snapshot at build/release time, and record the snapshot date so extraction stays reproducible between releases.
+  - Phase 2: Apply the suffix gate in output extraction.
+    - In the `output_signals` domain-emit path, reject a candidate whose registrable suffix is not a public suffix, after the existing file-suffix and file-hostname heuristics still run.
+    - Keep IP hosts, URL hosts, and user/import paths unaffected.
+    - Ensure IDN handling stays consistent with `canonical_domain`: the PSL stores IDN suffixes as punycode, so compare against the IDNA-encoded form used for canonicalization.
+  - Phase 3: Internal-engagement escape hatch.
+    - Add a configurable extra-suffix allowlist (parallel to the existing `include_private_ips` policy) so internal-scope output still captures non-public suffixes such as `.local`, `.internal`, `.lan`, and `.corp`.
+    - Default to public-suffix-only; operators opt in to extra suffixes per deployment or scope.
+  - Phase 4: Verification and docs.
+    - Add backend tests: dotted code identifiers are rejected, real domains and `co.uk`/`github.io`-style registrable domains pass, file-extension-as-TLD cases stay rejected by the denylist, IDN/punycode suffixes resolve, and the internal-suffix allowlist works when enabled.
+    - Add a test asserting extraction performs no network fetch (offline-safe).
+    - Update extraction docs, the vendored-dependency notes, and test-count documentation if totals change.
+  - Open Decisions:
+    - Recommended: bundle the PSL snapshot and refresh it at release time; expose refresh only as an explicit opt-in operator action, never a mandatory boot fetch, always with a hard fallback to the bundled snapshot.
+    - Recommended: keep the file-suffix denylist alongside the PSL gate rather than removing it.
+    - Recommended: apply the gate to auto-extraction only, leaving user-entered and imported domains trusted.
 
 ---
 

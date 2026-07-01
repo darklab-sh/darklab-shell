@@ -371,6 +371,12 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "related_urls": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntity"
+            },
+            "type": "array"
+          },
           "runs": {
             "items": {
               "additionalProperties": true,
@@ -382,6 +388,7 @@
         "required": [
           "entity",
           "runs",
+          "related_urls",
           "findings",
           "intel_snapshots",
           "intel_summary",

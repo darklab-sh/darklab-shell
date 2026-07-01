@@ -434,6 +434,37 @@ const _darklabGlobal = window;
     return wrap;
   }
 
+  function renderRelatedUrls(urls, meta = null, onOpenEntity = null) {
+    const wrap = node('div', 'atlas-source-list atlas-related-url-list');
+    const rows = Array.isArray(urls) ? urls : [];
+    if (!rows.length) {
+      wrap.appendChild(node('div', 'atlas-empty-inline', 'No related URLs'));
+      return wrap;
+    }
+    rows.forEach(urlEntity => {
+      const row = node('div', 'panel-row atlas-source-row atlas-related-url-row');
+      const title = document.createElement(typeof onOpenEntity === 'function' ? 'button' : 'div');
+      title.className = typeof onOpenEntity === 'function'
+        ? 'btn btn-ghost btn-compact atlas-source-command atlas-related-url-open'
+        : 'atlas-source-command';
+      if (title.tagName === 'BUTTON') title.type = 'button';
+      title.textContent = text(urlEntity.canonical_value, urlEntity.id);
+      if (typeof onOpenEntity === 'function') {
+        title.addEventListener('click', () => onOpenEntity(urlEntity));
+      }
+      const detail = node(
+        'div',
+        'atlas-muted',
+        `${formatCount(urlEntity.occurrence_count, 'hit')} · ${formatDate(urlEntity.last_seen_at)}`,
+      );
+      row.append(title, detail);
+      wrap.appendChild(row);
+    });
+    const pager = renderCollectionPager(meta, 'related URLs');
+    if (pager) wrap.appendChild(pager);
+    return wrap;
+  }
+
   function reviewStateSelect(value, onChange, options = {}) {
     const select = document.createElement('select');
     select.className = 'form-select form-control-compact atlas-finding-review';
@@ -734,6 +765,13 @@ const _darklabGlobal = window;
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
     container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
     container.append(section('Import sources', renderImportSources(detail.import_sources)));
+    if (['domain', 'ip'].includes(String(entity.type || ''))) {
+      container.append(section('Related URLs', renderRelatedUrls(
+        detail.related_urls,
+        detail.detail_limits?.related_urls,
+        handlers.onOpenEntity,
+      )));
+    }
     container.append(section('Source runs', renderRuns(
       detail.runs,
       handlers.onSeeRun,

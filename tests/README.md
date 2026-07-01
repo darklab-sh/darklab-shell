@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,893
+- behavior tests: 3,897
 - docs/inventory meta-tests: 48
-- `pytest`: 2207 (2172 behavior + 35 meta)
+- `pytest`: 2211 (2176 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,945
+- total: 3,949
 
 This document is organized in two parts:
 
@@ -524,6 +524,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestProjectOverviewContract.test_project_intel_overview_drops_deleted_run_scan_observations` | Verifies deleted runs remove app-scan observations so Project Overview no longer counts removed scan evidence. |
 | `TestProjectOverviewContract.test_project_intel_overview_uses_latest_app_port_service_attributes` | Verifies Project Overview shows updated app-captured service/version metadata when a later scan enriches an existing port entity. |
 | `TestProjectOverviewContract.test_project_intel_overview_uses_url_host_app_port_evidence` | Verifies URL targets use their host entity's app-captured port evidence instead of appearing silently unscanned. |
+| `TestProjectOverviewContract.test_project_intel_overview_keeps_url_host_evidence_in_team_scope` | Verifies team URL targets resolve app-captured host evidence from the team-owned host instead of a personal entity with the same value. |
 | `TestProjectOverviewContract.test_project_intel_overview_keeps_url_host_scan_states_honest` | Verifies URL targets distinguish host scans with no app ports from unresolved URL hosts. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_marks_stale_provider_data` | Verifies Project Overview marks fully expired provider snapshots as stale while keeping mixed fresh/stale provider data fresh. |
 | `TestProjectOverviewContract.test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate` | Verifies Project Overview ignores stale expired provider certificate data when a fresh provider snapshot is available for the same target. |
@@ -553,7 +554,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
 | `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
 | `TestPostgresMigrations.test_watcher_monitoring_incremental_migration_adds_enum_constraints` | Verifies the incremental watcher-monitoring Postgres migration normalizes legacy watcher-fire enum values and adds fire-kind and acknowledgement-state CHECK constraints. |
-| `TestPostgresMigrations.test_url_host_entity_link_migration_backfills_existing_postgres_links` | Verifies the URL host-link Postgres migration updates existing URL entities when matching scoped host entities exist. |
+| `TestPostgresMigrations.test_url_host_entity_link_migration_defers_to_startup_backfill` | Verifies the URL host-link migration is a no-op marker because startup backfill owns URL-host repair. |
 | `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
@@ -1056,6 +1057,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_atlas_import_parser_enforces_upload_and_warning_limits` | Verifies import parsing enforces upload byte limits and caps returned row warnings. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
 | `TestDatabaseInit.test_url_entities_create_and_link_host_entities` | Verifies URL materialization and direct URL upserts create scoped host entities and store URL host links. |
+| `TestDatabaseInit.test_materialized_url_host_from_extracted_entities_is_not_double_counted` | Verifies URL host entities emitted by live extraction are not counted again while storing the URL host link. |
 | `TestDatabaseInit.test_backfills_url_host_entity_links_for_existing_rows` | Verifies startup backfill links existing URL entities to created host entities without adding fresh observations. |
 | `TestDatabaseInit.test_materializes_port_entities_with_host_relationship_and_attributes` | Verifies Atlas materialization stores port host relationships, merges service attributes, and preserves host-before-port ordering. |
 | `TestDatabaseInit.test_materializes_command_target_scan_observation_without_port_entities` | Verifies port-scan command targets create app-native scan observations even when the run surfaces no port entities. |
@@ -1666,6 +1668,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed project-delete audit failures roll back the project deletion. |
 | `TestProjectRoutes.test_package_delete_rolls_back_when_fail_closed_audit_fails` | Verifies fail-closed package-delete audit failures roll back the package deletion. |
 | `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies legacy host target payloads that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
+| `TestProjectRoutes.test_project_url_target_route_creates_atlas_url_and_host_link` | Verifies creating a URL project target through the route creates the Atlas URL and same-scope host link without listing the host as another target. |
 | `TestProjectRoutes.test_project_targets_list_supports_pagination_type_search_and_auto_filter` | Verifies the project target list supports paging, type filters, search, and the auto-discovered target review filter. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
@@ -1693,6 +1696,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_run_link_can_include_source_atlas_entities` | Verifies run project links can preview and optionally link Atlas entities found in the same source run. |
 | `TestProjectRoutes.test_project_auto_promote_rule_routes_preview_apply_and_delete` | Verifies Project auto-promote rule routes can preview, create, list, update, apply idempotently, delete rules, and keep promoted links explained. |
 | `TestProjectRoutes.test_project_auto_promote_disabled_rules_reject_preview_and_apply` | Verifies disabled Project auto-promote rules can be stored but reject preview and apply requests. |
+| `TestProjectRoutes.test_completed_run_preserves_command_url_target_source_links_after_entity_materialization` | Verifies completed run finalization keeps command-discovered URL targets and their derived host source-linked after Atlas output entities are materialized. |
 | `TestProjectRoutes.test_completed_run_auto_promote_rules_apply_to_run_entities` | Verifies completed runs apply enabled auto-promote rules to newly materialized Atlas entities before active-project bulk linking. |
 | `TestProjectRoutes.test_completed_run_auto_promote_failure_is_non_fatal` | Verifies auto-promote failures during run finalization do not prevent run or Atlas entity persistence. |
 | `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run, non-curated Atlas entity links from the project while keeping curated entities. |

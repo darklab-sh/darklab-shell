@@ -70,6 +70,7 @@ ORPHAN_FILTERS = {"all", "hide", "only"}
 SUPPRESSION_FILTERS = {"all", "hide", "only"}
 ENTITY_DETAIL_RUN_LIMIT = 50
 ENTITY_DETAIL_FINDING_LIMIT = 50
+ENTITY_DETAIL_RELATED_URL_LIMIT = 25
 ATLAS_RUN_FILTER_LIMIT = 50
 
 
@@ -1837,6 +1838,29 @@ def entity_detail(
     ).fetchone()
     run_total = int(run_total_row["count"] or 0) if run_total_row else 0
     finding_total = int(finding_total_row["count"] or 0) if finding_total_row else 0
+    related_url_total = 0
+    related_url_rows = []
+    if entity["type"] in {"domain", "ip"}:
+        related_url_scope_sql = _entity_scope_sql("url_e", team_id)
+        related_url_scope_params = _entity_scope_params(session_id, team_id)
+        related_url_total_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM entities url_e "
+            "WHERE " + related_url_scope_sql + " AND url_e.type = 'url' AND url_e.host_entity_id = ? "  # nosec
+            "AND COALESCE(url_e.suppressed, FALSE) = FALSE",
+            [*related_url_scope_params, entity_id],
+        ).fetchone()
+        related_url_total = int(related_url_total_row["count"] or 0) if related_url_total_row else 0
+        related_url_rows = conn.execute(
+            "SELECT url_e.id, url_e.session_id, url_e.type, url_e.canonical_value, url_e.host_entity_id, "
+            "url_e.attributes_json, url_e.first_seen_at, url_e.last_seen_at, url_e.occurrence_count, "
+            "url_e.suppressed, url_e.suppressed_reason, url_e.suppressed_at, url_e.created "
+            "FROM entities url_e WHERE " + related_url_scope_sql + " "  # nosec
+            "AND url_e.type = 'url' AND url_e.host_entity_id = ? "
+            "AND COALESCE(url_e.suppressed, FALSE) = FALSE "
+            "ORDER BY url_e.last_seen_at DESC, url_e.occurrence_count DESC, url_e.canonical_value ASC "
+            "LIMIT ?",
+            [*related_url_scope_params, entity_id, ENTITY_DETAIL_RELATED_URL_LIMIT],
+        ).fetchall()
     run_rows = conn.execute(
         "SELECT erl.run_id, r.command, r.run_kind, r.started, r.finished, r.exit_code, "
         "erl.first_seen_at, erl.last_seen_at, erl.occurrence_count "
@@ -1870,14 +1894,31 @@ def entity_detail(
     )
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
+    related_urls = [_row_to_entity(related_url) for related_url in related_url_rows]
+    related_metadata = _list_metadata_for_entities(
+        conn,
+        session_id,
+        [str(related_url["id"]) for related_url in related_urls],
+        team_id=team_id,
+    )
+    for related_url in related_urls:
+        related_url.update(related_metadata.get(str(related_url["id"]), {}))
     return {
         "entity": entity,
         "runs": [_row_to_run_link(run) for run in run_rows],
         "import_sources": _entity_import_sources(conn, session_id, entity_id, team_id=team_id),
+        "related_urls": related_urls,
         "intel_snapshots": intel_snapshots,
         "intel_summary": summarize_intel_snapshots(entity["type"], intel_snapshots),
         "findings": findings,
         "detail_limits": {
+            "related_urls": {
+                "limit": ENTITY_DETAIL_RELATED_URL_LIMIT,
+                "offset": 0,
+                "shown": len(related_urls),
+                "total": related_url_total,
+                "has_more": len(related_urls) < related_url_total,
+            },
             "runs": {
                 "limit": ENTITY_DETAIL_RUN_LIMIT,
                 "offset": safe_runs_offset,

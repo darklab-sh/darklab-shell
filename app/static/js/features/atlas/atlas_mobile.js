@@ -1162,6 +1162,7 @@ let exportedDarklabAtlasMobile = null;
         onRemoveProjectLink: (link) => controller.removeProjectLink(link),
         onSaveMetadata: (payload) => controller.saveMetadata(payload),
         onSeeRun: (run) => controller.openSourceRun(run),
+        onOpenEntity: (entity) => controller.openEntityFromRelatedEntity?.(entity),
         onCleanRunAtlas: (run) => controller.confirmCleanRunAtlas?.(run),
         onDeleteEntity: () => controller.confirmDeleteEntity(),
         onSuppressEntity: (entity) => controller.updateSuppression(entity, !entity.suppressed),

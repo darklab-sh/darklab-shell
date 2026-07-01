@@ -80,7 +80,14 @@ def canonical_url(value: str) -> str:
     if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
         raise CanonicalizationError("invalid URL")
     scheme = parts.scheme.lower()
-    host = canonical_domain(parts.hostname or "")
+    try:
+        parsed_host_ip = ipaddress.ip_address(str(parts.hostname or "").strip())
+    except ValueError:
+        host = canonical_domain(parts.hostname or "")
+    else:
+        host = parsed_host_ip.compressed.lower()
+        if parsed_host_ip.version == 6:
+            host = f"[{host}]"
     try:
         parsed_port = parts.port
     except ValueError as exc:

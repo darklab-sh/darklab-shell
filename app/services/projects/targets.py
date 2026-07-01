@@ -15,7 +15,7 @@ import config as _config
 from core.database import DB_BACKEND, db_connect, validate_project_link_source
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from services.atlas.materializer import upsert_entity
+from services.atlas.materializer import upsert_entity, url_host_identity
 from services.atlas.scope import metadata_owner_id
 from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_entity, entity_signature
 from services.projects.contracts import (
@@ -369,6 +369,44 @@ def _ensure_project_entity_link(
     return entity_id
 
 
+def _link_entity_to_run(conn, entity_id: str, run_id: str, timestamp: str, occurrence_count: int = 0) -> None:
+    if not entity_id or not run_id:
+        return
+    conn.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(entity_id, run_id) DO NOTHING",
+        (entity_id, run_id, timestamp, timestamp, max(0, int(occurrence_count or 0))),
+    )
+
+
+def _link_url_host_to_run(
+    conn,
+    session_id: str,
+    run_id: str,
+    canonical_url_value: str,
+    timestamp: str,
+    *,
+    team_id: str = "",
+) -> str:
+    host_identity = url_host_identity(canonical_url_value)
+    if host_identity is None:
+        return ""
+    host_type, host_value = host_identity
+    host_entity_id = upsert_entity(
+        conn,
+        session_id,
+        host_type,
+        host_value,
+        team_id=team_id,
+        seen_at=timestamp,
+        occurrence_count=0,
+    )
+    _link_entity_to_run(conn, host_entity_id, run_id, timestamp, 0)
+    return host_entity_id
+
+
 def ensure_project_target_on_conn(
     conn,
     session_id,
@@ -665,13 +703,17 @@ def add_project_target(session_id, project_id, data, *, team_id=""):
             team_id=team_id,
         )
         if payload["source_run_id"]:
-            conn.execute(
-                "INSERT INTO entity_run_links "
-                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0) "
-                "ON CONFLICT(entity_id, run_id) DO NOTHING",
-                (entity_id, payload["source_run_id"], _now(), _now()),
-            )
+            linked_at = _now()
+            _link_entity_to_run(conn, entity_id, payload["source_run_id"], linked_at, 0)
+            if entity_type == "url":
+                _link_url_host_to_run(
+                    conn,
+                    session_id,
+                    payload["source_run_id"],
+                    canonical_value,
+                    linked_at,
+                    team_id=team_id,
+                )
         row = _select_project_target_row(conn, session_id, project_id, entity_id, team_id=team_id)
         target = _row_to_target(row)
         _attach_target_metadata(conn, session_id, [target], team_id=team_id)
@@ -760,13 +802,9 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                 review_state="pending",
                 source_detail=detail,
             )
-            conn.execute(
-                "INSERT INTO entity_run_links "
-                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0) "
-                "ON CONFLICT(entity_id, run_id) DO NOTHING",
-                (entity_id, run_id, created, created),
-            )
+            _link_entity_to_run(conn, entity_id, run_id, created, 0)
+            if entity_type == "url":
+                _link_url_host_to_run(conn, session_id, run_id, canonical_value, created)
             if already_linked:
                 continue
             row = _select_project_target_row(conn, session_id, project_id, entity_id)

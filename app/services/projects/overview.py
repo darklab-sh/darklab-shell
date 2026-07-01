@@ -1050,6 +1050,7 @@ def _overview_url_host_entity_ids(
             for row in rows
             if str(row["url_id"] or "") and str(row["host_id"] or "")
         }
+    stored_host_link_count = len(result)
     for target in targets:
         if str(target.get("type") or "") != "url":
             continue
@@ -1075,6 +1076,10 @@ def _overview_url_host_entity_ids(
         log.debug("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY", extra={
             **event_extra,
             "url_target_count": url_target_count,
+            "stored_host_link_count": stored_host_link_count,
+            "fallback_candidate_count": 0,
+            "fallback_resolved_count": 0,
+            "fallback_missing_host_entity_count": 0,
             "resolved_host_count": len(result),
             "missing_host_entity_count": 0,
             "invalid_url_host_count": invalid_url_host_count,
@@ -1101,11 +1106,17 @@ def _overview_url_host_entity_ids(
         host_entity_id = host_entity_ids.get((host_type, host_value), "")
         if host_entity_id:
             result[target_id] = host_entity_id
+    fallback_resolved_count = max(0, len(result) - stored_host_link_count)
+    fallback_missing_host_entity_count = max(0, len(url_hosts) - fallback_resolved_count)
     log.debug("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY", extra={
         **event_extra,
         "url_target_count": url_target_count,
+        "stored_host_link_count": stored_host_link_count,
+        "fallback_candidate_count": len(url_hosts),
+        "fallback_resolved_count": fallback_resolved_count,
+        "fallback_missing_host_entity_count": fallback_missing_host_entity_count,
         "resolved_host_count": len(result),
-        "missing_host_entity_count": max(0, len(url_hosts) - len(result)),
+        "missing_host_entity_count": fallback_missing_host_entity_count,
         "invalid_url_host_count": invalid_url_host_count,
     })
     return result

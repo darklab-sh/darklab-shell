@@ -433,7 +433,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Behavior:**
 
 - Open **Atlas** from the desktop rail, mobile menu, `Alt+A`, History row actions, Run Details, or a project filtered view.
-- Atlas groups saved entities by **Findings**, **IPs**, **Domains**, **Ports**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels. Port rows come from app-captured scanner output and can show the service or version when the tool reported it.
+- Atlas groups saved entities by **Findings**, **IPs**, **Domains**, **Ports**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels. Port rows come from app-captured scanner output and can show the service or version when the tool reported it. Domain and IP details also list related URL entities, so you can jump from a host to the URL evidence found under it.
 - Atlas search matches entity values plus Atlas labels and notes, so curated metadata is as findable as values copied from command output.
 - Atlas can be scoped to one source run from Run Details or from the Atlas run filter, and to one project from Projects or from the Atlas project filter. Those filters apply across the Findings queue, entity tabs, tab counts, and entity exports until you clear the visible chip or use **Clear filters**.
 - The Atlas toolbar can import external triage files from Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL. Imports show a preview with counts, samples, and row warnings before anything is written. Applying an import writes a high-level audit row with the source tool, format, selected options, project id, row/count summary, and created/updated counts without storing imported row bodies. From a project-filtered Atlas view, you can also link imported entities to that project or create project targets from imported domains, IPs, and URLs.
@@ -471,7 +471,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 Supported fields:
 
 - `row_type` or `type`: use `entity` for entity-only rows. Rows with a finding title are treated as finding rows.
-- `entity_kind` or `kind`: one of `domain`, `ip`, `port`, `url`, `cve`, or `hash`. `host` is accepted as a domain alias. Imported port rows accept `host:port/proto` values, default to TCP when the protocol is omitted, and support TCP or UDP. IPv6 hosts use brackets, such as `[2001:db8::1]:443/tcp`. Port rows do not create a separate host row unless the file also includes that host as its own entity.
+- `entity_kind` or `kind`: one of `domain`, `ip`, `port`, `url`, `cve`, or `hash`. `host` is accepted as a domain alias. Imported URL rows create or reuse the scoped domain or IP host entity and store that relationship on the URL row. Imported port rows accept `host:port/proto` values, default to TCP when the protocol is omitted, and support TCP or UDP. IPv6 hosts use brackets, such as `[2001:db8::1]:443/tcp`. Port rows do not create a separate host row unless the file also includes that host as its own entity.
 - `entity_value` or `value`: the value to normalize into Atlas.
 - `subject_key` or `subject`: a stable subject for a finding that does not have a normalizable entity.
 - `title` or `finding_title`: the finding title.

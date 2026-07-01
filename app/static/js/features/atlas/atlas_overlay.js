@@ -1853,6 +1853,7 @@ let exportedCycleAtlasTab = null;
       onRemoveProjectLink: (link) => removeProjectLink(link),
       onSaveMetadata: (payload) => saveMetadata(payload),
       onSeeRun: (run) => openSourceRun(run),
+      onOpenEntity: (entity) => openEntityFromRelatedEntity(entity),
       onCleanRunAtlas: (run) => confirmCleanRunAtlas(run),
       onDeleteEntity: () => confirmDeleteEntity(),
       onSuppressEntity: (entity) => updateSuppression(entity, !entity.suppressed),
@@ -2457,6 +2458,20 @@ let exportedCycleAtlasTab = null;
   function openEntityFromFinding(finding) {
     const entityId = String(finding && finding.entity_id || '');
     const entityType = String(finding && finding.entity_type || '');
+    if (!entityId || !entityType) return;
+    state.activeTab = entityType;
+    state.selectedId = entityId;
+    state.selectedFindingId = '';
+    state.detailOffsets = { runs: 0, findings: 0 };
+    resetSelection({ selectMode: state.selectMode, render: false });
+    state.query = '';
+    if (searchInput) searchInput.value = '';
+    refreshAtlas({ resetOffset: true });
+  }
+
+  function openEntityFromRelatedEntity(entity) {
+    const entityId = String(entity && entity.id || '');
+    const entityType = String(entity && entity.type || '');
     if (!entityId || !entityType) return;
     state.activeTab = entityType;
     state.selectedId = entityId;
@@ -3112,6 +3127,7 @@ let exportedCycleAtlasTab = null;
     updateSuppression,
     canTriageAtlasRows,
     openEntityFromFinding,
+    openEntityFromRelatedEntity,
     openSourceRun,
     exportEntities,
     loadRunOptions,

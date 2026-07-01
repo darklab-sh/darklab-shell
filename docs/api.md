@@ -311,7 +311,7 @@ darklab atlas findings --review-state important --run-id run_123
 
 Entity and finding list routes use the same `limit`, `offset`, and filter contract as the modal. `orphan_filter` and `suppression_filter` accept `hide`, `all`, or `only`. Entity detail includes source runs, related findings, project links, labels, notes, and intel summaries. Finding detail includes the normalized finding row plus recent source occurrences.
 
-Atlas entity rows include `host_entity_id` when a port can be tied back to a known host entity, plus an `attributes` object for lightweight app-captured details such as protocol, service, version, or banner text. Ports are scan evidence, so they do not expose provider-refresh data the way provider-backed domains, IPs, URLs, hashes, and CVEs can.
+Atlas entity rows include `host_entity_id` for host-owned rows such as ports and URLs. Port rows point back to the scanned host entity; URL rows point to the scoped domain or IP entity derived from the canonical URL host. Rows can also include an `attributes` object for lightweight app-captured details such as protocol, service, version, or banner text. Ports are scan evidence, so they do not expose provider-refresh data the way provider-backed domains, IPs, URLs, hashes, and CVEs can.
 
 ---
 

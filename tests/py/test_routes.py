@@ -7020,6 +7020,46 @@ class TestProjectRoutes:
         assert target["type"] == "ip"
         assert target["value"] == "192.0.2.10"
 
+    def test_project_url_target_route_creates_atlas_url_and_host_link(self):
+        client = get_client()
+        session_id = self._session_id("project-url-target")
+        project = self._create_project(client, session_id)
+
+        resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "url", "value": "https://portal.darklab.sh/login"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(resp.data)["target"]
+        listed = client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, session_id, team_id, type, canonical_value, host_entity_id "
+                    "FROM entities WHERE session_id = ? AND canonical_value IN (?, ?) "
+                    "ORDER BY type, canonical_value",
+                    (session_id, "https://portal.darklab.sh/login", "portal.darklab.sh"),
+                ).fetchall()
+            }
+
+        url_row = rows[("url", "https://portal.darklab.sh/login")]
+        host_row = rows[("domain", "portal.darklab.sh")]
+        listed_targets = json.loads(listed.data)["targets"]
+        assert resp.status_code == 201
+        assert listed.status_code == 200
+        assert target["type"] == "url"
+        assert target["value"] == "https://portal.darklab.sh/login"
+        assert target["id"] == url_row["id"]
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert host_row["team_id"] == ""
+        assert [(item["type"], item["value"]) for item in listed_targets] == [
+            ("url", "https://portal.darklab.sh/login")
+        ]
+
     def test_project_targets_list_supports_pagination_type_search_and_auto_filter(self):
         client = get_client()
         session_id = self._session_id("project-target-page")
@@ -9535,6 +9575,79 @@ class TestProjectRoutes:
         assert applied.status_code == 400
         assert "disabled auto-promote rules" in preview.get_json()["error"]
         assert "disabled auto-promote rules" in applied.get_json()["error"]
+
+    def test_completed_run_preserves_command_url_target_source_links_after_entity_materialization(self):
+        from blueprints import run as run_routes
+
+        client = get_client()
+        session_id = self._session_id("project-url-target-finalize")
+        project = self._create_project(client, session_id, name="URL Target Finalize")
+        active_set = client.post(
+            "/projects/active",
+            headers={"X-Session-ID": session_id},
+            json={"project_id": project["id"]},
+        )
+        run_id = "run-url-target-finalize-" + uuid.uuid4().hex
+
+        class FakeCapture:
+            preview_lines = [{
+                "text": "window output classList.add(document.querySelectorAll('.x'))",
+                "cls": "",
+                "entities": [
+                    {"type": "domain", "value": "classList.add", "canonical_value": "classlist.add"},
+                    {
+                        "type": "domain",
+                        "value": "document.querySelectorAll",
+                        "canonical_value": "document.queryselectorall",
+                    },
+                ],
+            }]
+            preview_truncated = False
+            output_line_count = 1
+            full_output_available = False
+            full_output_truncated = False
+            full_output_bytes = 0
+            artifact_rel_path = None
+
+            def finalize(self):
+                return None
+
+        run_routes._save_completed_run(
+            run_id,
+            session_id,
+            "",
+            "curl https://noc.darklab.sh",
+            "2026-07-01T00:00:00Z",
+            "2026-07-01T00:00:01Z",
+            0,
+            FakeCapture(),
+            link_active_project=True,
+        )
+
+        assert active_set.status_code == 200
+        with db_connect() as conn:
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT e.id, e.type, e.canonical_value, e.host_entity_id, erl.run_id, pl.project_id, pl.source "
+                    "FROM entities e "
+                    "LEFT JOIN entity_run_links erl ON erl.entity_id = e.id AND erl.run_id = ? "
+                    "LEFT JOIN project_links pl ON pl.entity_type = 'atlas_entity' AND pl.entity_id = e.id "
+                    "WHERE e.canonical_value IN (?, ?, ?) "
+                    "ORDER BY e.type, e.canonical_value",
+                    (run_id, "https://noc.darklab.sh", "noc.darklab.sh", "classlist.add"),
+                ).fetchall()
+            }
+
+        url_row = rows[("url", "https://noc.darklab.sh")]
+        host_row = rows[("domain", "noc.darklab.sh")]
+        output_row = rows[("domain", "classlist.add")]
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert url_row["run_id"] == run_id
+        assert host_row["run_id"] == run_id
+        assert output_row["run_id"] == run_id
+        assert url_row["project_id"] == project["id"]
+        assert url_row["source"] == "auto_command"
 
     def test_completed_run_auto_promote_rules_apply_to_run_entities(self):
         from blueprints import run as run_routes
@@ -14155,6 +14268,24 @@ class TestAtlasRoutes:
         session_id = self._session_id()
         run_id, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        with db_connect() as conn:
+            url_run_id = "run-" + uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                (url_run_id, session_id, "curl https://darklab.sh/login", "2026-05-14T00:01:00+00:00", "[]"),
+            )
+            materialize_run_entities(
+                conn,
+                session_id,
+                url_run_id,
+                [{
+                    "text": "https://darklab.sh/login",
+                    "entities": [{"type": "url", "value": "https://darklab.sh/login"}],
+                }],
+                seen_at="2026-05-14T00:01:01+00:00",
+            )
+            conn.commit()
 
         summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
         list_resp = client.get("/atlas/entities?type=domain", headers={"X-Session-ID": session_id})
@@ -14171,7 +14302,10 @@ class TestAtlasRoutes:
         assert detail_resp.status_code == 200
         detail = json.loads(detail_resp.data)
         assert detail["entity"]["id"] == domain_id
-        assert detail["runs"][0]["run_id"] == run_id
+        assert detail["related_urls"][0]["canonical_value"] == "https://darklab.sh/login"
+        assert detail["related_urls"][0]["host_entity_id"] == domain_id
+        assert detail["detail_limits"]["related_urls"]["total"] == 1
+        assert run_id in {run["run_id"] for run in detail["runs"]}
         assert detail["findings"][0]["raw_line"] == "443/tcp open https on darklab.sh"
 
     def test_findings_list_can_filter_by_source_run(self):

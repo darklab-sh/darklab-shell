@@ -559,7 +559,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0035_project_digest_schedule_dispatch.py # Postgres Project digest schedule and notification constraints
 │   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
 │   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
-│   │   │   └── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship backfill
+│   │   │   └── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application

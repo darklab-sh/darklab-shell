@@ -602,21 +602,9 @@ def extract_entities(
             canonical_url_value = canonical_url(raw_url)
         except CanonicalizationError:
             continue
-        _add_entity(
-            entities,
-            seen,
-            entity_type="url",
-            value=raw_url,
-            canonical_value=canonical_url_value,
-            source_line=source_line,
-            start=match.start(),
-            end=match.end(),
-        )
         host_offset = raw_url.lower().find(host.lower())
         start = match.start() + host_offset if host_offset >= 0 else match.start()
         end = start + len(host) if host_offset >= 0 else match.end()
-        if host_offset >= 0 and end < match.end():
-            url_tail_spans.append((end, match.end()))
         try:
             canonical_ip_value = canonical_ip(host.strip("[]"))
         except CanonicalizationError:
@@ -628,9 +616,22 @@ def extract_entities(
             host_canonical = canonical
         else:
             if not include_private_ips and not _is_public_ip(canonical_ip_value):
+                url_tail_spans.append((match.start(), match.end()))
                 continue
             host_entity_type = "ip"
             host_canonical = canonical_ip_value
+        _add_entity(
+            entities,
+            seen,
+            entity_type="url",
+            value=raw_url,
+            canonical_value=canonical_url_value,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
+        if host_offset >= 0 and end < match.end():
+            url_tail_spans.append((end, match.end()))
         _add_entity(
             entities,
             seen,

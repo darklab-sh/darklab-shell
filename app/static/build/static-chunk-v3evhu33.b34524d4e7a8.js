@@ -42,7 +42,7 @@ import {
 } from "./static-chunk-yo5cjr7d.b86e0c93eff0.js";
 import {
   DarklabAtlasDetail
-} from "./static-chunk-vup3nxbi.29ebe5c76a40.js";
+} from "./static-chunk-3f6nuo5i.9e2aca7c6b19.js";
 import {
   DarklabAtlasEntityRow
 } from "./static-chunk-b3etjcu4.ab70b0c41ed7.js";
@@ -1723,6 +1723,7 @@ var exportedCycleAtlasTab = null;
       onRemoveProjectLink: (link) => removeProjectLink(link),
       onSaveMetadata: (payload) => saveMetadata(payload),
       onSeeRun: (run) => openSourceRun(run),
+      onOpenEntity: (entity) => openEntityFromRelatedEntity(entity),
       onCleanRunAtlas: (run) => confirmCleanRunAtlas(run),
       onDeleteEntity: () => confirmDeleteEntity(),
       onSuppressEntity: (entity) => updateSuppression(entity, !entity.suppressed),
@@ -2285,6 +2286,19 @@ var exportedCycleAtlasTab = null;
   function openEntityFromFinding(finding) {
     const entityId = String(finding && finding.entity_id || "");
     const entityType = String(finding && finding.entity_type || "");
+    if (!entityId || !entityType) return;
+    state.activeTab = entityType;
+    state.selectedId = entityId;
+    state.selectedFindingId = "";
+    state.detailOffsets = { runs: 0, findings: 0 };
+    resetSelection({ selectMode: state.selectMode, render: false });
+    state.query = "";
+    if (searchInput) searchInput.value = "";
+    refreshAtlas({ resetOffset: true });
+  }
+  function openEntityFromRelatedEntity(entity) {
+    const entityId = String(entity && entity.id || "");
+    const entityType = String(entity && entity.type || "");
     if (!entityId || !entityType) return;
     state.activeTab = entityType;
     state.selectedId = entityId;
@@ -2906,6 +2920,7 @@ var exportedCycleAtlasTab = null;
     updateSuppression,
     canTriageAtlasRows,
     openEntityFromFinding,
+    openEntityFromRelatedEntity,
     openSourceRun,
     exportEntities,
     loadRunOptions,

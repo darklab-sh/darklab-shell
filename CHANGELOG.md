@@ -21,12 +21,17 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Autocomplete for workspace file input flags such as `nmap -iL`, `masscan -iL`, and `nuclei -l` now stays scoped to session files instead of prepending active project targets before a filename is typed.
 - Command output flags now prepare workspace write targets as `scanner:appuser` files, so scanner tools can truncate app-created placeholders without hitting permission errors.
 - The Commands modal category strip now hides the native horizontal scrollbar and uses tab-style arrow scrollers when the category list overflows.
+- Command-discovered URL project targets now keep source-run provenance after Atlas output materialization, and their derived host gets the same run link, so fresh command targets no longer appear only as orphaned Atlas URLs.
+- URL host-link backfill now uses the same canonical Python path on SQLite and Postgres instead of duplicating partial URL host parsing inside the Postgres migration marker.
 
 ### Added
 
 - **URL entities now stay linked to their host** — Captured or imported URL entities now create and store a scoped relationship to the matching domain or IP entity, so Project Overview and Atlas can roll URL evidence up through the host without reparsing every URL later.
   - Generic output extraction records the URL itself plus its host, direct URL target discovery such as `curl https://ip.darklab.sh` creates the Atlas URL and host link, and startup backfills older URL rows on SQLite and Postgres when the host can be resolved safely.
-  - **Tests:** focused backend coverage verifies URL extraction, materialized URL host relationships, direct URL upserts, Project target discovery, URL-host backfill, and Overview's stored host-link behavior.
+  - Bracketed IPv6 URL hosts stay bracketed in canonical URL values and link to the matching IP entity instead of creating a bogus domain from the first IPv6 segment.
+  - Generic extraction keeps its private-IP filtering policy for URL hosts too, so a private or loopback IP URL is ignored unless the caller explicitly opts into private IP capture.
+  - Atlas domain and IP detail views now list related URL entities and let you open the URL entity from the host context.
+  - **Tests:** focused backend coverage verifies URL extraction, materialized URL host relationships, direct URL upserts, Project target discovery, route-created URL targets, URL-host backfill, Overview's stored host-link behavior, team-scoped Overview host evidence, bracketed IPv6 URL hosts, and the live extractor-to-materializer path so URL hosts are not double-counted.
 
 - **Atlas port entities from scan output** — Atlas now captures open ports as first-class app-native entities from supported scanner output.
   - Nmap, masscan, rustscan, naabu domain/IP output, `nc -zv`, and curl connection lines can emit host-linked `port` entities with canonical `host:port/proto` values; nmap service/version/banner data is kept as lightweight port attributes.

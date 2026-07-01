@@ -31,6 +31,7 @@ from core.database_backend import (
     sqlite_table_columns,
     sqlite_table_exists,
 )
+from core.helpers import get_log_session_id
 from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 from services.runs.structured_summary import replace_run_output_summary
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
@@ -2770,7 +2771,10 @@ def _backfill_url_host_entity_links(conn) -> None:
     try:
         from services.atlas.materializer import upsert_entity, url_host_identity  # noqa: PLC0415
     except Exception:
-        log.debug("ATLAS_URL_HOST_BACKFILL_IMPORT_FAILED", exc_info=True)
+        log.warning("ATLAS_URL_HOST_BACKFILL_FAILED", exc_info=True, extra={
+            "stage": "import",
+            "backend": DB_BACKEND.value,
+        })
         return
     try:
         rows = conn.execute(
@@ -2779,40 +2783,83 @@ def _backfill_url_host_entity_links(conn) -> None:
             "WHERE type = 'url' AND COALESCE(host_entity_id, '') = ''"
         ).fetchall()
     except Exception:
-        log.debug("ATLAS_URL_HOST_BACKFILL_QUERY_FAILED", exc_info=True)
+        log.warning("ATLAS_URL_HOST_BACKFILL_FAILED", exc_info=True, extra={
+            "stage": "query",
+            "backend": DB_BACKEND.value,
+        })
         return
     updated_count = 0
-    skipped_count = 0
+    invalid_url_count = 0
+    host_upsert_miss_count = 0
+    update_miss_count = 0
     for row in rows:
         identity = url_host_identity(str(row["canonical_value"] or ""))
         if identity is None:
-            skipped_count += 1
+            invalid_url_count += 1
             continue
         host_type, host_canonical = identity
         seen_at = str(row["first_seen_at"] or row["last_seen_at"] or "")
-        host_entity_id = upsert_entity(
-            conn,
-            str(row["session_id"] or ""),
-            host_type,
-            host_canonical,
-            team_id=str(row["team_id"] or ""),
-            seen_at=seen_at,
-            occurrence_count=0,
-        )
+        session_id = str(row["session_id"] or "")
+        team_id = str(row["team_id"] or "")
+        try:
+            host_entity_id = upsert_entity(
+                conn,
+                session_id,
+                host_type,
+                host_canonical,
+                team_id=team_id,
+                seen_at=seen_at,
+                occurrence_count=0,
+            )
+        except Exception:
+            log.error("ATLAS_URL_HOST_BACKFILL_ROW_FAILED", exc_info=True, extra={
+                "stage": "upsert_host",
+                "backend": DB_BACKEND.value,
+                "url_entity_id": str(row["id"] or ""),
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "host_entity_type": host_type,
+            })
+            raise
         if not host_entity_id:
-            skipped_count += 1
+            host_upsert_miss_count += 1
             continue
-        result = conn.execute(
-            "UPDATE entities SET host_entity_id = ? "
-            "WHERE id = ? AND type = 'url' AND COALESCE(host_entity_id, '') = ''",
-            (host_entity_id, row["id"]),
-        )
-        updated_count += max(0, int(result.rowcount or 0))
-    if updated_count or skipped_count:
+        try:
+            result = conn.execute(
+                "UPDATE entities SET host_entity_id = ? "
+                "WHERE id = ? AND type = 'url' AND COALESCE(host_entity_id, '') = ''",
+                (host_entity_id, row["id"]),
+            )
+        except Exception:
+            log.error("ATLAS_URL_HOST_BACKFILL_ROW_FAILED", exc_info=True, extra={
+                "stage": "update_url_link",
+                "backend": DB_BACKEND.value,
+                "url_entity_id": str(row["id"] or ""),
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "host_entity_type": host_type,
+            })
+            raise
+        updated_rows = max(0, int(result.rowcount or 0))
+        if updated_rows:
+            updated_count += updated_rows
+        else:
+            update_miss_count += 1
+    skipped_count = invalid_url_count + host_upsert_miss_count + update_miss_count
+    if updated_count:
         log.info("ATLAS_URL_HOST_BACKFILL_COMPLETED", extra={
+            "backend": DB_BACKEND.value,
             "url_entity_count": len(rows),
             "updated_count": updated_count,
             "skipped_count": skipped_count,
+        })
+    if skipped_count:
+        log.warning("ATLAS_URL_HOST_BACKFILL_SKIPPED_ROWS", extra={
+            "backend": DB_BACKEND.value,
+            "url_entity_count": len(rows),
+            "invalid_url_count": invalid_url_count,
+            "host_upsert_miss_count": host_upsert_miss_count,
+            "update_miss_count": update_miss_count,
         })
 
 

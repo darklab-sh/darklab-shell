@@ -3152,6 +3152,7 @@ class TestProjectOverviewContract:
         assert recorded[0]["id"] == url_row["id"]
         assert url_row["host_entity_id"] == host_row["id"]
         assert url_row["id"] in run_links
+        assert host_row["id"] in run_links
 
     def test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects(self):
         assert project_workspace.classify_recent_change_state({
@@ -4158,6 +4159,101 @@ class TestProjectOverviewContract:
         assert overview["rollups"]["app_port_count"] == 1
         assert overview["coverage_gaps"]["untouched_targets"] == []
 
+    def test_project_intel_overview_keeps_url_host_evidence_in_team_scope(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        team_id = "team-overview-url-scope"
+        project = project_workspace.create_project(
+            "tok_team_url_owner",
+            {"name": "Team URL Scope"},
+            team_id=team_id,
+        )
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_team_url_owner",
+            project["id"],
+            {"type": "url", "value": "https://shared.example.com/login"},
+            team_id=team_id,
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, team_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, '', ?, ?, ?, 0, '', '')",
+                ("run-overview-url-personal", "tok_personal_url_scope", "nmap shared.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_personal_url_scope",
+                "run-overview-url-personal",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "shared.example.com"},
+                        {
+                            "type": "port",
+                            "value": "shared.example.com:8443/tcp",
+                            "attributes": {"service": "personal"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap shared.example.com",
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, team_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0, '', '')",
+                ("run-overview-url-team", "tok_team_url_member", team_id, "nmap shared.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_team_url_member",
+                "run-overview-url-team",
+                [{
+                    "entities": [
+                        {"type": "url", "value": "https://shared.example.com/login"},
+                        {"type": "domain", "value": "shared.example.com"},
+                        {
+                            "type": "port",
+                            "value": "shared.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                team_id=team_id,
+                seen_at=now,
+                command="nmap shared.example.com",
+            )
+            rows = {
+                (row["team_id"], row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, session_id, team_id, type, canonical_value, host_entity_id "
+                    "FROM entities WHERE canonical_value IN (?, ?)",
+                    ("shared.example.com", "https://shared.example.com/login"),
+                ).fetchall()
+            }
+            conn.commit()
+
+        personal_host = rows[("", "domain", "shared.example.com")]
+        team_host = rows[(team_id, "domain", "shared.example.com")]
+        team_url = rows[(team_id, "url", "https://shared.example.com/login")]
+        assert personal_host["id"] != team_host["id"]
+        assert team_url["host_entity_id"] == team_host["id"]
+        assert team_url["host_entity_id"] != personal_host["id"]
+
+        overview = project_workspace.get_project_intel_overview(
+            "tok_team_url_owner",
+            project["id"],
+            team_id=team_id,
+        )
+
+        assert overview is not None
+        row = {item["entity_id"]: item for item in overview["targets"]}[target["id"]]
+        assert row["type"] == "url"
+        assert row["app_evidence"]["host_entity_id"] == team_host["id"]
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert row["app_services"] == ["https"]
+        assert overview["rollups"]["app_port_count"] == 1
+
     def test_project_intel_overview_keeps_url_host_scan_states_honest(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
         project = project_workspace.create_project("tok_overview_url_scan_states", {"name": "URL Scan States"})
@@ -4615,6 +4711,10 @@ class TestProjectOverviewContract:
             "team_id": "",
             "project_id": project["id"],
             "url_target_count": 1,
+            "stored_host_link_count": 0,
+            "fallback_candidate_count": 0,
+            "fallback_resolved_count": 0,
+            "fallback_missing_host_entity_count": 0,
             "resolved_host_count": 0,
             "missing_host_entity_count": 0,
             "invalid_url_host_count": 1,
@@ -5631,17 +5731,13 @@ class TestPostgresMigrations:
         assert "'baseline_created'" in sql
         assert "'baseline_accepted'" in sql
 
-    def test_url_host_entity_link_migration_backfills_existing_postgres_links(self):
+    def test_url_host_entity_link_migration_defers_to_startup_backfill(self):
         from core.migrations import MIGRATIONS
 
         migration = next(item for item in MIGRATIONS if item.version == "0038")
-        sql = "\n".join(migration.statements)
 
         assert migration.name == "url_host_entity_links"
-        assert "UPDATE entities AS url_e" in sql
-        assert "SET host_entity_id = host_e.id" in sql
-        assert "url_e.type = 'url'" in sql
-        assert "COALESCE(host_e.team_id, '') = url_hosts.team_id" in sql
+        assert migration.statements == ()
 
     def test_sqlite_schema_matches_postgres_migration_core_shape(self):
         from core.migrations import MIGRATIONS
@@ -10579,6 +10675,9 @@ class TestIntelServices:
         )
         assert canonical.canonical_entity("url", "https://Example.com/path/?q=1") == (
             "https://example.com/path/?q=1"
+        )
+        assert canonical.canonical_entity("url", "HTTP://[2001:0DB8::0001]:8080/path/") == (
+            "http://[2001:db8::1]:8080/path"
         )
         assert canonical.canonical_entity("port", "Example.com:443") == "example.com:443/tcp"
         assert canonical.canonical_entity("port", "192.0.2.10:53/UDP") == "192.0.2.10:53/udp"
@@ -18775,6 +18874,7 @@ class TestOutputSignals:
         assert ("domain", "example.test") in values
         assert ("url", "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css") in values
         assert ("url", "https://example.test/assets/icons/awesome.svg") in values
+        assert ("url", "http://127.0.0.1/private/admin.php") not in values
         assert ("domain", "all.min.css") not in values
         assert ("domain", "awesome.svg") not in values
         assert ("domain", "admin-ajax.php") not in values
@@ -18782,11 +18882,15 @@ class TestOutputSignals:
         assert ("domain", r"www\.w3\.org") not in values
 
     def test_extract_entities_can_include_private_ips_when_requested(self):
-        entities = extract_entities("localhost-ish: 127.0.0.1 and fd00::1", include_private_ips=True)
+        entities = extract_entities(
+            "localhost-ish: 127.0.0.1 and fd00::1 http://127.0.0.1/private",
+            include_private_ips=True,
+        )
         values = {(item["type"], item["canonical_value"]) for item in entities}
 
         assert ("ip", "127.0.0.1") in values
         assert ("ip", "fd00::1") in values
+        assert ("url", "http://127.0.0.1/private") in values
 
     def test_classifier_adds_entity_metadata_to_real_output(self):
         classifier = OutputSignalClassifier("host darklab.sh")
@@ -21883,6 +21987,7 @@ class TestDatabaseInit:
     def test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity(self):
         payload = "\n".join((
             json.dumps({"row_type": "entity", "entity_kind": "url", "entity_value": "HTTPS://DarkLab.SH/Login"}),
+            json.dumps({"row_type": "entity", "entity_kind": "url", "entity_value": "HTTP://[2001:0DB8::0001]:8080/path/"}),
             json.dumps({"row_type": "entity", "entity_kind": "host", "entity_value": "192.0.2.10"}),
             json.dumps({"row_type": "entity", "entity_kind": "cve", "entity_value": "cve-2026-12345"}),
             json.dumps({"row_type": "entity", "entity_kind": "hash", "entity_value": "a" * 64}),
@@ -21899,6 +22004,7 @@ class TestDatabaseInit:
 
         assert [(entity.kind, entity.canonical_value) for entity in result.entities] == [
             ("url", "https://darklab.sh/Login"),
+            ("url", "http://[2001:db8::1]:8080/path"),
             ("ip", "192.0.2.10"),
             ("cve", "CVE-2026-12345"),
             ("hash", f"sha256:{'a' * 64}"),
@@ -22323,6 +22429,14 @@ SQL syntax error near q</response>
                 seen_at="2026-05-14T00:00:02+00:00",
                 occurrence_count=0,
             )
+            ipv6_url_id = upsert_entity(
+                conn,
+                "atlas-session",
+                "url",
+                "http://[2001:db8::1]:8080/status",
+                seen_at="2026-05-14T00:00:03+00:00",
+                occurrence_count=0,
+            )
             conn.commit()
             rows = {
                 (row["type"], row["canonical_value"]): dict(row)
@@ -22341,17 +22455,123 @@ SQL syntax error near q</response>
         url_row = rows[("url", "https://api.example.com/login")]
         ip_host_row = rows[("ip", "192.0.2.10")]
         ip_url_row = rows[("url", "https://192.0.2.10/status")]
+        ipv6_host_row = rows[("ip", "2001:db8::1")]
+        ipv6_url_row = rows[("url", "http://[2001:db8::1]:8080/status")]
         assert [item["type"] for item in recorded] == ["domain", "url"]
         assert url_row["host_entity_id"] == host_row["id"]
         assert host_row["occurrence_count"] == 1
         assert ip_url_id == ip_url_row["id"]
         assert ip_url_row["host_entity_id"] == ip_host_row["id"]
+        assert ipv6_url_id == ipv6_url_row["id"]
+        assert ipv6_url_row["host_entity_id"] == ipv6_host_row["id"]
+        assert ("domain", "2001") not in rows
         assert {(row["entity_id"], row["occurrence_count"]) for row in link_rows} == {
             (host_row["id"], 1),
             (url_row["id"], 1),
         }
 
+    def test_materialized_url_host_from_extracted_entities_is_not_double_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-url-extracted", "atlas-session", "curl https://api.example.com/login", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-url-extracted",
+                [{"entities": extract_entities("visit https://api.example.com/login now")}],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="curl https://api.example.com/login",
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "run-private-url-extracted",
+                    "atlas-session",
+                    "curl http://127.0.0.1/private",
+                    "2026-05-14T00:00:02+00:00",
+                    "[]"
+                ),
+            )
+            private_recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-private-url-extracted",
+                [{"entities": extract_entities("visit http://127.0.0.1/private now")}],
+                seen_at="2026-05-14T00:00:03+00:00",
+                command="curl http://127.0.0.1/private",
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "run-url-extracted-repeat",
+                    "atlas-session",
+                    "curl https://api.example.com/login",
+                    "2026-05-14T00:00:04+00:00",
+                    "[]",
+                ),
+            )
+            repeat_recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-url-extracted-repeat",
+                [
+                    {"entities": extract_entities("visit https://api.example.com/login now")},
+                    {"entities": extract_entities("visit https://api.example.com/login again")},
+                ],
+                seen_at="2026-05-14T00:00:05+00:00",
+                command="curl https://api.example.com/login",
+            )
+            conn.commit()
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id, occurrence_count "
+                    "FROM entities ORDER BY type, canonical_value"
+                ).fetchall()
+            }
+            link_rows = conn.execute(
+                "SELECT entity_id, occurrence_count FROM entity_run_links WHERE run_id = ? ORDER BY entity_id",
+                ("run-url-extracted",),
+            ).fetchall()
+            repeat_link_rows = conn.execute(
+                "SELECT entity_id, occurrence_count FROM entity_run_links WHERE run_id = ? ORDER BY entity_id",
+                ("run-url-extracted-repeat",),
+            ).fetchall()
+            conn.close()
+
+        host_row = rows[("domain", "api.example.com")]
+        url_row = rows[("url", "https://api.example.com/login")]
+        assert [item["type"] for item in recorded] == ["domain", "url"]
+        assert host_row["occurrence_count"] == 3
+        assert url_row["occurrence_count"] == 3
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert private_recorded == []
+        assert [
+            (item["type"], item["canonical_value"], item["occurrence_count"])
+            for item in repeat_recorded
+        ] == [
+            ("domain", "api.example.com", 2),
+            ("url", "https://api.example.com/login", 2),
+        ]
+        assert ("url", "http://127.0.0.1/private") not in rows
+        assert ("ip", "127.0.0.1") not in rows
+        assert {(row["entity_id"], row["occurrence_count"]) for row in link_rows} == {
+            (host_row["id"], 1),
+            (url_row["id"], 1),
+        }
+        assert {(row["entity_id"], row["occurrence_count"]) for row in repeat_link_rows} == {
+            (host_row["id"], 2),
+            (url_row["id"], 2),
+        }
+
     def test_backfills_url_host_entity_links_for_existing_rows(self):
+        from core.helpers import get_log_session_id
         from services.atlas.materializer import atlas_entity_id
         from services.intel.canonical import entity_signature
 
@@ -22377,20 +22597,172 @@ SQL syntax error near q</response>
                     "2026-05-14T00:00:01+00:00",
                 ),
             )
-            database._backfill_url_host_entity_links(conn)
+            ipv6_url_id = atlas_entity_id("atlas-session", "url", "https://[2001:db8::1]:8443/status")
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 3, '', ?, ?)",
+                (
+                    ipv6_url_id,
+                    "atlas-session",
+                    "https://[2001:db8::1]:8443/status",
+                    entity_signature("url", "https://[2001:db8::1]:8443/status"),
+                    "2026-05-14T00:00:02+00:00",
+                    "2026-05-14T00:00:02+00:00",
+                    "{}",
+                    "2026-05-14T00:00:02+00:00",
+                ),
+            )
+            team_id = "team-url-host-backfill"
+            team_host_id = atlas_entity_id("team-member-b", "domain", "team.example.com", team_id=team_id)
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, ?, 'domain', ?, ?, ?, ?, 5, '', ?, ?)",
+                (
+                    team_host_id,
+                    "team-member-b",
+                    team_id,
+                    "team.example.com",
+                    entity_signature("domain", "team.example.com"),
+                    "2026-05-14T00:00:03+00:00",
+                    "2026-05-14T00:00:03+00:00",
+                    "{}",
+                    "2026-05-14T00:00:03+00:00",
+                ),
+            )
+            team_url_id = atlas_entity_id("team-member-a", "url", "https://team.example.com/path", team_id=team_id)
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, ?, 'url', ?, ?, ?, ?, 2, '', ?, ?)",
+                (
+                    team_url_id,
+                    "team-member-a",
+                    team_id,
+                    "https://team.example.com/path",
+                    entity_signature("url", "https://team.example.com/path"),
+                    "2026-05-14T00:00:04+00:00",
+                    "2026-05-14T00:00:04+00:00",
+                    "{}",
+                    "2026-05-14T00:00:04+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, '', ?, ?)",
+                (
+                    "ent-url-host-backfill-invalid",
+                    "atlas-session",
+                    "https://bad host/path?secret=hidden",
+                    entity_signature("url", "https://bad host/path?secret=hidden"),
+                    "2026-05-14T00:00:05+00:00",
+                    "2026-05-14T00:00:05+00:00",
+                    "{}",
+                    "2026-05-14T00:00:05+00:00",
+                ),
+            )
+            with mock.patch("core.database.log.info") as info_log, \
+                    mock.patch("core.database.log.warning") as warning_log:
+                database._backfill_url_host_entity_links(conn)
             conn.commit()
             rows = {
                 (row["type"], row["canonical_value"]): dict(row)
                 for row in conn.execute(
-                    "SELECT id, type, canonical_value, host_entity_id, occurrence_count FROM entities"
+                    "SELECT id, session_id, team_id, type, canonical_value, host_entity_id, occurrence_count FROM entities"
                 ).fetchall()
             }
+            team_host_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM entities WHERE team_id = ? AND type = 'domain' "
+                "AND canonical_value = 'team.example.com'",
+                (team_id,),
+            ).fetchone()["count"]
             conn.close()
 
         host_row = rows[("domain", "legacy.example.com")]
         url_row = rows[("url", "https://legacy.example.com/path")]
+        ipv6_host_row = rows[("ip", "2001:db8::1")]
+        ipv6_url_row = rows[("url", "https://[2001:db8::1]:8443/status")]
+        team_host_row = rows[("domain", "team.example.com")]
+        team_url_row = rows[("url", "https://team.example.com/path")]
         assert url_row["host_entity_id"] == host_row["id"]
+        assert ipv6_url_row["host_entity_id"] == ipv6_host_row["id"]
+        assert team_url_row["host_entity_id"] == team_host_id
+        assert team_url_row["host_entity_id"] == team_host_row["id"]
+        assert team_host_row["session_id"] == "team-member-b"
+        assert team_host_count == 1
         assert host_row["occurrence_count"] == 0
+        assert ipv6_host_row["occurrence_count"] == 0
+        assert team_host_row["occurrence_count"] == 5
+        completion_log = next(
+            call.kwargs["extra"]
+            for call in info_log.call_args_list
+            if call.args == ("ATLAS_URL_HOST_BACKFILL_COMPLETED",)
+        )
+        assert completion_log == {
+            "backend": database.DB_BACKEND.value,
+            "url_entity_count": 4,
+            "updated_count": 3,
+            "skipped_count": 1,
+        }
+        skipped_log = next(
+            call.kwargs["extra"]
+            for call in warning_log.call_args_list
+            if call.args == ("ATLAS_URL_HOST_BACKFILL_SKIPPED_ROWS",)
+        )
+        assert skipped_log == {
+            "backend": database.DB_BACKEND.value,
+            "url_entity_count": 4,
+            "invalid_url_count": 1,
+            "host_upsert_miss_count": 0,
+            "update_miss_count": 0,
+        }
+        assert "secret=hidden" not in str(skipped_log)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, '', ?, ?)",
+                (
+                    "ent-url-host-backfill-error",
+                    "atlas-session",
+                    "https://error.example.com/path",
+                    entity_signature("url", "https://error.example.com/path"),
+                    "2026-05-14T00:00:06+00:00",
+                    "2026-05-14T00:00:06+00:00",
+                    "{}",
+                    "2026-05-14T00:00:06+00:00",
+                ),
+            )
+            with mock.patch("services.atlas.materializer.upsert_entity", side_effect=RuntimeError("boom")), \
+                    mock.patch("core.database.log.error") as error_log, \
+                    pytest.raises(RuntimeError):
+                database._backfill_url_host_entity_links(conn)
+            conn.close()
+        row_error_log = next(
+            call.kwargs["extra"]
+            for call in error_log.call_args_list
+            if call.args == ("ATLAS_URL_HOST_BACKFILL_ROW_FAILED",)
+        )
+        assert row_error_log == {
+            "stage": "upsert_host",
+            "backend": database.DB_BACKEND.value,
+            "url_entity_id": "ent-url-host-backfill-error",
+            "session": get_log_session_id("atlas-session"),
+            "team_id": "",
+            "host_entity_type": "domain",
+        }
 
     def test_materializes_port_entities_with_host_relationship_and_attributes(self):
         from core.helpers import get_log_session_id
@@ -22529,7 +22901,11 @@ SQL syntax error near q</response>
             "total_occurrence_count": 3,
             "invalid_entity_count": 0,
             "port_entity_count": 2,
+            "url_entity_count": 0,
             "url_host_link_count": 0,
+            "url_host_unresolved_count": 0,
+            "url_host_domain_count": 0,
+            "url_host_ip_count": 0,
             "attribute_entity_count": 1,
             "scan_observation_count": 1,
         }
