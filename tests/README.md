@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,905
+- behavior tests: 3,916
 - docs/inventory meta-tests: 48
-- `pytest`: 2219 (2184 behavior + 35 meta)
+- `pytest`: 2230 (2195 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,957
+- total: 3,968
 
 This document is organized in two parts:
 
@@ -1004,6 +1004,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
 | `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry built-in commands such as `bogus-command`. |
 | `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
+| `TestRewriteIdempotent.test_curl_progress_meter_is_suppressed_by_default` | Verifies that app-launched curl commands inject `--no-progress-meter` by default. |
+| `TestRewriteIdempotent.test_curl_progress_rewrite_preserves_explicit_output_modes` | Verifies that curl help, silent, explicit progress, and already-quiet modes are not rewritten again. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
 | `TestRewriteIdempotent.test_mtr_report_flag_unchanged` | Checks that mtr report flag unchanged. |
 | `TestRewriteIdempotent.test_nmap_already_connect_scan_unchanged` | Checks that nmap already connect scan unchanged. |

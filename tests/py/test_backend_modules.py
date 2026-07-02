@@ -20290,6 +20290,31 @@ class TestSeedHistoryFixtures:
 # ── rewrite_command idempotency ───────────────────────────────────────────────
 
 class TestRewriteIdempotent:
+    def test_curl_progress_meter_is_suppressed_by_default(self):
+        cmd, notice = rewrite_command("curl https://ip.darklab.sh")
+        assert cmd == "curl --no-progress-meter https://ip.darklab.sh"
+        assert notice is None
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("curl -I https://ip.darklab.sh", "curl --no-progress-meter -I https://ip.darklab.sh"),
+            ("curl -sv https://ip.darklab.sh", "curl --no-progress-meter -sv https://ip.darklab.sh"),
+            ("curl -s https://ip.darklab.sh", "curl -s https://ip.darklab.sh"),
+            ("curl --silent https://ip.darklab.sh", "curl --silent https://ip.darklab.sh"),
+            ("curl -# https://ip.darklab.sh", "curl -# https://ip.darklab.sh"),
+            ("curl --progress-bar https://ip.darklab.sh", "curl --progress-bar https://ip.darklab.sh"),
+            ("curl --progress-meter https://ip.darklab.sh", "curl --progress-meter https://ip.darklab.sh"),
+            ("curl --no-progress-meter https://ip.darklab.sh", "curl --no-progress-meter https://ip.darklab.sh"),
+            ("curl -h", "curl -h"),
+            ("curl --help", "curl --help"),
+        ],
+    )
+    def test_curl_progress_rewrite_preserves_explicit_output_modes(self, command, expected):
+        cmd, notice = rewrite_command(command)
+        assert cmd == expected
+        assert notice is None
+
     def test_mtr_already_report_wide_unchanged(self):
         cmd, notice = rewrite_command("mtr --report-wide google.com")
         assert "--report-wide --report-wide" not in cmd

@@ -574,6 +574,21 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - --no-progress-meter
+          position: prepend
+          unless_any:
+            - -h
+            - --help
+            - --manual
+            - --no-progress-meter
+            - --progress-bar
+            - --progress-meter
+            - --silent
+            - -#
+            - -s
     autocomplete:
       examples:
         - value: curl -h

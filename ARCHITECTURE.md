@@ -1105,6 +1105,7 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 
 | Command | Rewrite | Reason |
 | --------- | --------- | -------- |
+| `curl` | Adds `--no-progress-meter` unless help, silent, or explicit progress flags are present | Keeps the terminal transcript readable when curl writes progress updates to stderr and the app streams stderr with stdout. Silent. |
 | `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
 | `nmap` | Adds `-sT` when no scan mode is explicit | Uses TCP connect scanning for reliable non-root container execution; `-sS` and `--privileged` are blocked. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates`; uses owner-scoped `XDG_CONFIG_HOME=<workspace>/tools` when Files are enabled | Redirects template storage to tmpfs while keeping useful ProjectDiscovery config/resume state under the active personal/team workspace's `tools/` folder. Output metadata records the template source for later Run Details, Atlas import, and evidence review. Silent. |
@@ -2148,12 +2149,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,905
+- behavior tests: 3,916
 - docs/inventory meta-tests: 48
-- `pytest`: 2219 (2184 behavior + 35 meta)
+- `pytest`: 2230 (2195 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,957
+- total: 3,968
 
 ### Testing Architecture
 

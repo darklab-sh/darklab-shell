@@ -24,6 +24,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Command-discovered URL project targets now keep source-run provenance after Atlas output materialization, and their derived host gets the same run link, so fresh command targets no longer appear only as orphaned Atlas URLs.
 - URL host-link backfill now uses the same canonical Python path on SQLite and Postgres instead of duplicating partial URL host parsing inside the Postgres migration marker.
 - Generic command-output hostname extraction now uses an offline Public Suffix List gate plus conservative file-context checks, so dotted code identifiers such as `classlist.add` and `document.queryselector` no longer become Atlas domains while real domains and URL/scanner-specific capture paths keep their existing behavior.
+- App-launched `curl` runs now suppress curl's progress meter by default, so headers and response bodies don't get mixed with progress rows in the terminal transcript while explicit silent/help/progress modes stay unchanged.
 
 ### Added
 
