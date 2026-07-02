@@ -20,6 +20,13 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
+  - [Enforce a data-access layer and remove raw SQL from blueprints](#enforce-a-data-access-layer-and-remove-raw-sql-from-blueprints)
+  - [Unify SQLite and Postgres schema management](#unify-sqlite-and-postgres-schema-management)
+  - [Adopt a Flask application factory](#adopt-a-flask-application-factory)
+  - [Decompose oversized blueprint and core modules](#decompose-oversized-blueprint-and-core-modules)
+  - [Replace global singletons with injected dependencies](#replace-global-singletons-with-injected-dependencies)
+  - [Typed, validated configuration model](#typed-validated-configuration-model)
+  - [Right-size project documentation](#right-size-project-documentation)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Lightweight Jinja base template](#lightweight-jinja-base-template)
@@ -29,32 +36,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Reduce false-positive domain entities in output extraction with a Public Suffix List gate.**
-  - Problem: auto-discovered `domain` entities from command output capture many false positives. The current mitigation is a hand-maintained denylist of file-like suffixes (`_ENTITY_FILELIKE_SUFFIXES` in `output_signals.py`), which is open-ended and leaks the dominant false-positive class: dotted code identifiers in tool/verbose output such as `os.path`, `obj.method`, `Array.prototype`, and `config.default`. Invert the model: accept a domain only when its suffix is a real public suffix.
-  - Approach: use the `tldextract` package (Public Suffix List) so the check understands effective TLDs and registrable domains (`co.uk`, `github.io`) rather than only the last label. A bare IANA last-label list would be simpler but does not handle multi-level suffixes; the PSL is the better fit here.
-  - Scope:
-    - Gate auto-extraction only. Apply the suffix check in `output_signals` domain emission, never in the shared `canonical_domain`, which also serves user-entered Project targets and imports where the user asserts validity.
-    - Keep the existing file-suffix denylist as a second layer. Many file extensions are valid TLDs (`sh`, `py`, `md`, `rs`, `zip`, `app`, `dev`, `ai`), so `main.sh`, `lib.rs`, and `notes.md` still pass a PSL gate and must be rejected by the denylist. The two layers are complementary, not a replacement.
-    - Do not fetch the PSL at container boot or app start-up. This is a self-hosted tool that often runs offline, and evidence extraction should be deterministic per release.
-  - Phase 1: Add `tldextract` as a bundled, offline dependency.
-    - Add `tldextract` to `app/requirements.txt`.
-    - Configure it to use only its bundled PSL snapshot with no live network fetch (no runtime suffix-list URL lookups, no writable cache dependency).
-    - Add a `scripts/` maintenance helper to refresh the bundled snapshot at build/release time, and record the snapshot date so extraction stays reproducible between releases.
-  - Phase 2: Apply the suffix gate in output extraction.
-    - In the `output_signals` domain-emit path, reject a candidate whose registrable suffix is not a public suffix, after the existing file-suffix and file-hostname heuristics still run.
-    - Keep IP hosts, URL hosts, and user/import paths unaffected.
-    - Ensure IDN handling stays consistent with `canonical_domain`: the PSL stores IDN suffixes as punycode, so compare against the IDNA-encoded form used for canonicalization.
-  - Phase 3: Internal-engagement escape hatch.
-    - Add a configurable extra-suffix allowlist (parallel to the existing `include_private_ips` policy) so internal-scope output still captures non-public suffixes such as `.local`, `.internal`, `.lan`, and `.corp`.
-    - Default to public-suffix-only; operators opt in to extra suffixes per deployment or scope.
-  - Phase 4: Verification and docs.
-    - Add backend tests: dotted code identifiers are rejected, real domains and `co.uk`/`github.io`-style registrable domains pass, file-extension-as-TLD cases stay rejected by the denylist, IDN/punycode suffixes resolve, and the internal-suffix allowlist works when enabled.
-    - Add a test asserting extraction performs no network fetch (offline-safe).
-    - Update extraction docs, the vendored-dependency notes, and test-count documentation if totals change.
-  - Open Decisions:
-    - Recommended: bundle the PSL snapshot and refresh it at release time; expose refresh only as an explicit opt-in operator action, never a mandatory boot fetch, always with a hard fallback to the bundled snapshot.
-    - Recommended: keep the file-suffix denylist alongside the PSL gate rather than removing it.
-    - Recommended: apply the gate to auto-extraction only, leaving user-entered and imported domains trusted.
+No open Open TODOs are currently tracked.
 
 ---
 
@@ -195,6 +177,55 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
+
+### Enforce a data-access layer and remove raw SQL from blueprints
+- Problem: persistence logic is spread across the codebase rather than owned in one place. There are ~1,050 raw `.execute()` calls and ~830 inline SQL literals across ~55 modules, and blueprints issue SQL directly inside request handlers (for example `history.py` runs ~35 queries straight from route functions). The same load/query patterns get re-implemented per call site, and nothing prevents the next SQL string from landing in an HTTP handler.
+- The `services/` tree already has the right shape — domain packages such as `atlas/`, `projects/`, and `runs/` split into `queries.py`, `findings.py`, and similar — but blueprints bypass it and call `db_connect()` themselves, so the good structure is optional rather than the only path.
+- Approach:
+  - Move every query behind `services/*/queries` (or equivalent repository modules) so each read/write has a single owner.
+  - Make blueprints thin controllers: parse and validate the request, call a service, serialize the result — no `db_connect()` or `.execute()` above the service layer.
+  - Add an enforcement gate (an architecture test or lint rule) that fails when `db_connect` or `.execute(` appears under `blueprints/`, so the boundary cannot silently erode again.
+- This is the highest-leverage structural change and it reuses infrastructure that already exists.
+
+### Unify SQLite and Postgres schema management
+- Problem: schema evolution runs through two divergent mechanisms kept in sync by hand. Postgres uses a clean numbered migration framework with advisory locking (`core/migrations/v0001…v0038`, applied via `run_migrations_with_advisory_lock`). SQLite uses a separate imperative path — `_create_schema()` with `CREATE TABLE IF NOT EXISTS`, then a ~600-line `_migrate_schema()` of inline `ALTER TABLE … ADD COLUMN` statements and `RENAME TO …_legacy` table-rebuild dances (`database.py:2100+`). Two sources of truth for one schema is the most likely source of drift bugs, and the `connect_postgres_sqlite_compat` shim shows the dialect abstraction is already leaking.
+- Approach:
+  - Decide explicitly whether SQLite is a supported production backend or a local/dev convenience; document the decision. That choice sizes the rest of the work.
+  - Converge on a single migration mechanism that both backends run, retiring the hand-written `_migrate_schema` ladder in favor of ordered, versioned migrations.
+  - If dual-backend support stays, express each migration once against the shared dialect layer rather than maintaining parallel SQLite and Postgres definitions.
+
+### Adopt a Flask application factory
+- Problem: `app/app.py` builds a module-level `app` and, as a side effect of importing it, configures logging, loads config, connects to Redis, initializes metrics, and runs startup DB cleanup. The file carries import-ordering warnings ("Logging must be configured before other local imports — process.py connects to Redis at module import time") and several `# noqa: F401 — re-exported for test compatibility` markers, which indicate tests reach into module internals because there is no clean construction seam.
+- Approach:
+  - Introduce `create_app(config)` that registers blueprints and returns a configured app, with no work triggered merely by importing the module.
+  - Move import-time side effects (Redis connection, metrics setup, startup cleanup, periodic-task registration) into explicit lifecycle hooks or a CLI entrypoint.
+  - Once construction is explicit, remove the re-export/compat shims and let tests build an app per configuration instead of monkeypatching globals.
+
+### Decompose oversized blueprint and core modules
+- Problem: the largest modules mix routing, business logic, and persistence in single files — `run.py` (~3,470 lines), `api_v1.py` (~3,080), `projects.py` (~2,770), `history.py` (~2,580), plus `services/commands/registry.py` (~3,760) and `core/database.py` (~2,910). Size alone makes review, testing, and change isolation harder, and it is what makes the app read as immature despite solid feature coverage.
+- Approach:
+  - Extract business logic into services and keep route files focused on HTTP concerns; pair this with the data-access-layer work above.
+  - Split by responsibility rather than by line count — for example separate resource groups within `api_v1.py`, and separate schema/init/query/retention concerns within `database.py`.
+  - Target no route module over ~800 lines and no service module owning more than one domain concern; the test suite should follow the same decomposition so failures localize.
+
+### Replace global singletons with injected dependencies
+- Problem: `redis_client`, `limiter`, and `CFG` are module-level globals imported throughout the app. This is workable but drives the re-export/compat gymnastics in `app.py` and makes isolated testing awkward, since collaborators are bound at import time rather than passed in.
+- Approach:
+  - Pass dependencies explicitly (or attach them to an app-scoped registry / Flask extensions pattern) instead of importing module globals.
+  - Sequence this after the application factory lands, since the factory provides the natural place to construct and wire these dependencies once per app.
+
+### Typed, validated configuration model
+- Problem: configuration is effectively its own subsystem with no schema. `config.py` is ~1,190 lines feeding on large YAML inputs (`commands.yaml` ~184K, `config.yaml` ~42K) plus a ~3,760-line command `registry.py`, and it is consumed through untyped `CFG.get(...)` access scattered across the code. Misconfiguration surfaces late and diffusely rather than at boot.
+- Approach:
+  - Introduce a typed, validated settings model (for example pydantic-settings or equivalent) that fails fast at startup with a clear message when config is missing or malformed.
+  - Replace ad-hoc `CFG.get(...)` reads with attribute access on the validated model so config keys are discoverable and type-checked.
+
+### Right-size project documentation
+- Problem: several docs are treated as append-only logs and have grown past the point of being read or kept accurate — `CHANGELOG.md` (~792K), `README.md` (~127K), `ARCHITECTURE.md` (~280K), `FEATURES.md` (~188K). Documentation this large drifts from reality and buries the parts newcomers actually need.
+- Approach:
+  - Keep the README navigational and short; let it point into deeper docs rather than duplicating them.
+  - Make `ARCHITECTURE.md` and `FEATURES.md` describe current state concisely, and confine chronological history to `CHANGELOG.md`.
+  - Align with the existing documentation standards work so state docs stay free of migration/phase narrative that belongs in the changelog.
 
 ### Unified terminal built-in lifecycle
 - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.

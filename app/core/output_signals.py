@@ -7,7 +7,7 @@ can agree on what counts as a finding, warning, error, or summary line.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 import hashlib
@@ -16,6 +16,8 @@ import ipaddress
 import logging
 import re
 from urllib.parse import urlparse
+
+import tldextract
 
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
 from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
@@ -454,6 +456,24 @@ _ENTITY_FILELIKE_SUFFIXES = {
     "yml",
     "zip",
 }
+_ENTITY_FILELIKE_TLD_COLLISION_SUFFIXES = {"mov", "py", "rs", "sh"}
+_ENTITY_FILELIKE_BASENAMES = {
+    "build",
+    "config",
+    "deploy",
+    "index",
+    "lib",
+    "main",
+    "readme",
+    "setup",
+}
+
+_DOMAIN_SUFFIX_EXTRACTOR = tldextract.TLDExtract(
+    cache_dir=None,
+    suffix_list_urls=(),
+    fallback_to_snapshot=True,
+    include_psl_private_domains=True,
+)
 
 
 def _is_public_ip(value: str) -> bool:
@@ -520,6 +540,57 @@ def _looks_like_file_hostname(value: str) -> bool:
     return suffix in _ENTITY_FILELIKE_SUFFIXES
 
 
+def _entity_domain_labels(value: str) -> list[str]:
+    token = str(value or "").strip().rstrip(".").lower()
+    if not token:
+        return []
+    try:
+        return [
+            label.encode("idna").decode("ascii").lower()
+            for label in token.split(".")
+            if label
+        ]
+    except UnicodeError:
+        return []
+
+
+def _has_left_label_for_suffix(labels: list[str], suffix_labels: list[str]) -> bool:
+    return bool(labels and suffix_labels and len(labels) > len(suffix_labels))
+
+
+def _domain_candidate_has_allowed_suffix(value: str, extra_suffixes: Sequence[str] = ()) -> bool:
+    labels = _entity_domain_labels(value)
+    if not labels:
+        return False
+    ascii_value = ".".join(labels)
+    extracted = _DOMAIN_SUFFIX_EXTRACTOR(ascii_value)
+    suffix_labels = _entity_domain_labels(extracted.suffix)
+    if extracted.suffix and _has_left_label_for_suffix(labels, suffix_labels):
+        return True
+    for raw_suffix in extra_suffixes:
+        suffix_labels = _entity_domain_labels(raw_suffix)
+        if not suffix_labels or len(labels) < len(suffix_labels):
+            continue
+        if labels[-len(suffix_labels):] == suffix_labels and _has_left_label_for_suffix(labels, suffix_labels):
+            return True
+    return False
+
+
+def _looks_like_path_context(text: str, start: int, end: int) -> bool:
+    source = str(text or "")
+    prev_char = source[start - 1] if start > 0 else ""
+    next_char = source[end] if end < len(source) else ""
+    return prev_char in {"/", "\\"} or next_char == "\\"
+
+
+def _looks_like_bare_file_domain_collision(value: str) -> bool:
+    labels = _entity_domain_labels(value)
+    if len(labels) != 2:
+        return False
+    basename, suffix = labels
+    return basename in _ENTITY_FILELIKE_BASENAMES and suffix in _ENTITY_FILELIKE_TLD_COLLISION_SUFFIXES
+
+
 def _span_overlaps(spans: list[tuple[int, int]], start: int, end: int) -> bool:
     return any(start < span_end and end > span_start for span_start, span_end in spans)
 
@@ -542,6 +613,7 @@ def extract_entities(
     text: str,
     *,
     include_private_ips: bool = False,
+    extra_domain_suffixes: Sequence[str] = (),
     source_line: int | None = None,
     normalized_text: str | None = None,
 ) -> list[dict[str, object]]:
@@ -649,9 +721,15 @@ def extract_entities(
         raw = match.group(0).rstrip(".")
         if "\\" in raw or _looks_like_file_hostname(raw):
             continue
+        if _looks_like_path_context(stripped, match.start(), match.end()):
+            continue
+        if _looks_like_bare_file_domain_collision(raw):
+            continue
         try:
             canonical = canonical_domain(raw)
         except CanonicalizationError:
+            continue
+        if not _domain_candidate_has_allowed_suffix(canonical, extra_domain_suffixes):
             continue
         _add_entity(
             entities,
@@ -1468,6 +1546,7 @@ def _extract_entities_for_command(
     root: str,
     text: str,
     *,
+    extra_domain_suffixes: Sequence[str] = (),
     source_line: int | None = None,
     normalized_text: str | None = None,
     ansi_stripped_text: str | None = None,
@@ -1493,11 +1572,21 @@ def _extract_entities_for_command(
         if nmap_port_entities:
             return nmap_port_entities
         if _NMAP_RDNS_RE.search(stripped):
-            return extract_entities(text, source_line=source_line, normalized_text=stripped)
+            return extract_entities(
+                text,
+                extra_domain_suffixes=extra_domain_suffixes,
+                source_line=source_line,
+                normalized_text=stripped,
+            )
         if _is_nmap_vulners_finding(stripped):
             entities = _nmap_target_entities(line_target or command_target or "", source_line)
             seen = _seen_entities(entities)
-            for entity in extract_entities(text, source_line=source_line, normalized_text=stripped):
+            for entity in extract_entities(
+                text,
+                extra_domain_suffixes=extra_domain_suffixes,
+                source_line=source_line,
+                normalized_text=stripped,
+            ):
                 if str(entity.get("type") or "") == "domain" and str(entity.get("canonical_value") or "") == "vulners.com":
                     continue
                 if str(entity.get("type") or "") == "url":
@@ -1586,7 +1675,12 @@ def _extract_entities_for_command(
         return []
     if root == "ffuf" and (_is_ffuf_noise(stripped) or bool(_FFUF_CONFIG_RE.search(stripped))):
         return []
-    entities = extract_entities(text, source_line=source_line, normalized_text=stripped)
+    entities = extract_entities(
+        text,
+        extra_domain_suffixes=extra_domain_suffixes,
+        source_line=source_line,
+        normalized_text=stripped,
+    )
     if root == "ffuf" and (command_url_template or command_target):
         parsed_result = _parse_ffuf_result(stripped)
         if not parsed_result:
@@ -1868,6 +1962,7 @@ def extract_target(command: str) -> str | None:
 class OutputSignalClassifier:
     command: str
     cmd_type: str = "real"
+    extra_domain_suffixes: Sequence[str] = ()
 
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
@@ -1965,6 +2060,7 @@ class OutputSignalClassifier:
                 self.root,
                 text,
                 source_line=self.line_index,
+                extra_domain_suffixes=self.extra_domain_suffixes,
                 normalized_text=normalized_text,
                 ansi_stripped_text=ansi_stripped,
                 command_target=self.target,

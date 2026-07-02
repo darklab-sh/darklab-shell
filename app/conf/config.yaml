@@ -145,6 +145,16 @@
 # snapshots_inline_max_bytes: 0
 # intel_payload_inline_max_bytes: 0
 
+# Extra non-public suffixes accepted by generic command-output domain extraction.
+# The app already captures full URLs and explicit scanner targets through stronger
+# parser paths; this list only affects bare hostnames found in free text. Keep it
+# empty for public-suffix-only extraction, or opt into internal engagement names
+# such as host.local and service.corp.
+# Server default if unset: []
+# output_entity_extra_domain_suffixes:
+#   - local
+#   - corp
+
 # ── Per-session Workspace Storage ────────────────────────────────────────────
 #
 # Optional app-mediated file storage for file-enabled commands and UI.

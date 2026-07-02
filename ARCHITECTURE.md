@@ -1018,6 +1018,8 @@ Full-output artifacts are versioned JSONL. New files start with a small header r
 
 Live streams advertise the same contract. `/runs/<id>/stream` and `/api/v1/runs/<id>/stream` send a `schema` frame or row first, then keep using `output` events with a versioned line-event payload. Older clients can keep reading `type` and `text`; newer clients use `kind`, `role`, `signals`, and `entities`.
 
+Generic command-output entity extraction keeps URL, scanner-specific, import, and project-target paths on their stronger parsers, while bare free-text hostname candidates pass through an offline Public Suffix List gate before becoming domain metadata. The gate uses the `tldextract` package snapshot pinned in `app/requirements.txt`, includes private PSL suffixes so shared-hosting names such as `foo.github.io` stay distinct, and never fetches a live list during normal extraction. Operators can add deployment-local suffixes such as `.local` or `.corp` with `output_entity_extra_domain_suffixes`; that setting is threaded per extraction call, matching the existing private-IP capture policy.
+
 Browser-side command outcome summaries are derived display metadata layered on
 top of `LineEvent` transcripts. `output_core.js` normalizes explicit summary
 payloads and builds deterministic summaries for supported roots such as `nmap`,
@@ -2146,12 +2148,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,897
+- behavior tests: 3,905
 - docs/inventory meta-tests: 48
-- `pytest`: 2211 (2176 behavior + 35 meta)
+- `pytest`: 2219 (2184 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,949
+- total: 3,957
 
 ### Testing Architecture
 

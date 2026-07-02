@@ -614,7 +614,11 @@ def _diag_classifier_inspector(args) -> dict:
     if not submitted or not line.strip():
         return payload
 
-    classifier = OutputSignalClassifier(command, cmd_type=cmd_type)
+    classifier = OutputSignalClassifier(
+        command,
+        cmd_type=cmd_type,
+        extra_domain_suffixes=CFG.get("output_entity_extra_domain_suffixes", []),
+    )
     metadata = classifier.classify_line(line, cls=legacy_cls)
     base_event = line_event_from_legacy(line, legacy_cls)
     role = str(metadata.get("role") or base_event.role.value)

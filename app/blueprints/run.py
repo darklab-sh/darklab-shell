@@ -1418,7 +1418,11 @@ def _persist_completed_pty_run(
     owner_tab_id: str = "",
 ):
     capture = _run_output_capture(run.run_id)
-    signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
+    signal_classifier = OutputSignalClassifier(
+        execution_command,
+        cmd_type="real",
+        extra_domain_suffixes=CFG.get("output_entity_extra_domain_suffixes", []),
+    )
     for item in _shape_completed_pty_entries(synthesized_lines, transcript_mode):
         text = str(item.get("text", ""))
         cls = str(item.get("cls", ""))
@@ -1462,7 +1466,11 @@ def _client_side_run_command_allowed(command: str) -> bool:
 def _normalize_client_side_run_lines(lines, command: str):
     if not isinstance(lines, list):
         return [], False, 0
-    signal_classifier = OutputSignalClassifier(command, cmd_type="builtin")
+    signal_classifier = OutputSignalClassifier(
+        command,
+        cmd_type="builtin",
+        extra_domain_suffixes=CFG.get("output_entity_extra_domain_suffixes", []),
+    )
     capture = RunOutputCapture(
         run_id="client-side-run-preview",
         preview_limit=CFG["max_output_lines"],
@@ -2430,7 +2438,11 @@ def _start_real_command_process(
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
-    signal_classifier = OutputSignalClassifier(prepared_real.execution_command, cmd_type="real")
+    signal_classifier = OutputSignalClassifier(
+        prepared_real.execution_command,
+        cmd_type="real",
+        extra_domain_suffixes=CFG.get("output_entity_extra_domain_suffixes", []),
+    )
     workspace_owner = owner_context
     if workspace_owner is None:
         workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
@@ -2552,7 +2564,11 @@ def _brokered_synthetic_run(
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
-    signal_classifier = OutputSignalClassifier(original_command, cmd_type=cmd_type)
+    signal_classifier = OutputSignalClassifier(
+        original_command,
+        cmd_type=cmd_type,
+        extra_domain_suffixes=CFG.get("output_entity_extra_domain_suffixes", []),
+    )
     run_started_dt = datetime.fromisoformat(run_started)
 
     log.info("RUN_START", extra={

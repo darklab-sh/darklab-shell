@@ -2377,6 +2377,28 @@ class TestLoadConfig:
             extra={"cidr": "not-a-cidr"},
         )
 
+    def test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    output_entity_extra_domain_suffixes:
+                      - .LOCAL
+                      - corp
+                      - local
+                      - café
+                      - bad_suffix
+                    """
+                ))
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert cfg["output_entity_extra_domain_suffixes"] == ["local", "corp", "xn--caf-dma"]
+        warning.assert_called_once_with(
+            "OUTPUT_ENTITY_EXTRA_DOMAIN_SUFFIX_INVALID",
+            extra={"suffix": "bad_suffix"},
+        )
+
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = os.path.join(tmp, "config.yaml")
@@ -18880,6 +18902,92 @@ class TestOutputSignals:
         assert ("domain", "admin-ajax.php") not in values
         assert ("domain", "admin.php") not in values
         assert ("domain", r"www\.w3\.org") not in values
+
+    def test_extract_entities_uses_public_suffix_gate_for_generic_hostnames(self):
+        entities = extract_entities(
+            "darklab.sh example.co.uk pages.github.io co.uk github.io "
+            "classlist.add document.queryselector document.queryselectorall "
+            "event.touches images.length slider.addeventlistener os.path Array.prototype config.default"
+        )
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "darklab.sh") in values
+        assert ("domain", "example.co.uk") in values
+        assert ("domain", "pages.github.io") in values
+        assert ("domain", "co.uk") not in values
+        assert ("domain", "github.io") not in values
+        assert ("domain", "classlist.add") not in values
+        assert ("domain", "document.queryselector") not in values
+        assert ("domain", "document.queryselectorall") not in values
+        assert ("domain", "event.touches") not in values
+        assert ("domain", "images.length") not in values
+        assert ("domain", "slider.addeventlistener") not in values
+        assert ("domain", "os.path") not in values
+        assert ("domain", "array.prototype") not in values
+        assert ("domain", "config.default") not in values
+
+    def test_extract_entities_keeps_psl_gate_as_validation_only(self):
+        entities = extract_entities("foo.github.io bar.github.io")
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "foo.github.io") in values
+        assert ("domain", "bar.github.io") in values
+        assert ("domain", "github.io") not in values
+
+    def test_extract_entities_rejects_file_context_without_dropping_real_domains(self):
+        entities = extract_entities("./main.sh /opt/app/lib.rs C:\\tools\\deploy.py darklab.sh")
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "darklab.sh") in values
+        assert ("domain", "main.sh") not in values
+        assert ("domain", "lib.rs") not in values
+        assert ("domain", "deploy.py") not in values
+
+    def test_extract_entities_keeps_scheme_less_domain_path_references(self):
+        entities = extract_entities(
+            "found example.com/admin during scan; redirect to example.net/login and /opt/app/lib.rs"
+        )
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "example.com") in values
+        assert ("domain", "example.net") in values
+        assert ("domain", "lib.rs") not in values
+
+    def test_extract_entities_extra_suffix_allowlist_is_per_call(self):
+        default_entities = extract_entities("host.local service.corp local corp")
+        allowed_entities = extract_entities("host.local service.corp local corp", extra_domain_suffixes=["local", ".corp"])
+        default_values = {(item["type"], item["canonical_value"]) for item in default_entities}
+        allowed_values = {(item["type"], item["canonical_value"]) for item in allowed_entities}
+
+        assert ("domain", "host.local") not in default_values
+        assert ("domain", "service.corp") not in default_values
+        assert ("domain", "host.local") in allowed_values
+        assert ("domain", "service.corp") in allowed_values
+        assert ("domain", "local") not in allowed_values
+        assert ("domain", "corp") not in allowed_values
+
+    def test_extract_entities_url_host_companion_is_not_psl_gated(self):
+        bare_entities = extract_entities("host.local")
+        url_entities = extract_entities("https://host.local/path")
+        bare_values = {(item["type"], item["canonical_value"]) for item in bare_entities}
+        url_values = {(item["type"], item["canonical_value"]) for item in url_entities}
+
+        assert ("domain", "host.local") not in bare_values
+        assert ("url", "https://host.local/path") in url_values
+        assert ("domain", "host.local") in url_values
+
+    def test_extract_entities_public_suffix_gate_does_not_fetch_network(self):
+        import tldextract.suffix_list as suffix_list
+
+        # tldextract routes live suffix-list refreshes through this helper in the
+        # pinned version. If the dependency changes this internals path, keep the
+        # assertion intent: normal extraction must not attempt a network refresh.
+        with mock.patch.object(suffix_list, "find_first_response", side_effect=AssertionError("network fetch attempted")):
+            entities = extract_entities("darklab.sh classlist.add")
+
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+        assert ("domain", "darklab.sh") in values
+        assert ("domain", "classlist.add") not in values
 
     def test_extract_entities_can_include_private_ips_when_requested(self):
         entities = extract_entities(

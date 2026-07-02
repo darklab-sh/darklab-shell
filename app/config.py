@@ -7,6 +7,7 @@ import os
 import pwd
 import logging
 import ipaddress
+import re
 from pathlib import Path
 import yaml
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
@@ -142,6 +143,39 @@ def _normalize_ai_base_url_allowed_cidrs(value):
 
 def _normalize_restricted_command_input_cidrs(value):
     return _normalize_cidr_list(value, "RESTRICTED_COMMAND_INPUT_CIDR_INVALID")
+
+
+def _normalize_output_entity_extra_domain_suffixes(value):
+    if isinstance(value, str):
+        raw_values = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = [str(item).strip() for item in value if str(item or "").strip()]
+    else:
+        raw_values = []
+    normalized = []
+    seen = set()
+    for suffix in raw_values:
+        token = suffix.strip().lower().strip(".")
+        if not token:
+            continue
+        try:
+            ascii_labels = [label.encode("idna").decode("ascii") for label in token.split(".") if label]
+        except UnicodeError:
+            log.warning("OUTPUT_ENTITY_EXTRA_DOMAIN_SUFFIX_INVALID", extra={"suffix": suffix[:120]})
+            continue
+        ascii_suffix = ".".join(ascii_labels).lower()
+        if (
+            not ascii_suffix
+            or any(not label for label in ascii_suffix.split("."))
+            or any(not re.match(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", label) for label in ascii_suffix.split("."))
+        ):
+            log.warning("OUTPUT_ENTITY_EXTRA_DOMAIN_SUFFIX_INVALID", extra={"suffix": suffix[:120]})
+            continue
+        if ascii_suffix in seen:
+            continue
+        seen.add(ascii_suffix)
+        normalized.append(ascii_suffix)
+    return normalized
 
 
 def load_config(conf_dir=None):
@@ -304,6 +338,7 @@ def load_config(conf_dir=None):
         "runs_search_text_inline_max_bytes": 0,
         "snapshots_inline_max_bytes": 0,
         "intel_payload_inline_max_bytes": 0,
+        "output_entity_extra_domain_suffixes": [],
         "workspace_enabled":          False,
         "workspace_backend":          "tmpfs",
         # Intentional server-side workspace root default. Workspaces are
@@ -498,6 +533,9 @@ def load_config(conf_dir=None):
     )
     defaults["restricted_command_input_cidrs"] = _normalize_restricted_command_input_cidrs(
         defaults.get("restricted_command_input_cidrs")
+    )
+    defaults["output_entity_extra_domain_suffixes"] = _normalize_output_entity_extra_domain_suffixes(
+        defaults.get("output_entity_extra_domain_suffixes")
     )
     defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
     defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)

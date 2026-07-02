@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,897
+- behavior tests: 3,905
 - docs/inventory meta-tests: 48
-- `pytest`: 2211 (2176 behavior + 35 meta)
+- `pytest`: 2219 (2184 behavior + 35 meta)
 - `vitest`: 1469 (1456 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,949
+- total: 3,957
 
 This document is organized in two parts:
 
@@ -492,6 +492,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSplitChainedCommands.test_empty_string_returns_empty_list` | Checks that empty string returns empty list. |
 | `TestLoadConfig.test_database_env_overrides_yaml_backend_settings` | Verifies database environment variables override YAML backend settings and pool sizes. |
 | `TestLoadConfig.test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values` | Verifies that `RESTRICTED_COMMAND_INPUT_CIDRS` overrides YAML policy, preserves valid CIDRs, and warns on malformed values. |
+| `TestLoadConfig.test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values` | Verifies generic-output extra domain suffix config normalizes case, dots, IDNs, and duplicate values while warning on invalid suffixes. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
@@ -950,6 +951,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
 | `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts URLs, public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
 | `TestOutputSignals.test_extract_entities_ignores_file_names_inside_url_paths` | Verifies that entity extraction keeps URL entities and hostnames while ignoring file-like names inside URL paths. |
+| `TestOutputSignals.test_extract_entities_uses_public_suffix_gate_for_generic_hostnames` | Verifies that generic hostname extraction keeps real public-suffix domains while rejecting dotted code identifiers and bare public suffixes. |
+| `TestOutputSignals.test_extract_entities_keeps_psl_gate_as_validation_only` | Verifies that the Public Suffix List gate validates candidates without collapsing shared-hosting domains into their suffix. |
+| `TestOutputSignals.test_extract_entities_rejects_file_context_without_dropping_real_domains` | Verifies that path-shaped filename tokens are rejected while bare real domains with file-like suffixes still pass. |
+| `TestOutputSignals.test_extract_entities_keeps_scheme_less_domain_path_references` | Verifies that scheme-less domain/path references keep the host entity while real filesystem path tokens remain filtered. |
+| `TestOutputSignals.test_extract_entities_extra_suffix_allowlist_is_per_call` | Verifies that internal suffixes such as `.local` and `.corp` are captured only when the caller opts in. |
+| `TestOutputSignals.test_extract_entities_url_host_companion_is_not_psl_gated` | Verifies that full URL host companion domains keep their stronger URL-context behavior while matching bare hostnames stay gated. |
+| `TestOutputSignals.test_extract_entities_public_suffix_gate_does_not_fetch_network` | Verifies that normal entity extraction uses the bundled Public Suffix List snapshot without attempting a live network refresh. |
 | `TestOutputSignals.test_extract_entities_can_include_private_ips_when_requested` | Verifies that entity extraction can opt into private and loopback IP metadata for explicit caller-controlled contexts. |
 | `TestOutputSignals.test_classifier_adds_entity_metadata_to_real_output` | Verifies that real command output lines carry structured entity metadata with source-line indexes. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
