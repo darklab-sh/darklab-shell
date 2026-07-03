@@ -35,6 +35,7 @@ import blueprints.projects as project_routes
 import config
 import core.process as process
 import services.runs.comparison as run_comparison
+import services.assets.diagnostics as assets_diagnostics
 import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
@@ -521,7 +522,7 @@ class TestHealthRoute:
 
     def test_status_degraded_when_db_fails(self):
         client = get_client()
-        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+        with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db error")):
             resp = client.get("/health")
         assert resp.status_code == 503
         data = json.loads(resp.data)
@@ -11817,7 +11818,7 @@ class TestStatusRoute:
         # /status is for live HUD polling; it must never return 503 so a
         # blip doesn't tear down the UI. Fields report state instead.
         client = get_client()
-        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+        with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db error")):
             resp = client.get("/status")
         assert resp.status_code == 200
 
@@ -11840,7 +11841,7 @@ class TestStatusRoute:
 
     def test_status_runs_periodic_audit_retention_when_db_available(self):
         client = get_client()
-        with mock.patch("blueprints.assets.maybe_prune_events", return_value=0) as prune:
+        with mock.patch("services.assets.diagnostics.maybe_prune_events", return_value=0) as prune:
             data = json.loads(client.get("/status").data)
         assert data["db"] == "ok"
         prune.assert_called_once()
@@ -11848,7 +11849,7 @@ class TestStatusRoute:
     def test_status_keeps_db_ok_when_periodic_audit_retention_fails(self):
         client = get_client()
         with mock.patch(
-            "blueprints.assets.maybe_prune_events",
+            "services.assets.diagnostics.maybe_prune_events",
             side_effect=RuntimeError("retention failed"),
         ), mock.patch.object(shell_assets.log, "warning") as warning:
             data = json.loads(client.get("/status").data)
@@ -11858,7 +11859,7 @@ class TestStatusRoute:
 
     def test_db_down_when_sqlite_fails(self):
         client = get_client()
-        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+        with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db error")):
             data = json.loads(client.get("/status").data)
         assert data["db"] == "down"
 
@@ -12428,7 +12429,7 @@ class TestDiagRoute:
                 query_string={key: value for key, value in query.items() if key != "format"},
             ).data)
             with mock.patch(
-                "blueprints.assets.classifier_drift_report",
+                "services.assets.diagnostics.classifier_drift_report",
                 return_value={
                     "ok": True,
                     "runs_scanned": 0,
@@ -12609,7 +12610,7 @@ class TestDiagRoute:
     def test_db_section_error_on_db_failure(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 data = json.loads(client.get("/diag?format=json").data)
         assert data["db"]["ok"] is False
         assert "error" in data["db"]
@@ -13034,8 +13035,8 @@ class TestDiagRoute:
         def connect_tmp_db():
             return sqlite3.connect(db_path)
 
-        with mock.patch.object(shell_assets, "DB_PATH", str(db_path)), \
-             mock.patch.object(shell_assets, "db_connect", connect_tmp_db):
+        with mock.patch.object(assets_diagnostics, "_database_path", return_value=db_path), \
+             mock.patch.object(assets_diagnostics, "_database_context", connect_tmp_db):
             info = shell_assets._diag_db_stats()
 
         assert {"name": 'odd"table', "rows": 2} in info["tables"]
@@ -13099,8 +13100,8 @@ class TestDiagRoute:
         def connect_tmp_db():
             return sqlite3.connect(db_path)
 
-        with mock.patch.object(shell_assets, "DB_PATH", str(db_path)), \
-             mock.patch.object(shell_assets, "db_connect", connect_tmp_db):
+        with mock.patch.object(assets_diagnostics, "_database_path", return_value=db_path), \
+             mock.patch.object(assets_diagnostics, "_database_context", connect_tmp_db):
             info = shell_assets._diag_db_stats()
 
         assert info["runs"] == 1
@@ -13559,7 +13560,7 @@ class TestDiagRoute:
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/diag").get_data(as_text=True)
-        if "diag-cmd-cell" not in body:
+        if '<td class="diag-cmd-cell"' not in body:
             pytest.skip("no top-command rows in the dev DB to assert against")
         assert (
             'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"'
@@ -17650,7 +17651,7 @@ class TestHistoryRoute:
                 )
                 conn.commit()
 
-            with mock.patch("blueprints.history._history_table_exists", return_value=False):
+            with mock.patch("services.history.queries.history_table_exists", return_value=False):
                 data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
 
             assert data["runs"]["total"] == 1

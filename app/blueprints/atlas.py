@@ -10,7 +10,6 @@ from flask import Blueprint, Response, jsonify, request
 
 from extensions import limiter
 from config import CFG
-from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
@@ -34,11 +33,21 @@ from services.atlas.lookup import (
     atlas_entities_export_jsonl,
     atlas_summary,
     entity_detail,
+    entity_ids_in_session,
     entity_exists_in_scope,
+    finding_ids_in_session,
     finding_exists_in_scope,
     list_entities,
     list_findings,
     list_source_runs,
+    run_atlas_read,
+    run_atlas_transaction,
+    run_belongs_to_session,
+    update_entities_suppression,
+    update_entity_suppression,
+    update_finding_review_states,
+    update_finding_suppression,
+    update_findings_suppression,
 )
 from services.projects.contracts import (
     FINDING_REVIEW_STATES,
@@ -466,8 +475,7 @@ def atlas_index():
     if scope_response:
         return scope_response
     assert owner_scope is not None
-    with db_connect() as conn:
-        return jsonify(atlas_summary(
+    return jsonify(run_atlas_read(lambda conn: atlas_summary(
             conn,
             session_id,
             team_id=owner_scope.team_id,
@@ -475,14 +483,13 @@ def atlas_index():
             project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
-        ))
+        )))
 
 
 @atlas_bp.route("/atlas/views")
 def atlas_saved_views_list():
     session_id = get_session_id()
-    with db_connect() as conn:
-        _, views = _load_saved_views(conn, session_id)
+    _, views = run_atlas_read(lambda conn: _load_saved_views(conn, session_id))
     return jsonify({"views": views})
 
 
@@ -494,17 +501,22 @@ def atlas_saved_view_create():
     if not view["name"]:
         return jsonify({"error": "name is required"}), 400
     updated = datetime.now(timezone.utc).isoformat()
-    with db_connect() as conn:
-        preferences, views = _load_saved_views(conn, session_id)
-        if len(views) >= ATLAS_SAVED_VIEW_MAX_COUNT:
-            return jsonify({"error": "too_many", "limit": ATLAS_SAVED_VIEW_MAX_COUNT}), 400
-        existing_names = {str(item.get("name") or "").strip().lower() for item in views}
-        if view["name"].lower() in existing_names:
-            return jsonify({"error": "name already exists"}), 409
+    _preferences, views = run_atlas_read(lambda conn: _load_saved_views(conn, session_id))
+    if len(views) >= ATLAS_SAVED_VIEW_MAX_COUNT:
+        return jsonify({"error": "too_many", "limit": ATLAS_SAVED_VIEW_MAX_COUNT}), 400
+    existing_names = {str(item.get("name") or "").strip().lower() for item in views}
+    if view["name"].lower() in existing_names:
+        return jsonify({"error": "name already exists"}), 409
+    stored = _stored_saved_view(view, updated=updated)
+    views.append(stored)
+
+    def _create_saved_view(conn):
+        preferences, _loaded_views = _load_saved_views(conn, session_id)
         stored = _stored_saved_view(view, updated=updated)
-        views.append(stored)
         _save_saved_views(conn, session_id, preferences, views)
-        conn.commit()
+        return stored, views
+
+    stored, views = run_atlas_transaction(_create_saved_view)
     log.info("ATLAS_SAVED_VIEW_CREATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -525,22 +537,27 @@ def atlas_saved_view_update(view_id):
     if not view["name"]:
         return jsonify({"error": "name is required"}), 400
     updated = datetime.now(timezone.utc).isoformat()
-    with db_connect() as conn:
-        preferences, views = _load_saved_views(conn, session_id)
-        index = next((idx for idx, item in enumerate(views) if str(item.get("id") or "") == normalized_id), -1)
-        if index < 0:
-            return jsonify({"error": "view not found"}), 404
-        duplicate = next((
-            item for item in views
-            if str(item.get("id") or "") != normalized_id
-            and str(item.get("name") or "").strip().lower() == view["name"].lower()
-        ), None)
-        if duplicate:
-            return jsonify({"error": "name already exists"}), 409
+    _preferences, views = run_atlas_read(lambda conn: _load_saved_views(conn, session_id))
+    index = next((idx for idx, item in enumerate(views) if str(item.get("id") or "") == normalized_id), -1)
+    if index < 0:
+        return jsonify({"error": "view not found"}), 404
+    duplicate = next((
+        item for item in views
+        if str(item.get("id") or "") != normalized_id
+        and str(item.get("name") or "").strip().lower() == view["name"].lower()
+    ), None)
+    if duplicate:
+        return jsonify({"error": "name already exists"}), 409
+    stored = _stored_saved_view(view, updated=updated)
+    views[index] = stored
+
+    def _update_saved_view(conn):
+        preferences, _loaded_views = _load_saved_views(conn, session_id)
         stored = _stored_saved_view(view, updated=updated)
-        views[index] = stored
         _save_saved_views(conn, session_id, preferences, views)
-        conn.commit()
+        return stored, views
+
+    stored, views = run_atlas_transaction(_update_saved_view)
     log.info("ATLAS_SAVED_VIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -557,13 +574,17 @@ def atlas_saved_view_delete(view_id):
     normalized_id = _normalize_saved_view_id(view_id)
     if not normalized_id:
         return jsonify({"error": "view not found"}), 404
-    with db_connect() as conn:
-        preferences, views = _load_saved_views(conn, session_id)
-        kept = [item for item in views if str(item.get("id") or "") != normalized_id]
-        if len(kept) == len(views):
-            return jsonify({"error": "view not found"}), 404
+    _preferences, views = run_atlas_read(lambda conn: _load_saved_views(conn, session_id))
+    kept = [item for item in views if str(item.get("id") or "") != normalized_id]
+    if len(kept) == len(views):
+        return jsonify({"error": "view not found"}), 404
+
+    def _delete_saved_view(conn):
+        preferences, _loaded_views = _load_saved_views(conn, session_id)
         _save_saved_views(conn, session_id, preferences, kept)
-        conn.commit()
+        return kept
+
+    kept = run_atlas_transaction(_delete_saved_view)
     log.info("ATLAS_SAVED_VIEW_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -674,15 +695,14 @@ def atlas_runs_list():
         return scope_response
     assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 30, minimum=1, maximum=50)
-    with db_connect() as conn:
-        return jsonify(list_source_runs(
+    return jsonify(run_atlas_read(lambda conn: list_source_runs(
             conn,
             session_id,
             team_id=owner_scope.team_id,
             query=request.args.get("q") or "",
             run_id=request.args.get("run_id") or "",
             limit=limit,
-        ))
+        )))
 
 
 @atlas_bp.route("/atlas/entities")
@@ -694,8 +714,7 @@ def atlas_entities_list():
     assert owner_scope is not None
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
-    with db_connect() as conn:
-        return jsonify(list_entities(
+    return jsonify(run_atlas_read(lambda conn: list_entities(
             conn,
             session_id,
             team_id=owner_scope.team_id,
@@ -707,7 +726,7 @@ def atlas_entities_list():
             suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
             offset=offset,
-        ))
+        )))
 
 
 @atlas_bp.route("/atlas/entities/export")
@@ -721,8 +740,7 @@ def atlas_entities_export_download():
     if export_format not in {"csv", "jsonl"}:
         return jsonify({"error": "format must be csv or jsonl"}), 400
     limit = _parse_int(request.args.get("limit"), 10000, minimum=1, maximum=10000)
-    with db_connect() as conn:
-        rows = atlas_entities_export(
+    rows = run_atlas_read(lambda conn: atlas_entities_export(
             conn,
             session_id,
             team_id=owner_scope.team_id,
@@ -733,7 +751,7 @@ def atlas_entities_export_download():
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
-        )
+        ))
     if export_format == "jsonl":
         body = atlas_entities_export_jsonl(rows)
         mimetype = "application/x-ndjson; charset=utf-8"
@@ -767,8 +785,7 @@ def atlas_findings_list():
     limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
     try:
-        with db_connect() as conn:
-            return jsonify(list_findings(
+        return jsonify(run_atlas_read(lambda conn: list_findings(
                 conn,
                 session_id,
                 team_id=owner_scope.team_id,
@@ -781,7 +798,7 @@ def atlas_findings_list():
                 suppression_filter=request.args.get("suppression_filter") or "hide",
                 limit=limit,
                 offset=offset,
-            ))
+            )))
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -789,14 +806,14 @@ def atlas_findings_list():
 @atlas_bp.route("/atlas/runs/<run_id>/cleanup-preview")
 def atlas_run_cleanup_preview_route(run_id):
     session_id = get_session_id()
-    with db_connect() as conn:
-        owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
-            (run_id, session_id),
-        ).fetchone()
-        if not owned:
-            return jsonify({"error": "run not found"}), 404
-        preview = atlas_run_cleanup_preview(conn, session_id, [run_id])
+    def _preview(conn):
+        if not run_belongs_to_session(conn, session_id, run_id):
+            return None
+        return atlas_run_cleanup_preview(conn, session_id, [run_id])
+
+    preview = run_atlas_read(_preview)
+    if preview is None:
+        return jsonify({"error": "run not found"}), 404
     return jsonify({"ok": True, "cleanup": public_cleanup_preview(preview)})
 
 
@@ -806,15 +823,16 @@ def atlas_run_cleanup(run_id):
     session_id = get_session_id()
     data = request.get_json(silent=True) or {}
     include_curated = bool(data.get("include_curated")) if isinstance(data, dict) else False
-    with db_connect() as conn:
-        owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
-            (run_id, session_id),
-        ).fetchone()
-        if not owned:
-            return jsonify({"error": "run not found"}), 404
+
+    def _cleanup(conn):
+        if not run_belongs_to_session(conn, session_id, run_id):
+            return None
         cleanup = detach_atlas_run_sources(conn, session_id, [run_id], include_curated=include_curated)
-        conn.commit()
+        return cleanup
+
+    cleanup = run_atlas_transaction(_cleanup)
+    if cleanup is None:
+        return jsonify({"error": "run not found"}), 404
     log.info("ATLAS_RUN_CLEANED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -845,18 +863,21 @@ def atlas_findings_bulk_review_update():
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
     if not review_state:
         return jsonify({"error": "review_state is invalid"}), 400
-    with db_connect() as conn:
+    def _update_review(conn):
         found_ids: set[str] = set()
         for finding_id in finding_ids:
             if finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
                 found_ids.add(finding_id)
         if found_ids:
-            updated_at = _now_for_review()
-            conn.executemany(
-                "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
-                [(review_state, updated_at, finding_id) for finding_id in sorted(found_ids)],
+            update_finding_review_states(
+                conn,
+                found_ids,
+                review_state=review_state,
+                updated_at=_now_for_review(),
             )
-            conn.commit()
+        return found_ids
+
+    found_ids = run_atlas_transaction(_update_review)
     results = [
         {"finding_id": finding_id, "status": "updated" if finding_id in found_ids else "not_found"}
         for finding_id in finding_ids
@@ -888,15 +909,14 @@ def atlas_entity_detail(entity_id):
     assert owner_scope is not None
     runs_offset = _parse_int(request.args.get("runs_offset"), 0, minimum=0, maximum=100000)
     findings_offset = _parse_int(request.args.get("findings_offset"), 0, minimum=0, maximum=100000)
-    with db_connect() as conn:
-        detail = entity_detail(
+    detail = run_atlas_read(lambda conn: entity_detail(
             conn,
             session_id,
             entity_id,
             team_id=owner_scope.team_id,
             runs_offset=runs_offset,
             findings_offset=findings_offset,
-        )
+        ))
     if detail is None:
         return jsonify({"error": "entity not found"}), 404
     return jsonify(detail)
@@ -911,13 +931,15 @@ def atlas_entity_suppression_update(entity_id):
         return scope_response
     assert owner_scope is not None
     suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
-    with db_connect() as conn:
+    def _update_entity_suppression(conn):
         if not entity_exists_in_scope(conn, session_id, entity_id, team_id=owner_scope.team_id):
-            return jsonify({"error": "entity not found"}), 404
-        conn.execute(
-            "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-            "WHERE id = ?",
-            (suppressed, reason, _suppression_timestamp(suppressed), entity_id),
+            return False
+        update_entity_suppression(
+            conn,
+            entity_id,
+            suppressed=suppressed,
+            reason=reason,
+            suppressed_at=_suppression_timestamp(suppressed),
         )
         record_event(
             AuditEventType.ENTITY_SUPPRESS,
@@ -931,7 +953,10 @@ def atlas_entity_suppression_update(entity_id):
             conn=conn,
             **route_audit_fields(session_id, request, owner_scope),
         )
-        conn.commit()
+        return True
+
+    if not run_atlas_transaction(_update_entity_suppression):
+        return jsonify({"error": "entity not found"}), 404
     log.info("ATLAS_ENTITY_SUPPRESSION_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -957,20 +982,19 @@ def atlas_entities_bulk_suppression_update():
         return jsonify({"error": "entity_ids are required"}), 400
     if len(entity_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
-    with db_connect() as conn:
+    def _bulk_entity_suppression(conn):
         found_ids = {
             item_id
             for item_id in entity_ids
             if entity_exists_in_scope(conn, session_id, item_id, team_id=owner_scope.team_id)
         }
         if found_ids:
-            conn.executemany(
-                "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-                "WHERE id = ?",
-                [
-                    (suppressed, reason, _suppression_timestamp(suppressed), item_id)
-                    for item_id in sorted(found_ids)
-                ],
+            update_entities_suppression(
+                conn,
+                found_ids,
+                suppressed=suppressed,
+                reason=reason,
+                suppressed_at=_suppression_timestamp(suppressed),
             )
             record_event(
                 AuditEventType.ENTITY_SUPPRESS,
@@ -985,7 +1009,9 @@ def atlas_entities_bulk_suppression_update():
                 conn=conn,
                 **route_audit_fields(session_id, request, owner_scope),
             )
-            conn.commit()
+        return found_ids
+
+    found_ids = run_atlas_transaction(_bulk_entity_suppression)
     results = [
         {"entity_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
         for item_id in entity_ids
@@ -1016,14 +1042,8 @@ def atlas_entities_bulk_delete():
         return jsonify({"error": "entity_ids are required"}), 400
     if len(entity_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
-    with db_connect() as conn:
-        placeholders = ",".join("?" for _ in entity_ids)
-        rows = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? "  # nosec
-            f"AND id IN ({placeholders})",
-            [session_id, *entity_ids],
-        ).fetchall()
-        found_ids = {str(row["id"] or "") for row in rows}
+    def _bulk_delete_entities(conn):
+        found_ids = entity_ids_in_session(conn, session_id, entity_ids)
         deleted = delete_atlas_entities(conn, session_id, entity_ids)
         if deleted.get("entities"):
             record_event(
@@ -1038,7 +1058,9 @@ def atlas_entities_bulk_delete():
                 conn=conn,
                 **route_audit_fields(session_id, request),
             )
-        conn.commit()
+        return found_ids, deleted
+
+    found_ids, deleted = run_atlas_transaction(_bulk_delete_entities)
     results = [
         {"entity_id": entity_id, "status": "deleted" if entity_id in found_ids else "not_found"}
         for entity_id in entity_ids
@@ -1064,8 +1086,7 @@ def atlas_entities_bulk_delete():
 @atlas_bp.route("/atlas/entities/<entity_id>/delete-preview")
 def atlas_entity_delete_preview_route(entity_id):
     session_id = get_session_id()
-    with db_connect() as conn:
-        preview = atlas_entity_delete_preview(conn, session_id, entity_id)
+    preview = run_atlas_read(lambda conn: atlas_entity_delete_preview(conn, session_id, entity_id))
     if preview is None:
         return jsonify({"error": "entity not found"}), 404
     return jsonify({"ok": True, "preview": preview})
@@ -1078,10 +1099,10 @@ def atlas_entity_delete(entity_id):
     data = request.get_json(silent=True) or {}
     prune_source_run = bool(data.get("prune_source_run")) if isinstance(data, dict) else False
     prune_curated_source_run = bool(data.get("prune_curated_source_run")) if isinstance(data, dict) else False
-    with db_connect() as conn:
+    def _delete_entity(conn):
         preview = atlas_entity_delete_preview(conn, session_id, entity_id)
         if preview is None:
-            return jsonify({"error": "entity not found"}), 404
+            return None
         sibling_cleanup = None
         source_run_id = str(preview.get("source_run_id") or "")
         if prune_source_run:
@@ -1111,7 +1132,12 @@ def atlas_entity_delete(entity_id):
                 conn=conn,
                 **route_audit_fields(session_id, request),
             )
-        conn.commit()
+        return preview, source_run_id, deleted, cleanup
+
+    delete_result = run_atlas_transaction(_delete_entity)
+    if delete_result is None:
+        return jsonify({"error": "entity not found"}), 404
+    preview, source_run_id, deleted, cleanup = delete_result
     log.info("ATLAS_ENTITY_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1133,14 +1159,8 @@ def atlas_findings_bulk_delete():
         return jsonify({"error": "finding_ids are required"}), 400
     if len(finding_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
-    with db_connect() as conn:
-        placeholders = ",".join("?" for _ in finding_ids)
-        rows = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? "  # nosec
-            f"AND id IN ({placeholders})",
-            [session_id, *finding_ids],
-        ).fetchall()
-        found_ids = {str(row["id"] or "") for row in rows}
+    def _bulk_delete_findings(conn):
+        found_ids = finding_ids_in_session(conn, session_id, finding_ids)
         deleted_findings = delete_atlas_findings(conn, session_id, finding_ids)
         if deleted_findings:
             record_event(
@@ -1154,7 +1174,9 @@ def atlas_findings_bulk_delete():
                 conn=conn,
                 **route_audit_fields(session_id, request),
             )
-        conn.commit()
+        return found_ids, deleted_findings
+
+    found_ids, deleted_findings = run_atlas_transaction(_bulk_delete_findings)
     results = [
         {"finding_id": finding_id, "status": "deleted" if finding_id in found_ids else "not_found"}
         for finding_id in finding_ids
@@ -1184,13 +1206,15 @@ def atlas_finding_suppression_update(finding_id):
         return scope_response
     assert owner_scope is not None
     suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
-    with db_connect() as conn:
+    def _update_finding_suppression(conn):
         if not finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
-            return jsonify({"error": "finding not found"}), 404
-        conn.execute(
-            "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-            "WHERE id = ?",
-            (suppressed, reason, _suppression_timestamp(suppressed), finding_id),
+            return False
+        update_finding_suppression(
+            conn,
+            finding_id,
+            suppressed=suppressed,
+            reason=reason,
+            suppressed_at=_suppression_timestamp(suppressed),
         )
         record_event(
             AuditEventType.FINDING_SUPPRESS,
@@ -1203,7 +1227,10 @@ def atlas_finding_suppression_update(finding_id):
             conn=conn,
             **route_audit_fields(session_id, request, owner_scope),
         )
-        conn.commit()
+        return True
+
+    if not run_atlas_transaction(_update_finding_suppression):
+        return jsonify({"error": "finding not found"}), 404
     log.info("ATLAS_FINDING_SUPPRESSION_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1229,20 +1256,19 @@ def atlas_findings_bulk_suppression_update():
         return jsonify({"error": "finding_ids are required"}), 400
     if len(finding_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
-    with db_connect() as conn:
+    def _bulk_finding_suppression(conn):
         found_ids = {
             item_id
             for item_id in finding_ids
             if finding_exists_in_scope(conn, session_id, item_id, team_id=owner_scope.team_id)
         }
         if found_ids:
-            conn.executemany(
-                "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
-                "WHERE id = ?",
-                [
-                    (suppressed, reason, _suppression_timestamp(suppressed), item_id)
-                    for item_id in sorted(found_ids)
-                ],
+            update_findings_suppression(
+                conn,
+                found_ids,
+                suppressed=suppressed,
+                reason=reason,
+                suppressed_at=_suppression_timestamp(suppressed),
             )
             record_event(
                 AuditEventType.FINDING_SUPPRESS,
@@ -1256,7 +1282,9 @@ def atlas_findings_bulk_suppression_update():
                 conn=conn,
                 **route_audit_fields(session_id, request, owner_scope),
             )
-            conn.commit()
+        return found_ids
+
+    found_ids = run_atlas_transaction(_bulk_finding_suppression)
     results = [
         {"finding_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
         for item_id in finding_ids
@@ -1280,8 +1308,7 @@ def atlas_findings_bulk_suppression_update():
 @atlas_bp.route("/atlas/findings/<finding_id>/delete-preview")
 def atlas_finding_delete_preview_route(finding_id):
     session_id = get_session_id()
-    with db_connect() as conn:
-        preview = atlas_finding_delete_preview(conn, session_id, finding_id)
+    preview = run_atlas_read(lambda conn: atlas_finding_delete_preview(conn, session_id, finding_id))
     if preview is None:
         return jsonify({"error": "finding not found"}), 404
     return jsonify({"ok": True, "preview": preview})
@@ -1294,10 +1321,10 @@ def atlas_finding_delete(finding_id):
     data = request.get_json(silent=True) or {}
     prune_source_run = bool(data.get("prune_source_run")) if isinstance(data, dict) else False
     prune_curated_source_run = bool(data.get("prune_curated_source_run")) if isinstance(data, dict) else False
-    with db_connect() as conn:
+    def _delete_finding(conn):
         preview = atlas_finding_delete_preview(conn, session_id, finding_id)
         if preview is None:
-            return jsonify({"error": "finding not found"}), 404
+            return None
         sibling_cleanup = None
         source_run_id = str(preview.get("source_run_id") or "")
         if prune_source_run and source_run_id:
@@ -1324,7 +1351,12 @@ def atlas_finding_delete(finding_id):
                 conn=conn,
                 **route_audit_fields(session_id, request),
             )
-        conn.commit()
+        return source_run_id, deleted_findings, cleanup
+
+    delete_result = run_atlas_transaction(_delete_finding)
+    if delete_result is None:
+        return jsonify({"error": "finding not found"}), 404
+    source_run_id, deleted_findings, cleanup = delete_result
     log.info("ATLAS_FINDING_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),

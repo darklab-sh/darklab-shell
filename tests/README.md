@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,916
-- docs/inventory meta-tests: 48
-- `pytest`: 2230 (2195 behavior + 35 meta)
-- `vitest`: 1469 (1456 behavior + 13 meta)
+- behavior tests: 3,925
+- docs/inventory meta-tests: 54
+- `pytest`: 2243 (2202 behavior + 41 meta)
+- `vitest`: 1471 (1458 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,968
+- total: 3,983
 
 This document is organized in two parts:
 
@@ -385,6 +385,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_archived_team_rejects_invite_and_recovery_redeem` | Verifies archived teams reject API invite and recovery-code redemption without adding late members. |
 | `test_api_v1_team_project_readers_include_cross_member_entities_and_findings` | Verifies API team Project readers include linked entities and findings created by another team member's team-owned run. |
 | `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output/ranged-output reads work for the owner and hide cross-session runs behind 404. |
+| `test_api_v1_output_fallback_preserves_api_log_event_and_metadata` | Verifies API output fallback uses the API-specific warning event and keeps fallback/source metadata on the loaded run. |
 | `test_api_v1_ai_summary_routes_are_token_scoped` | Verifies API summary assist enqueue and list routes are scoped to the owning token. |
 | `test_api_v1_ai_assists_honor_team_scope` | Verifies API AI assist routes share team-owned run assists with team members, preserve personal isolation, and reject team viewers on trigger routes. |
 | `test_api_v1_artifact_list_and_download_are_token_scoped` | Verifies artifact list and download routes work for the owner and hide cross-session artifacts behind 404. |
@@ -442,6 +443,19 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_darklab_cli_download_rejects_unsafe_header_filename` | Verifies artifact downloads reject unsafe `Content-Disposition` filenames. |
 | `test_darklab_cli_download_uses_rfc5987_filename` | Verifies artifact downloads honor UTF-8 `filename*` attachment names before writing the file. |
 | `test_darklab_cli_download_refuses_to_overwrite_existing_file` | Verifies artifact downloads do not silently overwrite existing local files. |
+
+#### `test_architecture.py`
+
+| Test | Description |
+| --- | --- |
+| `TestBlueprintPersistenceBoundary.test_blueprint_connection_detection_catches_reexported_aliases` | Verifies the blueprint persistence boundary catches aliased `db_connect` imports from non-core modules. |
+| `TestBlueprintPersistenceBoundary.test_blueprint_execute_family_detection_covers_bulk_and_scripts` | Verifies the blueprint persistence boundary catches direct `execute`, `executemany`, and `executescript` calls. |
+| `TestBlueprintPersistenceBoundary.test_blueprint_execute_family_detection_is_conservative_by_design` | Verifies the blueprint persistence boundary intentionally treats any `.execute()` attribute call as persistence-like inside blueprints. |
+| `TestBlueprintPersistenceBoundary.test_blueprint_sql_string_detection_catches_owned_fragments` | Verifies the blueprint persistence boundary catches SQL-shaped strings and owner-predicate fragments. |
+| `TestBlueprintPersistenceBoundary.test_blueprint_sql_string_detection_ignores_route_text` | Verifies the blueprint persistence boundary ignores non-SQL route text such as HTTP `DELETE` method declarations. |
+| `TestBlueprintPersistenceBoundary.test_blueprint_scan_recurses_into_subpackages` | Verifies the blueprint persistence boundary scans Python files inside blueprint subpackages. |
+| `TestBlueprintPersistenceBoundary.test_blueprint_direct_database_access_matches_ratchet` | Verifies blueprints do not open database connections, execute SQL, or import database/backend helpers directly. |
+| `TestBlueprintPersistenceBoundary.test_api_v1_service_package_stays_non_persistence` | Verifies the API v1 service package stays limited to auth, serialization, and OpenAPI helpers. |
 
 #### `test_backend_modules.py`
 
@@ -677,6 +691,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_builtin_intel_does_not_create_atlas_entity_for_lookup_only_value` | Verifies terminal `intel` lookups do not create Atlas entities just to store provider snapshots. |
 | `TestIntelServices.test_builtin_intel_rejects_private_ip_without_override` | Verifies `intel ip` blocks private or loopback addresses by default before provider lookup. |
 | `TestIntelServices.test_builtin_intel_hash_rejects_invalid_value` | Verifies `intel hash` rejects non-hex or unsupported hash lengths with the expected user-facing message. |
+| `TestDataAccessLayerServiceCoverage.test_history_list_items_preserve_enriched_run_and_snapshot_shape` | Verifies the service-owned history list query preserves run and snapshot metadata, labels, notes, artifacts, projects, findings, and Atlas counts. |
+| `TestDataAccessLayerServiceCoverage.test_workspace_metadata_lookup_move_and_delete_stay_owner_scoped` | Verifies service-owned workspace metadata lookup, move, overwrite cleanup, and delete behavior stay scoped to the team owner. |
+| `TestDataAccessLayerServiceCoverage.test_diag_database_stats_keeps_ping_when_optional_sqlite_probes_fail` | Verifies diagnostics keep core database ping data while optional SQLite probes fail and log partial-probe details. |
+| `TestDataAccessLayerServiceCoverage.test_session_migration_service_moves_counts_and_cleans_source_rows` | Verifies service-owned session migration moves runs, snapshots, stars, preferences, variables, workflows, projects, notifications, recent values, and secrets while clearing source rows. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
 | `TestSessionWorkspace.test_owner_workspace_names_separate_personal_and_team_roots` | Verifies owner-aware workspace roots keep personal and team directories hashed and separate. |
@@ -3829,6 +3847,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `renders scope choices as selectable rows with visible state markers` | Verifies that the scope selector renders Personal and team choices as selectable rows with visible active and role state. |
 | `clears team state without showing selector noise when team refresh returns 401` | Verifies that unauthorized team refreshes clear active team state and stored scope without showing an inline selector error. |
 | `shows an inline error when the open selector cannot refresh teams` | Verifies that a failed team refresh while the selector is open shows the inline error state and unavailable labels. |
+| `keeps cached teams selectable when a later menu refresh fails` | Verifies that a temporary team-refresh failure keeps already loaded teams selectable in the scope menu. |
+| `keeps cached teams visible while marking a missing active team unavailable after refresh failure` | Verifies that cached team options stay visible while a missing stored active team still renders as unavailable after refresh failure. |
 | `reloads scoped surfaces when storage events switch team scope` | Verifies that cross-tab scope changes update the active team and refresh history, recents, Files cache, active runs, active Project, Status Monitor, and Options Secrets. |
 | `reloads scoped surfaces when selecting Personal from the scope selector` | Verifies that choosing Personal clears stored team scope and refreshes every team-scoped browser surface. |
 

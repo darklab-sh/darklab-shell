@@ -25,6 +25,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - URL host-link backfill now uses the same canonical Python path on SQLite and Postgres instead of duplicating partial URL host parsing inside the Postgres migration marker.
 - Generic command-output hostname extraction now uses an offline Public Suffix List gate plus conservative file-context checks, so dotted code identifiers such as `classlist.add` and `document.queryselector` no longer become Atlas domains while real domains and URL/scanner-specific capture paths keep their existing behavior.
 - App-launched `curl` runs now suppress curl's progress meter by default, so headers and response bodies don't get mixed with progress rows in the terminal transcript while explicit silent/help/progress modes stay unchanged.
+- The team-scope menu now keeps the last loaded team list visible if a later refresh fails, so a temporary `/session/teams` hiccup no longer removes selectable teams from the active-scope dropdown.
 
 ### Added
 
@@ -58,6 +59,23 @@ Entries favor clear outcomes first, then implementation and test details when th
 ### Changed
 
 - **Project targets now use the same `domain`, `url`, and `ip` vocabulary as Atlas** — `host` is no longer presented as a separate target type, while legacy `host` API/import inputs are still accepted as aliases and resolve to `domain` or `ip`.
+- **Data access now lives behind service-owned helpers instead of blueprint SQL** so route files stay focused on HTTP parsing, capability checks, service calls, and response shaping.
+  - **Blueprint boundary — direct persistence is a hard ban.**
+    - Contract: blueprints may not open database connections, call execute-family methods, build SQL-shaped strings, import backend/dialect symbols, or call persistence cleanup helpers.
+    - Migrated: the previous team, watcher, schedule, project, Atlas, run, workspace, asset diagnostics, history, session, and API v1 route persistence paths now call service helpers.
+    - Removed: the old per-module ratchet allowlist is empty, so new persistence access under `app/blueprints/` fails the architecture suite.
+    - Test coverage: `tests/py/test_architecture.py` catches direct and aliased `db_connect`, execute-family calls, SQL-shaped fragments, core database imports, backend/dialect imports, and blueprint subpackages.
+  - **Service ownership — shared helpers own query and transaction boundaries.**
+    - Contract: service functions open their own connection by default, while multi-step workflows can use service-layer transaction/read wrappers from `services.storage.transactions`.
+    - Migrated: history list/search, stats, insights, compare metadata, delete/export/share operations, run persistence, workspace metadata, asset diagnostics, and session state storage moved into domain services.
+    - Removed: blueprint-owned commits, rollbacks, owner predicates, and dialect decisions for those paths.
+    - Test coverage: service-level pytest coverage now checks history list metadata shape, team-scoped workspace metadata move/delete behavior, diagnostics partial-probe responses, and session migration counts/cleanup across runs, snapshots, stars, preferences, variables, workflows, projects, notifications, recent values, and secrets.
+  - **API v1 reuse — headless routes use domain services rather than a parallel API query layer.**
+    - Contract: `services/api_v1` stays focused on auth, serialization, and OpenAPI, while history, Atlas, team, schedule, watcher, project, artifact, and run persistence lives with the matching domain service.
+    - Migrated: API history/output/detail, Atlas, team, schedule, watcher, artifact, and project-link reads and writes route through shared service helpers.
+    - Removed: API route-level database imports, connection opens, execute calls, and API-owned owner-clause helpers.
+    - Test coverage: API tests cover output fallback logging/source metadata, token/team scoping, route payloads, and the architecture suite protects the `services/api_v1` non-persistence boundary.
+    - Net delta: the documented suite total is now 3,983 tests.
 - Frontend inventory checks now share the scanner in-process during Vitest runs and cache per-file analysis between fixture cases, cutting the inventory unit file from about 46 seconds to about 7 seconds locally while keeping the CLI output path intact.
 - Port-entity diagnostics now include bounded DEBUG/WARN breadcrumbs for scanner candidate drops, SQLite compatibility migration failures, malformed Atlas attributes, and scan-observation replacement, plus INFO-level port and scan-observation counts when runs capture Atlas evidence.
 - Port-entity documentation and the v1 API contract now describe host-linked port response metadata, generic import port syntax, Overview scan-coverage boundaries, and the settled port identity rules.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 import uuid
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from core import database
 from core.database_backend import dialect_for_backend
@@ -47,12 +47,22 @@ from services.watchers.models import (
     Watcher,
     WatcherFire,
 )
+from services.storage.transactions import run_read, run_transaction
 
 log = logging.getLogger("shell")
+_T = TypeVar("_T")
 
 
 class WatcherError(ValueError):
     """Raised when watcher input cannot be persisted."""
+
+
+def run_watcher_read(callback: Callable[[Any], _T]) -> _T:
+    return run_read(callback, connect=database.db_connect)
+
+
+def run_watcher_transaction(callback: Callable[[Any], _T]) -> _T:
+    return run_transaction(callback, connect=database.db_connect)
 
 
 def _utc_now() -> str:

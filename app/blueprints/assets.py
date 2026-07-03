@@ -9,7 +9,7 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -18,28 +18,25 @@ from flask import Blueprint, Response, abort, current_app, jsonify, render_templ
 
 from services.commands.registry import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
-from core.database import DB_BACKEND, DB_PATH, db_connect
-from core.database_backend import (
-    DatabaseBackend,
-    sqlite_journal_mode,
-    sqlite_page_stats,
-)
-from services.diagnostics.storage import (
-    PROJECT_WORKSPACE_COUNT_TABLES as _DIAG_PROJECT_WORKSPACE_COUNT_TABLES,
+from services.assets.diagnostics import (
+    classifier_drift_report_from_db,
+    diag_database_stats,
+    diag_table_storage_breakdown,
+    diag_usage_stats,
+    fmt_diag_duration_ms,
+    fmt_elapsed,
     format_bytes as _storage_fmt_bytes,
-    storage_snapshot,
-    table_storage_breakdown,
+    ping_database,
+    status_database_state,
 )
 from services.audit.models import AuditTargetType, EVENT_SPECS
 from services.audit.queries import AuditEventFilters, iter_event_pages, list_events
-from services.audit.retention import audit_export_max_rows, audit_log_enabled, maybe_prune_events
-from services.diagnostics.classifier_drift import classifier_drift_report
+from services.audit.retention import audit_export_max_rows, audit_log_enabled
 from services.ai.client import AIClientError
 from services.ai.diagnostics import provider_probe as ai_provider_probe, run_test_prompt as ai_run_test_prompt
 from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from core.helpers import (
     FONT_FILES,
-    GRACEFUL_TERMINATION_EXIT_CODE,
     current_theme_name,
     get_client_ip,
     get_log_session_id,
@@ -61,28 +58,11 @@ assets_bp = Blueprint("assets", __name__)
 
 
 def _fmt_elapsed(seconds):
-    # Diagnostics prefers short operator-readable durations over raw second
-    # counts for summary cards and activity tables.
-    s = int(seconds or 0)
-    if s >= 3600:
-        h, m = s // 3600, (s % 3600) // 60
-        return f"{h}h {m}m" if m else f"{h}h"
-    if s >= 60:
-        m, r = s // 60, s % 60
-        return f"{m}m {r}s" if r else f"{m}m"
-    return f"{s}s"
+    return fmt_elapsed(seconds)
 
 
 def _fmt_diag_duration_ms(value):
-    ms = float(value or 0)
-    if ms >= 1000:
-        seconds = ms / 1000
-        if seconds >= 10:
-            return f"{seconds:.0f}s"
-        return f"{seconds:.1f}s"
-    if ms >= 100:
-        return f"{ms:.0f} ms"
-    return f"{ms:g} ms"
+    return fmt_diag_duration_ms(value)
 
 
 _ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
@@ -209,15 +189,9 @@ def _diag_fmt_bytes(n) -> str:
 
 
 def _diag_row_value(row, key: str, index: int, default=None):
-    if hasattr(row, "keys"):
-        try:
-            return row[key]
-        except KeyError:
-            pass
-    try:
-        return row[index]
-    except (IndexError, KeyError, TypeError):
-        return default
+    from services.assets.diagnostics import row_value
+
+    return row_value(row, key, index, default)
 
 
 def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = None) -> dict:
@@ -228,7 +202,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
     probes, largest-run hints, and short-lived cache used by /diag and
     Prometheus scrapes.
     """
-    return table_storage_breakdown(conn, DB_BACKEND, table_counts)
+    return diag_table_storage_breakdown(conn, table_counts)
 
 def _diag_vendor_probe(url: str) -> dict:
     """In-process HEAD against a vendor URL via the Flask test client.
@@ -826,122 +800,7 @@ def _diag_redis_stats(client):
 
 def _diag_db_stats() -> dict:
     """Snapshot database health without letting optional probes blank the panel."""
-    info: dict = {}
-    info["backend"] = DB_BACKEND.value
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        with db_connect() as conn:
-            t0 = time.perf_counter()
-            conn.execute("SELECT 1").fetchone()
-            info["ping_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-            info["ping_human"] = _fmt_diag_duration_ms(info["ping_ms"])
-            try:
-                snapshot = storage_snapshot(conn, DB_BACKEND, db_path=str(DB_PATH))
-                table_counts = snapshot["table_counts"]
-                info["tables"] = snapshot["tables"]
-                info["runs"] = table_counts.get("runs", 0)
-                info["snapshots"] = table_counts.get("snapshots", 0)
-                info["project_workspace"] = {
-                    label: table_counts.get(table_name, 0)
-                    for table_name, label in _DIAG_PROJECT_WORKSPACE_COUNT_TABLES.items()
-                }
-                info["storage"] = snapshot["storage"]
-                info["dbstat_available"] = bool(info["storage"].get("dbstat_available"))
-                info["storage_stats_available"] = bool(info["storage"].get("storage_stats_available"))
-                info["size"] = int(snapshot.get("size") or 0)
-                info["size_human"] = snapshot.get("size_human") or _diag_fmt_bytes(info["size"])
-            except Exception:
-                pass
-        return info
-
-    db_path = Path(DB_PATH)
-
-    # File-system stats — independent of the connection.
-    try:
-        st = db_path.stat()
-        info["size"] = int(st.st_size)
-        info["size_human"] = _diag_fmt_bytes(info["size"])
-        info["mtime"] = int(st.st_mtime)
-        info["mtime_age_human"] = (
-            f"{_fmt_elapsed(int(time.time()) - info['mtime'])} ago"
-        )
-    except OSError:
-        pass
-
-    wal_path = db_path.with_name(db_path.name + "-wal")
-    try:
-        wal_size = int(wal_path.stat().st_size)
-    except OSError:
-        wal_size = 0
-    info["wal_size"] = wal_size
-    info["wal_size_human"] = _diag_fmt_bytes(wal_size)
-
-    # Pragma + table queries — single connection.
-    with db_connect() as conn:
-        try:
-            t0 = time.perf_counter()
-            conn.execute("SELECT 1").fetchone()
-            info["ping_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-            info["ping_human"] = _fmt_diag_duration_ms(info["ping_ms"])
-        except Exception:
-            pass
-        try:
-            info["journal_mode"] = sqlite_journal_mode(conn)
-        except Exception:
-            pass
-        try:
-            page_stats = sqlite_page_stats(conn)
-            page_count = page_stats["page_count"]
-            page_size = page_stats["page_size"]
-            freelist = page_stats["freelist_count"]
-            info["page_count"] = page_count
-            info["page_size"] = page_size
-            info["freelist_count"] = freelist
-            info["reclaimable_size"] = freelist * page_size
-            info["reclaimable_size_human"] = _diag_fmt_bytes(freelist * page_size)
-        except Exception:
-            pass
-
-        snapshot: dict = {}
-
-        # Per-table row counts. SQLite stores FTS5 shadow tables
-        # (`<vt>_data`, `_idx`, `_content`, `_docsize`, `_config`) under
-        # type='table' alongside regular tables, so to exclude them we
-        # first find the FTS5 virtual tables and synthesize their shadow
-        # names, then filter the table listing against that set.
-        try:
-            snapshot = storage_snapshot(conn, DB_BACKEND, db_path=str(DB_PATH))
-            info["tables"] = snapshot["tables"]
-            # Backward-compat: the original /diag schema exposed `runs`
-            # and `snapshots` counts at the top level.
-            table_counts = snapshot["table_counts"]
-            for t in snapshot["tables"]:
-                if t["name"] == "runs":
-                    info["runs"] = t["rows"]
-                elif t["name"] == "snapshots":
-                    info["snapshots"] = t["rows"]
-            project_counts = {
-                label: table_counts.get(table_name, 0)
-                for table_name, label in _DIAG_PROJECT_WORKSPACE_COUNT_TABLES.items()
-            }
-            info["project_workspace"] = project_counts
-            info["storage"] = snapshot["storage"]
-            info["dbstat_available"] = bool(info["storage"].get("dbstat_available"))
-            info["storage_stats_available"] = bool(info["storage"].get("storage_stats_available"))
-        except Exception:
-            pass
-
-        # FTS5 orphan probe — runs_fts is keyed by the SQLite integer rowid
-        # because the virtual table is declared with content_rowid=rowid.
-        # runs.id is the user-facing UUID/text primary key and must not be used
-        # here or every indexed row appears orphaned.
-        # Same operator value as the Redis procmeta orphan probe: surfaces
-        # cleanup that has fallen behind.
-        try:
-            info["fts_orphans"] = int(snapshot.get("fts_orphans") or 0)
-        except Exception:
-            pass
-
-    return info
+    return diag_database_stats()
 
 
 @assets_bp.route("/log", methods=["POST"])
@@ -1073,8 +932,7 @@ def health():
 
     # SQLite — critical: app cannot store or serve history without it
     try:
-        with db_connect() as conn:
-            conn.execute("SELECT 1")
+        ping_database()
         result["db"] = True
     except Exception:
         result["status"] = "degraded"
@@ -1103,21 +961,7 @@ def status():
     """Lightweight HUD polling endpoint. Always 200 so probes don't flap the UI."""
     uptime_s = int(time.time() - _APP_BOOT_TIME)
 
-    db_state = "down"
-    try:
-        with db_connect() as conn:
-            conn.execute("SELECT 1")
-            db_state = "ok"
-            try:
-                maybe_prune_events(conn=conn)
-                conn.commit()
-            except Exception:
-                rollback = getattr(conn, "rollback", None)
-                if callable(rollback):
-                    rollback()
-                log.warning("AUDIT_RETENTION_PERIODIC_PRUNE_FAILED", exc_info=True)
-    except Exception:
-        pass
+    db_state = status_database_state()
 
     if redis_client:
         try:
@@ -1285,102 +1129,7 @@ def diag():
     # ── Usage stats ──────────────────────────────────────────────────────────
     stats: dict = {"ok": False}
     if db_info.get("ok"):
-        try:
-            with db_connect() as conn:
-                # Browser passes its UTC offset in minutes via ?tz_offset so
-                # calendar boundaries (today, month, year) align with local
-                # midnight rather than UTC midnight.
-                try:
-                    tz_offset_min = int(request.args.get("tz_offset", 0))
-                except (TypeError, ValueError):
-                    tz_offset_min = 0
-                # getTimezoneOffset() returns positive-east convention inverted
-                # (UTC-5 → +300), so negate to get a proper UTC offset.
-                local_tz = timezone(timedelta(minutes=-tz_offset_min))
-                now_local = datetime.now(timezone.utc).astimezone(local_tz)
-                fmt = "%Y-%m-%d %H:%M:%S"
-                cutoffs = [
-                    ("today",      now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-                                            .astimezone(timezone.utc).strftime(fmt)),
-                    ("this week",  (datetime.now(timezone.utc) - timedelta(days=7)).strftime(fmt)),
-                    ("this month", now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                                            .astimezone(timezone.utc).strftime(fmt)),
-                    ("this year",  now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-                                            .astimezone(timezone.utc).strftime(fmt)),
-                ]
-                activity = []
-                for label, cutoff in cutoffs:
-                    row = conn.execute(
-                        "SELECT COUNT(*) AS count FROM runs WHERE started >= ?",
-                        (cutoff,),
-                    ).fetchone()
-                    n = _diag_row_value(row, "count", 0, 0)
-                    activity.append({"label": label, "count": n})
-                stats["activity"] = activity
-
-                # Exit-code outcome breakdown
-                row = conn.execute(
-                    """SELECT
-                         SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END) AS success,
-                         SUM(
-                             CASE
-                                 WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
-                                 THEN 1
-                                 ELSE 0
-                             END
-                         ) AS failed,
-                         SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END) AS incomplete
-                       FROM runs""",
-                    (GRACEFUL_TERMINATION_EXIT_CODE,),
-                ).fetchone()
-                stats["outcomes"] = {
-                    "success":    _diag_row_value(row, "success", 0, 0) or 0,
-                    "failed":     _diag_row_value(row, "failed", 1, 0) or 0,
-                    "incomplete": _diag_row_value(row, "incomplete", 2, 0) or 0,
-                }
-
-                # Top 10 commands by run count
-                rows = conn.execute(
-                    "SELECT command, COUNT(*) AS n FROM runs"
-                    " GROUP BY command ORDER BY n DESC LIMIT 10"
-                ).fetchall()
-                stats["top_by_freq"] = [
-                    {
-                        "command": _diag_row_value(row, "command", 0, ""),
-                        "count": _diag_row_value(row, "n", 1, 0),
-                    }
-                    for row in rows
-                ]
-
-                # Top 5 longest individual runs
-                if DB_BACKEND == DatabaseBackend.POSTGRES:
-                    duration_sql = """SELECT command,
-                                             ROUND(EXTRACT(EPOCH FROM (
-                                                 finished::timestamptz - started::timestamptz
-                                             ))) AS elapsed_s
-                                        FROM runs
-                                       WHERE finished IS NOT NULL AND started IS NOT NULL
-                                       ORDER BY elapsed_s DESC
-                                       LIMIT 5"""
-                else:
-                    duration_sql = """SELECT command,
-                                             ROUND((julianday(finished) - julianday(started)) * 86400) AS elapsed_s
-                                        FROM runs
-                                       WHERE finished IS NOT NULL AND started IS NOT NULL
-                                       ORDER BY elapsed_s DESC
-                                       LIMIT 5"""
-                rows = conn.execute(duration_sql).fetchall()
-                stats["top_by_duration"] = [
-                    {
-                        "command": _diag_row_value(row, "command", 0, ""),
-                        "elapsed": _fmt_elapsed(_diag_row_value(row, "elapsed_s", 1, 0)),
-                    }
-                    for row in rows
-                ]
-
-            stats["ok"] = True
-        except Exception as exc:
-            stats["error"] = str(exc)
+        stats = diag_usage_stats(request.args.get("tz_offset", 0))
     result["stats"] = stats
 
     # ── Tools ─────────────────────────────────────────────────────────────────
@@ -1496,14 +1245,12 @@ def diag_classifier_inspector():
 def diag_classifier_drift():
     _require_diag_access()
     try:
-        with db_connect() as conn:
-            report = classifier_drift_report(
-                conn,
-                run_limit=request.args.get("runs"),
-                line_limit=request.args.get("lines"),
-                command_root_filter=request.args.get("root"),
-                include_full=request.args.get("include_full"),
-            )
+        report = classifier_drift_report_from_db(
+            run_limit=request.args.get("runs"),
+            line_limit=request.args.get("lines"),
+            command_root_filter=request.args.get("root"),
+            include_full=request.args.get("include_full"),
+        )
     except Exception as exc:
         log.warning("CLASSIFIER_DRIFT_REPORT_FAILED", exc_info=True, extra={"reason": type(exc).__name__})
         report = {"ok": False, "error": str(exc)}

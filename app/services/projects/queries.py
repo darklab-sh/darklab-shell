@@ -4,6 +4,8 @@ Project workspace read/query helpers.
 
 from __future__ import annotations
 
+from typing import Any, Callable, TypeVar
+
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import metadata_owner_id
@@ -40,7 +42,14 @@ from services.projects.utils import (
     trim_text as _trim_text,
 )
 from services.runs.kinds import RUN_KIND_EXTERNAL
+from services.storage.transactions import run_transaction
 from services.teams.storage import token_hash as _team_token_hash
+
+_T = TypeVar("_T")
+
+
+def run_project_transaction(callback: Callable[[Any], _T]) -> _T:
+    return run_transaction(callback, connect=db_connect)
 
 
 def _metadata_filter_values(filters, key, max_len, *, lower=False):

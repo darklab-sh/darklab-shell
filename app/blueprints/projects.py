@@ -12,7 +12,6 @@ from werkzeug.exceptions import BadRequest
 
 from config import CFG
 from extensions import limiter
-from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
@@ -110,6 +109,7 @@ from services.projects.queries import (
     list_projects_page,
     list_projects_switcher,
     list_projects,
+    run_project_transaction,
 )
 from services.projects.targets import (
     add_project_target,
@@ -993,7 +993,8 @@ def projects_monitoring_fire_update(project_id, fire_id):
         })
         return _project_not_found()
     watcher, fire = updated
-    with db_connect() as conn:
+
+    def _record_ack(conn):
         record_event(
             AuditEventType.WATCHER_ACK,
             target_id=watcher.id,
@@ -1008,7 +1009,8 @@ def projects_monitoring_fire_update(project_id, fire_id):
             conn=conn,
             **_project_audit_fields(session_id, team_id),
         )
-        conn.commit()
+
+    run_project_transaction(_record_ack)
     log.info("PROJECT_MONITORING_FIRE_ACK_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1069,7 +1071,8 @@ def projects_delete(project_id):
     session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
     if error_response:
         return error_response
-    with db_connect() as conn:
+
+    def _delete_project(conn):
         deleted = delete_project(session_id, project_id, team_id=team_id, conn=conn)
         if not deleted:
             return _project_not_found()
@@ -1081,7 +1084,11 @@ def projects_delete(project_id):
             conn=conn,
             **_project_audit_fields(session_id, team_id),
         )
-        conn.commit()
+        return None
+
+    delete_response = run_project_transaction(_delete_project)
+    if delete_response is not None:
+        return delete_response
     log.info("PROJECT_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -2257,7 +2264,8 @@ def projects_packages_delete(project_id, package_id):
     session_id, team_id, error_response = _project_owner(Capability.MUTATE_PROJECTS)
     if error_response:
         return error_response
-    with db_connect() as conn:
+
+    def _delete_package(conn):
         deleted = delete_evidence_package(session_id, project_id, package_id, team_id=team_id, conn=conn)
         if not deleted:
             return _project_not_found("package not found")
@@ -2273,7 +2281,11 @@ def projects_packages_delete(project_id, package_id):
             conn=conn,
             **_project_audit_fields(session_id, team_id),
         )
-        conn.commit()
+        return None
+
+    delete_response = run_project_transaction(_delete_package)
+    if delete_response is not None:
+        return delete_response
     log.info("EVIDENCE_PACKAGE_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),

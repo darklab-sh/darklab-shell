@@ -6,11 +6,12 @@ import hashlib
 import re
 import secrets
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, TypeVar
 from uuid import uuid4
 
-from core.database import DB_BACKEND
+from core.database import DB_BACKEND, db_connect
 from core.database_backend import DatabaseBackend
+from services.storage.transactions import run_read, run_transaction
 
 from .capabilities import capabilities_for_role
 from .contracts import (
@@ -31,6 +32,15 @@ from .contracts import (
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 INVITE_CODE_PREFIX = "tinv_"
 RECOVERY_CODE_PREFIX = "trec_"
+_T = TypeVar("_T")
+
+
+def run_team_read(callback: Callable[[Any], _T]) -> _T:
+    return run_read(callback, connect=db_connect)
+
+
+def run_team_transaction(callback: Callable[[Any], _T]) -> _T:
+    return run_transaction(callback, connect=db_connect)
 
 
 def now() -> str:

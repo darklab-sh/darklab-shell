@@ -8,7 +8,6 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from config import CFG
-from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
 from services.audit.context import request_audit_fields
@@ -235,8 +234,7 @@ def session_teams_list():
     session_token, error_response = _required_token_session()
     if error_response:
         return error_response
-    with db_connect() as conn:
-        teams = storage.list_teams_for_token(conn, session_token)
+    teams = storage.run_team_read(lambda conn: storage.list_teams_for_token(conn, session_token))
     return jsonify({"teams": teams})
 
 
@@ -250,7 +248,7 @@ def session_teams_create():
     if body_error:
         return body_error
     try:
-        with db_connect() as conn:
+        def _create(conn):
             team, recovery = storage.create_team_with_recovery_code(
                 conn,
                 name=str(data.get("name") or ""),
@@ -268,7 +266,9 @@ def session_teams_create():
                 details={"role": "owner"},
                 conn=conn,
             )
-            conn.commit()
+            return team, recovery, detail
+
+        team, recovery, detail = storage.run_team_transaction(_create)
         _log_team_event(
             "create",
             session_token=session_token,
@@ -289,9 +289,12 @@ def session_teams_detail(team_id):
         return error_response
     actor = None
     try:
-        with db_connect() as conn:
+        def _detail(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
-            detail = storage.team_detail(conn, team_id, current_session_token=session_token)
+            return storage.team_detail(conn, team_id, current_session_token=session_token)
+
+        detail = storage.run_team_read(_detail)
         if not detail:
             raise TeamNotFound("Team not found")
         return jsonify(detail)
@@ -307,8 +310,11 @@ def session_teams_activity(team_id):
         return error_response
     actor = None
     try:
-        with db_connect() as conn:
+        def _membership(conn):
             actor = _actor_membership(conn, team_id, session_token)
+            return actor
+
+        actor = storage.run_team_read(_membership)
         scope = RequestScope(
             team_owner_context(
                 team_id,
@@ -354,7 +360,8 @@ def session_teams_update(team_id):
         return body_error
     actor = None
     try:
-        with db_connect() as conn:
+        def _update(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             require_capability(actor["role"], Capability.ARCHIVE_TEAM)
             status = str(data.get("status") or "").strip().lower()
@@ -377,7 +384,9 @@ def session_teams_update(team_id):
                 },
                 conn=conn,
             )
-            conn.commit()
+            return team, detail, paused, status
+
+        team, detail, paused, status = storage.run_team_transaction(_update)
         if status == "archived":
             log.info(
                 "TEAM_ARCHIVE_AUTOMATION_PAUSED",
@@ -416,7 +425,8 @@ def session_teams_invites_create(team_id):
         return body_error
     actor = None
     try:
-        with db_connect() as conn:
+        def _create_invite(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             storage.require_active_team(conn, team_id)
             role = str(data.get("role") or "operator").strip()
@@ -441,7 +451,9 @@ def session_teams_invites_create(team_id):
                 details={"target_invite_id": invite["id"], "role": role},
                 conn=conn,
             )
-            conn.commit()
+            return invite
+
+        invite = storage.run_team_transaction(_create_invite)
         _log_team_event(
             "invite_create",
             session_token=session_token,
@@ -462,7 +474,8 @@ def session_teams_invites_revoke(team_id, invite_id):
         return error_response
     actor = None
     try:
-        with db_connect() as conn:
+        def _revoke_invite(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             storage.require_active_team(conn, team_id)
             require_capability(actor["role"], Capability.MANAGE_INVITES)
@@ -476,7 +489,9 @@ def session_teams_invites_revoke(team_id, invite_id):
                     details={"target_invite_id": invite_id, "kind": "invite"},
                     conn=conn,
                 )
-            conn.commit()
+            return removed
+
+        removed = storage.run_team_transaction(_revoke_invite)
         _log_team_event(
             "invite_revoke",
             session_token=session_token,
@@ -507,7 +522,7 @@ def session_teams_join():
     if body_error:
         return body_error
     try:
-        with db_connect() as conn:
+        def _join(conn):
             member = storage.redeem_team_invite(
                 conn,
                 code=str(data.get("code") or ""),
@@ -525,7 +540,9 @@ def session_teams_join():
                 details={"target_member_id": member["id"], "role": str(member.get("role") or ""), "kind": "invite"},
                 conn=conn,
             )
-            conn.commit()
+            return member, detail
+
+        member, detail = storage.run_team_transaction(_join)
         _log_team_event(
             "invite_redeem",
             session_token=session_token,
@@ -549,7 +566,8 @@ def session_teams_members_update(team_id, member_id):
         return body_error
     actor = None
     try:
-        with db_connect() as conn:
+        def _update_member(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             storage.require_active_team(conn, team_id)
             target = storage.get_member(conn, member_id)
@@ -581,7 +599,9 @@ def session_teams_members_update(team_id, member_id):
                     },
                     conn=conn,
                 )
-            conn.commit()
+            return member
+
+        member = storage.run_team_transaction(_update_member)
         _log_team_event(
             "member_update",
             session_token=session_token,
@@ -609,7 +629,8 @@ def session_teams_members_remove(team_id, member_id):
         return error_response
     actor = None
     try:
-        with db_connect() as conn:
+        def _remove_member(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             storage.require_active_team(conn, team_id)
             target = storage.get_member(conn, member_id)
@@ -629,7 +650,9 @@ def session_teams_members_remove(team_id, member_id):
                     details={"target_member_id": member_id, "role": str(target["role"] or "")},
                     conn=conn,
                 )
-            conn.commit()
+            return removed
+
+        removed = storage.run_team_transaction(_remove_member)
         _log_team_event(
             "member_remove",
             session_token=session_token,
@@ -657,7 +680,8 @@ def session_teams_leave(team_id):
         return error_response
     actor = None
     try:
-        with db_connect() as conn:
+        def _leave(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             removed = storage.soft_remove_team_member(conn, actor["id"])
             if removed:
@@ -669,7 +693,9 @@ def session_teams_leave(team_id):
                     details={"target_member_id": actor["id"], "role": str(actor.get("role") or "")},
                     conn=conn,
                 )
-            conn.commit()
+            return removed
+
+        removed = storage.run_team_transaction(_leave)
         _log_team_event("leave", session_token=session_token, team_id=team_id, actor=actor)
         return jsonify({"removed": removed})
     except Exception as exc:
@@ -684,7 +710,8 @@ def session_teams_recovery_rotate(team_id):
         return error_response
     actor = None
     try:
-        with db_connect() as conn:
+        def _rotate_recovery(conn):
+            nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
             storage.require_active_team(conn, team_id)
             require_capability(actor["role"], Capability.MANAGE_RECOVERY)
@@ -701,7 +728,9 @@ def session_teams_recovery_rotate(team_id):
                 details={"target_recovery_id": recovery["id"]},
                 conn=conn,
             )
-            conn.commit()
+            return recovery
+
+        recovery = storage.run_team_transaction(_rotate_recovery)
         _log_team_event(
             "recovery_rotate",
             session_token=session_token,
@@ -730,7 +759,7 @@ def session_teams_recovery_redeem():
     if body_error:
         return body_error
     try:
-        with db_connect() as conn:
+        def _redeem_recovery(conn):
             member = storage.redeem_team_recovery_code(
                 conn,
                 code=str(data.get("code") or ""),
@@ -752,7 +781,9 @@ def session_teams_recovery_redeem():
                 },
                 conn=conn,
             )
-            conn.commit()
+            return member, detail
+
+        member, detail = storage.run_team_transaction(_redeem_recovery)
         _log_team_event(
             "recovery_redeem",
             session_token=session_token,

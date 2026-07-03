@@ -1051,7 +1051,7 @@ def test_api_v1_team_project_readers_include_cross_member_entities_and_findings(
 
 
 def test_api_v1_history_detail_output_and_cross_session_404():
-    import blueprints.history as history_blueprint
+    from services.history import queries as history_queries
     from services.runs.structured_summary import replace_run_output_summary
 
     client = get_client()
@@ -1141,7 +1141,7 @@ def test_api_v1_history_detail_output_and_cross_session_404():
         headers=_headers(token),
     )
     with mock.patch.object(
-        history_blueprint,
+        history_queries,
         "load_run_output_events_for_run",
         side_effect=AssertionError("summary-backed history filters should not load transcript events"),
     ):
@@ -1173,6 +1173,52 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     assert invalid_range.status_code == 400
     assert json.loads(invalid_range.data)["error"]["code"] == "invalid_range"
     assert cross_session.status_code == 404
+
+
+def test_api_v1_output_fallback_preserves_api_log_event_and_metadata():
+    from services.history import api_queries as history_api_queries
+    from services.runs import output_store
+
+    client = get_client()
+    token = _token(client)
+    run_id = _seed_run(token, output=["preview fallback line"])
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE runs SET full_output_available = 1, full_output_truncated = 0 WHERE id = ?",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO run_output_artifacts "
+            "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+            "VALUES (?, ?, 'gzip', 12, 1, 0, '2026-05-19T00:00:01+00:00')",
+            (run_id, "missing/api-output-artifact.txt.gz"),
+        )
+        conn.commit()
+
+    with mock.patch.object(output_store.log, "warning") as warning_log:
+        output_json = client.get(f"/api/v1/history/{run_id}/output?format=json", headers=_headers(token))
+
+    assert output_json.status_code == 200
+    payload = json.loads(output_json.data)
+    assert payload["lines"] == ["preview fallback line"]
+    assert payload["preview"] is True
+    assert payload["full_output_available"] is True
+    assert [call.args[0] for call in warning_log.call_args_list] == ["API_FULL_OUTPUT_LOAD_FAILED"]
+
+    run = {
+        "id": run_id,
+        "session_id": token,
+        "full_output_available": True,
+        "rel_path": "missing/api-output-artifact.txt.gz",
+        "output_preview": json.dumps([{"text": "preview fallback line", "cls": "", "tsC": "", "tsE": ""}]),
+    }
+    with mock.patch.object(output_store.log, "warning") as helper_warning_log:
+        events = history_api_queries.run_output_events(run)
+
+    assert [event.text for event in events] == ["preview fallback line"]
+    assert run["_output_source"] == "preview"
+    assert run["_output_fallback"] is True
+    assert [call.args[0] for call in helper_warning_log.call_args_list] == ["API_FULL_OUTPUT_LOAD_FAILED"]
 
 
 def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):

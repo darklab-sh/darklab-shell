@@ -526,7 +526,7 @@ class TestHealthFailEvents:
     def test_db_fail_emits_error(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_err:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         db_fail = [c for c in mock_err.call_args_list if c[0][0] == "HEALTH_DB_FAIL"]
         assert len(db_fail) == 1
@@ -767,7 +767,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]), \
-             mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
+             mock.patch("blueprints.run.run_persistence_transaction", side_effect=Exception("db write failed")):
             resp = _post_brokered_run(client, "echo saved")
             _ = resp.get_data(as_text=True)
 
@@ -1120,7 +1120,7 @@ class TestHealthStatusEvents:
     def test_health_ok_not_emitted_when_db_fails(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "debug") as mock_debug:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         ok_calls = [c for c in mock_debug.call_args_list if c[0][0] == "HEALTH_OK"]
         assert len(ok_calls) == 0
@@ -1128,7 +1128,7 @@ class TestHealthStatusEvents:
     def test_health_degraded_emits_warning_when_db_fails(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         degraded = [c for c in mock_warn.call_args_list if c[0][0] == "HEALTH_DEGRADED"]
         assert len(degraded) == 1
@@ -1136,7 +1136,7 @@ class TestHealthStatusEvents:
     def test_health_degraded_extra_has_db_false(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "HEALTH_DEGRADED")
         assert call.kwargs["extra"]["db"] is False
@@ -1394,10 +1394,14 @@ class TestHistoryViewedEvent:
         self._insert_run(run_id)
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get("/history", headers={"X-Session-ID": "hv-session"})
+                get_client().get("/history?q=ping", headers={"X-Session-ID": "hv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED")
             assert call.kwargs["extra"]["count"] == 1
             assert call.kwargs["extra"]["session"] == "hv-session"
+            assert call.kwargs["extra"]["query_present"] is True
+            assert call.kwargs["extra"]["query_len"] == len("ping")
+            assert "q" not in call.kwargs["extra"]
+            assert "ping" not in str(call.kwargs["extra"])
         finally:
             with db_connect() as conn:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
@@ -1698,6 +1702,8 @@ class TestSessionStateEvents:
         assert call.kwargs["extra"]["key_count"] == 1
 
     def test_session_preferences_invalid_json_emits_warning(self):
+        from services.session.storage import decode_preferences
+
         session_id = "prefs-invalid-" + uuid.uuid4().hex[:8]
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -1709,9 +1715,18 @@ class TestSessionStateEvents:
         try:
             with mock.patch.object(shell_app.log, "warning") as mock_warn:
                 resp = get_client().get("/session/preferences", headers={"X-Session-ID": session_id})
+                token_id = "tok_" + uuid.uuid4().hex
+                decode_preferences("{not-json", session_id=token_id)
             assert resp.status_code == 200
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "SESSION_PREFERENCES_INVALID"]
-            assert len(calls) == 1
+            assert len(calls) == 2
+            extra = calls[0].kwargs["extra"]
+            assert extra["error_type"] == "JSONDecodeError"
+            assert "not-json" not in str(extra)
+            token_extra = calls[-1].kwargs["extra"]
+            assert token_extra["session_kind"] == "token"
+            assert token_extra["session"] != token_id
+            assert token_id not in str(token_extra)
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session_id,))

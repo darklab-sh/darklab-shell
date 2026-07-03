@@ -226,6 +226,77 @@ describe('team scope selector', () => {
     expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Team unavailable')
   })
 
+  it('keeps cached teams selectable when a later menu refresh fails', async () => {
+    const sessionId = 'tok_scope_cached_retry'
+    let failRefresh = false
+    const apiFetch = vi.fn(async (url) => {
+      if (url === '/session/teams') {
+        if (failRefresh) {
+          return apiResponse(
+            { error: 'team refresh failed' },
+            { ok: false, status: 500, statusText: 'Internal Server Error' },
+          )
+        }
+        return apiResponse({
+          teams: [{
+            id: 'team_cached_1',
+            name: 'Cached Team',
+            slug: 'cached-team',
+            member: { role: 'operator' },
+          }],
+        })
+      }
+      return apiResponse({})
+    })
+    const { DarklabTeamScope } = await loadTeamScopeHarness({ apiFetch, sessionId })
+    await DarklabTeamScope.refreshTeamScopes()
+
+    failRefresh = true
+    DarklabTeamScope.open()
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-team-scope-option="team_cached_1"]')).not.toBeNull()
+    })
+    expect(document.getElementById('team-scope-status').classList.contains('is-error')).toBe(false)
+    expect(document.getElementById('team-scope-label').textContent).toBe('Personal')
+    expect(document.getElementById('team-scope-status').textContent).toBe('')
+  })
+
+  it('keeps cached teams visible while marking a missing active team unavailable after refresh failure', async () => {
+    const sessionId = 'tok_scope_cached_missing'
+    let failRefresh = false
+    const apiFetch = vi.fn(async (url) => {
+      if (url === '/session/teams') {
+        if (failRefresh) {
+          return apiResponse(
+            { error: 'team refresh failed' },
+            { ok: false, status: 500, statusText: 'Internal Server Error' },
+          )
+        }
+        return apiResponse({
+          teams: [{
+            id: 'team_cached_1',
+            name: 'Cached Team',
+            slug: 'cached-team',
+            member: { role: 'operator' },
+          }],
+        })
+      }
+      return apiResponse({})
+    })
+    const { DarklabTeamScope, storage } = await loadTeamScopeHarness({ apiFetch, sessionId })
+    await DarklabTeamScope.refreshTeamScopes()
+
+    storage.setItem(`active_team_id:${sessionId}`, 'team_missing_1')
+    failRefresh = true
+    await DarklabTeamScope.refreshTeamScopes()
+
+    expect(document.querySelector('[data-team-scope-option="team_cached_1"]')).not.toBeNull()
+    expect(document.getElementById('team-scope-label').textContent).toBe('Team unavailable')
+    expect(document.getElementById('mobile-team-scope-label').textContent).toBe('Team unavailable')
+    expect(document.getElementById('team-scope-trigger').classList.contains('is-error')).toBe(true)
+  })
+
   it('reloads scoped surfaces when storage events switch team scope', async () => {
     const sessionId = 'tok_scope_storage'
     const apiFetch = defaultApiFetch({

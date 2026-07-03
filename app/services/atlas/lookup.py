@@ -5,9 +5,9 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Any
+from typing import Any, Callable, TypeVar
 
-from core.database import DB_BACKEND
+from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.atlas.scope import (
@@ -37,6 +37,7 @@ from services.projects.metadata import (
     finding_triage_verification_status_filter_sql_and_params,
 )
 from services.storage.body_store import load_text_body, stored_body_pointer
+from services.storage.transactions import run_read, run_transaction
 
 
 FINDING_STATUS_ORDER = {
@@ -72,6 +73,207 @@ ENTITY_DETAIL_RUN_LIMIT = 50
 ENTITY_DETAIL_FINDING_LIMIT = 50
 ENTITY_DETAIL_RELATED_URL_LIMIT = 25
 ATLAS_RUN_FILTER_LIMIT = 50
+_T = TypeVar("_T")
+
+
+def run_atlas_read(callback: Callable[[Any], _T]) -> _T:
+    return run_read(callback, connect=db_connect)
+
+
+def run_atlas_transaction(callback: Callable[[Any], _T]) -> _T:
+    return run_transaction(callback, connect=db_connect)
+
+
+def atlas_summary_for_owner(session_id: str, *, team_id: str, **filters: str) -> dict[str, Any]:
+    return run_atlas_read(lambda conn: atlas_summary(conn, session_id, team_id=team_id, **filters))
+
+
+def atlas_source_runs_for_owner(session_id: str, *, team_id: str, limit: int, **filters: str) -> dict[str, Any]:
+    return run_atlas_read(lambda conn: list_source_runs(conn, session_id, team_id=team_id, limit=limit, **filters))
+
+
+def atlas_entities_for_owner(
+    session_id: str,
+    *,
+    team_id: str,
+    limit: int,
+    offset: int,
+    **filters: str,
+) -> dict[str, Any]:
+    return run_atlas_read(
+        lambda conn: list_entities(conn, session_id, team_id=team_id, limit=limit, offset=offset, **filters)
+    )
+
+
+def atlas_entity_for_owner(
+    session_id: str,
+    entity_id: str,
+    *,
+    team_id: str,
+    runs_offset: int,
+    findings_offset: int,
+) -> dict[str, Any] | None:
+    return run_atlas_read(
+        lambda conn: entity_detail(
+            conn,
+            session_id,
+            entity_id,
+            team_id=team_id,
+            runs_offset=runs_offset,
+            findings_offset=findings_offset,
+        )
+    )
+
+
+def atlas_findings_for_owner(
+    session_id: str,
+    *,
+    team_id: str,
+    query: str,
+    project_id: str,
+    run_id: str,
+    review_states: list[str],
+    orphan_filter: str,
+    suppression_filter: str,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    return run_atlas_read(
+        lambda conn: list_findings(
+            conn,
+            session_id,
+            team_id=team_id,
+            query=query,
+            project_id=project_id,
+            run_id=run_id,
+            review_states=review_states,
+            orphan_filter=orphan_filter,
+            suppression_filter=suppression_filter,
+            limit=limit,
+            offset=offset,
+        )
+    )
+
+
+def atlas_finding_for_owner(session_id: str, finding_id: str, *, team_id: str) -> dict[str, Any] | None:
+    return run_atlas_read(lambda conn: finding_detail(conn, session_id, finding_id, team_id=team_id))
+
+
+def run_belongs_to_session(conn: Any, session_id: str, run_id: str) -> bool:
+    row = conn.execute(
+        "SELECT id FROM runs WHERE id = ? AND session_id = ?",
+        (run_id, session_id),
+    ).fetchone()
+    return row is not None
+
+
+def entity_ids_in_session(conn: Any, session_id: str, entity_ids: list[str]) -> set[str]:
+    if not entity_ids:
+        return set()
+    placeholders = ",".join("?" for _ in entity_ids)
+    rows = conn.execute(
+        "SELECT id FROM entities WHERE session_id = ? "  # nosec
+        f"AND id IN ({placeholders})",
+        [session_id, *entity_ids],
+    ).fetchall()
+    return {str(row["id"] or "") for row in rows}
+
+
+def finding_ids_in_session(conn: Any, session_id: str, finding_ids: list[str]) -> set[str]:
+    if not finding_ids:
+        return set()
+    placeholders = ",".join("?" for _ in finding_ids)
+    rows = conn.execute(
+        "SELECT id FROM findings WHERE session_id = ? "  # nosec
+        f"AND id IN ({placeholders})",
+        [session_id, *finding_ids],
+    ).fetchall()
+    return {str(row["id"] or "") for row in rows}
+
+
+def update_entity_suppression(
+    conn: Any,
+    entity_id: str,
+    *,
+    suppressed: bool,
+    reason: str,
+    suppressed_at: str,
+) -> None:
+    conn.execute(
+        "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+        "WHERE id = ?",
+        (suppressed, reason, suppressed_at, entity_id),
+    )
+
+
+def update_entities_suppression(
+    conn: Any,
+    entity_ids: set[str],
+    *,
+    suppressed: bool,
+    reason: str,
+    suppressed_at: str,
+) -> None:
+    if not entity_ids:
+        return
+    conn.executemany(
+        "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+        "WHERE id = ?",
+        [
+            (suppressed, reason, suppressed_at, item_id)
+            for item_id in sorted(entity_ids)
+        ],
+    )
+
+
+def update_finding_suppression(
+    conn: Any,
+    finding_id: str,
+    *,
+    suppressed: bool,
+    reason: str,
+    suppressed_at: str,
+) -> None:
+    conn.execute(
+        "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+        "WHERE id = ?",
+        (suppressed, reason, suppressed_at, finding_id),
+    )
+
+
+def update_findings_suppression(
+    conn: Any,
+    finding_ids: set[str],
+    *,
+    suppressed: bool,
+    reason: str,
+    suppressed_at: str,
+) -> None:
+    if not finding_ids:
+        return
+    conn.executemany(
+        "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+        "WHERE id = ?",
+        [
+            (suppressed, reason, suppressed_at, item_id)
+            for item_id in sorted(finding_ids)
+        ],
+    )
+
+
+def update_finding_review_states(
+    conn: Any,
+    finding_ids: set[str],
+    *,
+    review_state: str,
+    updated_at: str,
+) -> None:
+    if not finding_ids:
+        return
+    conn.executemany(
+        "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
+        [(review_state, updated_at, finding_id) for finding_id in sorted(finding_ids)],
+    )
 
 
 def _sql_join(parts: tuple[str, ...]) -> str:

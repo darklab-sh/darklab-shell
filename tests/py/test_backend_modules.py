@@ -12307,6 +12307,346 @@ class TestIntelServices:
         assert "intel: Hash must be hex MD5/SHA1/SHA256" in text
 
 
+class TestDataAccessLayerServiceCoverage:
+    def _service_db(self, monkeypatch, tmp_path, name="data-access-layer.db"):
+        db_path = os.path.join(tmp_path, name)
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        database.db_init()
+        return db_path
+
+    def test_history_list_items_preserve_enriched_run_and_snapshot_shape(self, monkeypatch, tmp_path):
+        from services.history.queries import list_history_items
+        from services.runs.structured_filters import StructuredOutputFilters
+        from services.teams.request_scope import RequestScope
+        from services.teams.scope import personal_owner_context
+
+        self._service_db(monkeypatch, tmp_path, "history-service.db")
+        session_id = "tok_history_service"
+        now = "2026-06-02T12:00:00+00:00"
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 1)",
+                ("run-history-service", session_id, "nmap darklab.sh", now, now, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                ("snap-history-service", session_id, "saved context", "2026-06-02T12:00:01+00:00", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+                "VALUES (?, ?, ?, ?, '', 'active', ?, ?)",
+                ("prj_history_service", session_id, "History Project", "history-project", now, now),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', 1.0, 'confirmed', ?)",
+                ("pl_history_service", "prj_history_service", "run-history-service", now),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, ?, ?, 'text', 42, 'test', ?)",
+                ("rfa_history_service", session_id, "run-history-service", "reports/scan.txt", "scan.txt", now),
+            )
+            for entity_type, entity_id, label in (
+                ("run", "run-history-service", "Run label"),
+                ("snapshot", "snap-history-service", "Snapshot label"),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                    "VALUES (?, ?, ?, ?, ?, 'manual', ?)",
+                    (f"lbl_{entity_id}", session_id, entity_type, entity_id, label, now),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (f"note_{entity_id}", session_id, entity_type, entity_id, f"{label} note", now, now),
+                )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', ?, ?, ?, ?)",
+                ("ent_history_service", session_id, "sig_history_service", now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links "
+                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) VALUES (?, ?, ?, ?, 1)",
+                ("ent_history_service", "run-history-service", now, now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, severity, kind, title, raw_line, line_number, status, created) "
+                "VALUES (?, ?, ?, ?, 'medium', 'service', 'Open service', '443/tcp open https', 1, 'new', ?)",
+                ("fnd_history_service", session_id, "run-history-service", "ent_history_service", now),
+            )
+            conn.commit()
+
+        result = list_history_items(
+            session_id=session_id,
+            owner_scope=RequestScope(personal_owner_context(session_id)),
+            query="",
+            structured_filters=StructuredOutputFilters(),
+            command_root="",
+            exit_code_filter="all",
+            date_range="all",
+            type_filter="all",
+            project_id="",
+            starred_only=False,
+            include_total=True,
+            page=1,
+            page_size=10,
+            scope="all",
+        )
+
+        assert result.total_count == 2
+        assert result.page_count == 1
+        assert result.roots == ["nmap"]
+        run_item = next(item for item in result.items if item["type"] == "run")
+        snapshot_item = next(item for item in result.items if item["type"] == "snapshot")
+        assert run_item["artifact_count"] == 1
+        assert run_item["project_link_count"] == 1
+        assert run_item["labels"][0]["label"] == "Run label"
+        assert run_item["note"]["body"] == "Run label note"
+        assert run_item["finding_count"] == 1
+        assert run_item["atlas_entity_count"] == 1
+        assert run_item["atlas_finding_count"] == 1
+        assert snapshot_item["label_count"] == 1
+        assert snapshot_item["note"]["body"] == "Snapshot label note"
+
+    def test_workspace_metadata_lookup_move_and_delete_stay_owner_scoped(self, monkeypatch, tmp_path):
+        from services.teams.request_scope import RequestScope
+        from services.teams.scope import team_owner_context
+        from services.workspace.files import (
+            delete_workspace_file_metadata,
+            move_workspace_file_metadata,
+            workspace_file_metadata_by_path,
+        )
+
+        self._service_db(monkeypatch, tmp_path, "workspace-metadata-service.db")
+        session_id = "tok_workspace_service"
+        team_id = "team_workspace_service"
+        now = "2026-06-02T12:00:00+00:00"
+        scope = RequestScope(
+            team_owner_context(team_id, actor_session_id=session_id, actor_member_id="tmem_workspace_service"),
+            team_id=team_id,
+        )
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, team_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0, '[]')",
+                ("run-workspace-service", session_id, team_id, "cat reports/source.txt", now, now),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, team_id, name, slug, description, status, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, '', 'active', ?, ?)",
+                ("prj_workspace_service", session_id, team_id, "Workspace Project", "workspace-project", now, now),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', 1.0, 'confirmed', ?)",
+                ("pl_workspace_service", "prj_workspace_service", "run-workspace-service", now),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, ?, ?, 'text', 7, 'test', ?)",
+                ("rfa_workspace_service", session_id, "run-workspace-service", "reports/source.txt", "source.txt", now),
+            )
+            for path, label in (
+                ("reports/source.txt", "Keep"),
+                ("reports/destination.txt", "Overwrite me"),
+            ):
+                row_id = label.lower().replace(" ", "_")
+                conn.execute(
+                    "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, source, created) "
+                    "VALUES (?, ?, ?, 'workspace_file', ?, ?, 'manual', ?)",
+                    (f"lbl_{row_id}", session_id, team_id, path, label, now),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, ?, 'workspace_file', ?, ?, ?, ?)",
+                    (f"note_{row_id}", session_id, team_id, path, f"{label} note", now, now),
+                )
+            conn.commit()
+
+        before = workspace_file_metadata_by_path(scope, ["reports/source.txt"])
+        assert before["reports/source.txt"]["artifact_count"] == 1
+        assert before["reports/source.txt"]["project_names"] == ["Workspace Project"]
+        assert before["reports/source.txt"]["labels"][0]["label"] == "Keep"
+
+        move_workspace_file_metadata(scope, {"reports/source.txt": "reports/destination.txt"})
+        moved = workspace_file_metadata_by_path(scope, ["reports/source.txt", "reports/destination.txt"])
+
+        assert moved["reports/source.txt"]["artifact_count"] == 1
+        assert "labels" not in moved["reports/source.txt"]
+        assert moved["reports/destination.txt"]["labels"][0]["label"] == "Keep"
+        assert moved["reports/destination.txt"]["note"]["body"] == "Keep note"
+
+        delete_workspace_file_metadata(scope, ["reports/destination.txt"])
+        assert workspace_file_metadata_by_path(scope, ["reports/destination.txt"]) == {}
+
+    def test_diag_database_stats_keeps_ping_when_optional_sqlite_probes_fail(self, monkeypatch, tmp_path):
+        import services.assets.diagnostics as assets_diagnostics
+
+        db_path = self._service_db(monkeypatch, tmp_path, "diag-service.db")
+        monkeypatch.setattr(assets_diagnostics, "_database_backend", lambda: database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(assets_diagnostics, "_database_path", lambda: Path(db_path))
+        monkeypatch.setattr(
+            assets_diagnostics,
+            "sqlite_journal_mode",
+            mock.Mock(side_effect=RuntimeError("journal unavailable")),
+        )
+        monkeypatch.setattr(
+            assets_diagnostics,
+            "sqlite_page_stats",
+            mock.Mock(side_effect=RuntimeError("page stats unavailable")),
+        )
+        monkeypatch.setattr(
+            assets_diagnostics,
+            "storage_snapshot",
+            mock.Mock(side_effect=RuntimeError("dbstat unavailable")),
+        )
+
+        with mock.patch.object(assets_diagnostics.log, "warning") as warning_log, \
+             mock.patch.object(assets_diagnostics.log, "debug") as debug_log:
+            stats = assets_diagnostics.diag_database_stats()
+
+        assert stats["backend"] == "sqlite"
+        assert stats["ping_ms"] >= 0
+        assert "journal_mode" not in stats
+        assert "storage" not in stats
+        assert any(call.args == ("DIAG_DATABASE_STATS_PARTIAL",) for call in warning_log.call_args_list)
+        debug_probes = {
+            call.kwargs["extra"]["probe"]
+            for call in debug_log.call_args_list
+            if call.args == ("DIAG_DATABASE_OPTIONAL_PROBE_FAILED",)
+        }
+        assert {"journal_mode", "page_stats"}.issubset(debug_probes)
+
+    def test_session_migration_service_moves_counts_and_cleans_source_rows(self, monkeypatch, tmp_path):
+        from services.session import storage as session_storage
+
+        self._service_db(monkeypatch, tmp_path, "session-migration-service.db")
+        monkeypatch.setenv("SECRETS_MASTER_KEY", base64.b64encode(b"s" * 32).decode("ascii"))
+        secrets_vault.reset_master_key_cache_for_tests()
+        source_session = "tok_source_service"
+        destination_session = "tok_destination_service"
+        now = "2026-06-02T12:00:00+00:00"
+        secrets_storage.upsert_secret(source_session, "vt_api_key", "secret-value")
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, 'host darklab.sh', ?, ?, 0, '[]')",
+                ("run-session-service", source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, '[]')",
+                ("snap-session-service", source_session, "session snapshot", now),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, 'host darklab.sh')",
+                (source_session,),
+            )
+            conn.execute(
+                "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?)",
+                (source_session, json.dumps({"pref_theme_name": "darklab_obsidian.yaml"}), now),
+            )
+            conn.execute(
+                "INSERT INTO session_variables (session_id, name, value, updated) VALUES (?, 'HOST', 'darklab.sh', ?)",
+                (source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO user_workflows "
+                "(id, session_id, title, description, inputs, steps, created, updated) "
+                "VALUES (?, ?, 'Workflow', '', '[]', '[]', ?, ?)",
+                ("wf-session-service", source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
+                "VALUES (?, 'domain', 'darklab.sh', ?, 2)",
+                (source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+                "VALUES (?, ?, 'Migrated Project', 'migrated-project', '', 'active', ?, ?)",
+                ("prj_session_service", source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
+                ("ntc_session_service", source_session, now, now),
+            )
+            conn.commit()
+
+        counts = session_storage.migrate_session_records(
+            source_session,
+            destination_session,
+            audit_fields={"session_id": source_session, "actor_session_id": source_session, "team_id": ""},
+            audit_details={"source": "test"},
+            audit_target_id=destination_session,
+        )
+
+        assert counts["migrated_runs"] == 1
+        assert counts["migrated_snapshots"] == 1
+        assert counts["migrated_stars"] == 1
+        assert counts["migrated_preferences"] == 1
+        assert counts["migrated_variables"] == 1
+        assert counts["migrated_workflows"] == 1
+        assert counts["migrated_projects"] == 1
+        assert counts["migrated_notification_channels"] == 1
+        assert counts["migrated_recent_values"] == 1
+        assert counts["migrated_secrets"] == 1
+        with database.db_connect() as conn:
+            source_counts = {
+                "runs": conn.execute(
+                    "SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (source_session,)
+                ).fetchone()["count"],
+                "snapshots": conn.execute(
+                    "SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "stars": conn.execute(
+                    "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "preferences": conn.execute(
+                    "SELECT COUNT(*) AS count FROM session_preferences WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "variables": conn.execute(
+                    "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "workflows": conn.execute(
+                    "SELECT COUNT(*) AS count FROM user_workflows WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "recent": conn.execute(
+                    "SELECT COUNT(*) AS count FROM recent_values WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+            }
+            destination_project = conn.execute(
+                "SELECT session_id FROM projects WHERE id = 'prj_session_service'",
+            ).fetchone()
+            audit_row = conn.execute(
+                "SELECT details FROM audit_events WHERE target_id = ?",
+                (destination_session,),
+            ).fetchone()
+
+        assert set(source_counts.values()) == {0}
+        assert destination_project["session_id"] == destination_session
+        assert secrets_storage.get_secret_value_for_env(destination_session, "VT_API_KEY") == "secret-value"
+        assert audit_row is not None
+        assert json.loads(audit_row["details"])["migration_counts"]["migrated_recent_values"] == 1
+
+
 class TestSessionWorkspace:
     def _cfg(self, root, **overrides):
         cfg = {

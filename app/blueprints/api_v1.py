@@ -13,14 +13,20 @@ from typing import Any, Iterable
 from flask import Blueprint, Response, jsonify, request, send_file
 
 from config import CFG
-from core.database import DB_BACKEND, db_connect
 from core.helpers import get_client_ip, get_log_session_id
 from core.process import active_runs_for_session, active_runs_for_team, pid_for_session
 from extensions import limiter
 from services.api_v1.auth import ApiAuthError, current_api_session, require_api_auth
 from services.api_v1.openapi import openapi_spec
 from services.api_v1.serialization import artifact_summary, json_error, run_summary
-from services.audit.automation import record_schedule_event, record_watcher_event, run_now_details
+from services.atlas.lookup import (
+    atlas_entities_for_owner,
+    atlas_entity_for_owner,
+    atlas_finding_for_owner,
+    atlas_findings_for_owner,
+    atlas_source_runs_for_owner,
+    atlas_summary_for_owner,
+)
 from services.audit.context import request_audit_fields, route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -29,23 +35,9 @@ from services.commands.registry import (
     runtime_missing_command_message,
     split_command_argv,
 )
-from services.atlas.lookup import (
-    atlas_summary,
-    entity_detail,
-    finding_detail,
-    list_entities as list_atlas_entities,
-    list_findings as list_atlas_findings,
-    list_source_runs as list_atlas_source_runs,
-)
 from services.ai.assists import AIAssistRouteError, enqueue_next_commands_assist, enqueue_summary_assist, list_run_assists
-from services.history.search import run_search_clause
-from services.history.run_metadata import (
-    history_offloaded_search_run_ids as _history_offloaded_search_run_ids,
-    normalize_history_filter_text as _normalize_history_filter_text,
-    run_atlas_counts_by_run as _run_atlas_counts_by_run,
-    run_file_artifacts_by_run as _run_file_artifacts_by_run,
-    run_metadata_counts_by_run as _run_metadata_counts_by_run,
-)
+from services.history import api_queries as history_api
+from services.history.run_metadata import normalize_history_filter_text as _normalize_history_filter_text
 from services.notifications.channels_store import (
     NotificationChannelError,
     create_notification_channel,
@@ -56,7 +48,7 @@ from services.notifications.channels_store import (
     send_test_notification,
     update_notification_channel,
 )
-from services.projects.artifacts import artifact_availability, artifact_owner_context
+from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import (
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
@@ -80,13 +72,14 @@ from services.runs.broker import (
 )
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
 from services.runs.output_model import LineEvent, to_wire
-from services.runs.output_store import load_run_output_events_for_run
 from services.runs.start import (
     RunStartHandlers,
     RunStartRejected,
     start_brokered_run as _start_brokered_run_service,
 )
+from services.scheduler import api_operations as schedule_api
 from services.teams.capabilities import Capability, require_capability
+from services.teams import api_operations as team_api
 from services.teams import storage as team_storage
 from services.teams.contracts import (
     TeamError,
@@ -100,52 +93,31 @@ from services.teams.request_scope import RequestScopeError, current_request_scop
 from services.watchers.service import pause_team_watchers_and_schedules
 from services.runs.structured_filters import (
     StructuredOutputFilters,
-    entity_run_exists_clause,
-    event_matches_structured_filters,
-    filters_have_summary_selectors,
-    filters_need_line_event_scan,
     filter_events,
-    run_output_summary_exists_clause,
     structured_filters_from_params,
 )
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError, next_fire
-from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.route_helpers import (
     RouteBaselineRunNotCompleted,
     RouteBaselineRunNotFound,
-    fire_schedule_now,
-    fire_watcher_now,
     normalize_schedule_create_payload,
     normalize_schedule_update_payload,
-    normalize_watcher_create_payload,
     normalize_watcher_update_payload,
 )
 from services.scheduler.serialization import get_user_schedule_for_owner, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
     ScheduleError,
-    create_schedule,
-    delete_schedule,
-    get_schedule,
     list_for_owner as list_schedules_for_owner,
     list_schedule_fires,
-    schedule_refs_by_run,
-    update_schedule,
 )
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.session.variables import SessionVariableError
+from services.watchers import api_operations as watcher_api
 from services.watchers.serialization import watcher_fire_payload, watcher_payload
 from services.watchers.service import (
     WatcherError,
-    accept_baseline,
-    create_watcher,
-    delete_watcher,
     get_watcher,
-    list_for_owner as list_watchers_for_owner,
-    list_watcher_fires,
-    pause_watcher,
-    resume_watcher,
-    update_watcher,
 )
 from services.workspace.files import WorkspaceError, open_owner_workspace_file_for_download
 
@@ -673,33 +645,6 @@ def _history_datetime_filter(name: str) -> str:
     return parsed.isoformat()
 
 
-def _run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tuple[str, list[Any]]:
-    prefix = f"{alias}." if alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", [team_id]
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')", [session_id]
-
-
-def _apply_schedule_ref(run: dict[str, Any], schedule_ref: dict[str, str] | None) -> None:
-    ref = schedule_ref or {}
-    schedule_id = str(ref.get("schedule_id") or "")
-    owner_kind = str(ref.get("owner_kind") or "")
-    owner_id = str(ref.get("owner_id") or "")
-    run["schedule_id"] = schedule_id
-    run["scheduled"] = bool(schedule_id)
-    run["schedule_owner_kind"] = owner_kind
-    run["schedule_owner_id"] = owner_id
-    run["watcher_id"] = owner_id if owner_kind == OWNER_KIND_WATCHER else ""
-    run["schedule_label"] = str(ref.get("watcher_label" if owner_kind == OWNER_KIND_WATCHER else "schedule_label") or "")
-
-
-def _project_owner_clause(session_id: str, team_id: str, *, alias: str = "p") -> tuple[str, list[Any]]:
-    prefix = f"{alias}." if alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", [team_id]
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')", [session_id]
-
-
 def _active_runs_for_owner(session_id: str, team_id: str = "", client_id: str = "") -> list[dict[str, Any]]:
     if team_id:
         return active_runs_for_team(team_id, client_id=client_id)
@@ -710,40 +655,12 @@ def _run_status_from_active_or_row(run_id: str, session_id: str, team_id: str = 
     for active in _active_runs_for_owner(session_id, team_id):
         if str(active.get("run_id") or "") == run_id:
             return _active_run_summary(active)
-    with db_connect() as conn:
-        scope_sql, scope_params = _run_owner_clause(session_id, team_id, alias="")
-        row = conn.execute(
-            f"SELECT * FROM runs WHERE {scope_sql} AND id = ?",  # nosec
-            (*scope_params, run_id),
-        ).fetchone()
-        if not row:
-            return None
-        run = dict(row)
-        artifacts = _run_file_artifacts_by_run(conn, [run_id]).get(run_id, [])
-        run["artifact_count"] = len(artifacts)
-        run.update(_run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
-        run.update(_run_atlas_counts_by_run(conn, session_id, [run_id], team_id=team_id).get(run_id, {}))
-    return run_summary(run)
+    run = history_api.run_status_from_active_or_row(run_id, session_id, team_id)
+    return run_summary(run) if run is not None else None
 
 
 def _active_run_summary(active: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": str(active.get("run_id") or ""),
-        "command": str(active.get("command") or ""),
-        "started": active.get("started"),
-        "finished": None,
-        "status": "running",
-        "exit_code": None,
-        "run_kind": str(active.get("run_type") or "command"),
-        "output_line_count": 0,
-        "preview_truncated": False,
-        "full_output_available": False,
-        "full_output_truncated": False,
-        "artifact_count": 0,
-        "finding_count": 0,
-        "atlas_entity_count": 0,
-        "atlas_finding_count": 0,
-    }
+    return history_api.active_run_summary(active)
 
 
 def _history_filters() -> dict[str, str]:
@@ -786,126 +703,31 @@ def _history_where(
     offloaded_ids: list[str] | None = None,
     search_scope: str = "all",
 ):
-    scope_sql, scope_params = _run_owner_clause(session_id, team_id)
-    where = [scope_sql]
-    params: list[Any] = list(scope_params)
-    if filters["run_kind"]:
-        where.append("r.run_kind = ?")
-        params.append(filters["run_kind"])
-    if filters["project_id"]:
-        project_scope_sql, project_scope_params = _project_owner_clause(session_id, team_id)
-        where.append(
-            "EXISTS (SELECT 1 FROM project_links pl JOIN projects p ON p.id = pl.project_id "
-            f"WHERE {project_scope_sql} AND p.id = ? AND pl.entity_type = 'run' AND pl.entity_id = r.id)"  # nosec
-        )
-        params.extend([*project_scope_params, filters["project_id"]])
-    if filters["exit_code"]:
-        try:
-            where.append("r.exit_code = ?")
-            params.append(int(filters["exit_code"]))
-        except ValueError:
-            pass
-    if filters["since"]:
-        where.append("r.started >= ?")
-        params.append(filters["since"])
-    if filters["until"]:
-        where.append("r.started <= ?")
-        params.append(filters["until"])
-    if filters["q"]:
-        search = run_search_clause(DB_BACKEND, filters["q"], search_scope, alias="r", postgres_placeholder="?")
-        if search.predicate_sql:
-            if offloaded_ids:
-                placeholders = ",".join("?" for _ in offloaded_ids)
-                where.append(f"(({search.predicate_sql}) OR r.id IN ({placeholders}))")
-                params.extend(search.params)
-                params.extend(offloaded_ids)
-            else:
-                where.append(search.predicate_sql)
-                params.extend(search.params)
-    return " WHERE " + " AND ".join(where), params
+    return history_api.history_where(
+        session_id,
+        team_id,
+        filters,
+        offloaded_ids=offloaded_ids,
+        search_scope=search_scope,
+    )
 
 
 def _history_search_candidate_runs(
     session_id: str,
     team_id: str,
     filters: dict[str, str],
-    structured_filters: StructuredOutputFilters,
+    structured_filters,
 ) -> list[dict[str, Any]]:
-    offloaded_ids: list[str] = []
-    if filters["q"]:
-        with db_connect() as conn:
-            offloaded_ids = _history_offloaded_search_run_ids(
-                conn,
-                session_id,
-                team_id,
-                filters["q"],
-                "",
-                "",
-                "",
-                filters["project_id"],
-                run_kind=filters["run_kind"] or "all",
-            )
-    with db_connect() as conn:
-        where_sql, params = _history_where(
-            session_id,
-            team_id,
-            filters,
-            offloaded_ids=offloaded_ids,
-            search_scope="all",
-        )
-        entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
-        if entity_sql:
-            where_sql += entity_sql
-            params = [*params, *entity_params]
-        summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
-        if summary_sql:
-            where_sql += summary_sql
-            params = [*params, *summary_params]
-        rows = conn.execute(
-            "SELECT r.*, ("  # nosec
-            "SELECT art.rel_path FROM run_output_artifacts art "
-            "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
-            ") AS rel_path FROM runs r"
-            + where_sql
-            + " ORDER BY r.started DESC, r.id DESC",
-            params,
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return history_api.history_search_candidate_runs(session_id, team_id, filters, structured_filters)
 
 
 def _run_output_search_matches(
     run: dict[str, Any],
     query: str,
     context: int,
-    structured_filters: StructuredOutputFilters,
+    structured_filters,
 ) -> list[dict[str, Any]]:
-    needle = query.casefold()
-    events = _run_output_events(run)
-    lines = [event.text for event in events]
-    matches: list[dict[str, Any]] = []
-    for index, event in enumerate(events):
-        line = event.text
-        if needle and needle not in line.casefold():
-            continue
-        if structured_filters.active and not event_matches_structured_filters(event, structured_filters):
-            continue
-        before_start = max(0, index - context)
-        after_end = min(len(lines), index + context + 1)
-        matches.append({
-            "run_id": str(run.get("id") or ""),
-            "command": str(run.get("command") or ""),
-            "started": run.get("started"),
-            "finished": run.get("finished"),
-            "line_number": index + 1,
-            "line": line,
-            "kind": event.kind.value,
-            "role": event.role.value,
-            "signals": [signal.value for signal in event.signals],
-            "entities": [entity.to_wire() for entity in event.entities],
-            "context_before": lines[before_start:index],
-            "context_after": lines[index + 1:after_end],
-        })
-    return matches
+    return history_api.run_output_search_matches(run, query, context, structured_filters)
 
 
 def _history_output_search(
@@ -913,14 +735,10 @@ def _history_output_search(
     team_id: str,
     query: str,
     context: int,
-    structured_filters: StructuredOutputFilters,
+    structured_filters,
 ) -> list[dict[str, Any]]:
     filters = _history_filters()
-    filters["q"] = query
-    matches: list[dict[str, Any]] = []
-    for run in _history_search_candidate_runs(session_id, team_id, filters, structured_filters):
-        matches.extend(_run_output_search_matches(run, query, context, structured_filters))
-    return matches
+    return history_api.history_output_search(session_id, team_id, filters, query, context, structured_filters)
 
 
 def _structured_filters_payload(structured_filters: StructuredOutputFilters) -> dict[str, list[str]]:
@@ -940,121 +758,17 @@ def _history_rows(
     limit: int,
     offset: int,
     filters: dict[str, str],
-    structured_filters: StructuredOutputFilters | None = None,
+    structured_filters=None,
 ):
-    offloaded_ids: list[str] = []
-    if filters["q"]:
-        with db_connect() as conn:
-            offloaded_ids = _history_offloaded_search_run_ids(
-                conn,
-                session_id,
-                team_id,
-                filters["q"],
-                "",
-                "",
-                "",
-                filters["project_id"],
-                run_kind=filters["run_kind"] or "all",
-            )
-    with db_connect() as conn:
-        where_sql, params = _history_where(session_id, team_id, filters, offloaded_ids=offloaded_ids)
-        if structured_filters and structured_filters.active:
-            entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
-            if entity_sql:
-                where_sql += entity_sql
-                params = [*params, *entity_params]
-            summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
-            if summary_sql:
-                where_sql += summary_sql
-                params = [*params, *summary_params]
-            needs_line_scan = filters_need_line_event_scan(structured_filters) or (
-                filters_have_summary_selectors(structured_filters) and not summary_sql
-            )
-            if needs_line_scan:
-                rows = conn.execute(
-                    "SELECT r.*, ("  # nosec
-                    "SELECT art.rel_path FROM run_output_artifacts art "
-                    "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
-                    ") AS rel_path FROM runs r"
-                    + where_sql
-                    + " ORDER BY r.started DESC LIMIT 2000",
-                    params,
-                ).fetchall()
-                matching_runs = [dict(row) for row in rows]
-                matching_runs = [
-                    run for run in matching_runs
-                    if any(event_matches_structured_filters(event, structured_filters) for event in _run_output_events(run))
-                ]
-                total = len(matching_runs)
-                runs = matching_runs[offset:offset + limit]
-            else:
-                total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
-                total = int(total_row["count"] or 0) if total_row else 0
-                rows = conn.execute(
-                    "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
-                    "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-                    "FROM runs r"
-                    + where_sql
-                    + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
-                    (*params, limit, offset),
-                ).fetchall()
-                runs = [dict(row) for row in rows]
-        else:
-            total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
-            total = int(total_row["count"] or 0) if total_row else 0
-            rows = conn.execute(
-                "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
-                "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-                "FROM runs r"
-                + where_sql
-                + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
-                (*params, limit, offset),
-            ).fetchall()
-            runs = [dict(row) for row in rows]
-        run_ids = [str(run["id"]) for run in runs]
-        artifacts = _run_file_artifacts_by_run(conn, run_ids)
-        metadata = _run_metadata_counts_by_run(conn, run_ids)
-        atlas = _run_atlas_counts_by_run(conn, session_id, run_ids, team_id=team_id)
-        scheduled = schedule_refs_by_run(conn, run_ids)
-    for run in runs:
-        run_id = str(run["id"])
-        run["artifact_count"] = len(artifacts.get(run_id, []))
-        run.update(metadata.get(run_id, {}))
-        run.update(atlas.get(run_id, {}))
-        _apply_schedule_ref(run, scheduled.get(run_id))
-    return runs, total
+    return history_api.history_rows(session_id, team_id, limit, offset, filters, structured_filters)
 
 
 def _load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any] | None:
-    with db_connect() as conn:
-        scope_sql, scope_params = _run_owner_clause(session_id, team_id, alias="runs")
-        row = conn.execute(
-            "SELECT runs.*, art.rel_path "
-            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            f"WHERE {scope_sql} AND runs.id = ?",  # nosec
-            (*scope_params, run_id),
-        ).fetchone()
-        if not row:
-            return None
-        run = dict(row)
-        artifacts = _run_file_artifacts_by_run(conn, [run_id]).get(run_id, [])
-        run["artifacts"] = artifacts
-        run["artifact_count"] = len(artifacts)
-        run.update(_run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
-        run.update(_run_atlas_counts_by_run(conn, session_id, [run_id], team_id=team_id).get(run_id, {}))
-        _apply_schedule_ref(run, schedule_refs_by_run(conn, [run_id]).get(run_id))
-    return run
+    return history_api.load_run_detail(session_id, team_id, run_id)
 
 
 def _run_output_events(run: dict[str, Any], *, full: bool = True) -> list[LineEvent]:
-    result = load_run_output_events_for_run(
-        run,
-        prefer_full=full,
-        log_event="API_FULL_OUTPUT_LOAD_FAILED",
-    )
-    run["_output_source"] = result.source
-    run["_output_fallback"] = result.fallback
-    return result.events
+    return history_api.run_output_events(run, full=full)
 
 
 def _parse_output_range(value: object) -> tuple[int, int] | None:
@@ -1089,51 +803,11 @@ def _slice_output_events(events: list[LineEvent], line_range: tuple[int, int] | 
 
 
 def _artifact_for_run(session_id: str, team_id: str, run_id: str, artifact_id: str) -> dict[str, Any] | None:
-    with db_connect() as conn:
-        scope_sql, scope_params = _run_owner_clause(session_id, team_id, alias="")
-        run_row = conn.execute(
-            f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
-            (*scope_params, run_id),
-        ).fetchone()
-        if not run_row:
-            return None
-        row = conn.execute(
-            "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-            "detected_by, content_type, preview_type, content_sha256, created, ? AS run_team_id "
-            "FROM run_file_artifacts WHERE run_id = ? AND id = ?",
-            (str(run_row["team_id"] or ""), run_id, artifact_id),
-        ).fetchone()
-    if not row:
-        return None
-    artifact = dict(row)
-    owner_context = artifact_owner_context(str(artifact.get("session_id") or ""), artifact)
-    artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact, owner_context=owner_context))
-    return artifact
+    return history_api.artifact_for_run(session_id, team_id, run_id, artifact_id)
 
 
 def _artifacts_for_run(session_id: str, team_id: str, run_id: str) -> list[dict[str, Any]] | None:
-    with db_connect() as conn:
-        scope_sql, scope_params = _run_owner_clause(session_id, team_id, alias="")
-        run_row = conn.execute(
-            f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
-            (*scope_params, run_id),
-        ).fetchone()
-        if not run_row:
-            return None
-        rows = conn.execute(
-            "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-            "detected_by, content_type, preview_type, content_sha256, created, ? AS run_team_id "
-            "FROM run_file_artifacts WHERE run_id = ? "
-            "ORDER BY created ASC, workspace_path ASC",
-            (str(run_row["team_id"] or ""), run_id),
-        ).fetchall()
-    artifacts = []
-    for row in rows:
-        artifact = dict(row)
-        owner_context = artifact_owner_context(str(artifact.get("session_id") or ""), artifact)
-        artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact, owner_context=owner_context))
-        artifacts.append(artifact_summary(artifact))
-    return artifacts
+    return history_api.artifacts_for_run(session_id, team_id, run_id)
 
 
 def _sse_after_id() -> str:
@@ -1267,9 +941,7 @@ def _sse_chunks_with_error_logging(
 @require_api_auth
 def api_teams_list():
     session_id = _require_session_id()
-    with db_connect() as conn:
-        teams = team_storage.list_teams_for_token(conn, session_id)
-    return jsonify({"teams": teams})
+    return jsonify({"teams": team_api.list_teams_for_api(session_id)})
 
 
 @api_v1_bp.route("/teams", methods=["POST"])
@@ -1279,25 +951,13 @@ def api_teams_create():
     session_id = _require_session_id()
     data = _json_body()
     try:
-        with db_connect() as conn:
-            team, recovery = team_storage.create_team_with_recovery_code(
-                conn,
-                name=str(data.get("name") or ""),
-                slug=str(data.get("slug") or ""),
-                creator_session_token=session_id,
-                display_name=str(data.get("display_name") or ""),
-            )
-            detail = team_storage.team_detail(conn, team["id"], current_session_token=session_id)
-            _record_api_team_audit(
-                AuditEventType.TEAM_CREATE,
-                session_token=session_id,
-                team_id=team["id"],
-                actor_member_id=team.get("creator_member_id", ""),
-                actor_role="owner",
-                details={"role": "owner"},
-                conn=conn,
-            )
-            conn.commit()
+        team, recovery, detail = team_api.create_team_for_api(
+            session_id,
+            name=str(data.get("name") or ""),
+            slug=str(data.get("slug") or ""),
+            display_name=str(data.get("display_name") or ""),
+            audit_fields=_api_actor_audit_fields(session_id),
+        )
         _log_api_team_event(
             "create",
             session_token=session_id,
@@ -1317,11 +977,7 @@ def api_teams_detail(team_id: str):
     session_id = _require_session_id()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            detail = team_storage.team_detail(conn, team_id, current_session_token=session_id)
-        if not detail:
-            raise TeamNotFound("Team not found.")
+        actor, detail = team_api.team_detail_for_api(team_id, session_id)
         return jsonify(detail)
     except Exception as exc:
         return _log_api_team_exception("detail", exc, session_token=session_id, team_id=team_id, actor=actor)
@@ -1335,30 +991,17 @@ def api_teams_update(team_id: str):
     data = _json_body()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            require_capability(actor["role"], Capability.ARCHIVE_TEAM)
-            status = str(data.get("status") or "").strip().lower()
-            team = team_storage.update_team_status(conn, team_id, status=status)
-            paused = {"watchers": 0, "schedules": 0}
-            if status == "archived":
-                paused = pause_team_watchers_and_schedules(conn, team_id, reason="team_archived")
-            detail = team_storage.team_detail(conn, team_id, current_session_token=session_id)
-            event_type = AuditEventType.TEAM_ARCHIVE if status == "archived" else AuditEventType.TEAM_REACTIVATE
-            _record_api_team_audit(
-                event_type,
-                session_token=session_id,
-                team_id=team_id,
-                actor=actor,
-                details={
-                    "status": team["status"],
-                    "to_state": team["status"],
-                    "paused_watchers": paused["watchers"],
-                    "paused_schedules": paused["schedules"],
-                },
-                conn=conn,
-            )
-            conn.commit()
+        actor = team_api.team_member_for_api(team_id, session_id)
+        require_capability(actor["role"], Capability.ARCHIVE_TEAM)
+        status = str(data.get("status") or "").strip().lower()
+        team, detail, paused = team_api.update_team_for_api(
+            team_id,
+            session_id,
+            status=status,
+            actor=actor,
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+            pause_automation=pause_team_watchers_and_schedules,
+        )
         if status == "archived":
             log.info(
                 "TEAM_ARCHIVE_AUTOMATION_PAUSED",
@@ -1394,29 +1037,18 @@ def api_teams_invites_create(team_id: str):
     data = _json_body()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            team_storage.require_active_team(conn, team_id)
-            role = str(data.get("role") or "operator").strip()
-            require_capability(actor["role"], Capability.MANAGE_OWNERS if role == "owner" else Capability.MANAGE_INVITES)
-            invite = team_storage.create_team_invite_with_code(
-                conn,
-                team_id=team_id,
-                role=role,
-                created_by_member_id=actor["id"],
-                expires_at=str(data.get("expires_at") or ""),
-                max_uses=int(data.get("max_uses") or 1),
-                label=str(data.get("label") or ""),
-            )
-            _record_api_team_audit(
-                AuditEventType.TEAM_INVITE,
-                session_token=session_id,
-                team_id=team_id,
-                actor=actor,
-                details={"target_invite_id": invite["id"], "role": role},
-                conn=conn,
-            )
-            conn.commit()
+        actor = team_api.team_member_for_api(team_id, session_id)
+        role = str(data.get("role") or "operator").strip()
+        require_capability(actor["role"], Capability.MANAGE_OWNERS if role == "owner" else Capability.MANAGE_INVITES)
+        invite = team_api.create_team_invite_for_api(
+            team_id,
+            actor=actor,
+            role=role,
+            expires_at=str(data.get("expires_at") or ""),
+            max_uses=int(data.get("max_uses") or 1),
+            label=str(data.get("label") or ""),
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+        )
         _log_api_team_event(
             "invite_create",
             session_token=session_id,
@@ -1436,24 +1068,13 @@ def api_teams_invites_revoke(team_id: str, invite_id: str):
     session_id = _require_session_id()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            team_storage.require_active_team(conn, team_id)
-            require_capability(actor["role"], Capability.MANAGE_INVITES)
-            invite = conn.execute("SELECT team_id FROM team_invites WHERE id = ?", (invite_id,)).fetchone()
-            if not invite or str(invite["team_id"] or "") != team_id:
-                raise TeamNotFound("Team invite not found.")
-            removed = team_storage.revoke_team_invite(conn, invite_id)
-            if removed:
-                _record_api_team_audit(
-                    AuditEventType.TEAM_REVOKE,
-                    session_token=session_id,
-                    team_id=team_id,
-                    actor=actor,
-                    details={"target_invite_id": invite_id, "kind": "invite"},
-                    conn=conn,
-                )
-            conn.commit()
+        actor = team_api.team_member_for_api(team_id, session_id)
+        require_capability(actor["role"], Capability.MANAGE_INVITES)
+        removed = team_api.revoke_team_invite_for_api(
+            team_id,
+            invite_id,
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+        )
         _log_api_team_event(
             "invite_revoke",
             session_token=session_id,
@@ -1481,25 +1102,12 @@ def api_teams_join():
     session_id = _require_session_id()
     data = _json_body()
     try:
-        with db_connect() as conn:
-            member = team_storage.redeem_team_invite(
-                conn,
-                code=str(data.get("code") or ""),
-                session_token=session_id,
-                display_name=str(data.get("display_name") or ""),
-            )
-            detail = team_storage.team_detail(conn, member["team_id"], current_session_token=session_id)
-            _record_api_team_audit(
-                AuditEventType.TEAM_JOIN,
-                session_token=session_id,
-                team_id=member["team_id"],
-                actor_member_id=member["id"],
-                actor_role=str(member.get("role") or ""),
-                actor_display_name=str(member.get("display_name") or ""),
-                details={"target_member_id": member["id"], "role": str(member.get("role") or ""), "kind": "invite"},
-                conn=conn,
-            )
-            conn.commit()
+        member, detail = team_api.redeem_team_invite_for_api(
+            session_id,
+            code=str(data.get("code") or ""),
+            display_name=str(data.get("display_name") or ""),
+            audit_fields=_api_actor_audit_fields(session_id),
+        )
         _log_api_team_event(
             "invite_redeem",
             session_token=session_id,
@@ -1520,39 +1128,20 @@ def api_teams_members_update(team_id: str, member_id: str):
     data = _json_body()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            team_storage.require_active_team(conn, team_id)
-            target = team_storage.get_member(conn, member_id)
-            if not target or target["team_id"] != team_id:
-                raise TeamNotFound("Team member not found.")
-            new_role = str(data.get("role") or target["role"]).strip()
-            if target["role"] == "owner" or new_role == "owner":
-                require_capability(actor["role"], Capability.MANAGE_OWNERS)
-            elif actor["id"] != member_id:
-                require_capability(actor["role"], Capability.MANAGE_MEMBERS)
-            member = team_storage.update_team_member(
-                conn,
-                member_id,
-                role=new_role if "role" in data else None,
-                display_name=str(data.get("display_name")) if "display_name" in data else None,
-            )
-            if not member:
-                raise TeamNotFound("Team member not found.")
-            if "role" in data and str(target["role"] or "") != str(member["role"] or ""):
-                _record_api_team_audit(
-                    AuditEventType.TEAM_ROLE_CHANGE,
-                    session_token=session_id,
-                    team_id=team_id,
-                    actor=actor,
-                    details={
-                        "target_member_id": member_id,
-                        "from_role": str(target["role"] or ""),
-                        "to_role": str(member["role"] or ""),
-                    },
-                    conn=conn,
-                )
-            conn.commit()
+        actor, target = team_api.team_member_and_target_for_api(team_id, session_id, member_id)
+        new_role = str(data.get("role") or target["role"]).strip()
+        if target["role"] == "owner" or new_role == "owner":
+            require_capability(actor["role"], Capability.MANAGE_OWNERS)
+        elif actor["id"] != member_id:
+            require_capability(actor["role"], Capability.MANAGE_MEMBERS)
+        member = team_api.update_team_member_for_api(
+            team_id,
+            member_id,
+            target=target,
+            role=new_role if "role" in data else None,
+            display_name=str(data.get("display_name")) if "display_name" in data else None,
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+        )
         _log_api_team_event(
             "member_update",
             session_token=session_id,
@@ -1560,7 +1149,7 @@ def api_teams_members_update(team_id: str, member_id: str):
             actor=actor,
             target_member_id=member_id,
         )
-        return jsonify({"member": team_storage.public_member(member)})
+        return jsonify({"member": member})
     except Exception as exc:
         return _log_api_team_exception(
             "member_update",
@@ -1579,27 +1168,17 @@ def api_teams_members_remove(team_id: str, member_id: str):
     session_id = _require_session_id()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            team_storage.require_active_team(conn, team_id)
-            target = team_storage.get_member(conn, member_id)
-            if not target or target["team_id"] != team_id:
-                raise TeamNotFound("Team member not found.")
-            if target["role"] == "owner":
-                require_capability(actor["role"], Capability.MANAGE_OWNERS)
-            elif actor["id"] != member_id:
-                require_capability(actor["role"], Capability.MANAGE_MEMBERS)
-            removed = team_storage.soft_remove_team_member(conn, member_id)
-            if removed:
-                _record_api_team_audit(
-                    AuditEventType.TEAM_MEMBER_REMOVE,
-                    session_token=session_id,
-                    team_id=team_id,
-                    actor=actor,
-                    details={"target_member_id": member_id, "role": str(target["role"] or "")},
-                    conn=conn,
-                )
-            conn.commit()
+        actor, target = team_api.team_member_and_target_for_api(team_id, session_id, member_id)
+        if target["role"] == "owner":
+            require_capability(actor["role"], Capability.MANAGE_OWNERS)
+        elif actor["id"] != member_id:
+            require_capability(actor["role"], Capability.MANAGE_MEMBERS)
+        removed = team_api.remove_team_member_for_api(
+            team_id,
+            member_id,
+            target=target,
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+        )
         _log_api_team_event(
             "member_remove",
             session_token=session_id,
@@ -1626,19 +1205,12 @@ def api_teams_leave(team_id: str):
     session_id = _require_session_id()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            removed = team_storage.soft_remove_team_member(conn, actor["id"])
-            if removed:
-                _record_api_team_audit(
-                    AuditEventType.TEAM_LEAVE,
-                    session_token=session_id,
-                    team_id=team_id,
-                    actor=actor,
-                    details={"target_member_id": actor["id"], "role": str(actor.get("role") or "")},
-                    conn=conn,
-                )
-            conn.commit()
+        actor = team_api.team_member_for_api(team_id, session_id)
+        removed = team_api.leave_team_for_api(
+            team_id,
+            actor=actor,
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+        )
         _log_api_team_event("leave", session_token=session_id, team_id=team_id, actor=actor)
         return jsonify({"removed": removed})
     except Exception as exc:
@@ -1652,24 +1224,13 @@ def api_teams_recovery_rotate(team_id: str):
     session_id = _require_session_id()
     actor = None
     try:
-        with db_connect() as conn:
-            actor = _api_team_member(conn, team_id, session_id)
-            team_storage.require_active_team(conn, team_id)
-            require_capability(actor["role"], Capability.MANAGE_RECOVERY)
-            recovery = team_storage.rotate_team_recovery_code(
-                conn,
-                team_id=team_id,
-                created_by_member_id=actor["id"],
-            )
-            _record_api_team_audit(
-                AuditEventType.TEAM_RECOVERY_ROTATE,
-                session_token=session_id,
-                team_id=team_id,
-                actor=actor,
-                details={"target_recovery_id": recovery["id"]},
-                conn=conn,
-            )
-            conn.commit()
+        actor = team_api.team_member_for_api(team_id, session_id)
+        require_capability(actor["role"], Capability.MANAGE_RECOVERY)
+        recovery = team_api.rotate_team_recovery_for_api(
+            team_id,
+            actor=actor,
+            audit_fields=_api_actor_audit_fields(session_id, team_id=team_id, actor=actor),
+        )
         _log_api_team_event(
             "recovery_rotate",
             session_token=session_id,
@@ -1695,29 +1256,12 @@ def api_teams_recovery_redeem():
     session_id = _require_session_id()
     data = _json_body()
     try:
-        with db_connect() as conn:
-            member = team_storage.redeem_team_recovery_code(
-                conn,
-                code=str(data.get("code") or ""),
-                session_token=session_id,
-                display_name=str(data.get("display_name") or ""),
-            )
-            detail = team_storage.team_detail(conn, member["team_id"], current_session_token=session_id)
-            _record_api_team_audit(
-                AuditEventType.TEAM_RECOVERY_REDEEM,
-                session_token=session_id,
-                team_id=member["team_id"],
-                actor_member_id=member["id"],
-                actor_role=str(member.get("role") or ""),
-                actor_display_name=str(member.get("display_name") or ""),
-                details={
-                    "target_member_id": member["id"],
-                    "role": str(member.get("role") or ""),
-                    "kind": "recovery",
-                },
-                conn=conn,
-            )
-            conn.commit()
+        member, detail = team_api.redeem_team_recovery_for_api(
+            session_id,
+            code=str(data.get("code") or ""),
+            display_name=str(data.get("display_name") or ""),
+            audit_fields=_api_actor_audit_fields(session_id),
+        )
         _log_api_team_event(
             "recovery_redeem",
             session_token=session_id,
@@ -1798,16 +1342,14 @@ def api_history_search():
 @require_api_auth
 def api_atlas_summary():
     owner_scope = _api_request_scope()
-    with db_connect() as conn:
-        return jsonify(atlas_summary(
-            conn,
-            _require_session_id(),
-            team_id=owner_scope.team_id,
-            run_id=request.args.get("run_id") or "",
-            project_id=request.args.get("project_id") or "",
-            orphan_filter=request.args.get("orphan_filter") or "hide",
-            suppression_filter=request.args.get("suppression_filter") or "hide",
-        ))
+    return jsonify(atlas_summary_for_owner(
+        _require_session_id(),
+        team_id=owner_scope.team_id,
+        run_id=request.args.get("run_id") or "",
+        project_id=request.args.get("project_id") or "",
+        orphan_filter=request.args.get("orphan_filter") or "hide",
+        suppression_filter=request.args.get("suppression_filter") or "hide",
+    ))
 
 
 @api_v1_bp.route("/atlas/runs")
@@ -1815,15 +1357,13 @@ def api_atlas_summary():
 def api_atlas_runs():
     owner_scope = _api_request_scope()
     limit = normalize_page_limit(request.args.get("limit"), 30, 50)
-    with db_connect() as conn:
-        return jsonify(list_atlas_source_runs(
-            conn,
-            _require_session_id(),
-            team_id=owner_scope.team_id,
-            query=request.args.get("q") or "",
-            run_id=request.args.get("run_id") or "",
-            limit=limit,
-        ))
+    return jsonify(atlas_source_runs_for_owner(
+        _require_session_id(),
+        team_id=owner_scope.team_id,
+        query=request.args.get("q") or "",
+        run_id=request.args.get("run_id") or "",
+        limit=limit,
+    ))
 
 
 @api_v1_bp.route("/atlas/entities")
@@ -1833,20 +1373,18 @@ def api_atlas_entities():
     limit = normalize_page_limit(request.args.get("limit"), 50, 200)
     offset = normalize_page_offset(request.args.get("offset"))
     entity_type = request.args.get("entity_type") or request.args.get("type") or ""
-    with db_connect() as conn:
-        return jsonify(list_atlas_entities(
-            conn,
-            _require_session_id(),
-            team_id=owner_scope.team_id,
-            entity_type=entity_type,
-            query=request.args.get("q") or "",
-            project_id=request.args.get("project_id") or "",
-            run_id=request.args.get("run_id") or "",
-            orphan_filter=request.args.get("orphan_filter") or "hide",
-            suppression_filter=request.args.get("suppression_filter") or "hide",
-            limit=limit,
-            offset=offset,
-        ))
+    return jsonify(atlas_entities_for_owner(
+        _require_session_id(),
+        team_id=owner_scope.team_id,
+        entity_type=entity_type,
+        query=request.args.get("q") or "",
+        project_id=request.args.get("project_id") or "",
+        run_id=request.args.get("run_id") or "",
+        orphan_filter=request.args.get("orphan_filter") or "hide",
+        suppression_filter=request.args.get("suppression_filter") or "hide",
+        limit=limit,
+        offset=offset,
+    ))
 
 
 @api_v1_bp.route("/atlas/entities/<entity_id>")
@@ -1855,15 +1393,13 @@ def api_atlas_entity(entity_id):
     owner_scope = _api_request_scope()
     runs_offset = normalize_page_offset(request.args.get("runs_offset"))
     findings_offset = normalize_page_offset(request.args.get("findings_offset"))
-    with db_connect() as conn:
-        detail = entity_detail(
-            conn,
-            _require_session_id(),
-            entity_id,
-            team_id=owner_scope.team_id,
-            runs_offset=runs_offset,
-            findings_offset=findings_offset,
-        )
+    detail = atlas_entity_for_owner(
+        _require_session_id(),
+        entity_id,
+        team_id=owner_scope.team_id,
+        runs_offset=runs_offset,
+        findings_offset=findings_offset,
+    )
     if detail is None:
         return _api_json_error("not_found", "Atlas entity not found.", 404)
     return jsonify(detail)
@@ -1876,28 +1412,25 @@ def api_atlas_findings():
     limit = normalize_page_limit(request.args.get("limit"), 50, 200)
     offset = normalize_page_offset(request.args.get("offset"))
     review_states = request.args.getlist("review_state") or request.args.getlist("status")
-    with db_connect() as conn:
-        return jsonify(list_atlas_findings(
-            conn,
-            _require_session_id(),
-            team_id=owner_scope.team_id,
-            query=request.args.get("q") or "",
-            project_id=request.args.get("project_id") or "",
-            run_id=request.args.get("run_id") or "",
-            review_states=review_states,
-            orphan_filter=request.args.get("orphan_filter") or "hide",
-            suppression_filter=request.args.get("suppression_filter") or "hide",
-            limit=limit,
-            offset=offset,
-        ))
+    return jsonify(atlas_findings_for_owner(
+        _require_session_id(),
+        team_id=owner_scope.team_id,
+        query=request.args.get("q") or "",
+        project_id=request.args.get("project_id") or "",
+        run_id=request.args.get("run_id") or "",
+        review_states=review_states,
+        orphan_filter=request.args.get("orphan_filter") or "hide",
+        suppression_filter=request.args.get("suppression_filter") or "hide",
+        limit=limit,
+        offset=offset,
+    ))
 
 
 @api_v1_bp.route("/atlas/findings/<finding_id>")
 @require_api_auth
 def api_atlas_finding(finding_id):
     owner_scope = _api_request_scope()
-    with db_connect() as conn:
-        detail = finding_detail(conn, _require_session_id(), finding_id, team_id=owner_scope.team_id)
+    detail = atlas_finding_for_owner(_require_session_id(), finding_id, team_id=owner_scope.team_id)
     if detail is None:
         return _api_json_error("not_found", "Atlas finding not found.", 404)
     return jsonify(detail)
@@ -1962,7 +1495,7 @@ def api_history_run_artifacts(run_id):
     artifacts = _artifacts_for_run(session_id, owner_scope.team_id, run_id)
     if artifacts is None:
         return _api_json_error("not_found", "Run not found.", 404)
-    return jsonify({"artifacts": artifacts})
+    return jsonify({"artifacts": [artifact_summary(artifact) for artifact in artifacts]})
 
 
 @api_v1_bp.route("/history/<run_id>/artifacts/<artifact_id>")
@@ -2137,21 +1670,12 @@ def api_schedule_create():
             session_id,
             command_validator=validate_schedule_command,
         )
-        with db_connect() as conn:
-            schedule = create_schedule(
-                session_id,
-                team_id=owner_scope.team_id,
-                **payload,
-                conn=conn,
-            )
-            record_schedule_event(
-                AuditEventType.SCHEDULE_CREATE,
-                schedule,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                conn=conn,
-            )
-            conn.commit()
+        schedule = schedule_api.create_schedule_for_api(
+            session_id,
+            team_id=owner_scope.team_id,
+            payload=payload,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (
         ApiAuthError,
         TeamPermissionDenied,
@@ -2195,18 +1719,11 @@ def api_schedule_update(schedule_id):
             session_id,
             command_validator=validate_schedule_command,
         )
-        with db_connect() as conn:
-            updated = update_schedule(schedule.id, updates, conn=conn)
-            if updated is not None:
-                record_schedule_event(
-                    AuditEventType.SCHEDULE_UPDATE,
-                    updated,
-                    audit_fields=route_audit_fields(session_id, request, owner_scope),
-                    source="api_v1",
-                    details={"changed_fields": sorted(key for key in updates if key != "workspace_cwd")},
-                    conn=conn,
-                )
-            conn.commit()
+        updated = schedule_api.update_schedule_for_api(
+            schedule.id,
+            updates,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (
         ApiAuthError,
         TeamPermissionDenied,
@@ -2237,17 +1754,7 @@ def api_schedule_delete(schedule_id):
         schedule = _schedule_for_api_session(schedule_id, session_id, team_id=owner_scope.team_id)
     except (ApiAuthError, TeamPermissionDenied) as exc:
         return _schedule_api_error(exc)
-    with db_connect() as conn:
-        removed = delete_schedule(schedule.id, conn=conn)
-        record_schedule_event(
-            AuditEventType.SCHEDULE_DELETE,
-            schedule,
-            audit_fields=route_audit_fields(session_id, request, owner_scope),
-            source="api_v1",
-            details={"deleted_count": 1 if removed else 0},
-            conn=conn,
-        )
-        conn.commit()
+    removed = schedule_api.delete_schedule_for_api(schedule, audit_fields=route_audit_fields(session_id, request, owner_scope))
     log.info("API_SCHEDULE_DELETED", extra=_api_schedule_log_payload(schedule, session_id=session_id, removed=removed))
     return jsonify({"removed": removed})
 
@@ -2260,22 +1767,10 @@ def api_schedule_run_now(schedule_id):
         owner_scope = _api_request_scope()
         _require_api_team_capability(owner_scope, Capability.MANAGE_AUTOMATION)
         schedule = _schedule_for_api_session(schedule_id, session_id, team_id=owner_scope.team_id)
-        with db_connect() as conn:
-            status, refreshed, fired_at = fire_schedule_now(conn, schedule)
-            record_schedule_event(
-                AuditEventType.SCHEDULE_RUN_NOW,
-                refreshed or schedule,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                details=run_now_details(
-                    status,
-                    fired_at=fired_at,
-                    run_id=(refreshed or schedule).last_run_id,
-                    last_error=(refreshed or schedule).last_error,
-                ),
-                conn=conn,
-            )
-            conn.commit()
+        status, refreshed, fired_at = schedule_api.fire_schedule_now_for_api(
+            schedule,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (ApiAuthError, TeamPermissionDenied, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_api_error(exc)
     log.info("API_SCHEDULE_RUN_NOW", extra=_api_schedule_log_payload(
@@ -2325,12 +1820,7 @@ def api_watchers():
     session_id = _require_session_id()
     try:
         owner_scope = _api_request_scope()
-        with db_connect() as conn:
-            watchers = list_watchers_for_owner(session_id, team_id=owner_scope.team_id, conn=conn)
-            schedules = {
-                watcher.schedule_id: get_schedule(watcher.schedule_id, conn=conn)
-                for watcher in watchers
-            }
+        watchers, schedules = watcher_api.list_watchers_for_api(session_id, team_id=owner_scope.team_id)
     except (WatcherError, ScheduleError, ValueError) as exc:
         return _watcher_api_error(exc)
     limit = normalize_page_limit(request.args.get("limit"), 50, 100)
@@ -2357,29 +1847,13 @@ def api_watcher_create():
         owner_scope = _api_request_scope()
         _require_api_team_capability(owner_scope, Capability.MANAGE_AUTOMATION)
         data = _json_body()
-        with db_connect() as conn:
-            payload = normalize_watcher_create_payload(
-                data,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-                command_validator=validate_schedule_command,
-            )
-            watcher = create_watcher(
-                session_id,
-                team_id=owner_scope.team_id,
-                **payload,
-                conn=conn,
-            )
-            schedule = get_schedule(watcher.schedule_id, conn=conn)
-            record_watcher_event(
-                AuditEventType.WATCHER_CREATE,
-                watcher,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                conn=conn,
-            )
-            conn.commit()
+        watcher, schedule = watcher_api.create_watcher_from_body_for_api(
+            session_id,
+            team_id=owner_scope.team_id,
+            data=data,
+            command_validator=validate_schedule_command,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (
         ApiAuthError,
         TeamPermissionDenied,
@@ -2401,14 +1875,7 @@ def api_watcher(watcher_id):
     session_id = _require_session_id()
     try:
         owner_scope = _api_request_scope()
-        with db_connect() as conn:
-            watcher = _watcher_for_api_session(
-                watcher_id,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-            )
-            schedule = get_schedule(watcher.schedule_id, conn=conn)
+        watcher, schedule = watcher_api.watcher_detail_for_api(watcher_id, session_id, team_id=owner_scope.team_id)
     except (ApiAuthError, WatcherError, ScheduleError, ValueError) as exc:
         return _watcher_api_error(exc)
     return jsonify({"watcher": watcher_payload(watcher, schedule=schedule)})
@@ -2422,43 +1889,18 @@ def api_watcher_update(watcher_id):
         owner_scope = _api_request_scope()
         _require_api_team_capability(owner_scope, Capability.MANAGE_AUTOMATION)
         data = _json_body()
-        with db_connect() as conn:
-            watcher = _watcher_for_api_session(
-                watcher_id,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-            )
-            route_update = normalize_watcher_update_payload(
-                data,
-                session_id,
-                command_validator=validate_schedule_command,
-            )
-            updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
-            if updated is None:
-                raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
-            event_type = AuditEventType.WATCHER_UPDATE
-            if route_update.pause_requested:
-                updated = pause_watcher(updated.id, route_update.reason, conn=conn)
-                event_type = AuditEventType.WATCHER_PAUSE
-            elif route_update.resume_requested:
-                updated = resume_watcher(updated.id, conn=conn)
-                event_type = AuditEventType.WATCHER_RESUME
-            if updated is None:
-                raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
-            schedule = get_schedule(updated.schedule_id, conn=conn)
-            record_watcher_event(
-                event_type,
-                updated,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                details={
-                    "changed_fields": sorted(key for key in route_update.updates if key != "workspace_cwd"),
-                    "reason": route_update.reason if route_update.pause_requested else "",
-                },
-                conn=conn,
-            )
-            conn.commit()
+        route_update = normalize_watcher_update_payload(
+            data,
+            session_id,
+            command_validator=validate_schedule_command,
+        )
+        updated, schedule = watcher_api.update_watcher_for_api(
+            watcher_id,
+            session_id,
+            team_id=owner_scope.team_id,
+            route_update=route_update,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (
         ApiAuthError,
         TeamPermissionDenied,
@@ -2485,23 +1927,12 @@ def api_watcher_delete(watcher_id):
     try:
         owner_scope = _api_request_scope()
         _require_api_team_capability(owner_scope, Capability.MANAGE_AUTOMATION)
-        with db_connect() as conn:
-            watcher = _watcher_for_api_session(
-                watcher_id,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-            )
-            removed = delete_watcher(watcher.id, conn=conn)
-            record_watcher_event(
-                AuditEventType.WATCHER_DELETE,
-                watcher,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                details={"deleted_count": 1 if removed else 0},
-                conn=conn,
-            )
-            conn.commit()
+        watcher, removed = watcher_api.delete_watcher_for_api(
+            watcher_id,
+            session_id,
+            team_id=owner_scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (ApiAuthError, TeamPermissionDenied, WatcherError, ScheduleError, ValueError) as exc:
         return _watcher_api_error(exc)
     log.info("API_WATCHER_DELETED", extra=_api_watcher_log_payload(watcher, session_id=session_id, removed=removed))
@@ -2515,28 +1946,12 @@ def api_watcher_run_now(watcher_id):
     try:
         owner_scope = _api_request_scope()
         _require_api_team_capability(owner_scope, Capability.MANAGE_AUTOMATION)
-        with db_connect() as conn:
-            watcher = _watcher_for_api_session(
-                watcher_id,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-            )
-            status, refreshed, refreshed_schedule, fired_at = fire_watcher_now(conn, watcher)
-            record_watcher_event(
-                AuditEventType.WATCHER_RUN_NOW,
-                refreshed,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                details=run_now_details(
-                    status,
-                    fired_at=fired_at,
-                    run_id=refreshed.last_run_id,
-                    last_error=refreshed.last_error,
-                ),
-                conn=conn,
-            )
-            conn.commit()
+        status, refreshed, refreshed_schedule, fired_at = watcher_api.fire_watcher_now_for_api(
+            watcher_id,
+            session_id,
+            team_id=owner_scope.team_id,
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (ApiAuthError, TeamPermissionDenied, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _watcher_api_error(exc)
     log.info("API_WATCHER_RUN_NOW", extra=_api_watcher_log_payload(
@@ -2562,14 +1977,13 @@ def api_watcher_fires(watcher_id):
         owner_scope = _api_request_scope()
         limit = normalize_page_limit(request.args.get("limit"), 50, 100)
         offset = normalize_page_offset(request.args.get("offset"))
-        with db_connect() as conn:
-            watcher = _watcher_for_api_session(
-                watcher_id,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-            )
-            fires, total = list_watcher_fires(watcher.id, limit=limit, offset=offset, conn=conn)
+        watcher, fires, total = watcher_api.watcher_fires_for_api(
+            watcher_id,
+            session_id,
+            team_id=owner_scope.team_id,
+            limit=limit,
+            offset=offset,
+        )
     except (ApiAuthError, WatcherError, ValueError) as exc:
         return _watcher_api_error(exc)
     log.debug("API_WATCHER_FIRES_LISTED", extra=_api_watcher_log_payload(
@@ -2591,26 +2005,13 @@ def api_watcher_accept_baseline(watcher_id):
         owner_scope = _api_request_scope()
         _require_api_team_capability(owner_scope, Capability.MANAGE_AUTOMATION)
         data = _json_body()
-        with db_connect() as conn:
-            watcher = _watcher_for_api_session(
-                watcher_id,
-                session_id,
-                team_id=owner_scope.team_id,
-                conn=conn,
-            )
-            accepted = accept_baseline(watcher.id, run_id=data.get("run_id"), conn=conn)
-            if accepted is None:
-                raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
-            schedule = get_schedule(accepted.schedule_id, conn=conn)
-            record_watcher_event(
-                AuditEventType.WATCHER_ACCEPT_BASELINE,
-                accepted,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
-                source="api_v1",
-                details={"baseline_run_id": accepted.baseline_run_id},
-                conn=conn,
-            )
-            conn.commit()
+        accepted, schedule = watcher_api.accept_watcher_baseline_for_api(
+            watcher_id,
+            session_id,
+            team_id=owner_scope.team_id,
+            run_id=data.get("run_id"),
+            audit_fields=route_audit_fields(session_id, request, owner_scope),
+        )
     except (ApiAuthError, TeamPermissionDenied, WatcherError, ScheduleError, ValueError) as exc:
         return _watcher_api_error(exc)
     log.info("API_WATCHER_BASELINE_ACCEPTED", extra=_api_watcher_log_payload(accepted, session_id=session_id))

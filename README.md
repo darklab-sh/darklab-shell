@@ -587,6 +587,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── auth.py         # /api/v1 token authentication and JSON error helpers
 │   │   │   ├── openapi.py      # OpenAPI source-of-truth dictionary for /api/v1
 │   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
+│   │   ├── assets/
+│   │   │   ├── __init__.py     # Asset service package marker
+│   │   │   └── diagnostics.py  # Asset manifest and frontend bundle diagnostics helpers
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
 │   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
@@ -653,7 +656,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
+│   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
+│   │   │   ├── queries.py      # History list, search, export, share, and cleanup persistence helpers
 │   │   │   ├── run_metadata.py # Shared run-history metadata, artifact, count, and table-introspection helpers
 │   │   │   └── search.py       # Backend-aware run-history search SQL helpers
 │   │   ├── intel/
@@ -765,6 +770,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
 │   │   │   ├── output_model.py # Typed run-output line-event schema plus legacy wire compatibility helpers
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
+│   │   │   ├── persistence.py  # Completed-run save, artifact, Atlas, finding, and project-link persistence helpers
 │   │   │   ├── start.py        # Shared brokered run-start orchestration for browser and API routes
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   ├── structured_filters.py # Structured output filter parsing and summary-backed history clauses
@@ -772,6 +778,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
 │   │   ├── scheduler/
 │   │   │   ├── __init__.py     # Scheduled-run service package marker and config helper
+│   │   │   ├── api_operations.py # Headless API schedule create, update, delete, and run-now helpers
 │   │   │   ├── commands.py     # Shared scheduled-command validation helpers
 │   │   │   ├── cron.py         # Strict cron, cadence preset, timezone, and next-fire helpers
 │   │   │   ├── dispatch.py     # Schedule fire dispatch, broker launch, skip handling, and fire audit rows
@@ -788,12 +795,15 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── vault.py        # Master-key loading, HKDF derivation, and AES-GCM wrap/unwrap helpers
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
+│   │   │   ├── storage.py      # Session token, preference, recent-value, and migration storage helpers
 │   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
 │   │   ├── storage/
 │   │   │   ├── __init__.py     # Shared file-backed storage package marker
-│   │   │   └── body_store.py   # Compressed large-body offload helpers for DB text columns
+│   │   │   ├── body_store.py   # Compressed large-body offload helpers for DB text columns
+│   │   │   └── transactions.py # Shared service-layer read and transaction wrappers
 │   │   ├── teams/
 │   │   │   ├── __init__.py     # Team-mode service package exports
+│   │   │   ├── api_operations.py # Headless API team, invite, member, and recovery-code helpers
 │   │   │   ├── capabilities.py # Team role-to-capability matrix and enforcement helper
 │   │   │   ├── contracts.py    # Team-mode constants and exception classes
 │   │   │   ├── request_scope.py # Request-local personal/team active-scope resolver
@@ -801,6 +811,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── storage.py      # Team, member, invite, and recovery-code storage helpers
 │   │   ├── watchers/
 │   │   │   ├── __init__.py     # Watcher change-detection service package marker
+│   │   │   ├── api_operations.py # Headless API watcher create, update, fire, and baseline helpers
 │   │   │   ├── classifiers/
 │   │   │   │   ├── __init__.py # Compatibility exports for the shared diff classifier registry
 │   │   │   │   ├── common.py   # Compatibility exports for shared diff classifier helpers
@@ -1212,6 +1223,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
 │   │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
 │   │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
+│   │   ├── test_architecture.py # Architecture boundary guards for blueprint persistence access
 │   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
 │   │   ├── test_check_versions.py # Dependency version-check helper coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)

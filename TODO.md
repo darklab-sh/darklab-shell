@@ -20,7 +20,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
-  - [Enforce a data-access layer and remove raw SQL from blueprints](#enforce-a-data-access-layer-and-remove-raw-sql-from-blueprints)
   - [Unify SQLite and Postgres schema management](#unify-sqlite-and-postgres-schema-management)
   - [Adopt a Flask application factory](#adopt-a-flask-application-factory)
   - [Decompose oversized blueprint and core modules](#decompose-oversized-blueprint-and-core-modules)
@@ -36,7 +35,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open Open TODOs are currently tracked.
+No open TODOs are currently tracked.
 
 ---
 
@@ -178,15 +177,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ## Architecture
 
-### Enforce a data-access layer and remove raw SQL from blueprints
-- Problem: persistence logic is spread across the codebase rather than owned in one place. There are ~1,050 raw `.execute()` calls and ~830 inline SQL literals across ~55 modules, and blueprints issue SQL directly inside request handlers (for example `history.py` runs ~35 queries straight from route functions). The same load/query patterns get re-implemented per call site, and nothing prevents the next SQL string from landing in an HTTP handler.
-- The `services/` tree already has the right shape — domain packages such as `atlas/`, `projects/`, and `runs/` split into `queries.py`, `findings.py`, and similar — but blueprints bypass it and call `db_connect()` themselves, so the good structure is optional rather than the only path.
-- Approach:
-  - Move every query behind `services/*/queries` (or equivalent repository modules) so each read/write has a single owner.
-  - Make blueprints thin controllers: parse and validate the request, call a service, serialize the result — no `db_connect()` or `.execute()` above the service layer.
-  - Add an enforcement gate (an architecture test or lint rule) that fails when `db_connect` or `.execute(` appears under `blueprints/`, so the boundary cannot silently erode again.
-- This is the highest-leverage structural change and it reuses infrastructure that already exists.
-
 ### Unify SQLite and Postgres schema management
 - Problem: schema evolution runs through two divergent mechanisms kept in sync by hand. Postgres uses a clean numbered migration framework with advisory locking (`core/migrations/v0001…v0038`, applied via `run_migrations_with_advisory_lock`). SQLite uses a separate imperative path — `_create_schema()` with `CREATE TABLE IF NOT EXISTS`, then a ~600-line `_migrate_schema()` of inline `ALTER TABLE … ADD COLUMN` statements and `RENAME TO …_legacy` table-rebuild dances (`database.py:2100+`). Two sources of truth for one schema is the most likely source of drift bugs, and the `connect_postgres_sqlite_compat` shim shows the dialect abstraction is already leaking.
 - Approach:
@@ -204,7 +194,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ### Decompose oversized blueprint and core modules
 - Problem: the largest modules mix routing, business logic, and persistence in single files — `run.py` (~3,470 lines), `api_v1.py` (~3,080), `projects.py` (~2,770), `history.py` (~2,580), plus `services/commands/registry.py` (~3,760) and `core/database.py` (~2,910). Size alone makes review, testing, and change isolation harder, and it is what makes the app read as immature despite solid feature coverage.
 - Approach:
-  - Extract business logic into services and keep route files focused on HTTP concerns; pair this with the data-access-layer work above.
+  - Extract business logic into services and keep route files focused on HTTP concerns.
   - Split by responsibility rather than by line count — for example separate resource groups within `api_v1.py`, and separate schema/init/query/retention concerns within `database.py`.
   - Target no route module over ~800 lines and no service module owning more than one domain concern; the test suite should follow the same decomposition so failures localize.
 

@@ -38,8 +38,6 @@ from services.commands.registry import (
     validate_command,
 )
 from config import CFG, SCANNER_PREFIX, get_share_redaction_rules
-from core.database import DB_BACKEND, db_connect
-from core.database_backend import DatabaseBackend, dialect_for_backend
 from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from extensions import limiter
 from services.commands.builtins import (
@@ -92,6 +90,14 @@ from services.runs.output_model import (
     line_event_from_legacy,
     to_legacy_output_event,
     to_wire,
+)
+from services.runs.persistence import (
+    insert_run_row,
+    run_finalize_savepoint,
+    run_persistence_transaction,
+    run_scope_visibility_from_db,
+    scan_target_observation_count,
+    upsert_run_output_artifact,
 )
 from services.runs.structured_summary import replace_run_output_summary
 from services.runs.start import (
@@ -344,98 +350,6 @@ CLIENT_SIDE_RUN_ROOTS = {
     "uniq",
     "wc",
 }
-
-
-def _insert_run_row(
-    conn,
-    *,
-    run_id: str,
-    session_id: str,
-    team_id: str,
-    run_kind: str,
-    owner_tab_id: str,
-    command: str,
-    started: str,
-    finished: str,
-    exit_code: int,
-    output_preview: str,
-    preview_truncated: object,
-    output_line_count: int,
-    full_output_available: object,
-    full_output_truncated: object,
-    output_search_text: str,
-) -> None:
-    dialect = dialect_for_backend(DB_BACKEND)
-    conn.execute(
-        "INSERT INTO runs "
-        "("
-        "id, session_id, team_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
-        "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
-        "output_search_text"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            run_id,
-            session_id,
-            team_id,
-            run_kind,
-            owner_tab_id,
-            command,
-            started,
-            finished,
-            exit_code,
-            None,
-            output_preview,
-            dialect.boolean_param(preview_truncated),
-            int(output_line_count or 0),
-            dialect.boolean_param(full_output_available),
-            dialect.boolean_param(full_output_truncated),
-            output_search_text,
-        ),
-    )
-
-
-def _upsert_run_output_artifact(
-    conn,
-    *,
-    run_id: str,
-    rel_path: str,
-    compression: str,
-    byte_size: int,
-    line_count: int,
-    truncated: object,
-    created: str,
-) -> None:
-    dialect = dialect_for_backend(DB_BACKEND)
-    params = (
-        run_id,
-        rel_path,
-        compression,
-        int(byte_size or 0),
-        int(line_count or 0),
-        dialect.boolean_param(truncated),
-        created,
-    )
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        conn.execute(
-            "INSERT INTO run_output_artifacts "
-            "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(run_id) DO UPDATE SET "
-            "rel_path = excluded.rel_path, "
-            "compression = excluded.compression, "
-            "byte_size = excluded.byte_size, "
-            "line_count = excluded.line_count, "
-            "truncated = excluded.truncated, "
-            "created = excluded.created",
-            params,
-        )
-        return
-    conn.execute(
-        "INSERT OR REPLACE INTO run_output_artifacts "
-        "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        params,
-    )
 
 
 def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:
@@ -737,7 +651,7 @@ def _extract_output_search_text(preview_lines):
 
 
 def _link_active_project_run_entities_for_finalize(conn, session_id, project_id, run_id, *, team_id=""):
-    return _run_finalize_savepoint(
+    return run_finalize_savepoint(
         conn,
         "active_project_entity_link",
         lambda: link_active_project_run_entities(
@@ -748,21 +662,6 @@ def _link_active_project_run_entities_for_finalize(conn, session_id, project_id,
             team_id=team_id,
         ),
     )
-
-
-def _run_finalize_savepoint(conn, name, callback):
-    savepoint = f"run_finalize_{name}"
-    conn.execute(f"SAVEPOINT {savepoint}")
-    try:
-        result = callback()
-    except Exception:
-        try:
-            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-        finally:
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")
-        raise
-    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
-    return result
 
 
 def _structured_output_summary_fields(entries):
@@ -823,19 +722,6 @@ def _entity_type_counts_for_log(recorded_entities: Sequence[object]) -> dict[str
         if entity_type:
             counts[entity_type] = counts.get(entity_type, 0) + 1
     return counts
-
-
-def _scan_target_observation_count(conn, run_id: str) -> int:
-    row = conn.execute(
-        "SELECT COUNT(*) AS count FROM scan_target_observations WHERE run_id = ?",
-        (run_id,),
-    ).fetchone()
-    if row is None:
-        return 0
-    try:
-        return int(row["count"] or 0)
-    except (KeyError, TypeError, IndexError):
-        return int(row[0] or 0)
 
 
 def _log_atlas_entities_captured(
@@ -902,7 +788,7 @@ def _save_run_project_link_for_finalize(
 ):
     if link_project_id:
         try:
-            return _run_finalize_savepoint(
+            return run_finalize_savepoint(
                 conn,
                 "project_link",
                 lambda: link_run_to_project_on_conn(
@@ -924,7 +810,7 @@ def _save_run_project_link_for_finalize(
             return None
     if link_active_project:
         try:
-            return _run_finalize_savepoint(
+            return run_finalize_savepoint(
                 conn,
                 "active_project_link",
                 lambda: link_run_to_active_project(conn, session_id, run_id, team_id=team_id),
@@ -958,7 +844,7 @@ def _save_run_file_artifacts_for_finalize(
             )
         else:
             sized_workspace_artifacts = _workspace_artifacts_with_sizes(session_id, workspace_artifacts)
-        return _run_finalize_savepoint(
+        return run_finalize_savepoint(
             conn,
             "run_file_artifacts",
             lambda: record_run_file_artifacts(
@@ -988,7 +874,7 @@ def _discover_project_targets_for_finalize(
     if not active_project_link:
         return []
     try:
-        return _run_finalize_savepoint(
+        return run_finalize_savepoint(
             conn,
             "project_target_discovery",
             lambda: record_project_target_discoveries(
@@ -1019,7 +905,7 @@ def _discover_project_targets_for_finalize(
 
 def _record_run_findings_for_finalize(conn, session_id, team_id, run_id, command, persisted_entries) -> list:
     try:
-        return _run_finalize_savepoint(
+        return run_finalize_savepoint(
             conn,
             "run_findings",
             lambda: record_run_findings(conn, session_id, run_id, persisted_entries, team_id=team_id),
@@ -1036,7 +922,7 @@ def _record_run_findings_for_finalize(conn, session_id, team_id, run_id, command
 
 def _materialize_run_entities_for_finalize(conn, session_id, team_id, run_id, command, persisted_entries, finished_iso) -> list:
     try:
-        return _run_finalize_savepoint(
+        return run_finalize_savepoint(
             conn,
             "atlas_entities",
             lambda: materialize_run_entities(
@@ -1063,7 +949,7 @@ def _apply_auto_promote_for_finalize(conn, session_id, team_id, run_id, command,
     if not recorded_entities:
         return None
     try:
-        return _run_finalize_savepoint(
+        return run_finalize_savepoint(
             conn,
             "project_auto_promote_rules",
             lambda: apply_auto_promote_rules_for_run(
@@ -1224,8 +1110,9 @@ def _save_completed_run(
         output_state = _completed_run_output_state(run_id, session_id, capture)
         records = _RunFinalizeRecords()
         workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
-        with db_connect() as conn:
-            _insert_run_row(
+
+        def _persist_completed(conn):
+            insert_run_row(
                 conn,
                 run_id=run_id,
                 session_id=session_id,
@@ -1244,7 +1131,7 @@ def _save_completed_run(
                 output_search_text=output_state.stored_search_text,
             )
             if capture.full_output_available and capture.artifact_rel_path:
-                _upsert_run_output_artifact(
+                upsert_run_output_artifact(
                     conn,
                     run_id=run_id,
                     rel_path=capture.artifact_rel_path,
@@ -1297,7 +1184,7 @@ def _save_completed_run(
                 command,
                 records.active_project_link,
             )
-            records.scan_observation_count = _scan_target_observation_count(conn, run_id)
+            records.scan_observation_count = scan_target_observation_count(conn, run_id)
             records.auto_promote_summary = _apply_auto_promote_for_finalize(
                 conn,
                 session_id,
@@ -1315,7 +1202,8 @@ def _save_completed_run(
                 records.active_project_link,
                 records.recorded_entities,
             )
-            conn.commit()
+
+        run_persistence_transaction(_persist_completed)
         _auto_promote_results, auto_promote_project_ids = _log_run_finalize_records(
             run_id,
             session_id,
@@ -1574,8 +1462,8 @@ def save_client_side_run():
         truncated=bool(preview_truncated),
     )
 
-    with db_connect() as conn:
-        _insert_run_row(
+    def _persist_client_run(conn):
+        insert_run_row(
             conn,
             run_id=run_id,
             session_id=session_id,
@@ -1597,7 +1485,7 @@ def save_client_side_run():
         recorded_entities: list = []
         scan_observation_count = 0
         try:
-            recorded_entities = _run_finalize_savepoint(
+            recorded_entities = run_finalize_savepoint(
                 conn,
                 "atlas_entities",
                 lambda: materialize_run_entities(
@@ -1610,7 +1498,7 @@ def save_client_side_run():
                     command=command,
                 ),
             )
-            scan_observation_count = _scan_target_observation_count(conn, run_id)
+            scan_observation_count = scan_target_observation_count(conn, run_id)
         except Exception:
             app_metrics.record_run_finalize_error("entity_materialize")
             log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
@@ -1625,7 +1513,9 @@ def save_client_side_run():
             recorded_entities,
             scan_observation_count,
         )
-        conn.commit()
+        return recorded_entities, scan_observation_count
+
+    run_persistence_transaction(_persist_client_run)
 
     elapsed = round((finished - started).total_seconds(), 1)
     log.info("RUN_END", extra={
@@ -2966,32 +2856,15 @@ def _run_session_visibility(run_id: str, session_id: str, team_id: str = "") -> 
                 "actual_team_id": str(item.get("team_id", "") or ""),
             }
     try:
-        with db_connect() as conn:
-            if team_id:
-                row = conn.execute(
-                    "SELECT 1 FROM runs WHERE id = ? AND team_id = ?",
-                    (run_id, team_id),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT 1 FROM runs WHERE id = ? AND session_id = ? AND team_id = ''",
-                    (run_id, session_id),
-                ).fetchone()
-            db_match = row is not None
-            other_scope_row = None
-            if not db_match:
-                other_scope_row = conn.execute(
-                    "SELECT team_id FROM runs WHERE id = ?",
-                    (run_id,),
-                ).fetchone()
-            return {
-                "allowed": db_match,
-                "active_match": False,
-                "db_match": db_match,
-                "active_count": len(active_ids),
-                "scope_mismatch": other_scope_row is not None,
-                "actual_team_id": str(other_scope_row["team_id"] or "") if other_scope_row else "",
-            }
+        db_match, scope_mismatch, actual_team_id = run_scope_visibility_from_db(run_id, session_id, team_id)
+        return {
+            "allowed": db_match,
+            "active_match": False,
+            "db_match": db_match,
+            "active_count": len(active_ids),
+            "scope_mismatch": scope_mismatch,
+            "actual_team_id": actual_team_id,
+        }
     except Exception:
         log.error("RUN_BROKER_SESSION_CHECK_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id),

@@ -954,6 +954,14 @@ flowchart TB
 - Shared diff service code keeps tool-aware classifier registration and parser helpers in `services.diff.classifiers` plus shared result constants in `services.diff.models`, so Watchers and run comparison can reuse the same per-tool diff logic instead of maintaining separate parser families.
 - Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package preset catalog loading and validation helpers in `services.projects.package_presets`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, safe project-link provenance shaping helpers in `services.projects.provenance`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, personal/team project owner predicates in `services.projects.scope`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles. Engagement report draft, template, composition, rendering, redaction, storage, and async archive export helpers live in `services.reports`.
 
+### Data Access Boundary
+
+Blueprint modules own HTTP concerns: request parsing, capability checks, response shaping, and error serialization. Persistence belongs behind `services/` modules or shared `core/` infrastructure, so new database reads and writes should land in a service query/storage helper instead of a route module.
+
+Service functions open their own `db_connect()` context by default, with common read and commit wrappers centralized in `services.storage.transactions`. When several service operations need one transaction, a service may accept a caller-owned connection; in that mode the connection owner commits or rolls back unless the service is explicitly named and documented as transactional. This keeps multi-step operations such as run deletes, bulk deletes, workspace metadata moves, and project mutations from committing halfway through a larger workflow.
+
+`tests/py/test_architecture.py` enforces that boundary. It scans every blueprint for direct connection calls, aliased `db_connect` imports, raw execute-family calls, SQL-shaped string fragments, core database imports, backend/dialect imports, and persistence cleanup helper imports. The execute-family check is intentionally conservative: any `.execute()`, `.executemany()`, or `.executescript()` attribute call in a blueprint is treated as persistence-like and fails the suite.
+
 ### Backend Runtime Boundaries
 
 This boundary view answers a different question than the dependency graph above: not "which module imports which," but "which runtime service owns which responsibility."
@@ -2149,12 +2157,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,916
-- docs/inventory meta-tests: 48
-- `pytest`: 2230 (2195 behavior + 35 meta)
-- `vitest`: 1469 (1456 behavior + 13 meta)
+- behavior tests: 3,925
+- docs/inventory meta-tests: 54
+- `pytest`: 2243 (2202 behavior + 41 meta)
+- `vitest`: 1471 (1458 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,968
+- total: 3,983
 
 ### Testing Architecture
 
