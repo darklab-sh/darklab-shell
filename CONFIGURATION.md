@@ -140,7 +140,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, startup runs the app-owned Postgres schema migrations and normal `db_connect()` calls use the Postgres pool |
+| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, normal `db_connect()` calls use the Postgres pool |
 | `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
@@ -905,7 +905,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone local/test s
 docker compose --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. When `database_backend` is `postgres`, startup runs the app-owned schema migrations and normal app database calls route through the Postgres pool.
+The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. Startup runs the app-owned schema migrations for the selected backend, and when `database_backend` is `postgres`, normal app database calls route through the Postgres pool.
 
 The bundled Redis service runs with a read-only root filesystem and persistence disabled (`--save ""`, `--appendonly no`). It stores coordination, broker, rate-limit, and cache-like state; durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 

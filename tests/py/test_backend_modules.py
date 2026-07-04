@@ -5683,6 +5683,7 @@ class TestPostgresMigrations:
             "0036",
             "0037",
             "0038",
+            "0039",
         ]
         for table_name in (
             "runs",
@@ -5821,6 +5822,326 @@ class TestPostgresMigrations:
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in postgres_sql
 
+    def test_schema_inventory_captures_sqlite_head_objects(self):
+        from core.schema_manifest import SQLITE_BACKEND_ARTIFACTS, SHARED_APP_TABLES, sqlite_head_schema_inventory
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-inventory.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        assert inventory.missing_shared_tables() == ()
+        assert tuple(sorted(SHARED_APP_TABLES)) == tuple(sorted(inventory.tables[name].name for name in SHARED_APP_TABLES))
+        assert {"id", "session_id", "team_id", "command", "preview_truncated", "output_search_text"}.issubset(
+            inventory.tables["runs"].columns
+        )
+        assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert "idx_runs_session_started" in inventory.indexes
+        assert "idx_entities_host_entity" in inventory.indexes
+        assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
+        assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
+        assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
+
+    def test_schema_inventory_captures_postgres_migration_head_objects(self):
+        from core.schema_manifest import POSTGRES_BACKEND_ARTIFACTS, current_postgres_migration_schema_inventory
+
+        inventory = current_postgres_migration_schema_inventory()
+
+        assert inventory.missing_shared_tables() == ()
+        assert {"id", "session_id", "team_id", "command", "preview_truncated", "output_search_text"}.issubset(
+            inventory.tables["runs"].columns
+        )
+        assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert "idx_runs_session_started" in inventory.indexes
+        assert "idx_entities_host_entity" in inventory.indexes
+        assert "idx_runs_command_trgm" in inventory.indexes
+        assert "idx_entities_canonical_value_trgm" in inventory.indexes
+        assert {"findings_legacy_ai", "findings_ad"}.issubset(inventory.triggers)
+        assert {"findings_legacy_ai_fn", "findings_ad_fn"}.issubset(inventory.functions)
+        assert set(POSTGRES_BACKEND_ARTIFACTS).issubset({"schema_migrations", *inventory.extensions})
+        assert any(
+            "CHECK (ack_state IN" in constraint
+            for constraint in inventory.tables["watcher_fires"].constraints
+        )
+
+    def test_schema_manifest_validates_sqlite_against_baseline_source(self):
+        from core.schema_manifest import (
+            SHARED_APP_TABLES,
+            current_head_schema_manifest,
+            sqlite_head_schema_inventory,
+            verify_sqlite_head_schema,
+        )
+
+        manifest = current_head_schema_manifest()
+
+        assert set(SHARED_APP_TABLES).issubset(manifest.tables)
+        assert "idx_runs_session_started" in manifest.indexes
+        assert "idx_runs_command_trgm" not in manifest.indexes
+        assert "findings_ad" in manifest.triggers
+        assert "CHECK (status IN ('complete', 'empty', 'failed'))" in manifest.constraints["run_output_summary_status"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-manifest.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+                sqlite_drifts = verify_sqlite_head_schema(conn)
+            finally:
+                conn.close()
+
+        assert sqlite_inventory.missing_shared_tables() == ()
+        assert sqlite_drifts == ()
+
+    def test_normalized_schema_drift_guard_keeps_backend_heads_aligned(self):
+        from core.schema_manifest import (
+            compare_inventory_to_manifest,
+            current_head_schema_manifest,
+            current_postgres_migration_schema_inventory,
+            sqlite_head_schema_inventory,
+            strict_head_drift,
+        )
+
+        manifest = current_head_schema_manifest()
+        postgres_inventory = current_postgres_migration_schema_inventory()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-drift-guard.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        # Conservative (missing-only) comparison used by the runtime stamping guard.
+        assert compare_inventory_to_manifest(postgres_inventory, manifest) == ()
+        assert compare_inventory_to_manifest(sqlite_inventory, manifest) == ()
+        # Strict, shape-aware, bidirectional guard: the two authored heads must match
+        # exactly — same tables and columns (no missing, no extra) and matching column
+        # shape (type family, nullability, canonicalized default).
+        assert strict_head_drift(postgres_inventory) == ()
+        assert strict_head_drift(sqlite_inventory) == ()
+
+    def test_strict_drift_guard_catches_shape_and_extra_drift(self):
+        from core.schema_manifest import (
+            SchemaInventory,
+            SchemaTableInventory,
+            sqlite_head_schema_inventory,
+            strict_head_drift,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-strict-drift.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        runs = sqlite_inventory.tables["runs"]
+        mutated = dict(runs.columns)
+        mutated["exit_code"] = "TEXT"                       # integer -> text (type family)
+        mutated["command"] = "TEXT"                         # NOT NULL -> nullable
+        mutated["preview_truncated"] = "INTEGER NOT NULL DEFAULT 1"  # default 0 -> 1
+        mutated["bogus_extra"] = "TEXT NOT NULL"            # extra column
+        del mutated["started"]                              # missing column
+        drifted = SchemaInventory(
+            backend=sqlite_inventory.backend,
+            tables={
+                **sqlite_inventory.tables,
+                "runs": SchemaTableInventory(
+                    name="runs",
+                    columns=mutated,
+                    constraints=runs.constraints,
+                    create_sql=runs.create_sql,
+                ),
+            },
+            indexes=sqlite_inventory.indexes,
+            triggers=sqlite_inventory.triggers,
+            fts_artifacts=sqlite_inventory.fts_artifacts,
+        )
+
+        caught = {(drift.kind, drift.name) for drift in strict_head_drift(drifted)}
+        assert ("column_shape", "runs.exit_code") in caught
+        assert ("column_shape", "runs.command") in caught
+        assert ("column_shape", "runs.preview_truncated") in caught
+        assert ("extra_column", "runs.bogus_extra") in caught
+        assert ("missing_column", "runs.started") in caught
+
+    def test_generated_postgres_baseline_matches_legacy_migration_head(self):
+        """The generated Postgres baseline must reproduce the authoritative v0001-v0038 head.
+
+        Fresh Postgres installs build from the generated ``postgres_baseline_statements()``
+        (rendered from the single SQLite baseline), while existing deployments were built by
+        the numbered v0001-v0038 migrations. The two must produce an identical schema — same
+        column definitions at *exact* type (so BIGINT/JSONB/BYTEA are preserved, not coarse
+        type family), constraints, and indexes — or fresh and existing Postgres databases
+        silently diverge.
+
+        The normalized drift guard cannot catch this: its manifest is now derived from the
+        generated baseline (so the SQLite-vs-manifest comparison is circular) and it compares
+        coarse type families. This container-free, parse-level check is the real safeguard for
+        the ``_POSTGRES_COLUMN_OVERRIDES`` table and the SQLite->Postgres translator, and it
+        also fails if the frozen baseline (``_create_schema``) is edited instead of adding a
+        post-0039 delta.
+        """
+        from core.database_backend import DatabaseBackend
+        from core.migrations import MIGRATIONS
+        from core.migrations.baseline import postgres_baseline_statements
+        from core.schema_manifest import SHARED_APP_TABLES, postgres_migration_schema_inventory
+
+        # Everything before the 0039 squash boundary is the authoritative pre-squash head.
+        legacy_statements = [
+            statement
+            for migration in MIGRATIONS
+            if migration.version < "0039"
+            for statement in migration.statements_for(DatabaseBackend.POSTGRES)
+        ]
+        legacy = postgres_migration_schema_inventory(legacy_statements)
+        generated = postgres_migration_schema_inventory(postgres_baseline_statements())
+
+        def _norm(text):
+            return " ".join(str(text or "").split()).upper()
+
+        column_diffs: list[str] = []
+        constraint_diffs: list[str] = []
+        for table_name in sorted(SHARED_APP_TABLES):
+            legacy_table = legacy.tables.get(table_name)
+            generated_table = generated.tables.get(table_name)
+            assert legacy_table is not None, f"legacy v0001-v0038 head is missing shared table {table_name}"
+            assert generated_table is not None, f"generated baseline is missing shared table {table_name}"
+            legacy_cols = {name: _norm(defn) for name, defn in legacy_table.columns.items()}
+            generated_cols = {name: _norm(defn) for name, defn in generated_table.columns.items()}
+            for column_name in sorted(set(legacy_cols) | set(generated_cols)):
+                if legacy_cols.get(column_name) != generated_cols.get(column_name):
+                    column_diffs.append(
+                        f"{table_name}.{column_name}: legacy={legacy_cols.get(column_name)!r} "
+                        f"generated={generated_cols.get(column_name)!r}"
+                    )
+            if {_norm(c) for c in legacy_table.constraints} != {_norm(c) for c in generated_table.constraints}:
+                constraint_diffs.append(
+                    f"{table_name}: legacy={sorted(legacy_table.constraints)} "
+                    f"generated={sorted(generated_table.constraints)}"
+                )
+
+        shared = set(SHARED_APP_TABLES)
+        legacy_indexes = {name for name, index in legacy.indexes.items() if index.table_name in shared}
+        generated_indexes = {name for name, index in generated.indexes.items() if index.table_name in shared}
+
+        assert not column_diffs, (
+            "Generated Postgres baseline diverges from the v0001-v0038 head. A shared column's "
+            "type/default/nullability differs — most likely a BIGINT/JSONB/BYTEA column added to "
+            "the SQLite baseline without a matching _POSTGRES_COLUMN_OVERRIDES entry, or an edit "
+            "to the frozen _create_schema baseline instead of a post-0039 delta:\n  "
+            + "\n  ".join(column_diffs)
+        )
+        assert not constraint_diffs, (
+            "Generated Postgres baseline constraints diverge from the v0001-v0038 head:\n  "
+            + "\n  ".join(constraint_diffs)
+        )
+        assert legacy_indexes == generated_indexes, (
+            "Generated Postgres baseline shared-table indexes diverge from the v0001-v0038 head. "
+            f"legacy-only={sorted(legacy_indexes - generated_indexes)} "
+            f"generated-only={sorted(generated_indexes - legacy_indexes)}"
+        )
+
+    def test_schema_manifest_reports_actionable_drift(self):
+        from core.schema_manifest import (
+            SchemaInventory,
+            SchemaTableInventory,
+            compare_inventory_to_manifest,
+            current_head_schema_manifest,
+            sqlite_head_schema_inventory,
+        )
+
+        manifest = current_head_schema_manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-drift.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        runs_table = sqlite_inventory.tables["runs"]
+        broken_runs_table = SchemaTableInventory(
+            name=runs_table.name,
+            columns={
+                name: definition
+                for name, definition in runs_table.columns.items()
+                if name != "output_search_text"
+            },
+            constraints=runs_table.constraints,
+            create_sql=runs_table.create_sql,
+        )
+        run_output_summary_status = sqlite_inventory.tables["run_output_summary_status"]
+        broken_status_table = SchemaTableInventory(
+            name=run_output_summary_status.name,
+            columns=run_output_summary_status.columns,
+            constraints=(),
+            create_sql=run_output_summary_status.create_sql,
+        )
+        broken_inventory = SchemaInventory(
+            backend=sqlite_inventory.backend,
+            tables={
+                name: table
+                for name, table in sqlite_inventory.tables.items()
+                if name != "project_reports"
+            } | {
+                "runs": broken_runs_table,
+                "run_output_summary_status": broken_status_table,
+            },
+            indexes={
+                name: index
+                for name, index in sqlite_inventory.indexes.items()
+                if name != "idx_runs_session_started"
+            },
+            triggers={
+                name: trigger
+                for name, trigger in sqlite_inventory.triggers.items()
+                if name != "findings_ad"
+            },
+            fts_artifacts=(),
+        )
+
+        assert {
+            (drift.kind, drift.name, drift.detail)
+            for drift in compare_inventory_to_manifest(broken_inventory, manifest)
+        } >= {
+            ("missing_table", "project_reports", "expected shared app table is absent"),
+            ("missing_column", "runs.output_search_text", "expected shared app column is absent"),
+            (
+                "missing_constraint",
+                "run_output_summary_status:CHECK (status IN ('complete', 'empty', 'failed'))",
+                "expected shared app constraint is absent",
+            ),
+            ("missing_index", "idx_runs_session_started", "expected shared app index is absent"),
+            ("missing_trigger", "findings_ad", "expected shared app trigger is absent"),
+            ("missing_backend_artifact", "runs_fts", "expected sqlite schema artifact is absent"),
+        }
+
     def test_postgres_search_migration_adds_trigram_indexes(self):
         from core.migrations import MIGRATIONS
 
@@ -5869,6 +6190,7 @@ class TestPostgresMigrations:
         class FakeConnection:
             def __init__(self):
                 self.applied_versions = set()
+                self.commit_count = 0
                 self.calls = []
 
             def execute(self, sql, params=()):
@@ -5883,6 +6205,9 @@ class TestPostgresMigrations:
             def fetchall(self):
                 return [{"version": version} for version in sorted(self.applied_versions)]
 
+            def commit(self):
+                self.commit_count += 1
+
         conn = FakeConnection()
         migrations = (
             Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
@@ -5895,10 +6220,936 @@ class TestPostgresMigrations:
         assert applied == ["0001", "0002"]
         assert applied_again == []
         lock_calls = [call for call in conn.calls if call[0] == "SELECT pg_advisory_xact_lock(%s)"]
-        assert len(lock_calls) == 2
+        assert len(lock_calls) == 4
+        assert conn.commit_count == 2
         assert conn.applied_versions == {"0001", "0002"}
 
-    def test_database_init_runs_postgres_migrations_without_sqlite_bootstrap(self, monkeypatch):
+    def test_migration_runner_refreshes_ledger_after_reacquiring_advisory_lock(self):
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = {"0001"}
+                self.lock_count = 0
+                self.calls = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT pg_advisory_xact_lock(%s)":
+                    self.lock_count += 1
+                    if self.lock_count == 2:
+                        self.applied_versions.update({"0002", "0003"})
+                    return self
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                pass
+
+        conn = FakeConnection()
+        migrations = (
+            Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
+            Migration("0002", "second", ("CREATE TABLE two (id TEXT)",)),
+            Migration("0003", "third", ("CREATE TABLE three (id TEXT)",)),
+        )
+
+        applied = run_migrations_with_advisory_lock(conn, migrations)
+
+        assert applied == []
+        assert conn.applied_versions == {"0001", "0002", "0003"}
+        executed_sql = [call[0] for call in conn.calls]
+        assert "CREATE TABLE two (id TEXT)" not in executed_sql
+        assert "CREATE TABLE three (id TEXT)" not in executed_sql
+        assert conn.lock_count == 2
+
+    def test_fresh_postgres_baseline_stamps_legacy_without_executing_legacy_ddl(self):
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        def apply_baseline(conn, backend):
+            assert backend == database_backend.DatabaseBackend.POSTGRES
+            conn.execute("CREATE BASELINE HEAD")
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+                self.commit_count = 0
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized in {"CREATE LEGACY ONE", "CREATE LEGACY TWO"}:
+                    raise AssertionError(f"legacy DDL should not execute on fresh Postgres: {normalized}")
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+            def rollback(self):
+                raise AssertionError("fresh baseline path should not roll back")
+
+        migrations = (
+            Migration("0001", "legacy_one", ("CREATE LEGACY ONE",)),
+            Migration("0002", "legacy_two", ("CREATE LEGACY TWO",)),
+            Migration("0039", "unified_schema_baseline", (), baseline_apply=apply_baseline),
+        )
+        conn = FakeConnection()
+
+        applied = run_migrations_with_advisory_lock(conn, migrations)
+
+        assert applied == ["0001", "0002", "0039"]
+        assert conn.applied_versions == {"0001", "0002", "0039"}
+        assert conn.commit_count == 1
+        executed_sql = [call[0] for call in conn.calls]
+        assert "CREATE BASELINE HEAD" in executed_sql
+        assert "CREATE LEGACY ONE" not in executed_sql
+        assert "CREATE LEGACY TWO" not in executed_sql
+
+    def test_migration_runner_uses_sqlite_ledger_and_dialect_statements(self):
+        from core.migrations.runner import Migration, run_migrations
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        migrations = (
+            Migration(
+                "0001",
+                "local_first",
+                ("CREATE TABLE postgres_only (id TEXT)",),
+                sqlite_statements=("CREATE TABLE local_first (id TEXT PRIMARY KEY)",),
+            ),
+            Migration("0002", "empty_marker", ()),
+        )
+        try:
+            applied = run_migrations(conn, migrations, backend=database_backend.DatabaseBackend.SQLITE)
+            applied_again = run_migrations(conn, migrations, backend=database_backend.DatabaseBackend.SQLITE)
+            ledger_rows = conn.execute(
+                "SELECT version, name, applied_at FROM schema_migrations ORDER BY version"
+            ).fetchall()
+            sqlite_table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'local_first'"
+            ).fetchone()
+            postgres_only_table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'postgres_only'"
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert applied == ["0001", "0002"]
+        assert applied_again == []
+        assert [(row["version"], row["name"]) for row in ledger_rows] == [
+            ("0001", "local_first"),
+            ("0002", "empty_marker"),
+        ]
+        assert all(row["applied_at"] for row in ledger_rows)
+        assert sqlite_table is not None
+        assert postgres_only_table is None
+
+    def test_migration_runner_commits_each_migration_and_rolls_back_failed_version(self):
+        from core.migrations.runner import Migration, run_migrations
+
+        class FailingConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.commit_count = 0
+                self.rollback_count = 0
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized == "FAIL MIGRATION":
+                    raise RuntimeError("migration statement failed")
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+            def rollback(self):
+                self.rollback_count += 1
+
+        conn = FailingConnection()
+        migrations = (
+            Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
+            Migration("0002", "broken", ("FAIL MIGRATION",)),
+        )
+
+        with pytest.raises(RuntimeError, match="migration statement failed"):
+            run_migrations(conn, migrations, backend=database_backend.DatabaseBackend.SQLITE)
+
+        assert conn.applied_versions == {"0001"}
+        assert conn.commit_count == 1
+        assert conn.rollback_count == 1
+
+    def test_unified_baseline_migration_marks_reconciliation_boundary(self):
+        from core.migrations import MIGRATIONS
+
+        unified = MIGRATIONS[-1]
+
+        assert unified.version == "0039"
+        assert unified.name == "unified_schema_baseline"
+        assert unified.statements == ()
+        assert unified.sqlite_statements == ()
+        assert unified.postgres_statements == ()
+        assert unified.baseline_apply is not None
+
+    def test_unified_baseline_module_replaces_direct_legacy_imports(self):
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[2]
+        source = (repo_root / "app/core/migrations/v0039_unified_schema_baseline.py").read_text(encoding="utf-8")
+
+        assert "from .baseline import apply_unified_baseline" in source
+        assert "from core import database" not in source
+        assert "from core.migrations import MIGRATIONS" not in source
+
+    def test_current_manifest_derives_from_sqlite_head_source(self, monkeypatch):
+        from core import schema_manifest
+        from core.migrations import baseline
+
+        monkeypatch.setattr(
+            baseline,
+            "postgres_baseline_statements",
+            mock.Mock(side_effect=AssertionError("Postgres renderer must not define the shared manifest")),
+        )
+
+        manifest = schema_manifest.current_head_schema_manifest()
+
+        assert "runs" in manifest.tables
+        assert "command" in manifest.tables["runs"]
+        assert "idx_runs_session_started" in manifest.indexes
+
+    def test_dialect_specific_post_baseline_migrations_are_visible_to_drift_guard(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import Migration
+        from core.schema_manifest import (
+            current_head_schema_manifest,
+            current_postgres_baseline_schema_inventory,
+            current_postgres_migration_schema_inventory,
+            strict_head_drift,
+        )
+
+        future_delta = Migration(
+            "0040",
+            "dialect_specific_guard_fixture",
+            statements=(),
+            sqlite_statements=(
+                "ALTER TABLE runs ADD COLUMN dialect_guard_note TEXT",
+                "CREATE INDEX idx_runs_dialect_guard_note ON runs (dialect_guard_note)",
+            ),
+            postgres_statements=(
+                "ALTER TABLE runs ADD COLUMN dialect_guard_note TEXT",
+                "CREATE INDEX idx_runs_dialect_guard_note ON runs (dialect_guard_note)",
+            ),
+        )
+        migrations = (*MIGRATIONS, future_delta)
+
+        manifest = current_head_schema_manifest(migrations=migrations)
+        postgres_inventory = current_postgres_migration_schema_inventory(migrations=migrations)
+        stale_postgres_inventory = current_postgres_baseline_schema_inventory()
+
+        assert "dialect_guard_note" in manifest.tables["runs"]
+        assert "dialect_guard_note" in postgres_inventory.tables["runs"].columns
+        assert "idx_runs_dialect_guard_note" in postgres_inventory.indexes
+        assert strict_head_drift(postgres_inventory, migrations=migrations) == ()
+        stale_drift = {
+            (drift.kind, drift.name)
+            for drift in strict_head_drift(stale_postgres_inventory, migrations=migrations)
+        }
+        assert ("missing_column", "runs.dialect_guard_note") in stale_drift
+        assert ("missing_index", "idx_runs_dialect_guard_note") in stale_drift
+
+    def test_sqlite_head_stamping_records_legacy_and_unified_versions(self):
+        from core.migrations import MIGRATIONS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-unified-stamp.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    "SELECT version, name FROM schema_migrations ORDER BY version"
+                ).fetchall()
+                run_count = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+            finally:
+                conn.close()
+
+        assert [(row["version"], row["name"]) for row in rows] == [
+            (migration.version, migration.name)
+            for migration in MIGRATIONS
+        ]
+        assert rows[-1]["version"] == "0039"
+        assert run_count == 0
+
+    def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import run_migrations
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            applied = run_migrations(conn, MIGRATIONS, backend=database_backend.DatabaseBackend.SQLITE)
+            tables = {
+                str(row["name"])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+        finally:
+            conn.close()
+
+        assert applied == [migration.version for migration in MIGRATIONS]
+        assert {"runs", "runs_fts", "schema_migrations"}.issubset(tables)
+        assert not hasattr(database, "_migrate_schema")
+
+    def test_sqlite_fresh_unified_baseline_does_not_call_database_schema_wrappers(self, monkeypatch):
+        monkeypatch.setattr(
+            database,
+            "_create_schema",
+            mock.Mock(side_effect=AssertionError("legacy schema wrapper called")),
+        )
+        monkeypatch.setattr(
+            database,
+            "_create_indexes",
+            mock.Mock(side_effect=AssertionError("legacy index wrapper called")),
+        )
+        monkeypatch.setattr(
+            database,
+            "_create_fts_schema",
+            mock.Mock(side_effect=AssertionError("legacy fts wrapper called")),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-baseline-source.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            try:
+                tables = {
+                    str(row[0])
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+                }
+            finally:
+                conn.close()
+
+        assert {"runs", "runs_fts", "schema_migrations"}.issubset(tables)
+
+    def test_sqlite_partial_fresh_baseline_reruns_and_rebuilds_fts(self, monkeypatch):
+        from core.migrations import MIGRATIONS
+        from core.migrations import baseline
+
+        original_create_fts = baseline.create_sqlite_fts_schema
+        crash_injected = False
+
+        def crash_after_partial_baseline(conn):
+            nonlocal crash_injected
+            if not crash_injected:
+                crash_injected = True
+                conn.commit()
+                raise RuntimeError("simulated crash before ledger stamping")
+            original_create_fts(conn)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-partial-baseline.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    monkeypatch.setattr(baseline, "create_sqlite_fts_schema", crash_after_partial_baseline)
+                    with pytest.raises(RuntimeError, match="simulated crash"):
+                        database.db_init()
+
+                    conn = sqlite3.connect(db_path)
+                    conn.row_factory = sqlite3.Row
+                    try:
+                        partial_tables = {
+                            str(row["name"])
+                            for row in conn.execute(
+                                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                            ).fetchall()
+                        }
+                        ledger_versions = conn.execute(
+                            "SELECT version FROM schema_migrations ORDER BY version"
+                        ).fetchall()
+                        conn.execute(
+                            "INSERT INTO runs ("
+                            "id, session_id, command, started, output_preview, output_search_text"
+                            ") VALUES (?, ?, ?, ?, ?, ?)",
+                            (
+                                "run-partial-baseline",
+                                "session-partial",
+                                "cat partial.txt",
+                                "2026-07-01T00:00:00",
+                                json.dumps([{"text": "partialcrashneedle"}]),
+                                None,
+                            ),
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+
+                    monkeypatch.setattr(baseline, "create_sqlite_fts_schema", original_create_fts)
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                final_tables = {
+                    str(row["name"])
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+                }
+                final_versions = [
+                    str(row["version"])
+                    for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+                ]
+                triggers = {
+                    str(row["name"])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                    ).fetchall()
+                }
+                run_row = conn.execute(
+                    "SELECT output_search_text FROM runs WHERE id = ?",
+                    ("run-partial-baseline",),
+                ).fetchone()
+                fts_row = conn.execute(
+                    "SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?",
+                    ("partialcrashneedle",),
+                ).fetchone()
+            finally:
+                conn.close()
+
+        assert "runs" in partial_tables
+        assert "runs_fts" not in partial_tables
+        assert ledger_versions == []
+        assert {"runs", "runs_fts", "schema_migrations"}.issubset(final_tables)
+        assert {"runs_ai", "runs_ad"}.issubset(triggers)
+        assert final_versions == [migration.version for migration in MIGRATIONS]
+        assert run_row["output_search_text"] == "partialcrashneedle"
+        assert fts_row is not None
+
+    def test_sqlite_ledgered_init_skips_legacy_ladder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-ledgered-no-ladder.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                versions = {
+                    str(row["version"])
+                    for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+                }
+            finally:
+                conn.close()
+
+        assert "0039" in versions
+        assert not hasattr(database, "_migrate_schema")
+
+    def test_database_init_runs_sqlite_migrations_through_unified_helper(self, monkeypatch):
+        original_runner = database._run_schema_migrations
+        calls = []
+
+        def migration_runner(conn, backend):
+            calls.append(backend)
+            return original_runner(conn, backend)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-unified-db-init.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    monkeypatch.setattr(database, "_run_schema_migrations", migration_runner)
+                    database.db_init()
+                    database.db_init()
+
+        assert calls == [
+            database_backend.DatabaseBackend.SQLITE,
+            database_backend.DatabaseBackend.SQLITE,
+        ]
+
+    def test_database_schema_migration_helper_uses_sqlite_runner_commit_boundary(self, monkeypatch):
+        from core.migrations import runner
+
+        calls = []
+
+        def run_migrations(conn, migrations, *, backend, **kwargs):
+            calls.append({
+                "conn": conn,
+                "migrations": migrations,
+                "backend": backend,
+                "kwargs": kwargs,
+            })
+            return ["0040"]
+
+        conn = object()
+        monkeypatch.setattr(runner, "run_migrations", run_migrations)
+
+        applied = database._run_schema_migrations(conn, database_backend.DatabaseBackend.SQLITE)
+
+        assert applied == ["0040"]
+        assert calls[0]["conn"] is conn
+        assert calls[0]["backend"] == database_backend.DatabaseBackend.SQLITE
+        assert "commit_each" not in calls[0]["kwargs"]
+
+    def test_sqlite_preledger_unknown_schema_fails_closed_before_mutation(self):
+        from core.migrations.reconciliation import SchemaReconciliationError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-legacy-unsupported.db")
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+                conn.commit()
+            finally:
+                conn.close()
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    with pytest.raises(SchemaReconciliationError, match="darklab_shell 2\\.3\\.1"):
+                        database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                columns = {
+                    str(row[1])
+                    for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+                }
+                ledger_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+                ).fetchone()
+            finally:
+                conn.close()
+
+        assert columns == {"id", "command"}
+        assert ledger_exists is None
+
+    def test_sqlite_preledger_stamping_verifies_head_once(self, monkeypatch):
+        from core.migrations import reconciliation
+
+        verify_count = 0
+        original_verify = reconciliation.verify_sqlite_head_or_raise
+
+        def counted_verify(conn):
+            nonlocal verify_count
+            verify_count += 1
+            return original_verify(conn)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-preledger-verify-once.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("DROP TABLE schema_migrations")
+                conn.commit()
+            finally:
+                conn.close()
+
+            monkeypatch.setattr(reconciliation, "verify_sqlite_head_or_raise", counted_verify)
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+        assert verify_count == 1
+
+    def test_postgres_legacy_0038_ledger_applies_unified_baseline_marker(self, monkeypatch):
+        from core.migrations import MIGRATIONS
+        from core.migrations import reconciliation
+        from core.migrations.runner import run_migrations_with_advisory_lock
+
+        verify_calls = 0
+
+        def verify_postgres_head(_conn):
+            nonlocal verify_calls
+            verify_calls += 1
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version != "0039"}
+                self.calls = []
+                self.commit_count = 0
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+        monkeypatch.setattr(reconciliation, "verify_postgres_head_or_raise", verify_postgres_head)
+        conn = FakeConnection()
+
+        applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+        applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+        assert applied == ["0039"]
+        assert applied_again == []
+        assert "0039" in conn.applied_versions
+        assert conn.commit_count == 1
+        assert verify_calls == 1
+        assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
+
+    def test_postgres_legacy_0038_ledger_verifies_head_before_unified_marker(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.reconciliation import SchemaReconciliationError
+        from core.migrations.runner import run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version != "0039"}
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                    return self
+                if "FROM information_schema.tables" in normalized:
+                    return _Rows([{"table_name": "schema_migrations"}])
+                if "FROM information_schema.columns" in normalized:
+                    return _Rows([
+                        {
+                            "table_name": "schema_migrations",
+                            "column_name": "version",
+                            "data_type": "text",
+                            "is_nullable": "NO",
+                            "column_default": None,
+                        },
+                    ])
+                if "FROM pg_indexes" in normalized:
+                    return _Rows([])
+                if "FROM information_schema.triggers" in normalized:
+                    return _Rows([])
+                if "FROM pg_extension" in normalized:
+                    return _Rows([{"extname": "pg_trgm"}])
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def rollback(self):
+                pass
+
+        class _Rows:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        conn = FakeConnection()
+
+        with pytest.raises(SchemaReconciliationError, match="Postgres database schema is older"):
+            run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+        assert "0039" not in conn.applied_versions
+        assert not any(
+            str(call[0]).startswith("INSERT INTO schema_migrations") and call[1][0] == "0039"
+            for call in conn.calls
+        )
+
+    def test_postgres_fresh_empty_schema_uses_unified_baseline_and_stamps_legacy_versions(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+                self.commit_count = 0
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+        conn = FakeConnection()
+
+        applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+        applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+        assert applied == [migration.version for migration in MIGRATIONS]
+        assert applied_again == []
+        assert conn.applied_versions == {migration.version for migration in MIGRATIONS}
+        assert conn.commit_count == 1
+        assert any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
+
+    def test_postgres_fresh_unified_baseline_does_not_execute_legacy_migration_ddl(self, monkeypatch):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        original_statements_for = Migration.statements_for
+
+        def fail_if_legacy_statement_stream_is_replayed(self, backend):
+            if self.version != "0039":
+                raise AssertionError(f"legacy migration {self.version} DDL was replayed")
+            return original_statements_for(self, backend)
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                pass
+
+            def rollback(self):
+                pass
+
+        monkeypatch.setattr(Migration, "statements_for", fail_if_legacy_statement_stream_is_replayed)
+
+        applied = run_migrations_with_advisory_lock(FakeConnection(), MIGRATIONS)
+
+        assert applied == [migration.version for migration in MIGRATIONS]
+
+    def test_post_0039_delta_applies_after_fresh_unified_baseline(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import Migration, run_migrations
+
+        future_delta = Migration(
+            "0040",
+            "post_baseline_delta",
+            statements=(),
+            sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
+            postgres_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
+        )
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            applied = run_migrations(
+                conn,
+                (*MIGRATIONS, future_delta),
+                backend=database_backend.DatabaseBackend.SQLITE,
+            )
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_baseline_delta'"
+            ).fetchone()
+            versions = {
+                str(row["version"])
+                for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+        finally:
+            conn.close()
+
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0040"]
+        assert table_exists is not None
+        assert "0040" in versions
+
+    def test_migration_failure_logs_statement_context(self):
+        from core.migrations.runner import Migration, apply_migration
+
+        class FailingConnection:
+            def __init__(self):
+                self.rolled_back = False
+
+            def execute(self, sql, params=()):
+                if "broken_table" in str(sql):
+                    raise RuntimeError("boom")
+                return self
+
+            def rollback(self):
+                self.rolled_back = True
+
+        migration = Migration(
+            "9999",
+            "broken_test_migration",
+            statements=(
+                "CREATE TABLE ok_table (id TEXT PRIMARY KEY)",
+                "CREATE TABLE broken_table (id TEXT PRIMARY KEY)",
+            ),
+        )
+        conn = FailingConnection()
+
+        with mock.patch("core.migrations.runner.log.error") as log_error:
+            with pytest.raises(RuntimeError, match="boom"):
+                apply_migration(conn, migration, backend=database_backend.DatabaseBackend.SQLITE)
+
+        assert conn.rolled_back is True
+        event, = log_error.call_args.args
+        extra = log_error.call_args.kwargs["extra"]
+        assert event == "MIGRATION_FAILED"
+        assert extra["version"] == "9999"
+        assert extra["statement_index"] == 2
+        assert extra["statement_count"] == 2
+        assert len(extra["statement_hash"]) == 16
+        assert extra["statement_preview"] == "CREATE TABLE broken_table (id TEXT PRIMARY KEY)"
+
+    def test_postgres_advisory_lock_logs_wait_and_elapsed_time(self):
+        from core.migrations.runner import acquire_postgres_migration_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                return self
+
+        conn = FakeConnection()
+
+        with mock.patch("core.migrations.runner.log.debug") as log_debug:
+            lock_id = acquire_postgres_migration_lock(conn, namespace="darklab_shell_migrations")
+
+        events = [call.args[0] for call in log_debug.call_args_list]
+        assert events == ["ADVISORY_LOCK_WAITING", "ADVISORY_LOCK_ACQUIRED"]
+        assert conn.calls == [("SELECT pg_advisory_xact_lock(%s)", (lock_id,))]
+        acquired_extra = log_debug.call_args_list[1].kwargs["extra"]
+        assert acquired_extra["lock_id"] == lock_id
+        assert isinstance(acquired_extra["wait_ms"], int)
+
+    def test_unified_baseline_logs_backend_branch(self):
+        from core.migrations.baseline import apply_unified_baseline
+
+        class RecordingConnection:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, sql, params=()):
+                self.statements.append(str(sql))
+                return self
+
+        conn = RecordingConnection()
+
+        with mock.patch("core.migrations.baseline.log.debug") as log_debug, \
+             mock.patch("core.migrations.baseline.log.info") as log_info:
+            apply_unified_baseline(conn, database_backend.DatabaseBackend.SQLITE)
+
+        branch_extra = log_debug.call_args_list[0].kwargs["extra"]
+        built_extra = log_info.call_args_list[-1].kwargs["extra"]
+        assert log_debug.call_args_list[0].args[0] == "UNIFIED_SCHEMA_BASELINE_BRANCH_SELECTED"
+        assert branch_extra["backend"] == "sqlite"
+        assert branch_extra["sqlite_steps"] == "create_schema,create_indexes,create_fts_schema"
+        assert built_extra == {"backend": "sqlite", "baseline_version": "0039"}
+        assert any("CREATE TABLE IF NOT EXISTS runs" in statement for statement in conn.statements)
+
+    def test_sqlite_reconciliation_failure_logs_refused_stamping(self):
+        from core.migrations.reconciliation import SchemaReconciliationError, verify_sqlite_head_or_raise
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+            with mock.patch("core.migrations.reconciliation.log.error") as log_error:
+                with pytest.raises(SchemaReconciliationError):
+                    verify_sqlite_head_or_raise(conn)
+        finally:
+            conn.close()
+
+        events = [call.args[0] for call in log_error.call_args_list]
+        assert "SCHEMA_VERIFICATION_FAILED" in events
+        assert "SQLITE_SCHEMA_RECONCILIATION_FAILED" in events
+        reconciliation_call = next(
+            call for call in log_error.call_args_list
+            if call.args[0] == "SQLITE_SCHEMA_RECONCILIATION_FAILED"
+        )
+        extra = reconciliation_call.kwargs["extra"]
+        assert extra["backend"] == "sqlite"
+        assert extra["drift_count"] > 0
+        assert extra["action"] == "stamping_refused"
+
+    def test_post_schema_maintenance_logs_lifecycle_and_steps(self, monkeypatch):
+        import services.audit.retention as audit_retention
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "_populate_output_search_text", mock.Mock(return_value=0))
+        monkeypatch.setattr(database, "_rebuild_runs_fts", mock.Mock(side_effect=AssertionError("no rebuild expected")))
+        monkeypatch.setattr(database, "_backfill_watcher_monitoring_fields", mock.Mock())
+        monkeypatch.setattr(database, "_populate_run_output_summary", mock.Mock())
+        monkeypatch.setattr(database, "_prune_retention", mock.Mock())
+        monkeypatch.setattr(audit_retention, "warn_if_disabled", mock.Mock())
+        monkeypatch.setattr(audit_retention, "prune_events", mock.Mock())
+        monkeypatch.setattr(database, "_audit_project_target_host_type_collapse", mock.Mock())
+        monkeypatch.setattr(database, "_backfill_url_host_entity_links", mock.Mock())
+
+        with mock.patch.object(database.log, "info") as log_info, \
+             mock.patch.object(database.log, "debug") as log_debug:
+            database._run_post_schema_maintenance(object())
+
+        info_events = [call.args[0] for call in log_info.call_args_list]
+        step_events = [
+            call.kwargs["extra"]["step"]
+            for call in log_debug.call_args_list
+            if call.args[0] == "POST_SCHEMA_MAINTENANCE_STEP_STARTED"
+        ]
+        assert info_events[0] == "POST_SCHEMA_MAINTENANCE_STARTED"
+        assert info_events[-1] == "POST_SCHEMA_MAINTENANCE_COMPLETED"
+        assert step_events == [
+            "sqlite_output_search_text_backfill",
+            "sqlite_watcher_monitoring_backfill",
+            "run_output_summary_backfill",
+            "retention_prune",
+            "audit_retention_prune",
+            "project_target_audit",
+            "url_host_entity_link_backfill",
+        ]
+        assert log_info.call_args_list[-1].kwargs["extra"]["steps"] == ",".join(step_events)
+
+    def test_database_init_runs_postgres_migrations_through_unified_helper(self, monkeypatch):
         class FakePostgresConnection:
             def __init__(self):
                 self.committed = False
@@ -5921,22 +7172,20 @@ class TestPostgresMigrations:
         fake_app_conn = FakePostgresConnection()
         migration_runner = mock.Mock(return_value=["0001"])
         prune_retention = mock.Mock()
-        import core.migrations as migrations
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
         monkeypatch.setattr(database, "connect_postgres", mock.Mock(return_value=fake_conn))
         monkeypatch.setattr(database, "db_connect", mock.Mock(return_value=fake_app_conn))
         monkeypatch.setattr(database, "_prune_retention", prune_retention)
         monkeypatch.setattr(database, "ensure_run_output_dir", mock.Mock())
-        monkeypatch.setattr(migrations, "MIGRATIONS", ())
-        monkeypatch.setattr("core.migrations.runner.run_migrations_with_advisory_lock", migration_runner)
+        monkeypatch.setattr(database, "_run_schema_migrations", migration_runner)
         monkeypatch.setattr(database, "_db_init_lock", mock.Mock(side_effect=AssertionError("sqlite lock used")))
 
         database.db_init()
 
         assert fake_conn.committed is True
         assert fake_app_conn.committed is True
-        migration_runner.assert_called_once()
+        migration_runner.assert_called_once_with(fake_conn, database_backend.DatabaseBackend.POSTGRES)
         assert any(call[0] == "SELECT pg_advisory_xact_lock(?)" for call in fake_app_conn.calls)
         prune_retention.assert_called_once_with(fake_app_conn)
 
@@ -8666,7 +9915,7 @@ class TestWatchersFoundation:
             insert_fire(conn, "fire_baseline", "ok", {"classifier": "baseline", "baseline_created": True})
             conn.commit()
 
-            database._migrate_schema(conn)
+            database._backfill_watcher_monitoring_fields(conn)
             conn.commit()
 
             watcher_rows = conn.execute(
@@ -21741,7 +22990,7 @@ class TestDatabaseInit:
                     with mock.patch(
                         "core.database.load_full_output_entries",
                         side_effect=OSError("missing artifact"),
-                    ) as load_entries:
+                    ) as load_entries, mock.patch.object(database.log, "warning") as log_warning:
                         database._populate_run_output_summary(conn)
                         database._populate_run_output_summary(conn)
                     conn.commit()
@@ -21756,6 +23005,16 @@ class TestDatabaseInit:
                     ).fetchone()["count"]
 
         assert load_entries.call_count == 1
+        degraded_call = next(
+            call for call in log_warning.call_args_list
+            if call.args[0] == "RUN_OUTPUT_SUMMARY_BACKFILL_DEGRADED"
+        )
+        assert degraded_call.kwargs["extra"] == {
+            "backend": database.DB_BACKEND.value,
+            "artifact_unreadable": 1,
+            "preview_unreadable": 1,
+            "failed": 1,
+        }
         assert summary_count == 0
         assert [dict(row) for row in rows] == [{
             "status": "failed",
@@ -24086,7 +25345,9 @@ SQL syntax error near q</response>
             ("cve", "CVE-2025-49113", 1),
         ]
 
-    def test_project_workspace_migration_drops_legacy_target_and_finding_tables(self):
+    def test_project_workspace_legacy_target_tables_fail_closed_without_mutation(self):
+        from core.migrations.reconciliation import SchemaReconciliationError
+
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             conn = sqlite3.connect(db_path)
@@ -24149,7 +25410,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
 
-            with mock.patch("core.database.log.info") as info_log:
+            with pytest.raises(SchemaReconciliationError, match="Back up this database"):
                 self._create_tables(db_path)
 
             conn = sqlite3.connect(db_path)
@@ -24162,20 +25423,17 @@ SQL syntax error near q</response>
                 row[1] for row in conn.execute("PRAGMA table_info('findings')").fetchall()
             }
             finding_count = conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
+            target_count = conn.execute("SELECT COUNT(*) FROM project_targets").fetchone()[0]
+            finding_target_count = conn.execute("SELECT COUNT(*) FROM finding_targets").fetchone()[0]
             conn.close()
 
-        assert "project_targets" not in tables
-        assert "finding_targets" not in tables
-        assert "findings_occurrences" in tables
-        assert {"signature_hash", "last_seen_at", "run_id"}.issubset(finding_columns)
-        assert finding_count == 0
-        audit_log = next(call for call in info_log.call_args_list if call.args == ("PROJECT_TARGET_HOST_TYPE_AUDIT",))
-        assert audit_log.kwargs["extra"] == {
-            "host_entity_rows": 0,
-            "legacy_target_tables_present": False,
-            "legacy_target_table_count": 0,
-            "migration_required": False,
-        }
+        assert "project_targets" in tables
+        assert "finding_targets" in tables
+        assert "findings_occurrences" not in tables
+        assert "signature_hash" not in finding_columns
+        assert finding_count == 1
+        assert target_count == 1
+        assert finding_target_count == 1
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
         assert database.validate_project_entity_type("run") == "run"
@@ -25172,189 +26430,6 @@ SQL syntax error near q</response>
         assert "idx_audit_events_target_created" in audit_indexes
         assert "idx_audit_events_correlation" in audit_indexes
 
-    def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        conn.execute("""
-            CREATE TABLE entity_labels (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                label TEXT NOT NULL,
-                source TEXT NOT NULL DEFAULT 'manual',
-                created TEXT NOT NULL,
-                UNIQUE (session_id, entity_type, entity_id, label)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE entity_notes (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                body TEXT NOT NULL,
-                created TEXT NOT NULL,
-                updated TEXT NOT NULL,
-                UNIQUE (session_id, entity_type, entity_id)
-            )
-        """)
-        conn.execute(
-            "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, created) "
-            "VALUES ('lbl-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'important', 'now')"
-        )
-        conn.execute(
-            "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES ('note-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'personal', 'now', 'now')"
-        )
-
-        database._migrate_workspace_metadata_team_scope(conn)
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_labels_personal_unique "
-            "ON entity_labels (session_id, entity_type, entity_id, label) "
-            "WHERE team_id IS NULL OR team_id = ''"
-        )
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_labels_team_unique "
-            "ON entity_labels (team_id, entity_type, entity_id, label) "
-            "WHERE team_id != ''"
-        )
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_notes_personal_unique "
-            "ON entity_notes (session_id, entity_type, entity_id) "
-            "WHERE team_id IS NULL OR team_id = ''"
-        )
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_notes_team_unique "
-            "ON entity_notes (team_id, entity_type, entity_id) "
-            "WHERE team_id != ''"
-        )
-        conn.execute(
-            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
-            "VALUES ('lbl-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'important', 'now')"
-        )
-        conn.execute(
-            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
-            "VALUES ('lbl-team-b', 'tok_owner', 'team_b', 'workspace_file', 'targets.txt', 'important', 'now')"
-        )
-        conn.execute(
-            "INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated) "
-            "VALUES ('note-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'team', 'now', 'now')"
-        )
-
-        labels = conn.execute(
-            "SELECT id, team_id FROM entity_labels ORDER BY id"
-        ).fetchall()
-        notes = conn.execute(
-            "SELECT id, team_id FROM entity_notes ORDER BY id"
-        ).fetchall()
-        conn.close()
-
-        assert {row["id"]: row["team_id"] for row in labels} == {
-            "lbl-personal": "",
-            "lbl-team-a": "team_a",
-            "lbl-team-b": "team_b",
-        }
-        assert {row["id"]: row["team_id"] for row in notes} == {
-            "note-personal": "",
-            "note-team-a": "team_a",
-        }
-
-    def test_project_slug_migration_separates_personal_and_team_scopes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute("""
-                CREATE TABLE projects (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    slug TEXT NOT NULL,
-                    description TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'active',
-                    color TEXT NOT NULL DEFAULT '',
-                    created TEXT NOT NULL,
-                    updated TEXT NOT NULL,
-                    UNIQUE (session_id, slug)
-                )
-            """)
-            conn.execute(
-                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
-                "VALUES ('prj-personal', 'tok_owner', 'Case', 'case', 'now', 'now')"
-            )
-            conn.execute("""
-                CREATE TABLE team_invites (
-                    id TEXT PRIMARY KEY,
-                    team_id TEXT NOT NULL,
-                    code_hash TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    label TEXT NOT NULL DEFAULT '',
-                    created_by_member_id TEXT NOT NULL,
-                    expires_at TEXT NOT NULL DEFAULT '',
-                    max_uses INTEGER NOT NULL DEFAULT 1,
-                    use_count INTEGER NOT NULL DEFAULT 0,
-                    revoked_at TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    UNIQUE (team_id, code_hash),
-                    CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE team_recovery_codes (
-                    id TEXT PRIMARY KEY,
-                    team_id TEXT NOT NULL,
-                    code_hash TEXT NOT NULL,
-                    created_by_member_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    rotated_at TEXT NOT NULL DEFAULT '',
-                    revoked_at TEXT NOT NULL DEFAULT '',
-                    used_at TEXT NOT NULL DEFAULT '',
-                    UNIQUE (team_id, code_hash)
-                )
-            """)
-            conn.execute(
-                "INSERT INTO team_invites "
-                "(id, team_id, code_hash, role, created_by_member_id, created_at) "
-                "VALUES ('invite-one', 'team_one', 'invite_hash', 'operator', 'member-one', 'now')"
-            )
-            conn.execute(
-                "INSERT INTO team_recovery_codes "
-                "(id, team_id, code_hash, created_by_member_id, created_at) "
-                "VALUES ('recovery-one', 'team_one', 'recovery_hash', 'member-one', 'now')"
-            )
-            conn.commit()
-            conn.close()
-
-            self._create_tables(db_path)
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
-                "VALUES ('prj-team', 'tok_owner', 'team_1', 'Case', 'case', 'now', 'now')"
-            )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
-                    "VALUES ('prj-personal-dupe', 'tok_owner', '', 'Case', 'case', 'now', 'now')"
-                )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
-                    "VALUES ('prj-team-dupe', 'tok_other', 'team_1', 'Case', 'case', 'now', 'now')"
-                )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO team_invites "
-                    "(id, team_id, code_hash, role, created_by_member_id, created_at) "
-                    "VALUES ('invite-two', 'team_two', 'invite_hash', 'operator', 'member-two', 'now')"
-                )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO team_recovery_codes "
-                    "(id, team_id, code_hash, created_by_member_id, created_at) "
-                    "VALUES ('recovery-two', 'team_two', 'recovery_hash', 'member-two', 'now')"
-                )
-            conn.close()
-
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
         with tempfile.TemporaryDirectory() as tmp:
@@ -25364,78 +26439,10 @@ SQL syntax error near q</response>
                 with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()  # second call
 
-    def test_init_upgrades_old_schedule_owner_kind_constraints_for_project_digests(self):
+    def test_current_schema_accepts_project_digest_schedule_and_notifications(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                """
-                CREATE TABLE schedules (
-                    id TEXT PRIMARY KEY,
-                    session_token TEXT NOT NULL,
-                    owner_kind TEXT NOT NULL DEFAULT 'user',
-                    owner_id TEXT NOT NULL DEFAULT '',
-                    kind TEXT NOT NULL DEFAULT 'command',
-                    command_text TEXT NOT NULL,
-                    cron_expr TEXT NOT NULL,
-                    cadence_preset TEXT,
-                    timezone TEXT NOT NULL DEFAULT 'UTC',
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    next_run_at TEXT NOT NULL DEFAULT '',
-                    last_run_at TEXT NOT NULL DEFAULT '',
-                    last_run_id TEXT NOT NULL DEFAULT '',
-                    overlap_policy TEXT NOT NULL DEFAULT 'skip',
-                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
-                    label TEXT NOT NULL DEFAULT '',
-                    paused_reason TEXT NOT NULL DEFAULT '',
-                    last_error TEXT NOT NULL DEFAULT '',
-                    created TEXT NOT NULL,
-                    updated TEXT NOT NULL,
-                    CHECK (owner_kind IN ('user', 'watcher')),
-                    CHECK (kind IN ('command')),
-                    CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
-                    CHECK (overlap_policy IN ('skip'))
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE schedule_fires (
-                    id TEXT PRIMARY KEY,
-                    schedule_id TEXT NOT NULL,
-                    owner_kind TEXT NOT NULL,
-                    owner_id TEXT NOT NULL DEFAULT '',
-                    fired_at TEXT NOT NULL,
-                    run_id TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL,
-                    reason TEXT NOT NULL DEFAULT '',
-                    CHECK (owner_kind IN ('user', 'watcher')),
-                    CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO schedules "
-                "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, "
-                "timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy, consecutive_failures, "
-                "label, paused_reason, last_error, created, updated) "
-                "VALUES ('sch_old', 'tok_old', 'watcher', 'wtr_old', 'command', 'echo ok', '0 * * * *', "
-                "'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, 'Old', '', '', "
-                "'2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
-            )
-            conn.execute(
-                "INSERT INTO schedule_fires "
-                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
-                "VALUES ('sfire_old', 'sch_old', 'watcher', 'wtr_old', '2026-06-20T05:00:00+00:00', "
-                "'run_old', 'fired', '')"
-            )
-            conn.commit()
-            conn.close()
-
-            with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
-                    database.db_init()
-
+            self._create_tables(db_path)
             conn = sqlite3.connect(db_path)
             schedules_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
@@ -25452,69 +26459,6 @@ SQL syntax error near q</response>
                 "'0 * * * *', 'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, "
                 "'Digest', '', '', '2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
             )
-            preserved = conn.execute(
-                "SELECT team_id, owner_kind FROM schedules WHERE id = 'sch_old'"
-            ).fetchone()
-            preserved_fire = conn.execute(
-                "SELECT team_id, owner_kind FROM schedule_fires WHERE id = 'sfire_old'"
-            ).fetchone()
-            conn.close()
-
-        assert "project_digest" in schedules_sql
-        assert "project_digest" in fires_sql
-        assert preserved == ("", "watcher")
-        assert preserved_fire == ("", "watcher")
-
-    def test_init_upgrades_old_notification_event_trigger_constraints_for_project_digests(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                """
-                CREATE TABLE notification_events (
-                    id TEXT PRIMARY KEY,
-                    session_token TEXT NOT NULL,
-                    channel_id TEXT NOT NULL,
-                    trigger TEXT NOT NULL,
-                    payload_json TEXT NOT NULL DEFAULT '{}',
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    next_attempt_at TEXT NOT NULL DEFAULT '',
-                    last_attempt_at TEXT NOT NULL DEFAULT '',
-                    last_error TEXT NOT NULL DEFAULT '',
-                    run_id TEXT NOT NULL DEFAULT '',
-                    created TEXT NOT NULL,
-                    dead_at TEXT NOT NULL DEFAULT '',
-                    CHECK (
-                        trigger IN (
-                            'run_complete',
-                            'pty_session_ended',
-                            'watcher_changed',
-                            'watcher_error',
-                            'watcher_recovered',
-                            'scheduled_run_failed',
-                            'test'
-                        )
-                    ),
-                    CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO notification_events "
-                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
-                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                "VALUES ('nte_old', 'tok_old', 'ntc_old', 'run_complete', '{}', 'sent', 1, '', "
-                "'2026-06-20T05:01:00+00:00', '', 'run_old', '2026-06-20T05:00:00+00:00', '')"
-            )
-            conn.commit()
-            conn.close()
-
-            with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
-                    database.db_init()
-
-            conn = sqlite3.connect(db_path)
             events_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_events'"
             ).fetchone()[0]
@@ -25525,16 +26469,14 @@ SQL syntax error near q</response>
                 "VALUES ('nte_digest', 'tok_old', '', 'ntc_old', 'project_digest', '{}', 'pending', 0, '', "
                 "'', '', '', '2026-06-20T06:00:00+00:00', '')"
             )
-            preserved = conn.execute(
-                "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_old'"
-            ).fetchone()
             digest_row = conn.execute(
                 "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_digest'"
             ).fetchone()
             conn.close()
 
+        assert "project_digest" in schedules_sql
+        assert "project_digest" in fires_sql
         assert "project_digest" in events_sql
-        assert preserved == ("", "run_complete", "sent")
         assert digest_row == ("", "project_digest", "pending")
 
     def test_retention_prunes_old_runs(self):
@@ -25728,103 +26670,6 @@ SQL syntax error near q</response>
             ).fetchone()[0]
             conn.close()
         assert count == 1
-
-    def test_legacy_runs_table_gets_session_id_column_migrated(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute("""
-                CREATE TABLE runs (
-                    id       TEXT PRIMARY KEY,
-                    command  TEXT NOT NULL,
-                    started  TEXT NOT NULL,
-                    finished TEXT,
-                    exit_code INTEGER,
-                    output   TEXT
-                )
-            """)
-            conn.execute(
-                "INSERT INTO runs (id, command, started) VALUES ('legacy-run', 'ping', datetime('now'))"
-            )
-            conn.execute(
-                "INSERT INTO runs (id, command, started) VALUES ('legacy-builtin', 'history', datetime('now'))"
-            )
-            conn.commit()
-            conn.close()
-
-            with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
-                    database.db_init()
-
-            conn = sqlite3.connect(db_path)
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
-            tables = {
-                row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            session_id = conn.execute(
-                "SELECT session_id FROM runs WHERE id='legacy-run'"
-            ).fetchone()[0]
-            run_kinds = dict(conn.execute(
-                "SELECT id, run_kind FROM runs WHERE id IN ('legacy-run', 'legacy-builtin')"
-            ).fetchall())
-            conn.close()
-
-        assert "session_id" in columns
-        assert "run_kind" in columns
-        assert "owner_tab_id" in columns
-        assert session_id == ""
-        assert run_kinds == {"legacy-run": "external", "legacy-builtin": "builtin"}
-        assert "projects" in tables
-        assert "project_links" in tables
-
-    def test_migrate_schema_ignores_existing_column_error(self):
-        conn = mock.MagicMock()
-        conn.execute.side_effect = sqlite3.OperationalError("duplicate column name: session_id")
-
-        database._migrate_schema(conn)
-
-        assert conn.execute.call_count >= 1
-        assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
-
-        duplicate_conn = mock.MagicMock()
-        duplicate_conn.execute.side_effect = sqlite3.OperationalError("duplicate column name: host_entity_id")
-        with mock.patch.object(database.log, "debug") as debug_log:
-            with mock.patch.object(database.log, "warning") as warning_log:
-                database._apply_sqlite_add_column_compat(
-                    duplicate_conn,
-                    "ALTER TABLE entities ADD COLUMN host_entity_id TEXT",
-                    migration_area="atlas_port_entity_metadata",
-                )
-        debug_log.assert_called_once_with(
-            "SQLITE_SCHEMA_COMPAT_COLUMN_EXISTS",
-            extra={
-                "table": "entities",
-                "column": "host_entity_id",
-                "migration_area": "atlas_port_entity_metadata",
-            },
-        )
-        warning_log.assert_not_called()
-
-        failed_conn = mock.MagicMock()
-        failed_conn.execute.side_effect = sqlite3.OperationalError("database is locked")
-        with mock.patch.object(database.log, "warning") as warning_log:
-            database._apply_sqlite_add_column_compat(
-                failed_conn,
-                "ALTER TABLE entities ADD COLUMN attributes_json TEXT",
-                migration_area="atlas_port_entity_metadata",
-            )
-        warning_log.assert_called_once()
-        assert warning_log.call_args.args == ("SQLITE_SCHEMA_COMPAT_COLUMN_FAILED",)
-        assert warning_log.call_args.kwargs["exc_info"] is True
-        assert warning_log.call_args.kwargs["extra"] == {
-            "table": "entities",
-            "column": "attributes_json",
-            "migration_area": "atlas_port_entity_metadata",
-            "error": "database is locked",
-        }
-
 
 class TestBodyStore:
     def test_large_text_round_trips_through_pointer_and_deletes_file(self):

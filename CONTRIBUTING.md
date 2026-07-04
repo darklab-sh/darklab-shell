@@ -13,6 +13,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
 - [Adding External Commands](#adding-external-commands)
+- [Changing the Database Schema](#changing-the-database-schema)
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
 - [Dependency Version Tracking](#dependency-version-tracking)
@@ -179,6 +180,27 @@ Keep command examples in sync across the registry, docs, autocomplete, smoke fix
 
 ---
 
+## Changing the Database Schema
+
+The app runs on SQLite (default) and Postgres (larger deployments) through one shared schema path. Fresh installs start from the frozen `0039` baseline in `app/core/migrations/baseline.py`; the Postgres baseline is generated from the SQLite baseline by translating the SQLite DDL. Changes after that baseline are versioned migrations, and you describe a table or column once so both backends stay in sync.
+
+To make a schema change:
+
+- **Add a new numbered migration** under `app/core/migrations/` (`v0040_*`, `v0041_*`, …) and register it in `app/core/migrations/__init__.py`. Express the change once against the dialect layer — use `dialect_for_backend(...)` helpers for the cases that differ per backend (JSON/boolean/timestamp column types, upsert clauses). Migrations run in order on both backends and are tracked in the `schema_migrations` ledger, so they need no `IF NOT EXISTS` guards; the ledger runs each version exactly once.
+- **Do not edit the frozen `0039` baseline** (`baseline.py::_create_schema` / `_create_indexes` / `_create_fts_schema`). It represents the schema as of the `v0001…v0038` history and must stay fixed — editing it only affects fresh installs and diverges them from existing databases. Every forward change is a new migration, never a baseline edit.
+- **Keep the SQLite bridge release honest.** Pre-ledger SQLite databases are stampable only when they already reached the `2.3.1` current-head schema. Older SQLite files fail closed and must be started once with `2.3.1` before moving to this schema-ledger path. That means any new schema change after `0039` must ship as a `0040+` migration; do not sneak it into the frozen baseline or the bridge promise becomes false.
+- **For a Postgres-specific column type** — `BIGINT`, `JSONB`, or `BYTEA`, which SQLite stores as plain `INTEGER`/`TEXT`/`BLOB` and cannot distinguish — add a `(table, column) -> definition` entry to `_POSTGRES_COLUMN_OVERRIDES` in `baseline.py` so the generated Postgres schema uses the richer type. Plain `TEXT`/`INTEGER` columns need no override.
+- **Backend-specific search infrastructure stays branched on purpose.** Postgres-only artifacts (`pg_trgm` trigram indexes, finding triggers) are explicit appended statements in `baseline.py`; SQLite's `runs_fts` FTS5 table lives in the SQLite baseline.
+
+Two CI checks keep the backends aligned. A red build in either is a schema mistake, not a flaky test:
+
+- The **drift guard** builds the frozen baseline plus every post-baseline migration through each backend's `statements_for(...)` path, then compares those heads — catching missing or extra tables/columns and coarse column-shape differences, including dialect-specific `0040+` deltas.
+- The **generated-vs-legacy equivalence test** (`test_generated_postgres_baseline_matches_legacy_migration_head`) asserts the generated Postgres baseline reproduces the `v0001…v0038` head at exact type. If it fails, you either forgot a `_POSTGRES_COLUMN_OVERRIDES` entry for a `BIGINT`/`JSONB`/`BYTEA` column, or edited the frozen baseline instead of adding a migration.
+
+Run `npm run test:postgres` to exercise the Postgres lane locally. This is unrelated to [docs/postgres-migration.md](docs/postgres-migration.md), which covers the separate offline SQLite→Postgres *data* cutover, not schema definition.
+
+---
+
 ## Running Tests
 
 Run the three suites directly:
@@ -190,8 +212,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2243 pytest + 1471 Vitest + 269 Playwright = 3,983 tests**.
-That total includes 3,925 behavior tests plus 54 docs/inventory meta-tests.
+Current totals: **2275 pytest + 1473 Vitest + 269 Playwright = 4,017 tests**.
+That total includes 3,963 behavior tests plus 54 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration

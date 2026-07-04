@@ -302,6 +302,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0036",
         "0037",
         "0038",
+        "0039",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -457,6 +458,35 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_atlas_finding_import_occurrences_batch",
         "idx_atlas_finding_import_occurrences_finding_seen",
     }.issubset({row["indexname"] for row in import_index_rows})
+
+
+@pytest.mark.postgres
+def test_postgres_legacy_0038_ledger_refuses_unified_marker_when_head_drifted(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.reconciliation import SchemaReconciliationError
+    from core.migrations.runner import ensure_migration_table, migration_insert_sql, run_migrations_with_advisory_lock
+
+    conn = postgres_schema.conn
+    ensure_migration_table(conn, backend=DatabaseBackend.POSTGRES)
+    insert_sql = migration_insert_sql(DatabaseBackend.POSTGRES)
+    for migration in MIGRATIONS:
+        if migration.version == "0039":
+            break
+        conn.execute(insert_sql, (migration.version, migration.name))
+    conn.commit()
+
+    with pytest.raises(SchemaReconciliationError, match="Postgres database schema is older"):
+        run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+    conn.commit()
+    rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+
+    assert [row["version"] for row in rows] == [
+        migration.version
+        for migration in MIGRATIONS
+        if migration.version < "0039"
+    ]
+    assert "0039" not in {row["version"] for row in rows}
 
 
 @pytest.mark.postgres
@@ -2409,7 +2439,8 @@ def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postg
 
     monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(database, "CFG", {**database.CFG, "permalink_retention_days": 5})
-    monkeypatch.setattr(database, "_postgres_db_init", lambda: None)
+    monkeypatch.setattr(database, "connect_postgres", lambda _cfg: _postgres_db_connect())
+    monkeypatch.setattr(database, "_run_schema_migrations", lambda _conn, _backend: [])
     monkeypatch.setattr(database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(output_store, "RUN_OUTPUT_DIR", str(run_output_dir))
     monkeypatch.setattr(body_store, "DATA_DIR", str(data_root))

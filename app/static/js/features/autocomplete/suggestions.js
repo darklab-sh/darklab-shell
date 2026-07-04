@@ -564,6 +564,11 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
       _withRecentValueSuggestions(ctx, baseItems, ['domain', 'ip', 'url', 'port_set']),
       ['domain', 'host', 'ip', 'cidr', 'url', 'port_set', 'target'],
     ),
+    // Workspace reinterpretation: on a feature_required: workspace command (e.g.
+    // the `mv` / `file move` builtins), a `value_type: target` arg means "list
+    // session file/folder entries," not a scan target. This sources those entries;
+    // _withTypedValueSlotSuggestions then suppresses scan-target/recent injection
+    // because the resolver reports workspaceTargetActive for this branch.
     sourceHints: (spec, hints) => {
       if (!_autocompleteSpecRequiresWorkspace(spec)) return null;
       if (!(Array.isArray(hints) && hints.some(hint => _itemValueTypeIs(hint, 'target')))) return null;
@@ -970,10 +975,27 @@ function _withWordlistSuggestions(ctx, baseItems, categories = []) {
   return _prependDedupedItems(wordlistItems, baseItems);
 }
 
-function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}) {
+// True when the hint source reported any workspace-file signal: a workspace
+// file flag (e.g. `-iL`), a slash-path context, or a target slot that sourced
+// workspace file/directory entries. In all of these the base items are already
+// workspace entries, so scan-target/recent injection does not belong.
+function _resolvedWorkspaceContext(resolved) {
+  return !!(resolved && (
+    resolved.workspaceFlagActive
+    || resolved.workspacePathActive
+    || resolved.workspaceTargetActive
+  ));
+}
+
+function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}, options = {}) {
   const wordlistHandler = _valueTypeHandler('wordlist');
   if (wordlistHandler && valueSlots.wordlist && valueSlots.wordlist.active) {
     return wordlistHandler.applySuggestions(ctx, baseItems, valueSlots.wordlist);
+  }
+  if (options.workspaceContext) {
+    // Workspace-file context: baseItems are already workspace entries, so do
+    // not prepend project targets or recent scan values.
+    return baseItems;
   }
   for (const type of ['target', 'url', 'host', 'ip', 'cidr', 'port_set', 'domain']) {
     const handler = _valueTypeHandler(type);
@@ -1120,6 +1142,7 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
     filterQuery: ctx.currentToken,
     workspaceFlagActive: false,
     workspacePathActive: false,
+    workspaceTargetActive: workspaceTargetHints !== null,
   };
 }
 
@@ -1420,7 +1443,9 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, sequenceItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, sequenceItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolved),
+    });
   }
   if (directHints !== null) {
     const resolved = _resolveAutocompleteHintSource(ctx, spec, directHints, {
@@ -1430,14 +1455,9 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
-    if (resolved.workspaceFlagActive) {
-      const wordlistHandler = _valueTypeHandler('wordlist');
-      if (wordlistHandler && valueSlots.wordlist && valueSlots.wordlist.active) {
-        return wordlistHandler.applySuggestions(ctx, directItems, valueSlots.wordlist);
-      }
-      return directItems;
-    }
-    return _withTypedValueSlotSuggestions(ctx, directItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, directItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolved),
+    });
   }
 
   if (allowPositionalHints) {
@@ -1488,6 +1508,7 @@ function _buildContextAutocomplete(ctx) {
         ctx,
         filteredFlags.concat(positionalItems),
         valueSlots,
+        { workspaceContext: _resolvedWorkspaceContext(resolved) },
       );
     }
     return filteredFlags;
@@ -1499,7 +1520,9 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, positionalItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, positionalItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolved),
+    });
   }
   const resolvedWorkspacePathHints = allowPositionalHints
     ? _resolveAutocompleteHintSource(ctx, spec, [], { allowWorkspaceTarget: false })
@@ -1509,7 +1532,9 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolvedWorkspacePathHints.hints, ctx, { matchQuery: resolvedWorkspacePathHints.filterQuery }),
       resolvedWorkspacePathHints.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, pathItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, pathItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolvedWorkspacePathHints),
+    });
   }
   return [];
 }

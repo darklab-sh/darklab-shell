@@ -325,6 +325,16 @@ SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=
 
 Startup bootstrap is still serialized explicitly. `database.py` calls `db_init()` at module import time, so all Gunicorn workers can reach schema creation, migration, and retention pruning concurrently during boot. `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so that import-time bootstrap work happens once at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
 
+### Database Backend Support
+
+**SQLite remains the default backend; Postgres is the supported scaling backend.**
+
+SQLite is the local, single-user, and default deployment backend. It keeps the operational shape simple: one app-owned database file, WAL mode for concurrent readers, FTS5 for local search, and no separate database server requirement.
+
+Postgres is the supported backend for heavier multi-user deployments that need a server database, connection pooling, trigram-backed search, and production-style storage operations. It is selected explicitly with `database_backend: postgres` plus `database_url`; normal app database calls then route through the Postgres compatibility wrapper and backend-aware SQL helpers.
+
+SQLite-to-Postgres data movement is a separate offline cutover, not an automatic startup conversion. Operators use `scripts/migrate_sqlite_to_postgres.py` and the guide in `docs/postgres-migration.md` to copy data into a fresh Postgres schema, validate counts and artifacts, and only then switch backend settings. Schema management is shared by the app-owned migration runner; data migration remains an explicit maintenance workflow.
+
 ### FTS5 Tokenizer: Trigram with Unicode61 Fallback
 
 The `runs_fts` virtual table uses the FTS5 **trigram** tokenizer when available (SQLite ≥ 3.38), falling back to **unicode61** (the FTS5 default, available on all SQLite versions).

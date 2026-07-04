@@ -519,10 +519,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
 │   │   ├── http_rate_limit.py  # Baseline dynamic-route throttle for scanner-resistant request handling
 │   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
-│   │   ├── migrations/         # Postgres schema migration registry and runner
-│   │   │   ├── __init__.py     # Ordered Postgres migration list
-│   │   │   ├── runner.py       # Advisory-lock migration runner for Postgres startup
-│   │   │   ├── v0001_postgres_baseline.py # Current app schema baseline for Postgres
+│   │   ├── migrations/         # SQLite/Postgres schema migration registry and runner
+│   │   │   ├── __init__.py     # Ordered app migration list
+│   │   │   ├── baseline.py     # Frozen SQLite/Postgres fresh-install schema baseline
+│   │   │   ├── reconciliation.py # SQLite/Postgres migration reconciliation and stamping helpers
+│   │   │   ├── runner.py       # Backend-aware migration runner and ledger helper
+│   │   │   ├── v0001_postgres_baseline.py # Legacy Postgres baseline ledger entry
 │   │   │   ├── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
 │   │   │   ├── v0003_postgres_atlas_search.py # Trigram-backed Postgres Atlas search indexes
 │   │   │   ├── v0004_postgres_atlas_detail_indexes.py # Postgres Atlas detail lookup indexes
@@ -559,10 +561,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0035_project_digest_schedule_dispatch.py # Postgres Project digest schedule and notification constraints
 │   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
 │   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
-│   │   │   └── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
+│   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
+│   │   │   └── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
-│   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
+│   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
+│   │   └── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
 │   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
 │   ├── requirements.txt        # Python runtime dependencies

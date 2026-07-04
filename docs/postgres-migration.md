@@ -2,6 +2,8 @@
 
 darklab_shell keeps SQLite as the default backend for local and single-user installs. Postgres is the recommended backend for heavier multi-user deployments, but moving from SQLite to Postgres is an explicit offline cutover. The app does not convert databases during startup.
 
+SQLite and Postgres share the same app-owned schema migration ledger. Fresh databases for either backend are initialized through the same migration runner and the frozen `0039` baseline, with later schema changes applied as versioned migrations. Backend-specific pieces stay explicit: SQLite creates its FTS tables and triggers, and Postgres creates `pg_trgm` plus its trigram indexes. Existing SQLite databases are verified against the current shared schema before they receive migration ledger rows. The supported bridge for pre-ledger SQLite files is `darklab_shell` 2.3.1: start older SQLite databases once with 2.3.1 so its compatibility ladder reaches the current head, then move to this release. Unsupported older shapes fail closed so you can restore from backup or use that bridge path instead of getting a partial rewrite.
+
 Use `scripts/migrate_sqlite_to_postgres.py` when you're ready to copy a stopped SQLite database into a fresh Postgres database.
 
 Postgres backend configuration lives in [CONFIGURATION.md](../CONFIGURATION.md#database-backend-selection). Use this guide for SQLite-to-Postgres cutovers and bundled Postgres major-version upgrades, then switch `DATABASE_BACKEND` and `DATABASE_URL` after validation passes.
@@ -91,7 +93,7 @@ docker compose --profile postgres exec postgres sh -c \
 bash scripts/run_postgres_tests.sh --compose
 ```
 
-The migration step is important when you restore a Postgres 17 dump into a newer checkout. The app normally applies pending Postgres migrations on startup, but this validation flow intentionally keeps the app stopped until the database has been checked. `bash scripts/run_postgres_tests.sh --compose` also applies pending app migrations before running pytest, so a direct test run is safe; the explicit command above keeps the following `schema_migrations` check easy to understand.
+The migration step is important when you restore a Postgres 17 dump into a newer checkout. The app normally applies pending schema migrations on startup, but this validation flow intentionally keeps the app stopped until the database has been checked. `bash scripts/run_postgres_tests.sh --compose` also applies pending app migrations before running pytest, so a direct test run is safe; the explicit command above keeps the following `schema_migrations` check easy to understand.
 
 If you use an alternate Compose file, put the `-f` option before the subcommand in direct Docker commands, or pass the same Compose command to the helper:
 

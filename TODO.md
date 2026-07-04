@@ -9,6 +9,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Open TODOs](#open-todos)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
+  - [Dedicated positional workspace-file value type](#dedicated-positional-workspace-file-value-type)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -20,7 +21,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
-  - [Unify SQLite and Postgres schema management](#unify-sqlite-and-postgres-schema-management)
   - [Adopt a Flask application factory](#adopt-a-flask-application-factory)
   - [Decompose oversized blueprint and core modules](#decompose-oversized-blueprint-and-core-modules)
   - [Replace global singletons with injected dependencies](#replace-global-singletons-with-injected-dependencies)
@@ -35,9 +35,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
-
----
+No open Open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -47,7 +45,11 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-No open Technical Debt items are currently tracked.
+### Dedicated positional workspace-file value type
+
+- The `mv` and `file move` builtins declare their session-path argument as `value_type: target` under `feature_required: workspace`. The autocomplete layer reinterprets that as "list workspace file/folder entries" (via the `target` handler's `sourceHints`) and suppresses scan-target/recent injection for any workspace-required spec, so the behavior is correct. But `value_type: target` on a file-move command is misleading in the grammar, and these two specs are the only place the overload exists — file *flags* already have a clean dedicated mechanism (`workspace_flags` → `workspace_file_flags`).
+- The clean form would be a first-class positional workspace-file value type (for example `value_type: workspace_file`) whose handler sources workspace entries and injects nothing, then migrating `mv` and `file move` off `value_type: target`. Note this is a real refactor, not a rename: the only mechanism that currently lists top-level session entries for a positional arg is the `target` handler's `sourceHints`, so the entry-listing behavior has to be factored into the new handler (plus loader plumbing and a guard test). `workspace_path_arg_kinds` does not cover this — it only drills into a path once a `/` is typed.
+- Low priority: the current behavior is correct and drift-proofed at the suggestion chokepoint, and the overload is documented inline in `builtin_autocomplete.yaml` and the `target` handler. The one case that would justify the refactor is a future workspace command that needs both a session-file argument and a real scan-target argument, which the current spec-level suppression would get wrong.
 
 ---
 
@@ -176,13 +178,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Unify SQLite and Postgres schema management
-- Problem: schema evolution runs through two divergent mechanisms kept in sync by hand. Postgres uses a clean numbered migration framework with advisory locking (`core/migrations/v0001…v0038`, applied via `run_migrations_with_advisory_lock`). SQLite uses a separate imperative path — `_create_schema()` with `CREATE TABLE IF NOT EXISTS`, then a ~600-line `_migrate_schema()` of inline `ALTER TABLE … ADD COLUMN` statements and `RENAME TO …_legacy` table-rebuild dances (`database.py:2100+`). Two sources of truth for one schema is the most likely source of drift bugs, and the `connect_postgres_sqlite_compat` shim shows the dialect abstraction is already leaking.
-- Approach:
-  - Decide explicitly whether SQLite is a supported production backend or a local/dev convenience; document the decision. That choice sizes the rest of the work.
-  - Converge on a single migration mechanism that both backends run, retiring the hand-written `_migrate_schema` ladder in favor of ordered, versioned migrations.
-  - If dual-backend support stays, express each migration once against the shared dialect layer rather than maintaining parallel SQLite and Postgres definitions.
 
 ### Adopt a Flask application factory
 - Problem: `app/app.py` builds a module-level `app` and, as a side effect of importing it, configures logging, loads config, connects to Redis, initializes metrics, and runs startup DB cleanup. The file carries import-ordering warnings ("Logging must be configured before other local imports — process.py connects to Redis at module import time") and several `# noqa: F401 — re-exported for test compatibility` markers, which indicate tests reach into module internals because there is no clean construction seam.

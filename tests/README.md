@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,925
+- behavior tests: 3,963
 - docs/inventory meta-tests: 54
-- `pytest`: 2243 (2202 behavior + 41 meta)
-- `vitest`: 1471 (1458 behavior + 13 meta)
+- `pytest`: 2275 (2234 behavior + 41 meta)
+- `vitest`: 1473 (1460 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,983
+- total: 4,017
 
 This document is organized in two parts:
 
@@ -571,9 +571,43 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_watcher_monitoring_incremental_migration_adds_enum_constraints` | Verifies the incremental watcher-monitoring Postgres migration normalizes legacy watcher-fire enum values and adds fire-kind and acknowledgement-state CHECK constraints. |
 | `TestPostgresMigrations.test_url_host_entity_link_migration_defers_to_startup_backfill` | Verifies the URL host-link migration is a no-op marker because startup backfill owns URL-host repair. |
 | `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
+| `TestPostgresMigrations.test_schema_inventory_captures_sqlite_head_objects` | Verifies the schema inventory captures SQLite head tables, columns, shared indexes, triggers, and FTS artifacts. |
+| `TestPostgresMigrations.test_schema_inventory_captures_postgres_migration_head_objects` | Verifies the schema inventory captures Postgres migration tables, columns, indexes, triggers, trigger functions, extensions, and constraints. |
+| `TestPostgresMigrations.test_schema_manifest_validates_sqlite_against_baseline_source` | Verifies the schema manifest can validate SQLite's current head shape against the baseline-derived shared schema inventory. |
+| `TestPostgresMigrations.test_normalized_schema_drift_guard_keeps_backend_heads_aligned` | Verifies the normalized schema manifest catches drift between fresh SQLite startup and the rendered Postgres baseline head. |
+| `TestPostgresMigrations.test_strict_drift_guard_catches_shape_and_extra_drift` | Verifies the strict drift guard flags column type-family, nullability, and default changes plus extra and missing columns between backend heads. |
+| `TestPostgresMigrations.test_generated_postgres_baseline_matches_legacy_migration_head` | Verifies the SQLite-generated Postgres baseline reproduces the v0001-v0038 migration head exactly (column definitions, constraints, indexes), so a missing type override or an edit to the frozen baseline cannot silently diverge fresh from existing Postgres. |
+| `TestPostgresMigrations.test_schema_manifest_reports_actionable_drift` | Verifies schema manifest comparisons return actionable drift entries for missing tables, columns, indexes, triggers, and backend artifacts. |
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
-| `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
-| `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
+| `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the schema migration runner takes a transaction-scoped Postgres advisory lock and records applied migration versions. |
+| `TestPostgresMigrations.test_migration_runner_refreshes_ledger_after_reacquiring_advisory_lock` | Verifies the Postgres migration runner refreshes the ledger after reacquiring the transaction-scoped advisory lock, so a concurrent boot that already applied pending migrations is not double-applied. |
+| `TestPostgresMigrations.test_fresh_postgres_baseline_stamps_legacy_without_executing_legacy_ddl` | Verifies fresh Postgres runs the unified baseline callback and stamps legacy migration versions as satisfied markers without executing legacy `0001` through `0038` DDL. |
+| `TestPostgresMigrations.test_migration_runner_uses_sqlite_ledger_and_dialect_statements` | Verifies the migration runner can create and reuse the SQLite migration ledger while selecting SQLite-specific statements. |
+| `TestPostgresMigrations.test_migration_runner_commits_each_migration_and_rolls_back_failed_version` | Verifies the migration runner commits successful versions individually and leaves failed versions unledgered. |
+| `TestPostgresMigrations.test_unified_baseline_migration_marks_reconciliation_boundary` | Verifies the unified schema baseline migration records the shared reconciliation marker and delegates fresh schema creation to the baseline source. |
+| `TestPostgresMigrations.test_unified_baseline_module_replaces_direct_legacy_imports` | Verifies the unified baseline marker imports the baseline module instead of directly importing database schema constructors or the migration registry. |
+| `TestPostgresMigrations.test_current_manifest_derives_from_sqlite_head_source` | Verifies the current schema manifest is derived from the SQLite head source rather than the rendered Postgres baseline or legacy migration registry. |
+| `TestPostgresMigrations.test_dialect_specific_post_baseline_migrations_are_visible_to_drift_guard` | Verifies post-`0039` dialect-specific migration statements are included in the current head manifest and strict drift guard. |
+| `TestPostgresMigrations.test_sqlite_head_stamping_records_legacy_and_unified_versions` | Verifies SQLite startup stamps verified head schemas with the legacy migration versions plus the unified baseline marker. |
+| `TestPostgresMigrations.test_sqlite_fresh_unified_baseline_skips_legacy_ladder` | Verifies the fresh SQLite unified baseline builds the current schema without using the retired compatibility ladder. |
+| `TestPostgresMigrations.test_sqlite_fresh_unified_baseline_does_not_call_database_schema_wrappers` | Verifies fresh SQLite startup builds from the baseline module without calling the legacy database schema wrapper functions. |
+| `TestPostgresMigrations.test_sqlite_partial_fresh_baseline_reruns_and_rebuilds_fts` | Verifies a persisted partial fresh SQLite baseline with an empty ledger reruns idempotently, stamps every version, preserves data, restores FTS triggers, and rebuilds FTS rows during startup maintenance. |
+| `TestPostgresMigrations.test_sqlite_ledgered_init_skips_legacy_ladder` | Verifies ledgered SQLite startup does not re-enter the retired compatibility ladder after baseline adoption. |
+| `TestPostgresMigrations.test_database_init_runs_sqlite_migrations_through_unified_helper` | Verifies SQLite startup routes schema work through the unified migration helper on fresh and ledgered init. |
+| `TestPostgresMigrations.test_database_schema_migration_helper_uses_sqlite_runner_commit_boundary` | Verifies SQLite startup leaves the migration runner's default per-migration commit boundary enabled. |
+| `TestPostgresMigrations.test_sqlite_preledger_unknown_schema_fails_closed_before_mutation` | Verifies unsupported pre-ledger SQLite schemas fail before compatibility migrations can mutate them and name the 2.3.1 bridge release in the operator error. |
+| `TestPostgresMigrations.test_sqlite_preledger_stamping_verifies_head_once` | Verifies current-head pre-ledger SQLite stamping calls the head verifier once through the verifying stamp helper instead of doing duplicate checks in `db_init()`. |
+| `TestPostgresMigrations.test_postgres_legacy_0038_ledger_applies_unified_baseline_marker` | Verifies an existing Postgres ledger through `0038` advances only the `0039` unified baseline marker. |
+| `TestPostgresMigrations.test_postgres_legacy_0038_ledger_verifies_head_before_unified_marker` | Verifies an existing Postgres ledger through `0038` fails closed before writing the `0039` marker when the live schema is missing required head objects. |
+| `TestPostgresMigrations.test_postgres_fresh_empty_schema_uses_unified_baseline_and_stamps_legacy_versions` | Verifies a fresh Postgres schema builds through the unified baseline path and records legacy versions as satisfied. |
+| `TestPostgresMigrations.test_postgres_fresh_unified_baseline_does_not_execute_legacy_migration_ddl` | Verifies fresh Postgres baseline creation does not replay the legacy `0001` through `0038` migration statement streams. |
+| `TestPostgresMigrations.test_post_0039_delta_applies_after_fresh_unified_baseline` | Verifies migrations after the frozen `0039` baseline still execute as normal forward deltas on a fresh database. |
+| `TestPostgresMigrations.test_migration_failure_logs_statement_context` | Verifies failed migrations log the failing statement index, statement count, statement hash, and bounded statement preview. |
+| `TestPostgresMigrations.test_postgres_advisory_lock_logs_wait_and_elapsed_time` | Verifies Postgres advisory lock acquisition logs both waiting and acquired milestones with elapsed wait time. |
+| `TestPostgresMigrations.test_unified_baseline_logs_backend_branch` | Verifies the unified baseline logs the selected backend branch and baseline completion metadata. |
+| `TestPostgresMigrations.test_sqlite_reconciliation_failure_logs_refused_stamping` | Verifies unsupported SQLite schema reconciliation logs drift details and the refused-stamping action before raising. |
+| `TestPostgresMigrations.test_post_schema_maintenance_logs_lifecycle_and_steps` | Verifies post-schema maintenance logs start, step, and completion milestones with ordered step names. |
+| `TestPostgresMigrations.test_database_init_runs_postgres_migrations_through_unified_helper` | Verifies Postgres startup routes schema work through the unified migration helper without entering the SQLite lock path. |
 | `TestTeamModeFoundation.test_capability_matrix_and_requirement_errors` | Verifies the team-mode role matrix grants expected capabilities and rejects denied actions with the shared exception. |
 | `TestTeamModeFoundation.test_owner_context_predicates_keep_personal_scope_default` | Verifies personal owner context remains the default query shape while team owner context uses the same helper contract. |
 | `TestTeamModeFoundation.test_request_scope_logs_resolution_and_rejections` | Verifies active personal/team request-scope resolution logs DEBUG breadcrumbs and rejected team scope attempts log WARN events without raw tokens. |
@@ -1064,7 +1098,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_run_output_summary_backfill_marks_empty_runs_once` | Verifies startup marks legacy runs with empty structured output as handled instead of retrying them on every restart. |
-| `TestDatabaseInit.test_run_output_summary_backfill_marks_failures_once` | Verifies startup records unreadable run-output summary backfill attempts once and skips them on the next normal pass. |
+| `TestDatabaseInit.test_run_output_summary_backfill_marks_failures_once` | Verifies startup records unreadable run-output summary backfill attempts once, logs the degraded reason counts, and skips them on the next normal pass. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
 | `TestDatabaseInit.test_json_bearing_schema_columns_use_sqlite_json_type` | Verifies JSON-bearing schema columns keep SQLite's `TEXT` storage type through the backend dialect helper. |
 | `TestDatabaseInit.test_atlas_import_source_helpers_are_idempotent` | Verifies Atlas import draft, batch, entity-link, and finding-occurrence helpers remain idempotent on repeated inserts. |
@@ -1102,7 +1136,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_trufflehog_safe_finding_text_does_not_trust_redacted_equal_to_raw` | Verifies TruffleHog finding text falls back when vendor redaction equals the raw secret value. |
 | `TestDatabaseInit.test_trufflehog_redaction_fallback_logs_without_raw_line` | Verifies TruffleHog redaction fallback warnings do not include raw secret-scanner output. |
 | `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
-| `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
+| `TestDatabaseInit.test_project_workspace_legacy_target_tables_fail_closed_without_mutation` | Verifies unsupported legacy project-target and finding-target tables fail closed without destructive schema mutation. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_auto_promote_rule_apply_reuses_project_link_idempotency` | Verifies Atlas auto-promote apply reuses project-link deduplication and records rule source details. |
 | `TestDatabaseInit.test_project_link_provenance_maps_known_sources_and_bounds_source_detail` | Verifies project-link provenance maps every registered source and only serializes bounded, whitelisted source-detail keys. |
@@ -1125,19 +1159,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_auto_promote_run_rule_cap_limits_across_projects` | Verifies run-triggered auto-promote honors the per-run rule cap across multiple projects. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |
 | `TestDatabaseInit.test_creates_project_workspace_indexes` | Verifies that project workspace query-shape indexes are created during database bootstrap. |
-| `TestDatabaseInit.test_workspace_metadata_migration_separates_personal_and_team_scopes` | Verifies legacy workspace-file label and note metadata migrates to separate personal/team uniqueness scopes. |
-| `TestDatabaseInit.test_project_slug_migration_separates_personal_and_team_scopes` | Verifies legacy SQLite Project slug constraints are rebuilt into separate personal and team uniqueness scopes. |
 | `TestDatabaseInit.test_init_is_idempotent` | Checks init is idempotent handling. |
-| `TestDatabaseInit.test_init_upgrades_old_schedule_owner_kind_constraints_for_project_digests` | Verifies SQLite databases with the old schedule owner-kind constraint are rebuilt so Project digest schedules can be saved. |
-| `TestDatabaseInit.test_init_upgrades_old_notification_event_trigger_constraints_for_project_digests` | Verifies SQLite databases with the old notification trigger constraint are rebuilt so Project digest delivery events can be queued. |
+| `TestDatabaseInit.test_current_schema_accepts_project_digest_schedule_and_notifications` | Verifies the current SQLite schema accepts Project digest schedules and notification events without legacy constraint rebuilds. |
 | `TestDatabaseInit.test_retention_prunes_old_runs` | Checks that retention prunes old runs. |
 | `TestDatabaseInit.test_retention_prunes_old_snapshots` | Checks that retention prunes old snapshots. |
 | `TestDatabaseInit.test_retention_prunes_old_snapshot_metadata` | Verifies that retention prunes labels and notes for deleted snapshots. |
 | `TestDatabaseInit.test_retention_prunes_project_run_and_artifact_metadata` | Verifies that retention pruning removes stale project run links and run-file artifact metadata. |
 | `TestDatabaseInit.test_zero_retention_does_not_prune` | Checks that zero retention does not prune. |
 | `TestDatabaseInit.test_recent_runs_not_pruned` | Checks that recent runs not pruned. |
-| `TestDatabaseInit.test_legacy_runs_table_gets_session_id_column_migrated` | Checks that legacy runs table gets session id column migrated. |
-| `TestDatabaseInit.test_migrate_schema_ignores_existing_column_error` | Checks that migrate schema ignores existing column error. |
 | `TestBodyStore.test_large_text_round_trips_through_pointer_and_deletes_file` | Verifies the filesystem body store writes oversized text as a compressed pointer, reads it back, and deletes the file. |
 | `TestBodyStore.test_inline_threshold_accepts_human_readable_byte_values` | Verifies large-body offload thresholds accept byte counts plus `kb` and `mb` strings. |
 | `TestSessionVariables.test_set_list_unset_and_expand_variables` | Verifies that session command variables can be stored, listed, expanded in `$NAME` and `${NAME}` forms, and removed. |
@@ -1496,6 +1525,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestOutputSearch.test_partial_typing_narrows_progressively` | Regression for reverse-i-search: every keystroke from 1 character upward (`p`, `pi`, `pin`, `ping`) narrows the result set via LIKE/FTS without a silent empty intermediate; matches bash i-search expectations. |
 | `TestOutputSearch.test_scope_command_ignores_output_matches` | Reverse-i-search must only match typed command text, not output text. Verifies `scope=command` suppresses the FTS path so a term that appears only in `output_search_text` is not surfaced, while the default scope still returns it for the drawer's full-text search. |
 | `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
+| `TestOutputSearch.test_startup_backfill_rebuilds_fts_for_legacy_output_search_text` | Verifies SQLite startup rebuilds `runs_fts` after backfilling legacy `output_search_text`, so History search finds terms that were added during post-schema maintenance. |
+| `TestOutputSearch.test_output_search_backfill_logs_artifact_fallback_summary` | Verifies legacy output-search backfill logs artifact-read fallback context and the aggregate degraded summary while using preview text. |
 | `TestOutputSearch.test_fts_failure_falls_back_to_command_and_output_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text and output-only queries succeed via `LIKE` fallback and return HTTP 200. |
 
 #### `test_output_signals_against_line_signal.py`
@@ -1513,6 +1544,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
 | `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_postgres_legacy_0038_ledger_refuses_unified_marker_when_head_drifted` | Verifies an isolated Postgres schema with only legacy `0001`-`0038` ledger rows but missing head tables refuses the `0039` marker and leaves the ledger unchanged. |
 | `test_postgres_watcher_monitoring_migration_backfills_legacy_rows` | Verifies the Postgres watcher-monitoring migration backfills legacy watcher Project ids and watcher-fire state/kind rows. |
 | `test_team_mode_routes_use_postgres_scope_paths` | Verifies Postgres-backed team creation, invite redemption, recovery rotation, team-scoped API history/run reads, outsider denial, and personal/team Project slug isolation. |
 | `test_configured_postgres_app_startup_smoke_uses_real_pool` | Starts the configured app in a subprocess against a real Postgres pool and verifies startup, token generation, token lookup, and History access. |
@@ -2810,6 +2842,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `uses bridged allowed-command FAQ data for command lookup suggestions` | Verifies command lookup autocomplete reads allowed-command FAQ data through the Command Registry bridge when the old global is absent. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
+| `keeps workspace file-move positional args scoped to session entries, not scan targets` | Verifies that workspace file-move positional arguments suggest workspace entries without leaking project scan targets. |
+| ``keeps the `file move` subcommand scoped to session entries, not scan targets`` | Verifies that the `file move` subcommand inherits workspace scoping and suggests session entries without leaking project scan targets. |
 | `uses cwd-relative workspace file hints for external workspace read flags` | Verifies that workspace-aware external command input flags use CWD-relative suggestions and scoped folder-prefix completions. |
 | `uses directory-aware workspace path hints for typed file-command prefixes` | Verifies that workspace-aware file commands use scoped suggestions for typed prefixes such as `darklab/`, `../`, and `../darklab/`. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |

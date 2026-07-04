@@ -1,10 +1,13 @@
-"""Postgres schema migrations.
+"""Schema migration registry.
 
-SQLite keeps its current bootstrap path in ``core.database``. These migrations
-only run when ``database_backend`` is configured as ``postgres``.
+The checked-in migration stream is the shared schema ledger for SQLite and
+Postgres. Backend-specific statements keep SQLite FTS and Postgres trigram
+schema explicit while startup routes both backends through the same runner.
 """
 
+from .runner import Migration
 from . import (
+    baseline,
     v0001_postgres_baseline,
     v0002_postgres_run_search,
     v0003_postgres_atlas_search,
@@ -43,8 +46,10 @@ from . import (
     v0036_atlas_port_entity_metadata,
     v0037_scan_target_observations,
     v0038_url_host_entity_links,
+    v0039_unified_schema_baseline,
 )
-from .runner import Migration
+
+_ = baseline
 
 MIGRATIONS: tuple[Migration, ...] = (
     v0001_postgres_baseline.MIGRATION,
@@ -85,4 +90,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0036_atlas_port_entity_metadata.MIGRATION,
     v0037_scan_target_observations.MIGRATION,
     v0038_url_host_entity_links.MIGRATION,
+    v0039_unified_schema_baseline.MIGRATION,
 )
