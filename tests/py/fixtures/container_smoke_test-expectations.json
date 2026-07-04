@@ -163,7 +163,8 @@
       "exit_code": 0,
       "command": "curl -I https://ip.darklab.sh",
       "expected_text": [
-        "Xferd"
+        "HTTP/2 200",
+        "content-type: text/plain"
       ]
     },
     {

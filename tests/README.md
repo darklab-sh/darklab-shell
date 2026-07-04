@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,963
-- docs/inventory meta-tests: 54
-- `pytest`: 2275 (2234 behavior + 41 meta)
+- behavior tests: 3,971
+- docs/inventory meta-tests: 55
+- `pytest`: 2284 (2242 behavior + 42 meta)
 - `vitest`: 1473 (1460 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,017
+- total: 4,026
 
 This document is organized in two parts:
 
@@ -516,6 +516,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
+| `TestLoadConfig.test_startup_active_run_cleanup_uses_redis_lock` | Verifies startup active-run metadata cleanup only runs once while the Redis lock is held. |
+| `TestLoadConfig.test_startup_active_run_cleanup_runs_without_redis_lock` | Verifies startup active-run metadata cleanup still runs when no Redis lock client is available. |
 | `TestPackagePresetCatalog.test_default_package_presets_match_current_wizard_ids` | Verifies the shipped package preset catalog keeps the four built-in preset ids and policies. |
 | `TestPackagePresetCatalog.test_package_preset_loader_loads_custom_catalog` | Verifies operator package preset catalogs normalize labels, notes, redaction, artifact, and policy defaults. |
 | `TestPackagePresetCatalog.test_package_preset_loader_hot_reloads_when_file_changes` | Verifies the package preset catalog reloads after its YAML file changes. |
@@ -596,6 +598,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_database_init_runs_sqlite_migrations_through_unified_helper` | Verifies SQLite startup routes schema work through the unified migration helper on fresh and ledgered init. |
 | `TestPostgresMigrations.test_database_schema_migration_helper_uses_sqlite_runner_commit_boundary` | Verifies SQLite startup leaves the migration runner's default per-migration commit boundary enabled. |
 | `TestPostgresMigrations.test_sqlite_preledger_unknown_schema_fails_closed_before_mutation` | Verifies unsupported pre-ledger SQLite schemas fail before compatibility migrations can mutate them and name the 2.3.1 bridge release in the operator error. |
+| `TestPostgresMigrations.test_sqlite_preledger_current_head_tolerates_legacy_watcher_fire_checks` | Verifies current-head pre-ledger SQLite databases can stamp when the only drift is the legacy `watcher_fires` checks SQLite could not add after table creation. |
 | `TestPostgresMigrations.test_sqlite_preledger_stamping_verifies_head_once` | Verifies current-head pre-ledger SQLite stamping calls the head verifier once through the verifying stamp helper instead of doing duplicate checks in `db_init()`. |
 | `TestPostgresMigrations.test_postgres_legacy_0038_ledger_applies_unified_baseline_marker` | Verifies an existing Postgres ledger through `0038` advances only the `0039` unified baseline marker. |
 | `TestPostgresMigrations.test_postgres_legacy_0038_ledger_verifies_head_before_unified_marker` | Verifies an existing Postgres ledger through `0038` fails closed before writing the `0039` marker when the live schema is missing required head objects. |
@@ -759,10 +762,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_cleanup_uses_session_directory_activity_not_file_mtime` | Verifies that workspace cleanup uses the session directory activity timestamp rather than preserving a session because one file has a newer timestamp. |
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
+| `TestEntrypointWorkspaceRepair.test_app_import_and_factory_are_side_effect_free_until_bootstrap` | Verifies in a fresh subprocess that importing app modules and building factory apps do not create DB, Redis, logging, or Prometheus startup side effects, while bootstrap does. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestEntrypointWorkspaceRepair.test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only` | Verifies that the container entrypoint and Compose environment wire restricted CIDRs into scanner-user-only egress deny rules. |
 | `TestEntrypointWorkspaceRepair.test_compose_redis_is_ephemeral_under_read_only_root` | Verifies that the bundled Redis service disables persistence while running under a read-only root filesystem. |
 | `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
+| `TestEntrypointWorkspaceRepair.test_playwright_server_uses_wsgi_application_entrypoint` | Verifies that the Playwright server helper launches Gunicorn through the `wsgi:application` entrypoint. |
 | `TestAIRuntimeWiring.test_ai_worker_entrypoint_is_gated_and_supervised` | Verifies that the AI worker entrypoint is disabled by default, gated by `AI_WORKER_ENABLED`, runs as `appuser`, and restarts after exits. |
 | `TestAIRuntimeWiring.test_compose_ai_profile_wires_shell_to_llama_sidecar` | Verifies that the Compose llama profile, shell AI environment, optional dependency, healthcheck, and model cache volume stay wired together. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy, help metadata, smoke metadata, and autocomplete data, including pipe-helper entries. |
@@ -1242,6 +1247,7 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestProjectStructureCoverage.test_asset_manifest_source_hashes_match_current_sources` | Checks that the committed asset manifest's source hashes match the current CSS and JavaScript source files, catching stale bundles before runtime. |
 | `TestProjectStructureCoverage.test_asset_manifest_esm_bundles_do_not_include_lazy_sources` | Checks that committed ESM asset bundles do not include sources configured as lazy assets, catching lazy/eager drift before startup. |
+| `TestProjectStructureCoverage.test_pytest_files_do_not_import_legacy_flask_singleton` | Checks that pytest files build Flask apps through the factory helper instead of importing the retired module-level app singleton. |
 | `TestProjectStructureCoverage.test_asset_build_output_does_not_depend_on_cwd` | Checks that asset bundle output is identical when the build runs from the repo root or from the scripts directory. |
 | `TestProjectStructureCoverage.test_asset_build_logs_esm_bundle_failure_context` | Checks that ESM asset build failures include bundle, entry, output directory, check mode, and message context. |
 | `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
@@ -1355,8 +1361,11 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRequestResponseDebugEvents.test_response_logged_at_debug_level` | Checks that response logged at debug level. |
 | `TestRequestResponseDebugEvents.test_response_debug_extra_has_status` | Checks that response debug extra has status. |
 | `TestRequestResponseDebugEvents.test_request_debug_logs_query_keys_without_raw_query_values` | Verifies request DEBUG events log sorted query keys without raw query values. |
+| `TestWorkerEntrypointLoggingSetup.test_app_main_bootstraps_before_serving_dev_app` | Verifies the local `python app.py` path bootstraps, builds the app, logs initialization, and starts the dev server in order without binding a port. |
+| `TestWorkerEntrypointLoggingSetup.test_ai_worker_main_bootstraps_loads_dependencies_then_runs` | Verifies the AI worker entrypoint bootstraps runtime state before loading lazy dependencies and starting the worker loop. |
 | `TestWorkerEntrypointLoggingSetup.test_notification_worker_main_configures_logging` | Verifies the notification worker entrypoint configures structured logging before running. |
 | `TestWorkerEntrypointLoggingSetup.test_scheduler_worker_main_configures_logging` | Verifies the scheduler worker entrypoint configures structured logging before running. |
+| `TestWorkerEntrypointLoggingSetup.test_app_initialized_extra_has_factory_context` | Verifies `APP_INITIALIZED` logs app construction context such as pid, app name, blueprint count, hook counts, limiter storage, and duration. |
 | `TestDbPrunedEvent.test_db_pruned_emits_info_when_records_deleted` | Checks that database pruned emits info when records deleted. |
 | `TestDbPrunedEvent.test_db_pruned_extra_has_run_count` | Checks that database pruned extra has run count. |
 | `TestDbPrunedEvent.test_db_pruned_not_emitted_when_retention_disabled` | Checks that database pruned not emitted when retention disabled. |

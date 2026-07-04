@@ -5,15 +5,14 @@ import json
 import sqlite3
 import uuid
 
-import app as shell_app
+from conftest import make_test_app as _test_app
 from core.database import DB_PATH
 from services.teams.storage import token_hash
 import services.workspace.files as workspace
 
 
 def get_client():
-    shell_app.app.config["TESTING"] = True
-    return shell_app.app.test_client()
+    return _test_app().test_client()
 
 
 def _audit_event_rows(event_type):

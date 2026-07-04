@@ -13,7 +13,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-import app as shell_app
+import app as shell_app_module
+from conftest import make_test_app as _test_app
 import config
 import core.process as process
 from core.database import DB_PATH
@@ -29,13 +30,12 @@ if str(CLI_SRC) not in sys.path:
 
 
 def get_client():
-    shell_app.app.config["TESTING"] = True
-    return shell_app.app.test_client()
+    return _test_app().test_client()
 
 
 class _LiveCliServer:
     def __init__(self) -> None:
-        self._server = make_server("127.0.0.1", 0, shell_app.app, threaded=True)
+        self._server = make_server("127.0.0.1", 0, _test_app(), threaded=True)
         host, port = self._server.server_address[:2]
         self.base_url = f"http://{host}:{port}"
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -323,7 +323,7 @@ def test_api_v1_whoami_accepts_bearer_token():
     assert "tok_" not in json.dumps(data["token_created"])
     assert "tok_" not in json.dumps(data["last_seen_at"])
 
-    with shell_app.app.test_request_context("/api/v1/whoami", headers=_headers(token)):
+    with _test_app().test_request_context("/api/v1/whoami", headers=_headers(token)):
         try:
             current_api_session()
         except RuntimeError as exc:
@@ -336,8 +336,8 @@ def test_api_v1_read_routes_use_api_rate_limit(monkeypatch):
     client = get_client()
     token = _token(client)
     remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1)
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1)
 
     first = client.get("/api/v1/whoami", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
     second = client.get("/api/v1/whoami", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
@@ -352,11 +352,11 @@ def test_api_v1_team_routes_use_team_rate_limit_per_token(monkeypatch):
     token = _token(client)
     other_token = _token(client)
     remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 100)
-    monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_second", 100)
+    monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1000)
 
     first = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
     second = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
@@ -372,11 +372,11 @@ def test_api_v1_team_write_routes_use_separate_team_rate_limit(monkeypatch):
     client = get_client()
     token = _token(client)
     remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1)
 
     first = client.post(
         "/api/v1/teams",
@@ -1472,20 +1472,20 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
     )
     artifact_id = "rfa_" + uuid.uuid4().hex[:16]
     team_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
-    monkeypatch.setitem(shell_app.CFG, "workspace_enabled", True)
-    monkeypatch.setitem(shell_app.CFG, "workspace_backend", "tmpfs")
-    monkeypatch.setitem(shell_app.CFG, "workspace_root", str(tmp_path))
-    monkeypatch.setitem(shell_app.CFG, "workspace_quota_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_file_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_files", 10)
-    workspace_dir = ensure_session_workspace(token, shell_app.CFG)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_enabled", True)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_backend", "tmpfs")
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_root", str(tmp_path))
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_quota_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_file_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_files", 10)
+    workspace_dir = ensure_session_workspace(token, shell_app_module.CFG)
     (workspace_dir / "reports").mkdir()
     (workspace_dir / "reports" / "artifact.txt").write_text("artifact body", encoding="utf-8")
     (workspace_dir / "reports" / "team-artifact.txt").write_text("personal shadow body", encoding="utf-8")
     team_artifact_path = resolve_owner_workspace_path(
         team_owner_context(team_id, actor_session_id=token),
         "reports/team-artifact.txt",
-        shell_app.CFG,
+        shell_app_module.CFG,
         ensure_parent=True,
     )
     team_artifact_path.write_text("team artifact body", encoding="utf-8")
@@ -1721,7 +1721,7 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
 
     client = get_client()
     token = _token(client)
-    monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
+    monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
 
     start = client.post("/api/v1/runs", json={"command": "help"}, headers=_headers(token))
     run_id = json.loads(start.data)["id"]
@@ -1824,7 +1824,7 @@ def test_api_v1_run_start_reports_broker_unavailable(monkeypatch):
 def test_api_v1_run_start_rejects_archived_project_link(monkeypatch):
     client = get_client()
     token = _token(client)
-    monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
+    monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
     project_resp = client.post("/projects", json={"name": "Archived API"}, headers={"X-Session-ID": token})
     project = json.loads(project_resp.data)["project"]
     client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers={"X-Session-ID": token})
@@ -1940,14 +1940,14 @@ def test_api_v1_run_start_rewrites_workspace_root_output_paths(monkeypatch, tmp_
     token = _token(client)
     seen = {}
 
-    monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
-    monkeypatch.setitem(shell_app.CFG, "workspace_enabled", True)
-    monkeypatch.setitem(shell_app.CFG, "workspace_backend", "tmpfs")
-    monkeypatch.setitem(shell_app.CFG, "workspace_root", str(tmp_path))
-    monkeypatch.setitem(shell_app.CFG, "workspace_quota_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_file_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_files", 10)
-    monkeypatch.setitem(shell_app.CFG, "workspace_inactivity_ttl_hours", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_enabled", True)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_backend", "tmpfs")
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_root", str(tmp_path))
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_quota_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_file_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_files", 10)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_inactivity_ttl_hours", 1)
 
     def fake_start(_original_command, _session_id, _client_ip, prepared_real):
         seen["command"] = prepared_real.command
@@ -4311,7 +4311,6 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
 
 def test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history(monkeypatch, capsys):
     cli_main = import_module("darklab_cli.__main__")
-    shell_app.app.config["TESTING"] = True
     server = _LiveCliServer()
     server.start()
     try:

@@ -104,12 +104,23 @@ def _json_column_sql(default: str | None = None) -> str:
 @contextmanager
 def _db_init_lock():
     """Serialize schema/bootstrap work across Gunicorn workers."""
+    waiting_started = monotonic()
+    log.debug("DB_INIT_LOCK_WAITING", extra={"backend": DB_BACKEND.value, "lock_path": DB_INIT_LOCK_PATH})
     with open(DB_INIT_LOCK_PATH, "w", encoding="utf-8") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        log.debug(
+            "DB_INIT_LOCK_ACQUIRED",
+            extra={
+                "backend": DB_BACKEND.value,
+                "lock_path": DB_INIT_LOCK_PATH,
+                "wait_ms": int((monotonic() - waiting_started) * 1000),
+            },
+        )
         try:
             yield
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            log.debug("DB_INIT_LOCK_RELEASED", extra={"backend": DB_BACKEND.value, "lock_path": DB_INIT_LOCK_PATH})
 
 
 def _create_schema(conn):
@@ -894,85 +905,101 @@ def _postgres_schema_init_branch(conn, migrations) -> str:
 
 def db_init():
     """Create the runs and snapshots tables if they don't exist, and prune old records."""
-    ensure_run_output_dir()
-    log.info("DB_BACKEND_SELECTED", extra={"backend": DB_BACKEND.value})
-    log.info("DB_INIT_STARTED", extra={"backend": DB_BACKEND.value})
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
+    phase = "ensure_output_dir"
+    schema_action = "noop"
+    try:
+        ensure_run_output_dir()
+        log.info("DB_BACKEND_SELECTED", extra={"backend": DB_BACKEND.value})
+        log.info("DB_INIT_STARTED", extra={"backend": DB_BACKEND.value})
+        if DB_BACKEND == DatabaseBackend.POSTGRES:
+            from core.migrations import MIGRATIONS  # noqa: PLC0415
+
+            versions_changed = 0
+            phase = "connect"
+            with connect_postgres(CFG) as conn:
+                phase = "schema_branch"
+                branch = _postgres_schema_init_branch(conn, MIGRATIONS)
+                log.debug("POSTGRES_SCHEMA_INIT_BRANCH_SELECTED", extra={
+                    "branch": branch,
+                    "backend": DB_BACKEND.value,
+                })
+                phase = "migrations"
+                applied = _run_schema_migrations(conn, DB_BACKEND)
+                versions_changed = len(applied)
+                schema_action = _schema_startup_action(DB_BACKEND, applied, branch, MIGRATIONS)
+                phase = "commit"
+                conn.commit()
+            phase = "maintenance"
+            with db_connect() as conn:
+                _run_post_schema_maintenance(conn)
+                phase = "commit"
+                conn.commit()
+            log.info("DB_INIT_COMPLETED", extra={
+                "backend": DB_BACKEND.value,
+                "schema_versions_changed": versions_changed,
+                "schema_action": schema_action,
+                "maintenance_completed": True,
+            })
+            return
+        phase = "lock"
+        with _db_init_lock():
+            _db_init_sqlite_locked(schema_action)
+    except Exception:
+        log.error(
+            "DB_INIT_FAILED",
+            exc_info=True,
+            extra={"backend": DB_BACKEND.value, "phase": phase, "schema_action": schema_action},
+        )
+        raise
+
+
+def _db_init_sqlite_locked(schema_action: str = "noop") -> None:
+    versions_changed = 0
+    with db_connect() as conn:
+        from core.migrations.reconciliation import (  # noqa: PLC0415
+            sqlite_has_app_schema,
+            sqlite_has_migration_ledger,
+            stamp_verified_sqlite_head,
+        )
         from core.migrations import MIGRATIONS  # noqa: PLC0415
 
-        schema_action = "noop"
-        versions_changed = 0
-        with connect_postgres(CFG) as conn:
-            branch = _postgres_schema_init_branch(conn, MIGRATIONS)
-            log.debug("POSTGRES_SCHEMA_INIT_BRANCH_SELECTED", extra={
+        had_migration_ledger = sqlite_has_migration_ledger(conn)
+        had_app_schema = sqlite_has_app_schema(conn)
+        if not had_migration_ledger and not had_app_schema:
+            branch = "sqlite_fresh_unified_baseline"
+            log.debug("SQLITE_SCHEMA_INIT_BRANCH_SELECTED", extra={
+                "had_migration_ledger": had_migration_ledger,
+                "had_app_schema": had_app_schema,
                 "branch": branch,
-                "backend": DB_BACKEND.value,
             })
             applied = _run_schema_migrations(conn, DB_BACKEND)
             versions_changed = len(applied)
             schema_action = _schema_startup_action(DB_BACKEND, applied, branch, MIGRATIONS)
-            conn.commit()
-        with db_connect() as conn:
-            _run_post_schema_maintenance(conn)
-            conn.commit()
-        log.info("DB_INIT_COMPLETED", extra={
-            "backend": DB_BACKEND.value,
-            "schema_versions_changed": versions_changed,
-            "schema_action": schema_action,
-            "maintenance_completed": True,
-        })
-        return
-    with _db_init_lock():
-        schema_action = "noop"
-        versions_changed = 0
-        with db_connect() as conn:
-            from core.migrations.reconciliation import (  # noqa: PLC0415
-                sqlite_has_app_schema,
-                sqlite_has_migration_ledger,
-                stamp_verified_sqlite_head,
-            )
-            from core.migrations import MIGRATIONS  # noqa: PLC0415
-
-            had_migration_ledger = sqlite_has_migration_ledger(conn)
-            had_app_schema = sqlite_has_app_schema(conn)
-            if not had_migration_ledger and not had_app_schema:
-                branch = "sqlite_fresh_unified_baseline"
-                log.debug("SQLITE_SCHEMA_INIT_BRANCH_SELECTED", extra={
-                    "had_migration_ledger": had_migration_ledger,
-                    "had_app_schema": had_app_schema,
-                    "branch": branch,
-                })
-                applied = _run_schema_migrations(conn, DB_BACKEND)
-                versions_changed = len(applied)
-                schema_action = _schema_startup_action(DB_BACKEND, applied, branch, MIGRATIONS)
-            elif not had_migration_ledger:
-                branch = "sqlite_preledger_current_head"
-                log.debug("SQLITE_SCHEMA_INIT_BRANCH_SELECTED", extra={
-                    "had_migration_ledger": had_migration_ledger,
-                    "had_app_schema": had_app_schema,
-                    "branch": branch,
-                })
-                stamped = stamp_verified_sqlite_head(conn, MIGRATIONS)
-                versions_changed = len(stamped)
-                schema_action = _schema_startup_action(DB_BACKEND, stamped, branch, MIGRATIONS)
-            else:
-                branch = "sqlite_ledgered"
-                log.debug("SQLITE_SCHEMA_INIT_BRANCH_SELECTED", extra={
-                    "had_migration_ledger": had_migration_ledger,
-                    "had_app_schema": had_app_schema,
-                    "branch": branch,
-                })
-                applied = _run_schema_migrations(conn, DB_BACKEND)
-                versions_changed = len(applied)
-                schema_action = _schema_startup_action(DB_BACKEND, applied, branch, MIGRATIONS)
-            _run_post_schema_maintenance(conn)
-            conn.commit()
-        log.info("DB_INIT_COMPLETED", extra={
-            "backend": DB_BACKEND.value,
-            "schema_versions_changed": versions_changed,
-            "schema_action": schema_action,
-            "maintenance_completed": True,
-        })
-
-
-db_init()
+        elif not had_migration_ledger:
+            branch = "sqlite_preledger_current_head"
+            log.debug("SQLITE_SCHEMA_INIT_BRANCH_SELECTED", extra={
+                "had_migration_ledger": had_migration_ledger,
+                "had_app_schema": had_app_schema,
+                "branch": branch,
+            })
+            stamped = stamp_verified_sqlite_head(conn, MIGRATIONS)
+            versions_changed = len(stamped)
+            schema_action = _schema_startup_action(DB_BACKEND, stamped, branch, MIGRATIONS)
+        else:
+            branch = "sqlite_ledgered"
+            log.debug("SQLITE_SCHEMA_INIT_BRANCH_SELECTED", extra={
+                "had_migration_ledger": had_migration_ledger,
+                "had_app_schema": had_app_schema,
+                "branch": branch,
+            })
+            applied = _run_schema_migrations(conn, DB_BACKEND)
+            versions_changed = len(applied)
+            schema_action = _schema_startup_action(DB_BACKEND, applied, branch, MIGRATIONS)
+        _run_post_schema_maintenance(conn)
+        conn.commit()
+    log.info("DB_INIT_COMPLETED", extra={
+        "backend": DB_BACKEND.value,
+        "schema_versions_changed": versions_changed,
+        "schema_action": schema_action,
+        "maintenance_completed": True,
+    })

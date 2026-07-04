@@ -606,7 +606,9 @@ def test_postgres_watcher_monitoring_migration_backfills_legacy_rows(postgres_sc
 
 @pytest.mark.postgres
 def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core import database as core_database
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
@@ -787,7 +789,9 @@ def test_configured_postgres_app_startup_smoke_uses_real_pool(postgres_dsn, post
     data_dir = tmp_path / "data"
     code = """
 import json
-from app import app
+from runtime_bootstrap import bootstrap
+app = bootstrap()
+app.config["TESTING"] = True
 from core.database_backend import close_postgres_pool
 
 try:
@@ -837,7 +841,9 @@ finally:
 
 @pytest.mark.postgres
 def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.history import queries as history_queries
@@ -887,7 +893,9 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
 
 @pytest.mark.postgres
 def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_schema, tmp_path):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.history import queries as history_queries
@@ -985,7 +993,9 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
 
 @pytest.mark.postgres
 def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
@@ -1101,7 +1111,9 @@ def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, pos
 
 @pytest.mark.postgres
 def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.runs import persistence as run_persistence
@@ -1185,7 +1197,9 @@ def test_run_output_artifact_upsert_writes_to_postgres(monkeypatch, postgres_sch
 @pytest.mark.postgres
 def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypatch, postgres_schema):
     import blueprints.run as run_blueprint
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -1424,7 +1438,9 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
 
 @pytest.mark.postgres
 def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.history import queries as history_queries
@@ -1464,7 +1480,9 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
 
 @pytest.mark.postgres
 def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.session import storage as session_storage
@@ -1547,7 +1565,9 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
 
 @pytest.mark.postgres
 def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     import blueprints.session as session_blueprint
     from core import database as core_database
     from core.migrations import MIGRATIONS
@@ -1757,7 +1777,9 @@ def test_secret_session_migration_uses_postgres_conflict_handling(monkeypatch, p
 
 @pytest.mark.postgres
 def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.atlas.materializer import materialize_run_entities
@@ -1909,7 +1931,9 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
 @pytest.mark.postgres
 def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     import blueprints.workspace as workspace_blueprint
     from core import database as core_database
     from core.migrations import MIGRATIONS
@@ -2005,7 +2029,9 @@ def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, po
 
 @pytest.mark.postgres
 def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -2262,7 +2288,9 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
 
 @pytest.mark.postgres
 def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     import config
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
@@ -2329,7 +2357,9 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
 
 @pytest.mark.postgres
 def test_metrics_route_scrapes_postgres_runtime_gauges(monkeypatch, postgres_schema):
-    from app import app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
     import config
     from core import database
     from core.migrations import MIGRATIONS

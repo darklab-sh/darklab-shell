@@ -14,11 +14,16 @@ from collections.abc import Iterator
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from services import metrics as app_metrics
 from services.ai import ai_cfg
 from services.ai.schemas import AISchemaError
 
 log = logging.getLogger("shell")
+
+
+def _app_metrics():
+    from services import metrics as app_metrics  # noqa: PLC0415
+
+    return app_metrics
 
 
 class AIClientError(RuntimeError):
@@ -411,7 +416,7 @@ class OpenAICompatibleClient:
                     parsed = _parse_json_object(content)
                     payload = validate(parsed)
                     duration_ms = int((time.perf_counter() - started) * 1000)
-                    app_metrics.record_ai_request(
+                    _app_metrics().record_ai_request(
                         metric_variant,
                         "success",
                         duration_ms / 1000,
@@ -457,7 +462,7 @@ class OpenAICompatibleClient:
                     raise AIClientError("ai_malformed", error_message) from exc
             raise AIClientError("ai_malformed", "AI provider returned malformed JSON")
         except AIClientError as exc:
-            app_metrics.record_ai_request(
+            _app_metrics().record_ai_request(
                 metric_variant,
                 _metric_status_for_error(exc),
                 int((time.perf_counter() - started) * 1000) / 1000,

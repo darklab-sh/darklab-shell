@@ -92,7 +92,8 @@ from services.commands.builtins_wordlist import run_builtin_wordlist as _run_bui
 from services.commands.wordlists import load_wordlist_catalog
 from services.teams.scope import OwnerContext, owner_context_for_scope
 from config import CFG
-from core.process import active_runs_for_session, redis_client
+import core.process as process_state
+from core.process import active_runs_for_session
 
 
 _BACKSPACE_RE = re.compile(r".\x08")
@@ -236,7 +237,7 @@ def _run_builtin_ps(session_id: str, command: str) -> list[dict[str, object]]:
 
 
 def _run_builtin_status(session_id: str) -> list[dict[str, object]]:
-    return _run_builtin_status_impl(session_id, active_runs_for_session, redis_client)
+    return _run_builtin_status_impl(session_id, active_runs_for_session, process_state.redis_client)
 
 
 def _run_builtin_stats(session_id: str) -> list[dict[str, object]]:

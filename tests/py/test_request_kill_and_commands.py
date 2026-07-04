@@ -9,7 +9,10 @@ import json
 import uuid
 import unittest.mock as mock
 
-import app as shell_app
+import app as shell_app_module
+from conftest import make_test_app as _test_app
+from blueprints.run import KILL_BIN, SUDO_BIN
+from core.helpers import get_session_id
 import services.commands.registry as commands
 from services.commands.builtins import (
     _DOCUMENTED_BUILTIN_COMMANDS,
@@ -43,8 +46,7 @@ def _command_validation_helpers():
 
 
 def get_client(*, use_forwarded_for=True):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+    client = _test_app().test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
@@ -54,45 +56,46 @@ def get_client(*, use_forwarded_for=True):
 
 class TestRequestHelpers:
     def test_prefers_valid_forwarded_for(self):
-        with shell_app.app.test_request_context(
+        with _test_app().test_request_context(
             "/",
             environ_base={"REMOTE_ADDR": "127.0.0.1"},
             headers={"X-Forwarded-For": "203.0.113.9"},
         ):
-            assert shell_app.get_client_ip() == "203.0.113.9"
+            assert shell_app_module.get_client_ip() == "203.0.113.9"
 
     def test_uses_last_untrusted_forwarded_for_when_multiple(self):
-        with shell_app.app.test_request_context(
+        with _test_app().test_request_context(
             "/",
             environ_base={"REMOTE_ADDR": "127.0.0.1"},
             headers={"X-Forwarded-For": "198.51.100.5, 10.0.0.1"},
         ):
-            assert shell_app.get_client_ip() == "10.0.0.1"
+            assert shell_app_module.get_client_ip() == "10.0.0.1"
 
     def test_invalid_forwarded_for_falls_back(self):
-        with shell_app.app.test_request_context(
+        with _test_app().test_request_context(
             "/",
             environ_base={"REMOTE_ADDR": "127.0.0.1"},
             headers={"X-Forwarded-For": "definitely-not-an-ip"},
         ):
             # Flask test client context usually falls back to 127.0.0.1
-            assert shell_app.get_client_ip() == "127.0.0.1"
+            assert shell_app_module.get_client_ip() == "127.0.0.1"
 
     def test_get_session_id_strips_whitespace(self):
         session_id = str(uuid.uuid4())
-        with shell_app.app.test_request_context("/", headers={"X-Session-ID": f"  {session_id}  "}):
-            assert shell_app.get_session_id() == session_id
+        with _test_app().test_request_context("/", headers={"X-Session-ID": f"  {session_id}  "}):
+            assert get_session_id() == session_id
 
     def test_get_session_id_rejects_invalid_anonymous_session_id(self):
-        previous = shell_app.app.config.get("TESTING")
-        shell_app.app.config["TESTING"] = False
+        flask_app = _test_app()
+        previous = flask_app.config.get("TESTING")
+        flask_app.config["TESTING"] = False
         try:
-            with shell_app.app.test_request_context("/", headers={"X-Session-ID": "abc123"}):
-                assert shell_app.get_session_id() == ""
-            with shell_app.app.test_request_context("/", headers={"X-Session-ID": "../other-session"}):
-                assert shell_app.get_session_id() == ""
+            with flask_app.test_request_context("/", headers={"X-Session-ID": "abc123"}):
+                assert get_session_id() == ""
+            with flask_app.test_request_context("/", headers={"X-Session-ID": "../other-session"}):
+                assert get_session_id() == ""
         finally:
-            shell_app.app.config["TESTING"] = previous
+            flask_app.config["TESTING"] = previous
 
 
 # ── /kill ─────────────────────────────────────────────────────────────────────
@@ -160,7 +163,7 @@ class TestKillRoute:
         assert data["killed"] is True
         # pgid == pid because setsid guarantees PGID == PID at spawn time
         run_cmd.assert_called_once_with(
-            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "--", "-1234"],
+            [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", "--", "-1234"],
             timeout=5,
         )
         killpg.assert_not_called()
@@ -1020,8 +1023,8 @@ class TestBuiltinCommandResolution:
         owner = team_owner_context("team-builtins-files", actor_session_id="tok_builtin_actor")
         write_owner_workspace_text_file(owner, "notes.txt", "team notes\n", cfg)
 
-        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("services.commands.builtins_workspace.CFG", {**shell_app.CFG, **cfg}):
+        with mock.patch("services.commands.builtins.CFG", {**shell_app_module.CFG, **cfg}), \
+             mock.patch("services.commands.builtins_workspace.CFG", {**shell_app_module.CFG, **cfg}):
             read_events, read_exit = execute_builtin_command(
                 "cat notes.txt",
                 "tok_builtin_actor",

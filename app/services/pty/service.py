@@ -26,6 +26,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from config import CFG, SCANNER_PREFIX
+import core.process as process_state
 from core.process import (
     active_run_claim_owner_transition,
     active_run_owned_by,
@@ -35,7 +36,6 @@ from core.process import (
     active_runs_for_session,
     pid_pop,
     pid_register,
-    redis_client,
 )
 from services.pty import capture as pty_capture
 from services.pty.capture import (
@@ -45,9 +45,26 @@ from services.pty.capture import (
 from services.runs.broker import _is_redis_idle_timeout_error
 from services.runs.output_model import LineKind, from_wire, line_event_from_legacy, to_wire
 from services.runs.output_store import unknown_line_event_collector
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 
 log = logging.getLogger("shell")
+
+
+class _RedisClientProxy:
+    def _client(self):
+        return process_state.redis_client
+
+    def __bool__(self) -> bool:
+        return bool(self._client())
+
+    def __getattr__(self, name: str):
+        client = self._client()
+        if client is None:
+            raise AttributeError(name)
+        return getattr(client, name)
+
+
+redis_client = _RedisClientProxy()
 pyte = pty_capture.pyte
 _PTY_CAPTURE_MAX_HISTORY_LINES = pty_capture._PTY_CAPTURE_MAX_HISTORY_LINES
 _PTY_CAPTURE_MIN_HISTORY_LINES = pty_capture._PTY_CAPTURE_MIN_HISTORY_LINES
@@ -89,6 +106,8 @@ _PTY_ENV_PASSTHROUGH_KEYS = (
     "CLICOLOR",
     "COLORTERM",
 )
+
+
 def _coerce_non_negative_int(value: object, default: int) -> int:
     if isinstance(value, bool):
         return default

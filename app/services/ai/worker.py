@@ -7,30 +7,15 @@ import logging
 import signal
 import threading
 import time
+from typing import TYPE_CHECKING, Any
 
 from config import CFG
 from core.database_backend import is_transient_postgres_error
 from core.helpers import get_log_session_id
-from core.logging_setup import configure_logging
-from services import metrics as app_metrics
-from services.ai.client import AIClientError, AIProviderResult, OpenAICompatibleClient
-from services.ai.coordination import (
-    AICoordinationUnavailable,
-    acquire_worker_slot,
-    release_worker_slot,
-    worker_slot_heartbeat,
-)
-from services.ai.context import build_run_context
-from services.ai import next_commands, summarize
-from services.ai.storage import (
-    claim_next_assist,
-    complete_assist,
-    fail_assist,
-    heartbeat_assist,
-    reclaim_stale_assists,
-    replace_suggestion_validations,
-    update_assist_progress,
-)
+from runtime_bootstrap import bootstrap_runtime, setup_metrics_environment
+
+if TYPE_CHECKING:
+    from services.ai.client import AIProviderResult
 
 log = logging.getLogger("shell")
 
@@ -38,10 +23,90 @@ DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_LIMIT = 1
 DEFAULT_ASSIST_HEARTBEAT_SECONDS = 30.0
 _STOP = False
-_VARIANT_RUNNERS = {
-    "summary": summarize.run,
-    "next_commands": next_commands.run,
-}
+app_metrics: Any = None
+AIClientError: Any = None
+OpenAICompatibleClient: Any = None
+AICoordinationUnavailable: Any = None
+acquire_worker_slot: Any = None
+release_worker_slot: Any = None
+worker_slot_heartbeat: Any = None
+build_run_context: Any = None
+claim_next_assist: Any = None
+complete_assist: Any = None
+fail_assist: Any = None
+heartbeat_assist: Any = None
+reclaim_stale_assists: Any = None
+replace_suggestion_validations: Any = None
+update_assist_progress: Any = None
+_VARIANT_RUNNERS: dict[str, Any] = {}
+
+
+def _load_runtime_dependencies() -> None:
+    global app_metrics, AIClientError, OpenAICompatibleClient, AICoordinationUnavailable
+    global acquire_worker_slot, release_worker_slot, worker_slot_heartbeat, build_run_context
+    global claim_next_assist, complete_assist, fail_assist, heartbeat_assist
+    global reclaim_stale_assists, replace_suggestion_validations, update_assist_progress
+
+    if app_metrics is not None and _VARIANT_RUNNERS:
+        log.debug("AI_WORKER_DEPENDENCIES_SKIPPED", extra={"reason": "already_loaded"})
+    else:
+        log.debug("AI_WORKER_DEPENDENCIES_LOADING")
+    setup_metrics_environment(CFG)
+    from services import metrics as loaded_metrics  # noqa: PLC0415
+    from services.ai import next_commands, summarize  # noqa: PLC0415
+    from services.ai.client import (  # noqa: PLC0415
+        AIClientError as LoadedAIClientError,
+        OpenAICompatibleClient as LoadedOpenAICompatibleClient,
+    )
+    from services.ai.coordination import (  # noqa: PLC0415
+        AICoordinationUnavailable as LoadedAICoordinationUnavailable,
+        acquire_worker_slot as loaded_acquire_worker_slot,
+        release_worker_slot as loaded_release_worker_slot,
+        worker_slot_heartbeat as loaded_worker_slot_heartbeat,
+    )
+    from services.ai.context import build_run_context as loaded_build_run_context  # noqa: PLC0415
+    from services.ai.storage import (  # noqa: PLC0415
+        claim_next_assist as loaded_claim_next_assist,
+        complete_assist as loaded_complete_assist,
+        fail_assist as loaded_fail_assist,
+        heartbeat_assist as loaded_heartbeat_assist,
+        reclaim_stale_assists as loaded_reclaim_stale_assists,
+        replace_suggestion_validations as loaded_replace_suggestion_validations,
+        update_assist_progress as loaded_update_assist_progress,
+    )
+
+    app_metrics = loaded_metrics if app_metrics is None else app_metrics
+    AIClientError = LoadedAIClientError if AIClientError is None else AIClientError
+    OpenAICompatibleClient = (
+        LoadedOpenAICompatibleClient if OpenAICompatibleClient is None else OpenAICompatibleClient
+    )
+    AICoordinationUnavailable = (
+        LoadedAICoordinationUnavailable if AICoordinationUnavailable is None else AICoordinationUnavailable
+    )
+    acquire_worker_slot = loaded_acquire_worker_slot if acquire_worker_slot is None else acquire_worker_slot
+    release_worker_slot = loaded_release_worker_slot if release_worker_slot is None else release_worker_slot
+    worker_slot_heartbeat = loaded_worker_slot_heartbeat if worker_slot_heartbeat is None else worker_slot_heartbeat
+    build_run_context = loaded_build_run_context if build_run_context is None else build_run_context
+    claim_next_assist = loaded_claim_next_assist if claim_next_assist is None else claim_next_assist
+    complete_assist = loaded_complete_assist if complete_assist is None else complete_assist
+    fail_assist = loaded_fail_assist if fail_assist is None else fail_assist
+    heartbeat_assist = loaded_heartbeat_assist if heartbeat_assist is None else heartbeat_assist
+    reclaim_stale_assists = loaded_reclaim_stale_assists if reclaim_stale_assists is None else reclaim_stale_assists
+    replace_suggestion_validations = (
+        loaded_replace_suggestion_validations
+        if replace_suggestion_validations is None
+        else replace_suggestion_validations
+    )
+    update_assist_progress = loaded_update_assist_progress if update_assist_progress is None else update_assist_progress
+    if not _VARIANT_RUNNERS:
+        _VARIANT_RUNNERS.update({
+            "summary": summarize.run,
+            "next_commands": next_commands.run,
+        })
+    log.info(
+        "AI_WORKER_DEPENDENCIES_LOADED",
+        extra={"variants": ",".join(sorted(_VARIANT_RUNNERS)), "metrics_initialized": app_metrics is not None},
+    )
 
 
 def _handle_stop(signum, frame):  # noqa: ANN001
@@ -51,6 +116,7 @@ def _handle_stop(signum, frame):  # noqa: ANN001
 
 def run_once(*, limit: int = DEFAULT_LIMIT, cfg: dict | None = None) -> int:
     """Reap stale assists and process a small batch of queued assists."""
+    _load_runtime_dependencies()
     processed = reclaim_stale_assists()
     if processed:
         log.warning(
@@ -80,6 +146,7 @@ def run_once(*, limit: int = DEFAULT_LIMIT, cfg: dict | None = None) -> int:
 
 
 def _process_assist(assist: dict, *, cfg: dict | None = None) -> None:
+    _load_runtime_dependencies()
     active_cfg = CFG if cfg is None else cfg
     assist_id = str(assist.get("id") or "")
     run_id = str(assist.get("run_id") or "")
@@ -229,6 +296,7 @@ def _assist_db_heartbeat(
 
 
 def _record_worker_error_metric(variant: str, error_code: str, cfg: dict) -> None:
+    _load_runtime_dependencies()
     app_metrics.record_ai_request(
         variant or "summary",
         "error",
@@ -299,7 +367,16 @@ def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS) -> None:
 
 
 def main() -> None:
-    configure_logging(CFG)
+    try:
+        bootstrap_runtime(CFG, init_process=True, init_db=True, runtime_name="ai_worker")
+    except Exception:
+        log.error("AI_WORKER_BOOTSTRAP_FAILED", exc_info=True, extra={"phase": "bootstrap_runtime"})
+        raise
+    try:
+        _load_runtime_dependencies()
+    except Exception:
+        log.error("AI_WORKER_BOOTSTRAP_FAILED", exc_info=True, extra={"phase": "load_runtime_dependencies"})
+        raise
     run_forever()
 
 

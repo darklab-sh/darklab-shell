@@ -11,7 +11,8 @@ from config import CFG
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import DatabaseBackend
 from core.helpers import is_failed_exit_code
-from core.process import active_runs_for_session, redis_client
+import core.process as process_state
+from core.process import active_runs_for_session
 from services.commands.builtins_format import (
     ansi_amber as _ansi_amber,
     ansi_cell as _ansi_cell,
@@ -42,6 +43,23 @@ class _StatsBucket(TypedDict):
     failed: int
     incomplete: int
     durations: list[float]
+
+
+class _RedisClientProxy:
+    def _client(self):
+        return process_state.redis_client
+
+    def __bool__(self) -> bool:
+        return bool(self._client())
+
+    def __getattr__(self, name: str):
+        client = self._client()
+        if client is None:
+            raise AttributeError(name)
+        return getattr(client, name)
+
+
+redis_client = _RedisClientProxy()
 
 
 def _stats_elapsed_sql() -> str:

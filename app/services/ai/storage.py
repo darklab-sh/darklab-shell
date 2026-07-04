@@ -11,7 +11,7 @@ from typing import Any
 import uuid
 
 from core.database import db_connect
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.ai import ai_cfg
 
 TERMINAL_STATUSES = frozenset({"completed", "failed"})

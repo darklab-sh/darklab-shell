@@ -42,7 +42,8 @@ from core.helpers import (
     get_log_session_id,
     ip_is_in_cidrs,
 )
-from core.process import fallback_pid_snapshot, redis_client
+import core.process as process_state
+from core.process import fallback_pid_snapshot
 from services.runs.broker import (
     broker_available,
     broker_mode,
@@ -50,11 +51,37 @@ from services.runs.broker import (
     memory_store_snapshot,
 )
 from services.runs.output_model import line_event_from_legacy
-from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
 
 assets_bp = Blueprint("assets", __name__)
+
+
+class _RedisClientProxy:
+    def _client(self):
+        return process_state.redis_client
+
+    def __bool__(self) -> bool:
+        return bool(self._client())
+
+    def __getattr__(self, name: str):
+        client = self._client()
+        if client is None:
+            raise AttributeError(name)
+        return getattr(client, name)
+
+
+redis_client = _RedisClientProxy()
+
+
+def _redis_client():
+    return redis_client
+
+
+def _app_metrics():
+    from services import metrics as app_metrics  # noqa: PLC0415
+
+    return app_metrics
 
 
 def _fmt_elapsed(seconds):
@@ -813,7 +840,6 @@ def client_log():
     if not event.replace("_", "").isalnum():
         event = "CLIENT_ERROR"
     level = str(data.get("level") or "warning").strip().lower()
-    from services import metrics as app_metrics  # noqa: PLC0415
     extra: dict[str, object] = {
         "ip": get_client_ip(),
         "session": get_log_session_id(),
@@ -860,10 +886,10 @@ def client_log():
     if level == "debug":
         log.debug(event, extra=extra)
     elif level == "error":
-        app_metrics.record_client_error(context or event or "unknown")
+        _app_metrics().record_client_error(context or event or "unknown")
         log.error(event, extra=extra)
     else:
-        app_metrics.record_client_error(context or event or "unknown")
+        _app_metrics().record_client_error(context or event or "unknown")
         log.warning(event, extra=extra)
     return jsonify({"ok": True})
 
@@ -939,9 +965,10 @@ def health():
         log.error("HEALTH_DB_FAIL", exc_info=True)
 
     # Redis — checked only if configured; absence is acceptable (falls back to in-process)
-    if redis_client:
+    active_redis = _redis_client()
+    if active_redis:
         try:
-            redis_client.ping()
+            active_redis.ping()
             result["redis"] = True
         except Exception:
             result["redis"] = False
@@ -963,9 +990,10 @@ def status():
 
     db_state = status_database_state()
 
-    if redis_client:
+    active_redis = _redis_client()
+    if active_redis:
         try:
-            redis_client.ping()
+            active_redis.ping()
             redis_state = "ok"
         except Exception:
             redis_state = "down"
@@ -1075,9 +1103,10 @@ def diag():
     result["db"] = db_info
 
     # ── Redis ─────────────────────────────────────────────────────────────────
-    redis_info: dict = {"configured": bool(redis_client)}
-    if redis_client:
-        stats = _diag_redis_stats(redis_client)
+    active_redis = _redis_client()
+    redis_info: dict = {"configured": bool(active_redis)}
+    if active_redis:
+        stats = _diag_redis_stats(active_redis)
         if "error" in stats and "ping_ms" not in stats:
             redis_info["ok"] = False
             redis_info["error"] = stats["error"]
@@ -1106,7 +1135,7 @@ def diag():
     result["broker"] = broker_info
 
     # ── Interactive PTY ──────────────────────────────────────────────────────
-    result["pty"] = app_metrics.pty_metrics_snapshot()
+    result["pty"] = _app_metrics().pty_metrics_snapshot()
 
     # ── Vendor assets ─────────────────────────────────────────────────────────
     # In-process HEAD probes against the served URLs — file-existence on its
@@ -1273,7 +1302,7 @@ def diag_ai_test():
     try:
         payload = ai_run_test_prompt()
     except AIClientError as exc:
-        app_metrics.record_ai_request(
+        _app_metrics().record_ai_request(
             "diag_test",
             "error",
             0.0,

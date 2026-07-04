@@ -74,7 +74,7 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 
 APP_VERSION = _config.APP_VERSION
 CFG = _config.CFG

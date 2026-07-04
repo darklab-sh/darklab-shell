@@ -16,7 +16,7 @@ import time
 
 from config import CFG, resolve_data_dir
 from core.helpers import get_log_session_id
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge

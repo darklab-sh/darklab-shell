@@ -15,6 +15,7 @@ import json
 import time
 from functools import lru_cache
 import fnmatch
+from collections.abc import Mapping
 from typing import Any, cast
 from urllib.parse import urlparse
 
@@ -32,7 +33,6 @@ log = logging.getLogger("shell")
 # in-process mode (memory rate limiting, threading.Lock pid map) which is
 # only appropriate for local dev or single-worker deployments.
 REDIS_URL = os.environ.get("REDIS_URL") or CFG.get("redis_url", "")
-_FAKE_REDIS_ENABLED = os.environ.get("APP_FAKE_REDIS") == "1"
 
 
 def _redis_log_fields(url: object) -> dict[str, object]:
@@ -246,23 +246,73 @@ def _redis_stream_id_after(left: str, right: str) -> bool:
 
 
 redis_client = None
-if _FAKE_REDIS_ENABLED:
-    REDIS_URL = REDIS_URL or "memory://"
-    redis_client = _FakeRedisClient()
-    log.info("REDIS_FAKE_ENABLED", extra={"fallback": "in_memory"})
-elif REDIS_URL:
-    try:
-        import redis as redis_lib
-        redis_client = redis_lib.from_url(REDIS_URL, decode_responses=True)
-        redis_client.ping()
-        log.info("REDIS_CONNECTED", extra=_redis_log_fields(REDIS_URL))
-    except Exception:
-        log.warning(
-            "REDIS_UNAVAILABLE",
-            exc_info=True,
-            extra={**_redis_log_fields(REDIS_URL), "redis_configured": True, "fallback": "in_process"},
+_process_initialized = False
+_rate_limit_storage_fallback_logged = False
+
+
+def _configured_redis_url(cfg: Mapping[str, Any] | None = None) -> str:
+    active_cfg = CFG if cfg is None else cfg
+    return str(os.environ.get("REDIS_URL") or active_cfg.get("redis_url", "") or "")
+
+
+def init_process(cfg: Mapping[str, Any] | None = None, *, force: bool = False):
+    """Initialize process-local Redis state explicitly at runtime startup."""
+    global REDIS_URL, redis_client, _process_initialized
+    active_url = _configured_redis_url(cfg)
+    fake_redis = os.environ.get("APP_FAKE_REDIS") == "1"
+    log.debug("PROCESS_RUNTIME_INIT_STARTED", extra={
+        "force": force, "redis_configured": bool(active_url), "fake_redis": fake_redis
+    })
+    if _process_initialized and not force:
+        mode = "redis" if redis_client and REDIS_URL != "memory://" else "fake" if redis_client else "memory"
+        log.debug("PROCESS_RUNTIME_INIT_SKIPPED", extra={"reason": "already_initialized", "redis_mode": mode})
+        return redis_client
+
+    REDIS_URL = active_url
+    redis_client = None
+    if fake_redis:
+        REDIS_URL = REDIS_URL or "memory://"
+        redis_client = _FakeRedisClient()
+        log.info("REDIS_FAKE_ENABLED", extra={"fallback": "in_memory"})
+    elif REDIS_URL:
+        try:
+            import redis as redis_lib
+            redis_client = redis_lib.from_url(REDIS_URL, decode_responses=True)
+            redis_client.ping()
+            log.info("REDIS_CONNECTED", extra=_redis_log_fields(REDIS_URL))
+        except Exception:
+            log.warning(
+                "REDIS_UNAVAILABLE",
+                exc_info=True,
+                extra={**_redis_log_fields(REDIS_URL), "redis_configured": True, "fallback": "in_process"},
+            )
+            redis_client = None
+    elif _worker_count_from_env() <= 1:
+        log.info(
+            "REDIS_FALLBACK_IN_PROCESS",
+            extra={"redis_configured": False, "workers": _worker_count_from_env(), "fallback": "in_process"}
         )
-        redis_client = None
+
+    validate_redis_worker_configuration(redis_client)
+    _process_initialized = True
+    return redis_client
+
+
+def redis_storage_uri(cfg: Mapping[str, Any] | None = None) -> str:
+    global _rate_limit_storage_fallback_logged
+    if redis_client is None:
+        if not _rate_limit_storage_fallback_logged:
+            log.warning(
+                "RATE_LIMIT_STORAGE_FALLBACK",
+                extra={
+                    "reason": "redis_client_uninitialized",
+                    "fallback": "memory",
+                    "redis_configured": bool(_configured_redis_url(cfg)),
+                },
+            )
+            _rate_limit_storage_fallback_logged = True
+        return "memory://"
+    return REDIS_URL or _configured_redis_url(cfg) or "memory://"
 
 def _worker_count_from_env() -> int:
     try:
@@ -291,9 +341,6 @@ def validate_redis_worker_configuration(redis, *, workers: int | None = None) ->
         extra={"workers": worker_count, "redis_configured": bool(REDIS_URL)},
     )
     raise RuntimeError(message)
-
-
-validate_redis_worker_configuration(redis_client)
 
 _pid_map: dict[str, int] = {}
 _active_run_meta: dict[str, dict] = {}

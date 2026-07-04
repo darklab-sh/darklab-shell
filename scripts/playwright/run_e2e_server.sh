@@ -75,7 +75,7 @@ export APP_DATA_DIR="$DATA_DIR"
 export APP_CONF_DIR="$CONF_DIR"
 export REDIS_URL=""
 export APP_FAKE_REDIS="$APP_FAKE_REDIS"
-export FLASK_APP=app.py
+export FLASK_APP=wsgi.py
 
 server_cmd=(
   "$PYTHON_BIN" -m gunicorn
@@ -86,7 +86,7 @@ server_cmd=(
   --timeout 60
   --graceful-timeout 5
   --keep-alive 30
-  app:app
+  wsgi:application
 )
 
 if [[ -n "$SERVER_LOG" ]]; then

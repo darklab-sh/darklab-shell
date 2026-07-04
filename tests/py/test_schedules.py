@@ -8,15 +8,14 @@ import sqlite3
 import unittest.mock as mock
 from typing import Any
 
-import app as shell_app
+from conftest import make_test_app as _test_app
 from core.database import db_init, db_connect
 from services.commands.builtins import execute_builtin_command
 from services.teams import storage as team_storage
 
 
 def get_client():
-    shell_app.app.config["TESTING"] = True
-    return shell_app.app.test_client()
+    return _test_app().test_client()
 
 
 def _line_text(line: dict[str, object]) -> str:

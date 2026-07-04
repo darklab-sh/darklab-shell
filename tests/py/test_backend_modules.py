@@ -54,7 +54,9 @@ import services.projects.package_presets as package_presets
 import services.projects.provenance as project_provenance
 import services.reports.storage as report_storage
 import services.reports.templates as report_templates
-import app as shell_app
+import runtime_bootstrap
+import app as shell_app_module
+from conftest import make_test_app as _test_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.registry_loader as registry_loader_module
@@ -300,7 +302,10 @@ class TestAIAssistProviderClient:
         def unavailable_request(self, method, path, payload=None):
             raise AIClientError("ai_unavailable", "AI provider request failed: timed out")
 
-        monkeypatch.setattr("services.ai.client.app_metrics.record_ai_request", record_ai_request)
+        monkeypatch.setattr(
+            "services.ai.client._app_metrics",
+            lambda: SimpleNamespace(record_ai_request=record_ai_request),
+        )
         monkeypatch.setattr(OpenAICompatibleClient, "_request_json", unavailable_request)
         client = OpenAICompatibleClient({
             "ai_enabled": True,
@@ -1046,7 +1051,8 @@ class TestAIAssistContextAndStorage:
             "AI_ASSIST_STALE_RECLAIMED",
             extra={"count": 2, "stale_after_seconds": 300},
         )
-        debug.assert_called_once_with("AI_WORKER_BUSY", extra={"max_concurrent": 1})
+        debug.assert_any_call("AI_WORKER_DEPENDENCIES_LOADING")
+        debug.assert_any_call("AI_WORKER_BUSY", extra={"max_concurrent": 1})
 
     def test_ai_assist_storage_reuses_completed_cache_and_active_rows(self, monkeypatch, tmp_path):
         from services.ai.context import build_run_context
@@ -1254,7 +1260,7 @@ class TestAIAssistContextAndStorage:
             "ai_rate_limit_global_per_minute": 20,
             "diagnostics_allowed_cidrs": [],
         }
-        with shell_app.app.test_request_context("/", environ_base={"REMOTE_ADDR": "198.51.100.10"}):
+        with _test_app().test_request_context("/", environ_base={"REMOTE_ADDR": "198.51.100.10"}):
             with mock.patch.object(process, "redis_client", route_limited_redis), \
                  mock.patch.object(ai_assists.log, "warning") as warning:
                 ai_assists._enforce_ai_write_rate_limit(
@@ -2569,15 +2575,15 @@ class TestLoadConfig:
                     assert "data_dir is not writable: /not-writable" in str(exc)
 
     def test_workspace_root_env_warning_only_logs_on_mismatch(self):
-        with mock.patch.object(shell_app.log, "warning") as warning:
-            shell_app._warn_workspace_root_config_drift(
+        with mock.patch.object(runtime_bootstrap.log, "warning") as warning:
+            runtime_bootstrap.warn_workspace_root_config_drift(
                 {"workspace_root": "/tmp/workspaces"},
                 {"WORKSPACE_ROOT": "/tmp/workspaces"},
             )
             warning.assert_not_called()
 
-        with mock.patch.object(shell_app.log, "warning") as warning:
-            shell_app._warn_workspace_root_config_drift(
+        with mock.patch.object(runtime_bootstrap.log, "warning") as warning:
+            runtime_bootstrap.warn_workspace_root_config_drift(
                 {"workspace_root": "/tmp/app-workspaces"},
                 {"WORKSPACE_ROOT": "/tmp/env-workspaces"},
             )
@@ -2587,6 +2593,46 @@ class TestLoadConfig:
         assert args == ("WORKSPACE_ROOT_MISMATCH",)
         assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
+    def test_startup_active_run_cleanup_uses_redis_lock(self, monkeypatch):
+        fake_redis = process._FakeRedisClient()
+        calls = []
+
+        monkeypatch.setattr(process, "redis_client", fake_redis)
+        monkeypatch.setattr(
+            process,
+            "cleanup_stale_active_run_metadata",
+            lambda: calls.append(True) or {
+                "metadata_removed": 0,
+                "session_members_removed": 0,
+                "team_members_removed": 0,
+            },
+        )
+
+        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+
+        assert len(calls) == 1
+        assert fake_redis.get(runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY) is not None
+
+    def test_startup_active_run_cleanup_runs_without_redis_lock(self, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(process, "redis_client", None)
+        monkeypatch.setattr(
+            process,
+            "cleanup_stale_active_run_metadata",
+            lambda: calls.append(True) or {
+                "metadata_removed": 0,
+                "session_members_removed": 0,
+                "team_members_removed": 0,
+            },
+        )
+
+        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+
+        assert len(calls) == 2
 
 
 class TestPackagePresetCatalog:
@@ -6749,16 +6795,91 @@ class TestPostgresMigrations:
         assert columns == {"id", "command"}
         assert ledger_exists is None
 
+    def test_sqlite_preledger_current_head_tolerates_legacy_watcher_fire_checks(self):
+        from core.migrations import MIGRATIONS
+        from core.schema_manifest import verify_sqlite_head_schema
+
+        fire_kind_check = (
+            ",\n            CHECK (fire_kind IN (\n"
+            "                'changed', 'recovered', 'failed', 'no_change',\n"
+            "                'baseline_created', 'baseline_accepted', 'paused', 'unclassified'\n"
+            "            ))"
+        )
+        ack_state_check = (
+            ",\n            CHECK (ack_state IN "
+            "('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-legacy-watcher-fires-checks.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                create_sql = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watcher_fires'"
+                ).fetchone()[0]
+                legacy_create_sql = create_sql.replace(fire_kind_check, "").replace(ack_state_check, "")
+                conn.execute("PRAGMA writable_schema=ON")
+                conn.execute(
+                    "UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'watcher_fires'",
+                    (legacy_create_sql,),
+                )
+                conn.execute("PRAGMA writable_schema=OFF")
+                conn.execute("DROP TABLE schema_migrations")
+                conn.commit()
+            finally:
+                conn.close()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                missing_constraints = {
+                    drift.name
+                    for drift in verify_sqlite_head_schema(conn)
+                    if drift.kind == "missing_constraint"
+                }
+            finally:
+                conn.close()
+
+            assert missing_constraints == {
+                "watcher_fires:CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))",
+                "watcher_fires:CHECK (fire_kind IN ('changed', 'recovered', 'failed', 'no_change', "
+                "'baseline_created', 'baseline_accepted', 'paused', 'unclassified'))",
+            }
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    with mock.patch("core.migrations.reconciliation.log.warning") as warning:
+                        database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                versions = [
+                    str(row["version"])
+                    for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+                ]
+            finally:
+                conn.close()
+
+        assert versions == [migration.version for migration in MIGRATIONS]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("SQLITE_SCHEMA_RECONCILIATION_TOLERATED_LEGACY_CONSTRAINT_GAP",)
+        assert warning.call_args.kwargs["extra"]["drift_count"] == 2
+
     def test_sqlite_preledger_stamping_verifies_head_once(self, monkeypatch):
         from core.migrations import reconciliation
 
         verify_count = 0
         original_verify = reconciliation.verify_sqlite_head_or_raise
 
-        def counted_verify(conn):
+        def counted_verify(conn, **kwargs):
             nonlocal verify_count
             verify_count += 1
-            return original_verify(conn)
+            return original_verify(conn, **kwargs)
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-preledger-verify-once.db")
@@ -7286,7 +7407,7 @@ class TestTeamModeFoundation:
             conn.commit()
 
             with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context("/history"):
+                 _test_app().test_request_context("/history"):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
                     scope = request_scope.current_request_scope("tok_scope_owner", request)
             assert scope.is_team is False
@@ -7297,7 +7418,7 @@ class TestTeamModeFoundation:
             assert personal_extra["session"].startswith("tok_sco")
 
             with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context(
+                 _test_app().test_request_context(
                 f"/api/v1/history?team_id={team['id']}",
                 method="GET",
                 environ_base={"REMOTE_ADDR": "198.51.100.10"},
@@ -7316,7 +7437,7 @@ class TestTeamModeFoundation:
             assert team_extra["session"] != "tok_scope_owner"
 
             with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context(
+                 _test_app().test_request_context(
                 "/api/v1/history",
                 headers={"X-Team-ID": team["id"]},
             ):
@@ -7343,13 +7464,13 @@ class TestTeamModeFoundation:
             conn.commit()
 
             with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+                 _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
                 with pytest.raises(request_scope.RequestScopeError) as blocked:
                     request_scope.current_request_scope("tok_archived_owner", request)
             assert blocked.value.code == "team_archived"
 
             with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+                 _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
                 scope = request_scope.current_request_scope("tok_archived_owner", request, allow_archived=True)
 
             assert scope.is_team is True
@@ -14471,6 +14592,241 @@ class TestSessionWorkspace:
 
 
 class TestEntrypointWorkspaceRepair:
+    def test_app_import_and_factory_are_side_effect_free_until_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            conf_dir = root / "conf"
+            metrics_dir = root / "metrics"
+            data_dir.mkdir()
+            conf_dir.mkdir()
+            (conf_dir / "config.yaml").write_text(
+                "\n".join([
+                    "database_backend: sqlite",
+                    f"data_dir: {data_dir}",
+                    f"prometheus_multiproc_dir: {metrics_dir}",
+                    "workspace_enabled: false",
+                    "rate_limit_enabled: false",
+                    "run_broker_require_redis: true",
+                ]),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update({
+                "APP_CONF_DIR": str(conf_dir),
+                "APP_DATA_DIR": str(data_dir),
+                "PROMETHEUS_MULTIPROC_DIR": str(metrics_dir),
+                "REDIS_URL": "redis://redis.example.invalid:6379/0",
+                "WEB_CONCURRENCY": "4",
+                "PYTHONPATH": str(REPO_ROOT / "app"),
+            })
+            env.pop("APP_FAKE_REDIS", None)
+            env.pop("DARKLAB_APP_START_TIME_SECONDS", None)
+            code = textwrap.dedent(
+                """
+                import json
+                import hashlib
+                import logging
+                import os
+                from pathlib import Path
+                import sys
+                import tempfile
+                import types
+
+                redis_calls = []
+
+                class FakeRedisClient:
+                    def ping(self):
+                        redis_calls.append({"method": "ping"})
+                        return True
+
+                    def scan_iter(self, *args, **kwargs):
+                        redis_calls.append({"method": "scan_iter", "kwargs": dict(kwargs)})
+                        return []
+
+                    def get(self, key):
+                        redis_calls.append({"method": "get", "key": str(key)})
+                        return None
+
+                    def srem(self, *args, **kwargs):
+                        redis_calls.append({"method": "srem"})
+                        return 0
+
+                    def delete(self, *args, **kwargs):
+                        redis_calls.append({"method": "delete"})
+                        return 0
+
+                fake_redis = types.ModuleType("redis")
+                fake_redis_exceptions = types.ModuleType("redis.exceptions")
+
+                class RedisConnectionError(Exception):
+                    pass
+
+                class RedisTimeoutError(Exception):
+                    pass
+
+                def from_url(url, **kwargs):
+                    redis_calls.append({"method": "from_url", "url": str(url), "kwargs": dict(kwargs)})
+                    return FakeRedisClient()
+
+                fake_redis.from_url = from_url
+                fake_redis_exceptions.ConnectionError = RedisConnectionError
+                fake_redis_exceptions.TimeoutError = RedisTimeoutError
+                fake_redis.exceptions = fake_redis_exceptions
+                sys.modules["redis"] = fake_redis
+                sys.modules["redis.exceptions"] = fake_redis_exceptions
+
+                data_dir = Path(os.environ["APP_DATA_DIR"])
+                db_path = data_dir / "history.db"
+                metrics_dir = Path(os.environ["PROMETHEUS_MULTIPROC_DIR"])
+
+                def snapshot():
+                    process_module = sys.modules.get("core.process")
+                    return {
+                        "db_exists": db_path.exists(),
+                        "metrics_dir_exists": metrics_dir.exists(),
+                        "shell_handler_count": len(logging.getLogger("shell").handlers),
+                        "redis_calls": list(redis_calls),
+                        "redis_client_initialized": bool(
+                            process_module is not None and getattr(process_module, "redis_client", None) is not None
+                        ),
+                        "process_initialized": bool(
+                            process_module is not None and getattr(process_module, "_process_initialized", False)
+                        ),
+                        "app_start_env_set": bool(os.environ.get("DARKLAB_APP_START_TIME_SECONDS")),
+                        "metrics_module_loaded": "services.metrics" in sys.modules,
+                    }
+
+                import app
+                import app_factory
+                import blueprints.assets
+                import extensions
+                import services.ai.worker
+                import services.commands.builtins_runtime
+                import services.pty.service
+
+                import_state = snapshot()
+                first_app = app.create_app({
+                    "rate_limit_enabled": False,
+                    "TESTING": True,
+                    "SERVER_NAME": "first.example.test",
+                })
+                second_app = app.create_app({
+                    "rate_limit_enabled": True,
+                    "TESTING": False,
+                    "SERVER_NAME": "second.example.test",
+                })
+                first_static_dir = Path(tempfile.mkdtemp())
+                second_static_dir = Path(tempfile.mkdtemp())
+                (first_static_dir / "marker.txt").write_text("first", encoding="utf-8")
+                (second_static_dir / "marker.txt").write_text("second", encoding="utf-8")
+                first_app.static_folder = str(first_static_dir)
+                second_app.static_folder = str(second_static_dir)
+                with first_app.app_context():
+                    first_asset_version = app._asset_version("/static/marker.txt")
+                with second_app.app_context():
+                    second_asset_version = app._asset_version("/static/marker.txt")
+                factory_state = snapshot()
+
+                from runtime_bootstrap import bootstrap
+
+                boot_app = bootstrap()
+                bootstrap_state = snapshot()
+
+                print(json.dumps({
+                    "import": import_state,
+                    "factory": factory_state,
+                    "factory_distinct": first_app is not second_app,
+                    "factory_blueprint_count": len(first_app.blueprints),
+                    "factory_override_false": first_app.config["RATELIMIT_ENABLED"],
+                    "factory_override_true": second_app.config["RATELIMIT_ENABLED"],
+                    "factory_testing_override": first_app.config["TESTING"],
+                    "factory_server_name_override": first_app.config["SERVER_NAME"],
+                    "factory_before_count": sum(len(handlers) for handlers in first_app.before_request_funcs.values()),
+                    "factory_after_count": sum(len(handlers) for handlers in first_app.after_request_funcs.values()),
+                    "factory_error_handler_codes": sorted(int(code) for code in first_app.error_handler_spec[None]),
+                    "factory_limiter_configs_independent": (
+                        first_app.config["RATELIMIT_ENABLED"] is False
+                        and second_app.config["RATELIMIT_ENABLED"] is True
+                    ),
+                    "factory_asset_versions_distinct": first_asset_version != second_asset_version,
+                    "factory_first_asset_version_expected": (
+                        first_asset_version == hashlib.sha256(b"first").hexdigest()[:12]
+                    ),
+                    "factory_second_asset_version_expected": (
+                        second_asset_version == hashlib.sha256(b"second").hexdigest()[:12]
+                    ),
+                    "factory_has_jinja_globals": all(
+                        name in first_app.jinja_env.globals
+                        for name in ("static_asset", "asset_bundle", "asset_bundle_script_type")
+                    ),
+                    "bootstrap": bootstrap_state,
+                    "bootstrap_app_name": boot_app.name,
+                    "app_factory_module": app_factory.__name__,
+                    "app_redis_dynamic": app.process_state.redis_client is sys.modules["core.process"].redis_client,
+                    "assets_redis_dynamic": bool(blueprints.assets.redis_client),
+                    "pty_redis_dynamic": bool(services.pty.service.redis_client),
+                    "builtin_runtime_default_redis_dynamic": bool(
+                        services.commands.builtins_runtime.run_builtin_status.__defaults__[1]
+                    ),
+                }))
+                """
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=REPO_ROOT / "app",
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, result.stderr + result.stdout
+
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+        import_state = payload["import"]
+        factory_state = payload["factory"]
+        bootstrap_state = payload["bootstrap"]
+
+        for state in (import_state, factory_state):
+            assert state["db_exists"] is False
+            assert state["metrics_dir_exists"] is False
+            assert state["shell_handler_count"] == 0
+            assert state["redis_calls"] == []
+            assert state["redis_client_initialized"] is False
+            assert state["process_initialized"] is False
+            assert state["app_start_env_set"] is False
+            assert state["metrics_module_loaded"] is False
+
+        assert payload["factory_distinct"] is True
+        assert payload["factory_blueprint_count"] == 14
+        assert payload["factory_override_false"] is False
+        assert payload["factory_override_true"] is True
+        assert payload["factory_testing_override"] is True
+        assert payload["factory_server_name_override"] == "first.example.test"
+        assert payload["factory_before_count"] >= 3
+        assert payload["factory_after_count"] >= 1
+        assert payload["factory_error_handler_codes"] == [429, 500]
+        assert payload["factory_limiter_configs_independent"] is True
+        assert payload["factory_asset_versions_distinct"] is True
+        assert payload["factory_first_asset_version_expected"] is True
+        assert payload["factory_second_asset_version_expected"] is True
+        assert payload["factory_has_jinja_globals"] is True
+        assert payload["app_factory_module"] == "app_factory"
+
+        assert bootstrap_state["db_exists"] is True
+        assert bootstrap_state["metrics_dir_exists"] is True
+        assert bootstrap_state["shell_handler_count"] == 1
+        assert {call["method"] for call in bootstrap_state["redis_calls"]} >= {"from_url", "ping"}
+        assert bootstrap_state["redis_client_initialized"] is True
+        assert bootstrap_state["process_initialized"] is True
+        assert bootstrap_state["app_start_env_set"] is True
+        assert payload["bootstrap_app_name"] == "app"
+        assert payload["app_redis_dynamic"] is True
+        assert payload["assets_redis_dynamic"] is True
+        assert payload["pty_redis_dynamic"] is True
+        assert payload["builtin_runtime_default_redis_dynamic"] is True
+
     def test_workspace_repair_targets_children_inside_session_directories(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
 
@@ -14522,10 +14878,19 @@ class TestEntrypointWorkspaceRepair:
         gunicorn_conf = (REPO_ROOT / "app" / "gunicorn_conf.py").read_text()
 
         assert "--config /app/gunicorn_conf.py" in entrypoint
+        assert "wsgi:application" in entrypoint
+        assert "app:app" not in entrypoint
         assert "def child_exit(" in gunicorn_conf
         assert "multiprocess.mark_process_dead(worker.pid)" in gunicorn_conf
         assert "def worker_exit(" in gunicorn_conf
         assert "close_postgres_pool()" in gunicorn_conf
+
+    def test_playwright_server_uses_wsgi_application_entrypoint(self):
+        server_helper = (REPO_ROOT / "scripts" / "playwright" / "run_e2e_server.sh").read_text()
+
+        assert "FLASK_APP=wsgi.py" in server_helper
+        assert "wsgi:application" in server_helper
+        assert "app:app" not in server_helper
 
 
 class TestAIRuntimeWiring:
@@ -17432,7 +17797,7 @@ class TestRunBrokerMemoryStore:
             (b"2-0", {b"payload": b'{"type":"output","text":"hello"}'}),
         ]
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis):
+        with mock.patch.object(process, "redis_client", fake_redis):
             events = run_broker._RedisRunBrokerStore().events_after("run-1", after_id="1-0", limit=10)
 
         assert [(event.event_id, event.payload) for event in events] == [
@@ -17443,7 +17808,7 @@ class TestRunBrokerMemoryStore:
         fake_redis = mock.Mock()
         fake_redis.xrange.return_value = []
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis):
+        with mock.patch.object(process, "redis_client", fake_redis):
             run_broker._RedisRunBrokerStore().events_after("run-1", after_id="123-trim", limit=10)
 
         fake_redis.xrange.assert_called_once_with("runstream:run-1", min="0-0", count=10)
@@ -17456,7 +17821,7 @@ class TestRunBrokerMemoryStore:
         ]
         fake_redis.xlen.return_value = 3
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+        with mock.patch.object(process, "redis_client", fake_redis), \
              mock.patch.object(run_broker, "_replay_fetch_count", return_value=2):
             events = run_broker._RedisRunBrokerStore().replay("run-1")
 
@@ -17471,7 +17836,7 @@ class TestRunBrokerMemoryStore:
         fake_redis = mock.Mock()
         fake_redis.xadd.return_value = b"1-0"
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+        with mock.patch.object(process, "redis_client", fake_redis), \
              mock.patch.object(run_broker, "_redis_stream_maxlen", return_value=1234):
             event = run_broker._RedisRunBrokerStore().publish("run-1", "output", {"text": "hello"})
 
@@ -17483,7 +17848,7 @@ class TestRunBrokerMemoryStore:
         )
 
     def test_broker_requires_redis_when_configured(self):
-        with mock.patch.object(run_broker, "redis_client", None), \
+        with mock.patch.object(process, "redis_client", None), \
              mock.patch.dict(run_broker.CFG, {
                  "run_broker_enabled": True,
                  "run_broker_require_redis": True,
@@ -17494,7 +17859,7 @@ class TestRunBrokerMemoryStore:
             )
 
     def test_broker_allows_memory_store_when_redis_is_optional(self):
-        with mock.patch.object(run_broker, "redis_client", None), \
+        with mock.patch.object(process, "redis_client", None), \
              mock.patch.dict(run_broker.CFG, {
                  "run_broker_enabled": True,
                  "run_broker_require_redis": False,
@@ -22022,31 +22387,31 @@ class TestNormalizePermalinkLinesPromptEcho:
 class TestPermalinkErrorPage:
     def test_returns_404_status(self):
         with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert resp.status_code == 404
 
     def test_includes_noun_in_body(self):
         with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+            with _test_app().app_context():
                 resp = _permalink_error_page("run")
         assert b"run" in resp.data
 
     def test_includes_app_name(self):
         with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
-            with shell_app.app.app_context():
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"my-shell" in resp.data
 
     def test_mentions_retention_when_configured(self):
         with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"30 days" in resp.data or b"1 month" in resp.data
 
     def test_no_retention_mention_when_unlimited(self):
         with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         # Unlimited mode should not mention an automatic deletion period
         assert b"retention" not in resp.data.lower()
@@ -25653,7 +26018,7 @@ SQL syntax error near q</response>
                 "match_mode": "contains",
                 "pattern": "example",
             }
-            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
                 first = project_auto_promote.create_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
                 with pytest.raises(ProjectWorkspaceQuotaExceeded) as exc:
                     project_auto_promote.create_rule_on_conn(
@@ -26094,7 +26459,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_project(conn)
             self._insert_auto_promote_entity(conn, "ent-auto-scan-one", "domain", "one.example.com")
             self._insert_auto_promote_entity(conn, "ent-auto-scan-two", "domain", "two.example.com")
-            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
                 preview = project_auto_promote.preview_rule_on_conn(
                     conn,
                     "auto-session",
@@ -26158,7 +26523,7 @@ SQL syntax error near q</response>
                 },
             )
             with (
-                mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
+                mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
                 mock.patch.object(project_auto_promote.log, "warning") as warning_log,
             ):
                 summary = project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-cap")
@@ -26237,7 +26602,7 @@ SQL syntax error near q</response>
                     "pattern": "example",
                 },
             )
-            with mock.patch.dict(shell_app.CFG, {"max_project_entities_per_project": 1}, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, {"max_project_entities_per_project": 1}, clear=False):
                 result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
             rows = conn.execute(
                 "SELECT entity_id, source, review_state FROM project_links "
@@ -26778,7 +27143,7 @@ class TestBuiltinStatus:
 
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    with mock.patch("services.commands.builtins.redis_client", None):
+                    with mock.patch("services.commands.builtins.process_state.redis_client", None):
                         lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)

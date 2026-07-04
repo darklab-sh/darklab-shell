@@ -18,7 +18,7 @@ from core.helpers import get_log_session_id
 from core.output_signals import command_root as output_command_root
 from core.output_signals import extract_target
 from core.redaction import REDACTED_ENTITY_SENTINEL
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.commands.registry import (
     load_autocomplete_context_from_commands_registry,
     required_secrets_for_command,

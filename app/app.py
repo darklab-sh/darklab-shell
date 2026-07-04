@@ -8,111 +8,42 @@ Then open http://localhost:8888 or read the README.md for Docker instructions.
 import logging
 import os
 from pathlib import Path
-import signal  # noqa: F401 — re-exported for test compatibility
 import time
 import hashlib
 import json
+from uuid import uuid4
 
-from flask import Flask, jsonify, request
+from flask import current_app, has_app_context, jsonify, request
+from app_factory import create_app as _create_flask_app
 
-# Logging must be configured before other local imports — process.py
-# connects to Redis at module import time and emits log calls then.
-from config import (  # noqa: F401 — re-exported for test compatibility
-    APP_CONF_DIR,
-    APP_VERSION,
-    CFG,
-    CONFIG_LOAD_WARNINGS,
-    DARK_THEME,
-    SCANNER_PREFIX,
-    THEME_REGISTRY,
-    THEME_REGISTRY_MAP,
-    get_theme_entry,
-    theme_runtime_css_vars,
-)
-from core.logging_setup import configure_logging
-configure_logging(CFG)
+from config import APP_VERSION, CFG
+from runtime_bootstrap import bootstrap_runtime
+from extensions import limiter
+from core.helpers import get_client_ip, get_log_session_id, get_session_id
+import core.process as process_state
+from blueprints.assets import assets_bp
+from blueprints.api_v1 import api_v1_bp
+from blueprints.atlas import atlas_bp
+from blueprints.content import content_bp
+from blueprints.run import run_bp
+from blueprints.history import history_bp
+from blueprints.notifications import notifications_bp
+from blueprints.schedules import schedules_bp
+from blueprints.session import session_bp
+from blueprints.secrets import secrets_bp
+from blueprints.teams import teams_bp
+from blueprints.watchers import watchers_bp
+from blueprints.workspace import workspace_bp
+from blueprints.projects import projects_bp
+from core.http_rate_limit import check_dynamic_route_rate_limit
+from core.database import DB_BACKEND, db_connect
+from core.database_backend import DatabaseBackend
+from core.process import redis_storage_uri
+from services.workspace.files import cleanup_inactive_workspaces
+from services.metrics_lazy import app_metrics
+from services.api_v1.serialization import json_error
 
 log = logging.getLogger("shell")
-
-
-def _log_loaded_config() -> None:
-    for warning in CONFIG_LOAD_WARNINGS:
-        log.warning("CONFIG_LOCAL_LOAD_FAILED", extra=dict(warning))
-    conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
-    log.info(
-        "CONFIG_LOADED",
-        extra={
-            "conf_dir": str(conf_dir),
-            "local_overlay": (conf_dir / "config.local.yaml").exists(),
-            "database_backend": str(CFG.get("database_backend") or ""),
-            "workspace_enabled": bool(CFG.get("workspace_enabled")),
-            "log_level": str(CFG.get("log_level") or ""),
-            "log_format": str(CFG.get("log_format") or ""),
-        },
-    )
-
-
-_log_loaded_config()
-
-
-def _init_metrics_environment():
-    from services.metrics import setup_prometheus_multiproc_dir  # noqa: PLC0415
-    path = setup_prometheus_multiproc_dir(CFG)
-    os.environ.setdefault("DARKLAB_APP_START_TIME_SECONDS", str(int(time.time())))
-    return path
-
-
-def _warn_workspace_root_config_drift(cfg, environ=None):
-    """Warn when container env and app config point at different workspace roots."""
-    active_environ = os.environ if environ is None else environ
-    env_root = str(active_environ.get("WORKSPACE_ROOT") or "").strip()
-    cfg_root = str(cfg.get("workspace_root") or "").strip()
-    if not env_root or not cfg_root:
-        return
-    normalized_env_root = Path(env_root).expanduser().resolve(strict=False)
-    normalized_cfg_root = Path(cfg_root).expanduser().resolve(strict=False)
-    if normalized_env_root == normalized_cfg_root:
-        return
-    log.warning(
-        "WORKSPACE_ROOT_MISMATCH",
-        extra={
-            "workspace_root_env": str(normalized_env_root),
-            "workspace_root_config": str(normalized_cfg_root),
-        },
-    )
-
-
-_warn_workspace_root_config_drift(CFG)
-_init_metrics_environment()
-
-# Import blueprints and shared helpers after logging is configured.
-from extensions import limiter  # noqa: E402
-from core.helpers import get_client_ip, get_log_session_id, get_session_id  # noqa: E402, F401 — re-exported
-from blueprints.assets import assets_bp  # noqa: E402
-from blueprints.api_v1 import api_v1_bp  # noqa: E402
-from blueprints.atlas import atlas_bp  # noqa: E402
-from blueprints.content import content_bp  # noqa: E402
-from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
-from blueprints.history import history_bp  # noqa: E402
-from blueprints.notifications import notifications_bp  # noqa: E402
-from blueprints.schedules import schedules_bp  # noqa: E402
-from blueprints.session import session_bp  # noqa: E402
-from blueprints.secrets import secrets_bp  # noqa: E402
-from blueprints.teams import teams_bp  # noqa: E402
-from blueprints.watchers import watchers_bp  # noqa: E402
-from blueprints.workspace import workspace_bp  # noqa: E402
-from blueprints.projects import projects_bp  # noqa: E402
-from core.http_rate_limit import check_dynamic_route_rate_limit  # noqa: E402
-from core.database import DB_BACKEND, db_connect  # noqa: E402
-from core.database_backend import DatabaseBackend  # noqa: E402
-from core.process import cleanup_stale_active_run_metadata, redis_client  # noqa: E402
-from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
-from services import metrics as app_metrics  # noqa: E402
-from services.api_v1.serialization import json_error  # noqa: E402
-
-app = Flask(__name__, template_folder="templates")
-app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
-limiter.init_app(app)
 
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
 _SQLITE_WAL_CHECKPOINT_INTERVAL_SECONDS = 300
@@ -130,6 +61,25 @@ _ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "m
 _VALID_ASSET_BUNDLE_MODES = frozenset({"source", "bundle"})
 _WARNED_INVALID_ASSET_BUNDLE_MODES: set[str] = set()
 _LOGGED_ASSET_BUNDLE_MODES: set[str] = set()
+_REQUEST_ID_MAX_LENGTH = 64
+
+
+def _bounded_request_id(value: object = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return uuid4().hex
+    safe = "".join(ch for ch in raw if ch.isalnum() or ch in {"-", "_", "."})
+    return (safe or uuid4().hex)[:_REQUEST_ID_MAX_LENGTH]
+
+
+def _current_request_id() -> str:
+    return str(request.environ.get("darklab_request_id") or "")
+
+
+def _active_static_folder() -> str:
+    if has_app_context():
+        return str(current_app.static_folder or "")
+    return str(Path(__file__).resolve().parent / "static")
 
 
 def _should_log_request_completed() -> bool:
@@ -202,13 +152,13 @@ def _hashed_static_asset_url(path: str) -> str:
 def _asset_version(path: str) -> str:
     local_path: Path | None = None
     if path.startswith("/static/"):
-        local_path = Path(app.static_folder or "") / path.removeprefix("/static/")
+        local_path = Path(_active_static_folder()) / path.removeprefix("/static/")
     elif path.startswith("/vendor/"):
         vendor_path = path.removeprefix("/vendor/")
         if vendor_path.startswith("fonts/"):
-            local_path = Path(app.static_folder or "") / vendor_path
+            local_path = Path(_active_static_folder()) / vendor_path
         else:
-            local_path = Path(app.static_folder or "") / "js/vendor" / vendor_path
+            local_path = Path(_active_static_folder()) / "js/vendor" / vendor_path
     if local_path is None:
         return APP_VERSION
     try:
@@ -328,37 +278,12 @@ def _asset_bundle_script_type(logical_name: str) -> str:
     return "module" if str(entry.get("type") or "").strip() == "esm" else ""
 
 
-app.jinja_env.globals["static_asset"] = _static_asset_url
-app.jinja_env.globals["asset_bundle"] = _asset_bundle
-app.jinja_env.globals["asset_bundle_script_type"] = _asset_bundle_script_type
-
-
-def _cleanup_active_run_metadata_on_startup():
-    try:
-        result = cleanup_stale_active_run_metadata()
-    except Exception:
-        log.exception("ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR")
-        return
-    removed = int(result.get("metadata_removed", 0) or 0)
-    session_members = int(result.get("session_members_removed", 0) or 0)
-    team_members = int(result.get("team_members_removed", 0) or 0)
-    if removed or session_members or team_members:
-        log.info("ACTIVE_RUN_METADATA_STARTUP_CLEANUP", extra={
-            "metadata_removed": removed,
-            "session_members_removed": session_members,
-            "team_members_removed": team_members,
-        })
-
-
-_cleanup_active_run_metadata_on_startup()
-
-
-@app.errorhandler(429)
 def _rate_limit_handler(e):
     ip = get_client_ip()
     scope = "secrets" if request.path.startswith("/session/secrets") else "global"
     log.warning("RATE_LIMIT", extra={
         "ip": ip,
+        "request_id": _current_request_id(),
         "path": request.path,
         "limit": str(e.description),
         "scope": scope,
@@ -376,18 +301,18 @@ def _rate_limit_handler(e):
     return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
 
 
-@app.before_request
 def _enforce_dynamic_route_rate_limit():
     result = check_dynamic_route_rate_limit(
         client_ip=get_client_ip(),
         path=request.path,
         cfg=CFG,
-        redis_client=redis_client,
+        redis_client=process_state.redis_client,
     )
     if result.allowed:
         return None
     log.warning("RATE_LIMIT", extra={
         "ip": get_client_ip(),
+        "request_id": _current_request_id(),
         "path": request.path,
         "limit": result.limit,
         "scope": "http",
@@ -398,16 +323,21 @@ def _enforce_dynamic_route_rate_limit():
     return jsonify({"error": "rate_limited", "retry_after": result.retry_after}), 429
 
 
-@app.errorhandler(500)
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
     try:
         session_for_log = get_log_session_id(get_session_id())
     except Exception:
+        log.debug(
+            "REQUEST_SESSION_RESOLUTION_FAILED",
+            exc_info=True,
+            extra={"method": request.method, "path": request.path, "request_id": _current_request_id()},
+        )
         session_for_log = ""
     log.error("UNHANDLED_EXCEPTION", exc_info=True, extra={
         "ip": get_client_ip(),
         "session": session_for_log,
+        "request_id": _current_request_id(),
         "method": request.method,
         "path": request.path,
         "status": 500,
@@ -417,7 +347,6 @@ def _server_error_handler(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-@app.before_request
 def _run_periodic_workspace_cleanup():
     _maybe_cleanup_workspaces()
     _maybe_checkpoint_sqlite_wal()
@@ -466,18 +395,17 @@ def _maybe_checkpoint_sqlite_wal():
         })
 
 
-@app.before_request
 def _log_request():
     request.environ["darklab_metrics_start"] = str(time.perf_counter())
+    request.environ["darklab_request_id"] = _bounded_request_id(request.headers.get("X-Request-ID"))
     if log.isEnabledFor(logging.DEBUG):
         ip = get_client_ip()
-        extra: dict = {"ip": ip, "method": request.method, "path": request.path}
+        extra: dict = {"ip": ip, "request_id": _current_request_id(), "method": request.method, "path": request.path}
         if request.query_string:
             extra["query_keys"] = sorted(request.args.keys())
         log.debug("REQUEST", extra=extra)
 
 
-@app.after_request
 def _log_response(response):
     response = _apply_immutable_asset_cache_headers(response)
     started = request.environ.get("darklab_metrics_start")
@@ -499,6 +427,7 @@ def _log_response(response):
             extra={
                 "ip": get_client_ip(),
                 "session": get_log_session_id(),
+                "request_id": _current_request_id(),
                 "method": request.method,
                 "path": request.path,
                 "endpoint": request.endpoint or "unknown",
@@ -509,7 +438,7 @@ def _log_response(response):
     if log.isEnabledFor(logging.DEBUG):
         ip    = get_client_ip()
         extra = {
-            "ip": ip, "method": request.method,
+            "ip": ip, "request_id": _current_request_id(), "method": request.method,
             "path": request.path, "status": response.status_code,
         }
         if response.content_length is not None:
@@ -518,30 +447,86 @@ def _log_response(response):
     return response
 
 
-app.register_blueprint(assets_bp)
-app.register_blueprint(api_v1_bp)
-app.register_blueprint(atlas_bp)
-app.register_blueprint(content_bp)
-app.register_blueprint(run_bp)
-app.register_blueprint(history_bp)
-app.register_blueprint(notifications_bp)
-app.register_blueprint(schedules_bp)
-app.register_blueprint(session_bp)
-app.register_blueprint(secrets_bp)
-app.register_blueprint(teams_bp)
-app.register_blueprint(watchers_bp)
-app.register_blueprint(workspace_bp)
-app.register_blueprint(projects_bp)
+def create_app(config=None):
+    active_config = CFG if config is None else config
+    return _create_flask_app(
+        active_config,
+        import_name=__name__,
+        template_folder="templates",
+        limiter_extension=limiter,
+        limiter_storage_uri=redis_storage_uri(active_config),
+        jinja_globals={
+            "static_asset": _static_asset_url,
+            "asset_bundle": _asset_bundle,
+            "asset_bundle_script_type": _asset_bundle_script_type,
+        },
+        blueprints=(
+            assets_bp,
+            api_v1_bp,
+            atlas_bp,
+            content_bp,
+            run_bp,
+            history_bp,
+            notifications_bp,
+            schedules_bp,
+            session_bp,
+            secrets_bp,
+            teams_bp,
+            watchers_bp,
+            workspace_bp,
+            projects_bp,
+        ),
+        error_handlers={
+            429: _rate_limit_handler,
+            500: _server_error_handler,
+        },
+        before_request_handlers=(
+            _enforce_dynamic_route_rate_limit,
+            _run_periodic_workspace_cleanup,
+            _log_request,
+        ),
+        after_request_handlers=(
+            _log_response,
+        ),
+    )
 
-log.info("APP_INITIALIZED", extra={
-    "version": APP_VERSION,
-    "database_backend": str(CFG.get("database_backend") or "sqlite"),
-    "workspace_enabled": bool(CFG.get("workspace_enabled")),
-})
+
+def _log_app_initialized(config=None, *, flask_app=None, duration_ms: int | None = None) -> None:
+    active_config = CFG if config is None else config
+    storage_uri = redis_storage_uri(active_config)
+    before_count = 0
+    after_count = 0
+    blueprint_count = 0
+    app_name = ""
+    if flask_app is not None:
+        app_name = str(getattr(flask_app, "name", "") or "")
+        blueprint_count = len(getattr(flask_app, "blueprints", {}) or {})
+        before_count = sum(len(handlers) for handlers in getattr(flask_app, "before_request_funcs", {}).values())
+        after_count = sum(len(handlers) for handlers in getattr(flask_app, "after_request_funcs", {}).values())
+    log.info("APP_INITIALIZED", extra={
+        "version": APP_VERSION,
+        "database_backend": str(active_config.get("database_backend") or "sqlite"),
+        "workspace_enabled": bool(active_config.get("workspace_enabled")),
+        "pid": os.getpid(),
+        "app_name": app_name,
+        "blueprint_count": blueprint_count,
+        "before_request_handlers": before_count,
+        "after_request_handlers": after_count,
+        "limiter_storage": "redis" if storage_uri.startswith("redis://") or storage_uri.startswith("rediss://") else "memory",
+        "duration_ms": int(duration_ms or 0),
+    })
 
 
-if __name__ == "__main__":
+def main() -> None:
     # For local development only. In production, Gunicorn is used as the WSGI server
     # via the Dockerfile CMD. Run locally with: python3 app.py
     print("darklab_shell running at http://localhost:8888")
-    app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec
+    started = time.monotonic()
+    bootstrap_runtime(CFG, cleanup_active_runs=True, runtime_name="dev")
+    dev_app = create_app()
+    _log_app_initialized(flask_app=dev_app, duration_ms=int((time.monotonic() - started) * 1000))
+    dev_app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec
+
+
+if __name__ == "__main__":
+    main()

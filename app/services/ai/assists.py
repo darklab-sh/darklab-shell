@@ -18,7 +18,7 @@ from services.ai.coordination import AICoordinationUnavailable, check_ai_route_r
 from services.ai.prompts import resolved_prompt_version
 from services.ai.schemas import NEXT_COMMANDS_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION
 from services.ai.storage import enqueue_assist, list_recent_assists_for_run
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.projects.active import get_active_project
 from services.projects.targets import list_project_targets
 

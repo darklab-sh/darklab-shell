@@ -478,7 +478,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── THEME.md                   # Theme authoring/reference guide and runtime token behavior
 ├── TODO.md                    # Internal task list, known issues, and product ideas
 ├── app/
-│   ├── app.py                  # Flask factory — logging setup, blueprint registration, before/after-request hooks
+│   ├── app.py                  # Local development entrypoint that boots the runtime and starts Flask
+│   ├── app_factory.py          # Generic Flask constructor used behind app.create_app()
 │   ├── blueprints/
 │   │   ├── api_v1.py           # /api/v1 headless REST, run streaming, artifact, and read-only project routes
 │   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
@@ -567,9 +568,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   │   └── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
-│   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
+│   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to factory construction)
 │   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
 │   ├── requirements.txt        # Python runtime dependencies
+│   ├── runtime_bootstrap.py    # Explicit web/worker startup for logging, metrics, Redis, and DB init
 │   ├── services/
 │   │   ├── __init__.py         # Service package marker
 │   │   ├── ai/
@@ -700,6 +702,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── metrics/
 │   │   │   ├── __init__.py     # Prometheus metric definitions, label normalizers, and render helpers
 │   │   │   └── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
+│   │   ├── metrics_environment.py # Prometheus multiprocess environment setup helper
+│   │   ├── metrics_lazy.py     # Lazy Prometheus metrics proxy for import-pure modules
 │   │   ├── notifications/
 │   │   │   ├── __init__.py     # Outbound notification service package marker and config helper
 │   │   │   ├── base.py         # Registerable notification channel base class and registry
@@ -1062,7 +1066,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
 │   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
 │   │       └── workspace_bridge.js # Files panel ESM bridge for lightweight shell close actions
-│   └── templates/
+│   ├── templates/
 │       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
 │       ├── diag_audit.html     # Operator audit-log viewer and export links (IP-gated)
@@ -1072,6 +1076,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       ├── permalink_error.html # Missing/expired permalink template
 │       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
 │       └── theme_vars_style.html # Injected CSS variable block for the active theme
+│   └── wsgi.py                 # Gunicorn WSGI entrypoint that calls bootstrap()
 ├── assets.config.json         # Frontend asset bundle membership/order for scripts/build_assets.mjs
 ├── assets/                     # README media assets (demo videos)
 ├── docker-compose.yml          # Local Compose stack with Redis, optional Postgres, optional local AI providers, and the shell app

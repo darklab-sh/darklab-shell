@@ -7,6 +7,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Decompose oversized blueprint and core modules](#decompose-oversized-blueprint-and-core-modules)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Dedicated positional workspace-file value type](#dedicated-positional-workspace-file-value-type)
@@ -21,8 +22,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
-  - [Adopt a Flask application factory](#adopt-a-flask-application-factory)
-  - [Decompose oversized blueprint and core modules](#decompose-oversized-blueprint-and-core-modules)
   - [Replace global singletons with injected dependencies](#replace-global-singletons-with-injected-dependencies)
   - [Typed, validated configuration model](#typed-validated-configuration-model)
   - [Right-size project documentation](#right-size-project-documentation)
@@ -35,7 +34,76 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open Open TODOs are currently tracked.
+### Decompose oversized blueprint and core modules
+
+- **Problem:** the largest modules mix routing, business logic, content generation, and (historically) persistence in single files, so review, testing, and change isolation are harder than the feature set warrants.
+- **Refreshed inventory (the original numbers were stale).** The data-access-layer and schema-unification work already shrank several named modules as a side effect, and surfaced new large service modules. Current line counts:
+  - Still oversized, in scope:
+    - `services/commands/registry.py` — 3,755 (untouched by prior work; the single biggest file)
+    - `blueprints/run.py` — 3,357 (10 routes but ~93 helper functions; ~1,390 lines of run-lifecycle logic sit before the first route, plus PTY route handlers)
+    - `blueprints/projects.py` — 2,786 (67 routes, already delegating to `services/projects/*`; oversized by route *count*, not fat handlers)
+    - `blueprints/api_v1.py` — 2,484 (68 routes, down from ~3,080; the same resource-count problem)
+    - `blueprints/atlas.py` — 1,459
+  - Already effectively resolved by prior work — confirm against the target and close out, do not re-split:
+    - `core/database.py` — 1,005 (was ~2,910; the `_migrate_schema` ladder was retired and `_create_schema` moved to `core/migrations/baseline.py`)
+    - `blueprints/history.py` — 1,417 (was ~2,580; queries moved to `services/history/queries.py`)
+  - New oversized service modules that appeared during the refactors — triage, do not assume all need splitting:
+    - `services/api_v1/openapi.py` — 2,597, `core/output_signals.py` — 2,186, `services/atlas/lookup.py` — 2,139, `services/projects/overview.py` — 1,766, `services/workspace/files.py` — 1,740, `core/migrations/baseline.py` — 1,689, `services/pty/service.py` — 1,553, `services/history/queries.py` — 1,428, `services/projects/queries.py` — 1,426, `services/atlas/import_workflow.py` — 1,426
+  - Current inventory items that Phase 0 must classify explicitly before work starts, because they are over or near the proposed thresholds:
+    - `blueprints/assets.py` — 1,341; decide whether to split static/vendor delivery, `/health`, `/diag`, and operator diagnostics into separate route modules or mark it deferred with a reason
+    - `core/process.py` — 1,169; classify as split-target or ratchet-only process-state module
+    - `services/metrics/__init__.py` — 983; classify metrics registration/collection shape before deciding whether to split
+    - `services/projects/auto_promote.py` — 963; classify as split-target or cohesive service
+    - `core/schema_manifest.py` — 899 and `core/database_backend.py` — 845; classify as cohesive infrastructure or split-target
+    - `services/commands/builtins_runtime.py` — 830 and `blueprints/teams.py` — 796; ratchet-track even if they stay under the first pass route/service target
+- **Why now:** the seams and precedents already exist.
+  - The `services/` tree is already the established home for extracted logic, and the data-access work made blueprints thin controllers, so route files mostly need *grouping*, not business-logic surgery.
+  - The commands package already demonstrates the target shape: `services/commands/` holds `builtins.py`, `builtins_runtime.py`, `builtins_intel.py`, `builtins_discovery.py`, `builtins_team.py`, `builtins_workspace.py`, `builtins_notify.py`, and `registry_loader.py` — `registry.py` is simply the one file that never got split.
+  - `tests/py/test_architecture.py` already exists as the enforcement home for a size ratchet.
+- **Scope:**
+  - In scope:
+    - split the still-oversized modules by **responsibility**, using the split strategy that fits each module *type* (below), so no route module exceeds ~800 lines and no service module owns more than one domain concern
+    - a **size ratchet** in `tests/py/test_architecture.py` seeded from the current per-file line counts, failing when any tracked module grows past its baseline, so decomposition sticks and new bloat is caught
+    - objective thresholds for the ratchet: route modules target <800 raw lines; service/core modules over ~1,200 raw lines must be classified as split-target or cohesive-artifact; service/core modules over ~800 raw lines are ratchet-tracked; cohesive artifacts get a short justification in the ratchet map
+    - a documented target and the split-by-type policy in `ARCHITECTURE.md`/`CONTRIBUTING.md`
+  - Out of scope:
+    - files that are legitimately one cohesive artifact where splitting hurts readability: `services/api_v1/openapi.py` (a single OpenAPI spec dict — data, not logic) and `core/migrations/baseline.py` (the generated-from-SQLite schema baseline). Keep these as ratchet-tracked "do not grow" entries rather than split targets, unless a natural seam emerges
+    - behavior changes of any kind — every split is a pure move-and-reimport refactor
+    - re-splitting `core/database.py` and `history.py`, which prior work already brought to/near target — only confirm and add them to the ratchet
+    - moving business logic that the data-access item already relocated; this item is about file organization, not another persistence pass
+- **Split strategy by module type** (line count is the trigger, responsibility is the cut):
+  - **Concern-heavy single files → sibling modules by concern.** `registry.py` mixes FAQ content generation (`_builtin_faq`, `render_faq_markup`, `_faq_inline_markup`), registry file load/normalize/merge (`_load_commands_registry_file`, the `_normalize_*` helpers, `_merge_command_registry_entries`), the frozen-dict/list machinery, registry build/access, and `validate_command`. Split into `registry_faq.py`, `registry_normalize.py` (or fold into the existing `registry_loader.py`), and `registry_validate.py`, leaving `registry.py` as the assembled registry surface. `output_signals.py`, `atlas/lookup.py`, `projects/overview.py`, and `workspace/files.py` get the same by-sub-responsibility treatment.
+  - **Business-logic-in-route files → services.** `run.py`'s ~1,390 lines of pre-route run-lifecycle/finalization helpers move into `services/runs/` (which already holds `persistence.py`, `start.py`, and finalization-adjacent helpers), and its five PTY routes either move to a `blueprints/pty.py` or delegate further into `services/pty/service.py`, leaving `run.py` a thin route file. Predeclare the target service seams in Phase 0 so this does not create a new catch-all module: likely `services/runs/lifecycle.py` or `execution.py` for subprocess lifecycle helpers, `services/runs/finalization.py` for completion/finding/artifact/project hooks, and route-only PTY handlers in a blueprint while transport/session logic stays in `services/pty`.
+  - **Route-count-heavy blueprints → split by resource group.** `projects.py`, `api_v1.py`, and `atlas.py` are already thin per route (~36–41 lines/route) but hold too many routes in one file. Split each into resource-group modules that register onto the same blueprint (for example Projects CRUD vs targets vs findings vs packages vs reports vs monitoring; API v1 by resource family) so the blueprint object stays one registration but the routes live in cohesive files.
+    - Registration contract: the existing public blueprint symbol stays in the parent module (`projects_bp`, `api_v1_bp`, `atlas_bp`, and so on); resource-group submodules import that blueprint object and register routes when imported; the parent imports those submodules exactly once for route registration; `app.create_app()` continues importing only the parent blueprint symbol. Route-registration side effects are allowed inside blueprint assembly, while runtime side effects remain forbidden at import.
+- **Phase 0 — inventory, targets, and ratchet:**
+  - Regenerate the exact per-file line-count inventory (the numbers above will drift); classify each module as split-target, already-resolved, or legitimately-cohesive.
+  - Land the ratchet in `tests/py/test_architecture.py` first: a per-file baseline map of the tracked modules that fails on any increase. Use raw line counts consistently, seed from current counts so it can only shrink, and include new split-package files with their own max thresholds so bloat cannot move sideways. Cohesive artifacts get "no growth beyond baseline"; active split-targets get temporary baselines during the phase and final max thresholds at close-out.
+  - Decide the split boundaries per module with the strategy above, and record the target file layout so splits are reviewable as move-only diffs. Include an explicit keep/split/defer decision for `blueprints/assets.py` rather than leaving it implicit.
+- **Phase 1 — `registry.py` (highest leverage, no route risk):**
+  - Extract FAQ generation, normalize/merge, and validation into sibling modules per the strategy; keep public imports stable (re-export from `registry.py` or update call sites). Drop `registry.py`'s ratchet baseline as it clears.
+- **Phase 2 — `run.py`:**
+  - Move the run-lifecycle/finalization helpers into `services/runs/`, and separate the PTY routes. `run.py` becomes a thin route file under ~800 lines. This is the riskiest blueprint split (SSE streaming, PTY transport, run finalization), so it gets the deepest regression attention.
+- **Phase 3 — resource-group blueprint splits:**
+  - Split `projects.py`, then `api_v1.py`, then `atlas.py` into resource-group modules registering onto the existing blueprint. One blueprint per phase-step, full suite green after each, no route path or response change.
+- **Phase 4 — remaining oversized service modules:**
+  - Split `output_signals.py`, `atlas/lookup.py`, `projects/overview.py`, `workspace/files.py`, `pty/service.py`, and the `*/queries.py` files by sub-responsibility where a clean seam exists; leave the cohesive-artifact files (`openapi.py`, `baseline.py`) as ratchet-only.
+- **Phase 5 — tests-follow-decomposition and close-out:**
+  - Where the monolithic test files (notably `tests/py/test_backend_modules.py`) now span multiple new module boundaries, split the corresponding test classes into files that mirror the modules decomposed by this plan so failures localize. This is useful but not required for every unrelated test area; do not turn decomposition close-out into a full test-suite reorganization. Keep `tests/README.md` counts and appendix entries current for any new test files.
+  - Empty the ratchet's shrink allowance to a hard "no tracked module over its target," update `ARCHITECTURE.md`/`CONTRIBUTING.md` with the split-by-type policy, and record the change in `CHANGELOG.md`.
+- **Test criteria:**
+  - The full suite passes after every phase — every split is behavior-preserving, so `test_routes.py`, `test_api_v1.py`, the container smoke test, and the blueprint/service unit tests are the primary regression net; route paths, response shapes, and status codes are unchanged.
+  - The size ratchet in `tests/py/test_architecture.py` passes at every phase with a monotonically shrinking per-file baseline, and enforces the final targets at close-out.
+  - Import-stability check: public symbols that moved keep working for their callers (either re-exported from the original module or all call sites updated), verified by the suite importing without error and by a grep/AST check for stale imports of moved symbols.
+  - Route registration check: the app's route map is unchanged after each blueprint split, except for internal endpoint function names if those are intentionally accepted and documented. Prefer a route-map snapshot/comparison test if no equivalent guard already exists.
+  - Documentation check: run `tests/py/test_docs.py` after every phase because new modules must be reflected in README project structure and any new test files must be reflected in the test appendix.
+  - Architecture guard check: keep the direct-database-access blueprint guard recursive over any new blueprint subpackages, so moving route handlers into grouped modules does not weaken the persistence boundary.
+  - The OpenAPI snapshot test still matches (`api_v1.py`/`openapi.py` route changes must not alter the generated `docs/api-v1-openapi.json`).
+- **Success criteria:**
+  - No route blueprint exceeds ~800 lines and no service module owns more than one domain concern; the split-target modules are decomposed and the already-resolved and cohesive-artifact modules are tracked by the ratchet.
+  - The size ratchet fails the build when a tracked module grows past its target, so the decomposition cannot silently regress.
+  - Every split was behavior-preserving: route paths, response shapes, and the OpenAPI snapshot are unchanged.
+  - The split-by-type policy is documented in `ARCHITECTURE.md`/`CONTRIBUTING.md`, and the change is recorded in `CHANGELOG.md`.
 
 ## Known Issues
 
@@ -178,20 +246,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Adopt a Flask application factory
-- Problem: `app/app.py` builds a module-level `app` and, as a side effect of importing it, configures logging, loads config, connects to Redis, initializes metrics, and runs startup DB cleanup. The file carries import-ordering warnings ("Logging must be configured before other local imports — process.py connects to Redis at module import time") and several `# noqa: F401 — re-exported for test compatibility` markers, which indicate tests reach into module internals because there is no clean construction seam.
-- Approach:
-  - Introduce `create_app(config)` that registers blueprints and returns a configured app, with no work triggered merely by importing the module.
-  - Move import-time side effects (Redis connection, metrics setup, startup cleanup, periodic-task registration) into explicit lifecycle hooks or a CLI entrypoint.
-  - Once construction is explicit, remove the re-export/compat shims and let tests build an app per configuration instead of monkeypatching globals.
-
-### Decompose oversized blueprint and core modules
-- Problem: the largest modules mix routing, business logic, and persistence in single files — `run.py` (~3,470 lines), `api_v1.py` (~3,080), `projects.py` (~2,770), `history.py` (~2,580), plus `services/commands/registry.py` (~3,760) and `core/database.py` (~2,910). Size alone makes review, testing, and change isolation harder, and it is what makes the app read as immature despite solid feature coverage.
-- Approach:
-  - Extract business logic into services and keep route files focused on HTTP concerns.
-  - Split by responsibility rather than by line count — for example separate resource groups within `api_v1.py`, and separate schema/init/query/retention concerns within `database.py`.
-  - Target no route module over ~800 lines and no service module owning more than one domain concern; the test suite should follow the same decomposition so failures localize.
 
 ### Replace global singletons with injected dependencies
 - Problem: `redis_client`, `limiter`, and `CFG` are module-level globals imported throughout the app. This is workable but drives the re-export/compat gymnastics in `app.py` and makes isolated testing awkward, since collaborators are bound at import time rather than passed in.

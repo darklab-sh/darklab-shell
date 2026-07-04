@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import signal
 import sqlite3
 import tempfile
 import textwrap
@@ -28,7 +29,8 @@ from typing import Any
 from urllib.parse import quote, urlencode
 import unittest.mock as mock
 
-import app as shell_app
+import app as shell_app_module
+from conftest import make_test_app as _test_app
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
@@ -110,8 +112,7 @@ def _assert_no_audit_private_export_strings(text: str) -> None:
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def get_client(*, use_forwarded_for=True):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+    client = _test_app().test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
@@ -328,9 +329,9 @@ class TestIndexRoute:
 
     def test_bundle_mode_renders_built_asset_bundles(self):
         client = get_client()
-        manifest = json.loads(shell_app._ASSET_MANIFEST_PATH.read_text(encoding="utf-8"))
+        manifest = json.loads(shell_app_module._ASSET_MANIFEST_PATH.read_text(encoding="utf-8"))
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
-            shell_app._STATIC_ASSET_URL_CACHE.clear()
+            shell_app_module._STATIC_ASSET_URL_CACHE.clear()
             body = client.get("/").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'type="module" src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
@@ -369,11 +370,11 @@ class TestIndexRoute:
         assert '/vendor/xterm.css?v=' not in body
 
     def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
+        monkeypatch.setattr(shell_app_module, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
-            with mock.patch.object(shell_app.log, "error") as mock_error:
+            with mock.patch.object(shell_app_module.log, "error") as mock_error:
                 with pytest.raises(RuntimeError, match="Run assets:sync"):
-                    shell_app._asset_bundle("app")
+                    shell_app_module._asset_bundle("app")
         mock_error.assert_called_once()
         assert mock_error.call_args[0][0] == "ASSET_MANIFEST_RESOLUTION_FAILED"
         assert mock_error.call_args.kwargs["exc_info"] is True
@@ -407,61 +408,61 @@ class TestIndexRoute:
                 },
             },
         }), encoding="utf-8")
-        monkeypatch.setattr(shell_app, "_ASSET_MANIFEST_PATH", manifest_path)
+        monkeypatch.setattr(shell_app_module, "_ASSET_MANIFEST_PATH", manifest_path)
 
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
-            shell_app._STATIC_ASSET_URL_CACHE.clear()
-            assert shell_app._asset_bundle("module-fixture") == [
+            shell_app_module._STATIC_ASSET_URL_CACHE.clear()
+            assert shell_app_module._asset_bundle("module-fixture") == [
                 "/static/build/module-fixture.123456789abc.js"
             ]
-            assert shell_app._asset_bundle_script_type("module-fixture") == "module"
-            assert shell_app._static_asset_url("/vendor/jspdf.umd.min.js") == (
+            assert shell_app_module._asset_bundle_script_type("module-fixture") == "module"
+            assert shell_app_module._static_asset_url("/vendor/jspdf.umd.min.js") == (
                 "/static/build/vendor-jspdf.123456789abc.js"
             )
 
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
-            sources = shell_app._asset_bundle("module-fixture")
-            vendor_url = shell_app._static_asset_url("/vendor/jspdf.umd.min.js")
+            sources = shell_app_module._asset_bundle("module-fixture")
+            vendor_url = shell_app_module._static_asset_url("/vendor/jspdf.umd.min.js")
         assert len(sources) == 1
         assert sources[0].startswith("/static/js/core/utils.js?v=")
         assert vendor_url.startswith("/vendor/jspdf.umd.min.js?v=")
 
     def test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back(self):
-        shell_app._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
+        shell_app_module._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "sideways"}):
-            with mock.patch.object(shell_app.log, "warning") as mock_warning:
-                assert shell_app._asset_bundle_mode() == "bundle"
-                assert shell_app._asset_bundle_mode() == "bundle"
+            with mock.patch.object(shell_app_module.log, "warning") as mock_warning:
+                assert shell_app_module._asset_bundle_mode() == "bundle"
+                assert shell_app_module._asset_bundle_mode() == "bundle"
         mock_warning.assert_called_once()
         assert mock_warning.call_args[0][0] == "ASSET_BUNDLE_MODE_INVALID"
         assert mock_warning.call_args.kwargs["extra"] == {
             "configured_mode": "sideways",
             "fallback_mode": "bundle",
         }
-        shell_app._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
+        shell_app_module._WARNED_INVALID_ASSET_BUNDLE_MODES.clear()
 
     def test_asset_bundle_mode_selection_logs_info_once_per_mode(self):
-        shell_app._LOGGED_ASSET_BUNDLE_MODES.clear()
+        shell_app_module._LOGGED_ASSET_BUNDLE_MODES.clear()
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
-            with mock.patch.object(shell_app.log, "info") as mock_info:
-                assert shell_app._asset_bundle_mode() == "source"
-                assert shell_app._asset_bundle_mode() == "source"
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
+                assert shell_app_module._asset_bundle_mode() == "source"
+                assert shell_app_module._asset_bundle_mode() == "source"
         mock_info.assert_called_once()
         assert mock_info.call_args[0][0] == "ASSET_BUNDLE_MODE_SELECTED"
         assert mock_info.call_args.kwargs["extra"] == {"asset_bundle_mode": "source"}
-        shell_app._LOGGED_ASSET_BUNDLE_MODES.clear()
+        shell_app_module._LOGGED_ASSET_BUNDLE_MODES.clear()
 
     def test_asset_version_fallback_logs_warning(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warning:
-            version = shell_app._asset_version("/static/js/does-not-exist.js")
-        assert version == shell_app.APP_VERSION
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warning:
+            version = shell_app_module._asset_version("/static/js/does-not-exist.js")
+        assert version == shell_app_module.APP_VERSION
         mock_warning.assert_called_once()
         assert mock_warning.call_args[0][0] == "ASSET_VERSION_FALLBACK"
         assert mock_warning.call_args.kwargs["exc_info"] is True
         extra = mock_warning.call_args.kwargs["extra"]
         assert extra["asset_path"] == "/static/js/does-not-exist.js"
         assert extra["local_path"].endswith("static/js/does-not-exist.js")
-        assert extra["fallback_version"] == shell_app.APP_VERSION
+        assert extra["fallback_version"] == shell_app_module.APP_VERSION
 
     def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
         client = get_client()
@@ -645,7 +646,7 @@ class TestSecretsRoutes:
             assert listed.status_code == 401
             assert listed.get_json()["error"] == "session_required"
 
-            with mock.patch.dict(shell_app.app.config, {"ALLOW_LEGACY_TEST_SESSION_IDS": False}):
+            with mock.patch.dict(client.application.config, {"ALLOW_LEGACY_TEST_SESSION_IDS": False}):
                 created = client.post(
                     "/session/secrets",
                     headers={"X-Session-ID": "../bad"},
@@ -2329,7 +2330,7 @@ class TestTeamRoutes:
             assert detail_payload["recovery_codes"][0]["used_at"] == ""
             assert "code_hash" not in detail.get_data(as_text=True)
 
-            with mock.patch.object(shell_app.log, "error") as mock_error, mock.patch(
+            with mock.patch.object(shell_app_module.log, "error") as mock_error, mock.patch(
                 "services.teams.storage.rotate_team_recovery_code",
                 side_effect=RuntimeError("recovery unavailable"),
             ):
@@ -2365,11 +2366,11 @@ class TestTeamRoutes:
             other_session_id = "tok_team_read_rate_other"
             self._register_session_token(session_id)
             self._register_session_token(other_session_id)
-            monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
-            monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
-            monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1)
-            monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 100)
-            monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1000)
+            monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
+            monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1000)
+            monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_minute", 1)
+            monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_second", 100)
+            monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1000)
 
             first = client.get("/session/teams", headers={"X-Session-ID": session_id})
             second = client.get("/session/teams", headers={"X-Session-ID": session_id})
@@ -2564,7 +2565,7 @@ class TestTeamRoutes:
             assert late_join.status_code == 400
             assert late_join.get_json()["message"] == "Invite code has already been used"
 
-            with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
                 denied = client.post(
                     f"/session/teams/{team_id}/invites",
                     headers={"X-Session-ID": operator_token},
@@ -4039,8 +4040,8 @@ class TestTeamRoutes:
             _CapturedThread.instances = []
             fake_proc = _RouteFakeProc(pid=8790)
 
-            with mock.patch("config.CFG", {**shell_app.CFG, **workspace_cfg}), \
-                 mock.patch("blueprints.run.CFG", {**shell_app.CFG, **workspace_cfg}), \
+            with mock.patch("config.CFG", {**shell_app_module.CFG, **workspace_cfg}), \
+                 mock.patch("blueprints.run.CFG", {**shell_app_module.CFG, **workspace_cfg}), \
                  mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
                  mock.patch("blueprints.run.broker_available", return_value=True), \
                  mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
@@ -4260,20 +4261,20 @@ class TestTeamRoutes:
             run_id = "run-team-artifact-shared"
             artifact_id = "rfa_team_artifact_shared"
             artifact_body = b"team artifact body\n"
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 from services.teams.scope import team_owner_context
 
                 personal_shadow = resolve_workspace_path(
                     owner_token,
                     "reports/team-artifact.txt",
-                    shell_app.CFG,
+                    shell_app_module.CFG,
                     ensure_parent=True,
                 )
                 personal_shadow.write_bytes(b"personal shadow body\n")
                 artifact_path = workspace_files.resolve_owner_workspace_path(
                     team_owner_context(team_id, actor_session_id=owner_token),
                     "reports/team-artifact.txt",
-                    shell_app.CFG,
+                    shell_app_module.CFG,
                     ensure_parent=True,
                 )
                 artifact_path.write_bytes(artifact_body)
@@ -4319,7 +4320,7 @@ class TestTeamRoutes:
                 f"/projects/{project_id}/artifacts",
                 headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
             )
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 artifact_preview = client.get(
                     f"/projects/{project_id}/artifacts/{artifact_id}/preview",
                     headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
@@ -4338,7 +4339,7 @@ class TestTeamRoutes:
                 f"/projects/{project_id}/artifacts",
                 headers={"X-Session-ID": operator_token},
             )
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 package_created = client.post(
                     f"/projects/{project_id}/packages",
                     headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
@@ -4378,7 +4379,7 @@ class TestTeamRoutes:
                 f"/projects/{project_id}/packages",
                 headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
             )
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 package_download = client.get(
                     f"/projects/{project_id}/packages/{package['id']}/download",
                     headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
@@ -4466,7 +4467,7 @@ class TestTeamRoutes:
             )
             assert joined.status_code == 201
 
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 personal_write = client.post(
                     "/workspace/files",
                     headers={"X-Session-ID": owner_token},
@@ -4564,7 +4565,7 @@ class TestTeamRoutes:
                 (row["session_id"], row["team_id"], row["entity_id"])
                 for row in note_rows
             ] == [(operator_token, team_id, "shared/moved.txt")]
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 deleted = client.delete(
                     "/workspace/files?path=shared/moved.txt",
                     headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
@@ -4595,7 +4596,7 @@ class TestTeamRoutes:
             )
             assert joined.status_code == 201
 
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 written = client.post(
                     "/workspace/files",
                     headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
@@ -7173,8 +7174,8 @@ class TestProjectRoutes:
         client = get_client()
         remote_addr = f"2001:db8::{uuid.uuid4().hex[:16]}"
         probe_path = f"/nuclei-probe-{uuid.uuid4().hex}"
-        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_minute", 1)
-        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_second", 1)
+        monkeypatch.setitem(shell_app_module.CFG, "http_rate_limit_per_minute", 1)
+        monkeypatch.setitem(shell_app_module.CFG, "http_rate_limit_per_second", 1)
 
         first = client.get(
             probe_path,
@@ -7207,8 +7208,8 @@ class TestProjectRoutes:
     def test_static_assets_skip_baseline_http_rate_limit(self, monkeypatch):
         client = get_client()
         remote_addr = f"2001:db8::{uuid.uuid4().hex[:16]}"
-        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_minute", 1)
-        monkeypatch.setitem(shell_app.CFG, "http_rate_limit_per_second", 1)
+        monkeypatch.setitem(shell_app_module.CFG, "http_rate_limit_per_minute", 1)
+        monkeypatch.setitem(shell_app_module.CFG, "http_rate_limit_per_second", 1)
 
         first = client.get(
             "/static/js/app.js",
@@ -8232,7 +8233,7 @@ class TestProjectRoutes:
         )
         assert cross_session.status_code == 404
 
-    @mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False)
+    @mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}, clear=False)
     def test_links_run_and_unlinks_without_duplicate_rows(self):
         client = get_client()
         session_id = self._session_id("project-link")
@@ -8356,8 +8357,8 @@ class TestProjectRoutes:
         note = json.loads(note_resp.data)["note"]
         assert note["body"] == "Confirm service owner"
         assert note["entity_id"] == run_id
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
-            artifact_path = resolve_workspace_path(session_id, "reports/run.txt", shell_app.CFG, ensure_parent=True)
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}):
+            artifact_path = resolve_workspace_path(session_id, "reports/run.txt", shell_app_module.CFG, ensure_parent=True)
             artifact_bytes = b"0123456789"
             artifact_path.write_bytes(artifact_bytes)
             artifact_hash = hashlib.sha256(artifact_bytes).hexdigest()
@@ -8451,7 +8452,7 @@ class TestProjectRoutes:
                 (f"note_fnd_direct_{run_id}", session_id, f"fnd_direct_{run_id}"),
             )
             conn.commit()
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}):
             summary = json.loads(client.get(
                 f"/projects/{project['id']}/summary",
                 headers={"X-Session-ID": session_id},
@@ -8820,7 +8821,7 @@ class TestProjectRoutes:
         assert [item["label"] for item in package_get["package"]["labels"]] == ["handoff"]
         assert package_get["package"]["note"]["body"] == "Package review note"
         with (
-            mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 2}),
+            mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True, "max_output_lines": 2}),
             mock.patch.object(project_routes.log, "info") as package_log,
         ):
             package_download = client.get(
@@ -9085,7 +9086,7 @@ class TestProjectRoutes:
         unsupported_file_link_lines, _ = execute_builtin_command("project link file reports/notes.txt", session_id)
         assert _builtin_line_text(unsupported_file_link_lines[0]) == "project: project links support run"
 
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}, clear=False):
             missing_label = client.post(
                 "/entities/workspace_file/reports/missing.txt/labels",
                 json={"label": "ghost"},
@@ -10075,7 +10076,7 @@ class TestProjectRoutes:
     def test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached(self):
         client = get_client()
         session_id = self._session_id("project-bulk-policy")
-        with mock.patch.dict(shell_app.CFG, {"max_project_links_per_project": 2}, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, {"max_project_links_per_project": 2}, clear=False):
             project = self._create_project(client, session_id)
             first_run_id = self._seed_run(session_id, "nmap darklab.sh")
             second_run_id = self._seed_run(session_id, "dig darklab.sh")
@@ -10115,7 +10116,7 @@ class TestProjectRoutes:
     def test_project_target_quota_ignores_bulk_linked_atlas_entities(self):
         client = get_client()
         session_id = self._session_id("project-target-quota")
-        with mock.patch.dict(shell_app.CFG, {
+        with mock.patch.dict(shell_app_module.CFG, {
             "max_project_links_per_project": 20,
             "max_project_entities_per_project": 20,
             "max_project_targets_per_project": 1,
@@ -10151,7 +10152,7 @@ class TestProjectRoutes:
     def test_bulk_project_atlas_links_obey_entity_quota(self):
         client = get_client()
         session_id = self._session_id("project-entity-quota")
-        with mock.patch.dict(shell_app.CFG, {
+        with mock.patch.dict(shell_app_module.CFG, {
             "max_project_links_per_project": 20,
             "max_project_entities_per_project": 1,
             "max_project_targets_per_project": 20,
@@ -10193,8 +10194,8 @@ class TestProjectRoutes:
         run_id = "run-" + uuid.uuid4().hex
         workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
         artifact_body = b"Authorization: Bearer abc123 from https://secret.darklab.sh and 192.168.1.5\n"
-        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
-            artifact_path = resolve_workspace_path(session_id, "reports/secrets.txt", shell_app.CFG, ensure_parent=True)
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+            artifact_path = resolve_workspace_path(session_id, "reports/secrets.txt", shell_app_module.CFG, ensure_parent=True)
             artifact_path.write_bytes(artifact_body)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -10281,7 +10282,7 @@ class TestProjectRoutes:
             )
             conn.commit()
 
-        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
             package_resp = client.post(
                 f"/projects/{project['id']}/packages",
                 json={
@@ -10324,7 +10325,7 @@ class TestProjectRoutes:
         assert "192.168.1.5" not in json.dumps(package)
         assert "Internal verification note" not in json.dumps(package)
 
-        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
             package_download = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
                 headers={"X-Session-ID": session_id},
@@ -10401,7 +10402,7 @@ class TestProjectRoutes:
     def test_project_workspace_write_quotas_return_conflict(self):
         client = get_client()
         session_id = self._session_id("project-quota")
-        with mock.patch.dict(shell_app.CFG, {
+        with mock.patch.dict(shell_app_module.CFG, {
             "max_projects_per_session": 5,
             "max_project_links_per_project": 1,
             "max_project_targets_per_project": 1,
@@ -10507,13 +10508,13 @@ class TestProjectRoutes:
         session_id = self._session_id("project-package-size")
         project = self._create_project(client, session_id)
         run_id = "run-" + uuid.uuid4().hex
-        with mock.patch.dict(shell_app.CFG, {
+        with mock.patch.dict(shell_app_module.CFG, {
             "workspace_enabled": True,
             "workspace_root": str(tmp_path / "workspaces"),
             "evidence_package_max_mb": 1,
             "evidence_package_max_uncompressed_mb": 5,
         }, clear=False):
-            artifact_path = resolve_workspace_path(session_id, "reports/big.txt", shell_app.CFG, ensure_parent=True)
+            artifact_path = resolve_workspace_path(session_id, "reports/big.txt", shell_app_module.CFG, ensure_parent=True)
             artifact_path.write_bytes(os.urandom(1024 * 1024 + 1))
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
@@ -11292,8 +11293,8 @@ class TestProjectRoutes:
                 started,
             ))
             artifact_expected_text[artifact_id] = artifact_text.strip()
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
-                resolve_workspace_path(session_id, artifact_path, shell_app.CFG, ensure_parent=True).write_text(
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+                resolve_workspace_path(session_id, artifact_path, shell_app_module.CFG, ensure_parent=True).write_text(
                     artifact_text,
                     encoding="utf-8",
                 )
@@ -11414,13 +11415,13 @@ class TestProjectRoutes:
             draft["selection_filters"][case["selection_key"]] = case["filters"]
             draft["selection_exclude_ids"][case["selection_key"]] = [excluded_id]
 
-            with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 context = compose_report_context(
                     draft,
                     project=project,
                     session_id=session_id,
                     project_id=project["id"],
-                    cfg=shell_app.CFG,
+                    cfg=shell_app_module.CFG,
                 )
                 preview_resp = client.post(
                     f"/projects/{project['id']}/report/preview",
@@ -11439,13 +11440,13 @@ class TestProjectRoutes:
             assert excluded_label not in preview_text
 
             with tempfile.TemporaryDirectory() as tmp:
-                with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+                with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                     archive_result = build_report_export_archive(
                         draft,
                         project=project,
                         session_id=session_id,
                         project_id=project["id"],
-                        cfg=shell_app.CFG,
+                        cfg=shell_app_module.CFG,
                         archive_dir=tmp,
                     )
                 try:
@@ -11515,8 +11516,8 @@ class TestProjectRoutes:
             "workspace_enabled": True,
             "workspace_root": str(tmp_path / "workspaces"),
         }
-        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
-            artifact_path = resolve_workspace_path(session_id, "reports/secrets.txt", shell_app.CFG, ensure_parent=True)
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+            artifact_path = resolve_workspace_path(session_id, "reports/secrets.txt", shell_app_module.CFG, ensure_parent=True)
             artifact_path.write_bytes(artifact_body)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -11575,7 +11576,7 @@ class TestProjectRoutes:
             "artifact_ids": [artifact_id],
             "entity_ids": [],
         }
-        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
             preview_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={"draft": draft},
@@ -11600,7 +11601,7 @@ class TestProjectRoutes:
         assert "Finding private note" not in report_text
 
         draft["export"]["redaction_mode"] = "raw"
-        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
             raw_preview_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={"draft": draft},
@@ -11633,7 +11634,7 @@ class TestProjectRoutes:
             )
             conn.commit()
 
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": False}, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": False}, clear=False):
             summary_resp = client.get(
                 f"/projects/{project['id']}/summary",
                 headers={"X-Session-ID": session_id},
@@ -12182,8 +12183,8 @@ class TestThemesRoute:
     def test_empty_registry_falls_back_to_built_in_dark_theme(self, monkeypatch):
         client = get_client(use_forwarded_for=False)
         monkeypatch.setitem(config.CFG, "default_theme", "theme_missing.yaml")
-        monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY_MAP", {})
-        monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY", [])
+        monkeypatch.setitem(config.get_theme_entry.__globals__, "THEME_REGISTRY_MAP", {})
+        monkeypatch.setitem(config.get_theme_entry.__globals__, "THEME_REGISTRY", [])
 
         data = json.loads(client.get("/themes").data)
         assert data["current"]["name"] == "dark"
@@ -12237,7 +12238,7 @@ class TestVendorAssets:
 
     def test_built_css_bundle_is_served_with_immutable_cache_header(self):
         client = get_client()
-        built_path = shell_app._asset_bundle_entry("app")["path"]
+        built_path = shell_app_module._asset_bundle_entry("app")["path"]
         resp = client.get(built_path)
         assert resp.status_code == 200
         assert "text/css" in resp.content_type
@@ -12248,7 +12249,7 @@ class TestVendorAssets:
             body,
         )
         self._assert_immutable_asset_cache(resp)
-        vendor_path = shell_app._load_asset_manifest()["static_assets"]["/vendor/jspdf.umd.min.js"]["path"]
+        vendor_path = shell_app_module._load_asset_manifest()["static_assets"]["/vendor/jspdf.umd.min.js"]["path"]
         vendor_resp = client.get(vendor_path)
         assert vendor_resp.status_code == 200
         assert "javascript" in vendor_resp.content_type
@@ -12281,11 +12282,10 @@ class TestVendorAssets:
 class TestDiagRoute:
     """Operator diagnostics endpoint — IP-gated, returns 404 when unconfigured."""
 
-    def _allowed_client(self):
+    def _allowed_client(self, *, init_db: bool = True):
         """Test client whose remote_addr (127.0.0.1) matches the allowed CIDR."""
-        shell_app.app.config["TESTING"] = True
         # No X-Forwarded-For — we want remote_addr to be 127.0.0.1 (Werkzeug default)
-        return shell_app.app.test_client()
+        return _test_app(init_db=init_db).test_client()
 
     def _record_audit_event(
         self,
@@ -12768,12 +12768,10 @@ class TestDiagRoute:
     def test_broker_section_omits_fallback_when_redis_configured(self):
         client = self._allowed_client()
         fake = self._fake_redis_client()
-        # `broker_mode()` reads from run_broker's own module-level reference,
-        # so patch both the assets-blueprint binding and the broker module.
-        import services.runs.broker as shell_broker
+        # `broker_mode()` reads the process-level Redis client dynamically.
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
-                with mock.patch.object(shell_broker, "redis_client", fake):
+                with mock.patch.object(process, "redis_client", fake):
                     data = json.loads(client.get("/diag?format=json").data)
         broker = data["broker"]
         assert broker["mode"] == "redis"
@@ -13576,11 +13574,12 @@ class TestDiagRoute:
             "-oA /workspace/scan-output ip.darklab.sh"
         )
         assert len(long_command) > 48, "fixture must exceed the old truncate length"
-        from core.database import db_connect
+        from core.database import db_connect, db_init
         run_id = f"diag-long-cmd-{uuid.uuid4().hex}"
         started = "2000-01-01 00:00:00"
         finished = "2099-01-01 00:00:00"
         try:
+            db_init()
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
@@ -13588,7 +13587,7 @@ class TestDiagRoute:
                     (run_id, "diag-test", long_command, started, finished, 0),
                 )
                 conn.commit()
-            client = self._allowed_client()
+            client = self._allowed_client(init_db=False)
             with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
                 body = client.get("/diag").get_data(as_text=True)
             # Full command appears at least twice: in `title=` and as cell text.
@@ -13919,9 +13918,9 @@ class TestWorkflowsRoute:
 
     def test_workspace_required_workflows_follow_files_feature_flag(self):
         client = get_client()
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": False}):
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": False}):
             disabled = json.loads(client.get("/workflows").data)
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}):
             enabled = json.loads(client.get("/workflows").data)
 
         disabled_titles = {item["title"] for item in disabled["items"]}
@@ -16760,9 +16759,9 @@ class TestWorkspaceRoutes:
 
     def test_periodic_cleanup_runs_before_requests_when_workspace_enabled(self):
         client = get_client()
-        previous_cleanup = shell_app._last_workspace_cleanup_monotonic
+        previous_cleanup = shell_app_module._last_workspace_cleanup_monotonic
         try:
-            shell_app._last_workspace_cleanup_monotonic = 0
+            shell_app_module._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
                 from services.workspace.files import ensure_session_workspace
                 expired_root = ensure_session_workspace("expired-session", config.CFG)
@@ -16774,13 +16773,13 @@ class TestWorkspaceRoutes:
                 assert resp.status_code == 200
                 assert not expired_root.exists()
         finally:
-            shell_app._last_workspace_cleanup_monotonic = previous_cleanup
+            shell_app_module._last_workspace_cleanup_monotonic = previous_cleanup
 
     def test_periodic_cleanup_skips_request_session_workspace(self):
         client = get_client()
-        previous_cleanup = shell_app._last_workspace_cleanup_monotonic
+        previous_cleanup = shell_app_module._last_workspace_cleanup_monotonic
         try:
-            shell_app._last_workspace_cleanup_monotonic = 0
+            shell_app_module._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
                 from services.workspace.files import ensure_session_workspace
                 current_root = ensure_session_workspace("active-session", config.CFG)
@@ -16795,21 +16794,21 @@ class TestWorkspaceRoutes:
                 assert current_root.exists()
                 assert not expired_root.exists()
         finally:
-            shell_app._last_workspace_cleanup_monotonic = previous_cleanup
+            shell_app_module._last_workspace_cleanup_monotonic = previous_cleanup
 
     def test_periodic_sqlite_wal_checkpoint_runs_before_requests(self):
         client = get_client()
-        previous_checkpoint = shell_app._last_sqlite_wal_checkpoint_monotonic
+        previous_checkpoint = shell_app_module._last_sqlite_wal_checkpoint_monotonic
         fake_conn = mock.MagicMock()
         fake_conn.__enter__.return_value = fake_conn
         fake_conn.__exit__.return_value = None
         fake_conn.execute.return_value.fetchone.return_value = (0, 12, 12)
         try:
-            shell_app._last_sqlite_wal_checkpoint_monotonic = 0
-            with mock.patch.object(shell_app, "DB_BACKEND", DatabaseBackend.SQLITE), \
-                 mock.patch.object(shell_app, "db_connect", return_value=fake_conn) as connect_db, \
-                 mock.patch.object(shell_app, "_sqlite_wal_checkpoint_monotonic", return_value=1000), \
-                 mock.patch.object(shell_app.log, "info") as log_info:
+            shell_app_module._last_sqlite_wal_checkpoint_monotonic = 0
+            with mock.patch.object(shell_app_module, "DB_BACKEND", DatabaseBackend.SQLITE), \
+                 mock.patch.object(shell_app_module, "db_connect", return_value=fake_conn) as connect_db, \
+                 mock.patch.object(shell_app_module, "_sqlite_wal_checkpoint_monotonic", return_value=1000), \
+                 mock.patch.object(shell_app_module.log, "info") as log_info:
                 resp = client.get("/health")
 
             assert resp.status_code == 200
@@ -16821,7 +16820,7 @@ class TestWorkspaceRoutes:
                 "checkpointed_frames": 12,
             })
         finally:
-            shell_app._last_sqlite_wal_checkpoint_monotonic = previous_checkpoint
+            shell_app_module._last_sqlite_wal_checkpoint_monotonic = previous_checkpoint
 
 
 # ── /runs ─────────────────────────────────────────────────────────────────────
@@ -17182,7 +17181,7 @@ class TestRunRoute:
             "killer_client_id": "client-2",
             "killer_tab_id": "tab-2",
         })
-        killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
+        killpg.assert_called_once_with(4321, signal.SIGTERM)
 
         team_scope = mock.Mock(team_id="team-1", is_team=True, member={"id": "tmem-killer", "role": "operator"})
         with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
@@ -17191,7 +17190,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.publish_run_event") as team_publish, \
              mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
              mock.patch("blueprints.run.os.killpg") as team_killpg, \
-             mock.patch.object(shell_app.log, "info") as team_info:
+             mock.patch.object(shell_app_module.log, "info") as team_info:
             team_resp = client.post(
                 "/kill",
                 headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1", "X-Client-ID": "client-2"},
@@ -17203,7 +17202,7 @@ class TestRunRoute:
             "killer_client_id": "client-2",
             "killer_tab_id": "tab-2",
         })
-        team_killpg.assert_called_once_with(8765, shell_app.signal.SIGTERM)
+        team_killpg.assert_called_once_with(8765, signal.SIGTERM)
         kill_extra = next(c.kwargs["extra"] for c in team_info.call_args_list if c.args and c.args[0] == "RUN_KILL")
         assert kill_extra["team_id"] == "team-1"
         assert kill_extra["actor_member_id"] == "tmem-killer"
@@ -21535,62 +21534,62 @@ class TestGetClientIp:
     otherwise falls back to the direct connection IP (REMOTE_ADDR)."""
 
     def setup_method(self, method):  # noqa: ARG002
-        self._original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        self._original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
 
     def teardown_method(self, method):  # noqa: ARG002
-        shell_app.log.setLevel(self._original_level)
+        shell_app_module.log.setLevel(self._original_level)
 
     def test_valid_ipv4_in_xff_is_used(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": "1.2.3.4"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "1.2.3.4"
 
     def test_valid_ipv6_in_xff_is_used(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": "2001:db8::1"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "2001:db8::1"
 
     def test_last_untrusted_ip_used_when_xff_has_multiple_trusted_hops(self):
-        original_cidrs = list(shell_app.CFG.get("trusted_proxy_cidrs", []))
+        original_cidrs = list(shell_app_module.CFG.get("trusted_proxy_cidrs", []))
         with mock.patch.dict(
-            shell_app.CFG,
+            shell_app_module.CFG,
             {"trusted_proxy_cidrs": original_cidrs + ["10.0.0.0/8"]},
             clear=False,
-        ), mock.patch.object(shell_app.log, "debug") as mock_debug:
+        ), mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": "5.6.7.8, 10.0.0.1"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "5.6.7.8"
 
     def test_untrusted_proxy_logs_proxy_ip_and_falls_back(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warning:
-            with shell_app.app.test_request_context(
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warning:
+            with _test_app().test_request_context(
                 "/health",
                 environ_base={"REMOTE_ADDR": "203.0.113.10"},
                 headers={"X-Forwarded-For": "1.2.3.4"},
             ):
-                assert shell_app.get_client_ip() == "203.0.113.10"
+                assert shell_app_module.get_client_ip() == "203.0.113.10"
         calls = [c for c in mock_warning.call_args_list if c[0][0] == "UNTRUSTED_PROXY"]
         assert calls[0].kwargs["extra"]["proxy_ip"] == "203.0.113.10"
         assert calls[0].kwargs["extra"]["forwarded_for"] == "1.2.3.4"
 
     def test_no_xff_falls_back_to_remote_addr(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client(use_forwarded_for=False).get("/health")
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         # Flask test client REMOTE_ADDR is 127.0.0.1
         assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"
 
     def test_non_ip_xff_falls_back_to_remote_addr(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": "not-an-ip"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"
 
     def test_empty_xff_falls_back_to_remote_addr(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": ""})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"

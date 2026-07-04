@@ -10,7 +10,7 @@ from typing import Any, Callable
 from config import CFG
 from core import process
 from core.helpers import get_log_session_id
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.intel import audit, cache
 from services.intel.base import (
     IntelProviderError,

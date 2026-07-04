@@ -323,7 +323,7 @@ The app treats TruffleHog's `Redacted` field as untrusted display data. Finding 
 
 SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=NORMAL`. This allows concurrent reads during writes, which is important with 4 Gunicorn workers all reading/writing the same database simultaneously. The `db_connect()` function applies these pragmas on every connection.
 
-Startup bootstrap is still serialized explicitly. `database.py` calls `db_init()` at module import time, so all Gunicorn workers can reach schema creation, migration, and retention pruning concurrently during boot. `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so that import-time bootstrap work happens once at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
+Startup bootstrap is serialized explicitly. The web entrypoint calls `runtime_bootstrap.bootstrap()`, and worker processes call `runtime_bootstrap.bootstrap_runtime(...)` with the startup steps they need. `db_init()` runs from that explicit bootstrap path rather than from module import. For SQLite, `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so schema creation, migration, and retention pruning happen one process at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
 
 ### Database Backend Support
 
@@ -350,10 +350,10 @@ The `runs_fts` virtual table uses the FTS5 **trigram** tokenizer when available 
 ### Structured Logging
 
 **Problem:** The original `logging.basicConfig(...)` in `app.py` had two issues:
-1. It was called after local imports, so `process.py`'s module-level Redis connection log fired before the formatter was installed, producing either no output (Python's lastResort suppresses INFO) or the wrong format.
+1. Logging setup lived in the app assembly module, which made startup order fragile and tied logging to importing the Flask app.
 2. All log records were plain strings, incompatible with GELF structured log aggregation.
 
-**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. In `app.py`, `configure_logging` is called immediately after `from config import CFG` and before all other local imports. This guarantees the logger is ready before `process.py` (or any other module) imports and logs at module scope.
+**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. Runtime startup calls it through `runtime_bootstrap.configure_runtime_logging(...)` before process setup, database initialization, or app construction. This keeps `import app` side-effect-free while still ensuring Redis, database, worker, and request lifecycle logs use the configured formatter.
 
 The `shell` logger is configured with `propagate = False` so records don't double-emit to the root logger. Werkzeug's own request lines are suppressed (`logging.getLogger("werkzeug").setLevel(ERROR)`) because request logging is handled by `before_request` / `after_request` hooks instead.
 

@@ -24,7 +24,7 @@ from services.download_tickets import (
     create_download_ticket,
     read_download_ticket,
 )
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
     EvidencePackageBuildError,

@@ -13,7 +13,7 @@ from typing import Any, Iterator
 
 from config import CFG
 from core import process
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.ai import ai_cfg
 
 log = logging.getLogger("shell")

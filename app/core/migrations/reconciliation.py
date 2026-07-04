@@ -22,6 +22,19 @@ class SchemaReconciliationError(RuntimeError):
 
 
 SUPPORTED_SQLITE_BRIDGE_RELEASE = "2.3.1"
+_SQLITE_PRELEDGER_WATCHER_ACK_STATE_CHECK = (
+    "watcher_fires:CHECK (ack_state IN "
+    "('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))"
+)
+_SQLITE_PRELEDGER_WATCHER_FIRE_KIND_CHECK = (
+    "watcher_fires:CHECK (fire_kind IN "
+    "('changed', 'recovered', 'failed', 'no_change', 'baseline_created', "
+    "'baseline_accepted', 'paused', 'unclassified'))"
+)
+_SQLITE_PRELEDGER_ALLOWED_MISSING_CONSTRAINTS = frozenset({
+    _SQLITE_PRELEDGER_WATCHER_ACK_STATE_CHECK,
+    _SQLITE_PRELEDGER_WATCHER_FIRE_KIND_CHECK,
+})
 
 
 def sqlite_has_migration_ledger(conn: Any) -> bool:
@@ -32,18 +45,34 @@ def sqlite_has_app_schema(conn: Any) -> bool:
     return any(sqlite_table_exists(conn, table_name) for table_name in SHARED_APP_TABLES)
 
 
-def verify_sqlite_head_or_raise(conn: Any) -> None:
+def verify_sqlite_head_or_raise(
+    conn: Any,
+    *,
+    tolerate_preledger_constraint_gaps: bool = False,
+) -> None:
     drifts = verify_sqlite_head_schema(conn)
+    tolerated_drifts: tuple[SchemaDrift, ...] = ()
+    if tolerate_preledger_constraint_gaps:
+        drifts, tolerated_drifts = _split_sqlite_preledger_drifts(drifts)
     if not drifts:
         log.debug("SCHEMA_VERIFICATION_COMPLETED", extra={
             "backend": DatabaseBackend.SQLITE.value,
             "drift_count": 0,
             "table_count": len(SHARED_APP_TABLES),
+            "tolerated_legacy_constraint_gaps": len(tolerated_drifts),
         })
         log.debug("SQLITE_SCHEMA_VERIFICATION_PASSED", extra={
             "backend": DatabaseBackend.SQLITE.value,
             "checked_tables": len(SHARED_APP_TABLES),
+            "tolerated_legacy_constraint_gaps": len(tolerated_drifts),
         })
+        if tolerated_drifts:
+            log.warning("SQLITE_SCHEMA_RECONCILIATION_TOLERATED_LEGACY_CONSTRAINT_GAP", extra={
+                "backend": DatabaseBackend.SQLITE.value,
+                "drift_count": len(tolerated_drifts),
+                "drift_sample": _format_schema_drifts(tolerated_drifts),
+                "reason": "sqlite_cannot_add_table_check_constraints_after_creation",
+            })
         return
     summary = _format_schema_drifts(drifts)
     log.error("SCHEMA_VERIFICATION_FAILED", extra={
@@ -89,7 +118,7 @@ def verify_postgres_head_or_raise(conn: Any) -> None:
 
 
 def stamp_verified_sqlite_head(conn: Any, migrations: tuple[Migration, ...], *, commit: bool = False) -> list[str]:
-    verify_sqlite_head_or_raise(conn)
+    verify_sqlite_head_or_raise(conn, tolerate_preledger_constraint_gaps=True)
     stamped = stamp_migration_versions(conn, migrations, backend=DatabaseBackend.SQLITE, commit=commit)
     if stamped:
         log.info("SQLITE_SCHEMA_RECONCILIATION_STAMPED", extra={
@@ -98,6 +127,22 @@ def stamp_verified_sqlite_head(conn: Any, migrations: tuple[Migration, ...], *, 
             "reason": "preledger_current_head",
         })
     return stamped
+
+
+def _split_sqlite_preledger_drifts(
+    drifts: tuple[SchemaDrift, ...],
+) -> tuple[tuple[SchemaDrift, ...], tuple[SchemaDrift, ...]]:
+    actionable: list[SchemaDrift] = []
+    tolerated: list[SchemaDrift] = []
+    for drift in drifts:
+        if (
+            drift.kind == "missing_constraint"
+            and drift.name in _SQLITE_PRELEDGER_ALLOWED_MISSING_CONSTRAINTS
+        ):
+            tolerated.append(drift)
+        else:
+            actionable.append(drift)
+    return tuple(actionable), tuple(tolerated)
 
 
 def _format_schema_drifts(drifts: tuple[SchemaDrift, ...], *, limit: int = 5) -> str:

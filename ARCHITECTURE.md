@@ -924,7 +924,9 @@ flowchart TB
     Projects["projects.py"]
   end
 
-  App["app.py"]
+  Factory["app_factory.py"]
+  Bootstrap["runtime_bootstrap.py"]
+  Wsgi["wsgi.py"]
 
   Config --> Logging
   Logging --> Helpers
@@ -942,17 +944,29 @@ flowchart TB
   BuiltinCommands --> Run
   CommandRules --> Projects
   BuiltinCommands --> Projects
-  Http --> App
+  Http --> Factory
+  Factory --> Wsgi
+  Bootstrap --> Wsgi
 ```
 
 - `config.py` is the root configuration/theme layer and stays free of Flask app dependencies.
-- `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
+- `runtime_bootstrap.py` owns startup side effects such as logging setup, metrics environment setup, Redis/process initialization, database initialization, and startup cleanup. `app.py` assembles the product app by collecting the limiter, blueprints, hooks, error handlers, and Jinja globals, then delegates the final Flask object creation to the generic constructor in `app_factory.py`. Metrics helpers use a lazy proxy so importing route modules does not initialize Prometheus before bootstrap prepares the multiprocess directory.
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
-- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
+- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` is the app assembly module and the local development entrypoint; `app_factory.py` stays piece-agnostic and builds a Flask app from explicitly supplied registrations.
 - AI assist service code keeps provider HTTP handling in `services.ai.client`, context assembly and redaction in `services.ai.context`, Redis-backed rate/concurrency coordination in `services.ai.coordination`, queue/cache persistence in `services.ai.storage`, route orchestration in `services.ai.assists`, suggestion validation in `services.ai.suggestions`, and the provider-call loop in `services.ai.worker`.
 - Shared diff service code keeps tool-aware classifier registration and parser helpers in `services.diff.classifiers` plus shared result constants in `services.diff.models`, so Watchers and run comparison can reuse the same per-tool diff logic instead of maintaining separate parser families.
 - Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package preset catalog loading and validation helpers in `services.projects.package_presets`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, safe project-link provenance shaping helpers in `services.projects.provenance`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, personal/team project owner predicates in `services.projects.scope`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles. Engagement report draft, template, composition, rendering, redaction, storage, and async archive export helpers live in `services.reports`.
+
+### Flask Construction And Startup Contract
+
+`app.create_app(config=None)` is the app-specific factory. It builds a Flask app, registers Darklab's blueprints, hooks, error handlers, Jinja globals, and limiter extension, then returns the app without running startup I/O. Uppercase keys in the optional mapping are copied into `app.config`; the existing lowercase `rate_limit_enabled` convenience maps to `RATELIMIT_ENABLED`. Route and service modules still read the global config until the typed settings work replaces that pattern.
+
+`app_factory.create_app(...) -> Flask` is the lower-level constructor used by `app.create_app(...)`. It accepts already-chosen extensions, blueprints, hooks, error handlers, and Jinja globals. Application code should normally call `app.create_app(...)` instead of this helper so the product wiring stays centralized.
+
+`runtime_bootstrap.bootstrap_runtime(...)` owns non-Flask startup work. Its toggles choose whether to prepare metrics, configure logging, initialize process/Redis state, run database initialization, and run guarded active-run cleanup. Notification, scheduler, and AI worker entrypoints use this helper and do not build a Flask app.
+
+`runtime_bootstrap.bootstrap(config=None)` is the web startup path. It runs the runtime bootstrap, calls `app.create_app(...)`, logs app-initialization context, and returns the Flask app. `wsgi.py` exposes `application = bootstrap()` for Gunicorn, while `python app.py` calls the same runtime pieces before starting Flask's local development server. Pytest clients use `make_test_app(init_db=True)` from `tests/py/conftest.py`, which builds apps through `app.create_app(...)` and initializes the test schema only when needed.
 
 ### Data Access Boundary
 
@@ -1764,8 +1778,18 @@ The current event inventory is:
 
 | Level | Event | Where | Key extra fields |
 | ------- | ------- | ------- | ----------------- |
-| DEBUG | `REQUEST` | `before_request` | ip, method, path, qs |
-| DEBUG | `RESPONSE` | `after_request` | ip, method, path, status, size |
+| DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
+| DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, status, size |
+| DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
+| DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
+| DEBUG | `RUNTIME_BOOTSTRAP_STEP_COMPLETED` | runtime bootstrap | step, runtime |
+| DEBUG | `RUNTIME_BOOTSTRAP_STEP_SKIPPED` | runtime bootstrap | step, reason, runtime |
+| DEBUG | `PROCESS_RUNTIME_INIT_STARTED` | process tracking startup | force, redis_configured, fake_redis |
+| DEBUG | `PROCESS_RUNTIME_INIT_SKIPPED` | process tracking startup | reason, redis_mode |
+| DEBUG | `DB_INIT_LOCK_WAITING` | database startup lock | backend, lock_path |
+| DEBUG | `DB_INIT_LOCK_ACQUIRED` | database startup lock | backend, lock_path, wait_ms |
+| DEBUG | `DB_INIT_LOCK_RELEASED` | database startup lock | backend, lock_path |
+| DEBUG | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_SKIPPED` | active-run startup cleanup | reason, pid |
 | DEBUG | `KILL_MISS` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role |
 | DEBUG | `HEALTH_OK` | `health()` | — |
 | DEBUG | `ACTIVE_RUNS_VIEWED` | `get_active_history_runs` | ip, session, count |
@@ -1787,6 +1811,8 @@ The current event inventory is:
 | DEBUG | `METRICS_INTEL_CACHE_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
 | DEBUG | `METRICS_AI_ASSIST_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
 | DEBUG | `AI_WORKER_TICK` | AI worker loop | processed |
+| DEBUG | `AI_WORKER_DEPENDENCIES_LOADING` | AI worker startup | — |
+| DEBUG | `AI_WORKER_DEPENDENCIES_SKIPPED` | AI worker startup | reason |
 | DEBUG | `AI_ASSIST_PROGRESS_UPDATE_FAILED` | AI worker progress storage | assist_id, run_id (+ traceback) |
 | DEBUG | `AI_COORDINATION_LEGACY_SLOT_DELETE_FAILED` | AI Redis coordination cleanup | (+ traceback) |
 | DEBUG | `NOTIFICATION_WORKER_TICK` | notification worker | delivered, limit |
@@ -1797,16 +1823,22 @@ The current event inventory is:
 | DEBUG | `BODY_STORE_DELETE_MISS` | large body storage | rel_path, kind |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format |
-| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled |
+| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
+| INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
+| INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
 | INFO | `DB_BACKEND_SELECTED` | `db_init` | backend |
 | INFO | `POSTGRES_POOL_OPENED` | Postgres backend pool | pool_min, pool_max, jit_enabled |
 | INFO | `POSTGRES_POOL_CLOSED` | Postgres backend pool | — |
 | INFO | `REDIS_CONNECTED` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db |
 | INFO | `REDIS_FAKE_ENABLED` | process tracking startup | fallback |
+| INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
+| INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
 | INFO | `MIGRATION_APPLIED` | Schema migration runner | version, migration_name |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
-| INFO | `GUNICORN_WORKER_EXITED` | Gunicorn worker hook | pid |
+| INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
+| INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
+| INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, status, duration_ms |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
 | INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
@@ -1915,12 +1947,15 @@ The current event inventory is:
 | INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
 | INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
+| INFO | `AI_WORKER_DEPENDENCIES_LOADED` | AI worker startup | variants, metrics_initialized |
 | INFO | `AI_WORKER_STARTED` | AI worker startup | — |
 | INFO | `AI_ASSIST_PROVIDER_REQUEST` | AI provider call start | assist_id, run_id, variant, model, connect_timeout_seconds, read_timeout_seconds |
 | INFO | `AI_ASSIST_COMPLETED` | AI worker completion | assist_id, run_id, variant, duration_ms, context_hash, input_chars, output_chars, estimated_input_tokens, redacted_bytes, suggestion_count, rejected_count, provider timing fields |
 | INFO | `AI_ASSIST_SUMMARY_FALLBACK` | AI summary orchestration | assist_id, run_id, variant, reason |
 | INFO | `AI_ASSIST_NEXT_COMMANDS_FALLBACK` | AI next-command orchestration | assist_id, run_id, variant, reason |
 | INFO | `AI_WORKER_STOPPED` | AI worker shutdown | — |
+| INFO | `NOTIFICATION_WORKER_STARTED` | notification worker | pid, poll_seconds, limit |
+| INFO | `NOTIFICATION_WORKER_STOPPED` | notification worker | pid |
 | INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
@@ -1997,7 +2032,8 @@ The current event inventory is:
 | WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
-| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit, scope |
+| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, request_id, path, limit, scope |
+| WARN | `RATE_LIMIT_STORAGE_FALLBACK` | rate-limit storage setup | reason, fallback, redis_configured |
 | WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
 | WARN | `CMD_TIMEOUT_TERMINATE_FAILED` | brokered run timeout cleanup | ip, run_id, session, cmd (+ traceback) |
 | WARN | `CLIENT_RUN_OUTPUT_INVALID` | client-side run persistence | ip, session, cmd, payload_type |
@@ -2009,6 +2045,7 @@ The current event inventory is:
 | WARN | `CONFIG_LOCAL_LOAD_FAILED` | config loading | path, error |
 | WARN | `POSTGRES_READ_RETRY` | Postgres backend read retry | sqlstate, operation, retry_delay_ms |
 | WARN | `REDIS_UNAVAILABLE` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db, redis_configured, fallback |
+| WARN | `WORKSPACE_ROOT_MISMATCH` | runtime bootstrap | workspace_root_env, workspace_root_config |
 | WARN | `AI_SECRET_LOOKUP_FAILED` | AI provider credentials | secret_name (+ traceback) |
 | WARN | `AI_CONTEXT_SECRET_METADATA_LOAD_FAILED` | AI context redaction | session (+ traceback) |
 | WARN | `AI_CONTEXT_FULL_OUTPUT_LOAD_FAILED` | AI context assembly | run_id, rel_path, error |
@@ -2025,6 +2062,7 @@ The current event inventory is:
 | WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message |
 | WARN | `AI_WORKER_DATABASE_INTERRUPTED` | AI worker database loop | error_type |
 | WARN | `ACTIVE_RUN_METADATA_DECODE_FAILED` | process tracking metadata | key, error |
+| WARN | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED` | active-run startup cleanup | reason, fallback, pid |
 | WARN | `REDIS_SESSION_SET_READ_FAILED` | process tracking metadata | key (+ traceback) |
 | WARN | `REDIS_SCAN_FAILED` | process tracking metadata | pattern (+ traceback) |
 | WARN | `METRICS_DB_COLLECT_FAILED` | Prometheus runtime collector | database_backend (+ traceback) |
@@ -2041,6 +2079,11 @@ The current event inventory is:
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
+| ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
+| ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
+| ERROR | `METRICS_ENVIRONMENT_SETUP_FAILED` | metrics startup | prometheus_multiproc_dir, source (+ traceback) |
+| ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |
 | ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |
 | ERROR | `WATCHER_FINALIZE_ERROR` | run finalization watcher hook | run_id, session (+ traceback) |
 | ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
@@ -2052,21 +2095,26 @@ The current event inventory is:
 | ERROR | `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` | Project auto-promote run-finalization service | session, team_id, run_id, project_id, rule_id, target_entity_kind, match_mode, limit (+ traceback) |
 | ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
 | ERROR | `NOTIFICATION_CHANNEL_SEND_EXCEPTION` | notification dispatcher | event_id, channel_id, kind, trigger (+ traceback) |
+| ERROR | `NOTIFICATION_WORKER_BOOTSTRAP_FAILED` | notification worker | phase (+ traceback) |
 | ERROR | `NOTIFICATION_WORKER_CRASHED` | notification worker | phase, limit, poll_seconds (+ traceback) |
 | ERROR | `POSTGRES_POOL_OPEN_FAILED` | Postgres backend pool | pool_min, pool_max, jit_enabled (+ traceback) |
 | ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, consecutive_failures, error, command_root (+ traceback) |
 | ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
+| ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
+| ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Schema migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
-| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, method, path, status (+ traceback) |
+| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, request_id, method, path, status (+ traceback) |
+| CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ### Logging Shape Notes
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
 - run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
+- web bootstrap runs active-run metadata cleanup through a Redis-backed ownership guard; no-Redis deployments keep the previous per-worker cleanup fallback, while multi-worker startup without Redis fails closed with `REDIS_REQUIRED_FOR_MULTI_WORKER`
 - diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the command-execution path
 - proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
 
@@ -2163,12 +2211,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,963
-- docs/inventory meta-tests: 54
-- `pytest`: 2275 (2234 behavior + 41 meta)
+- behavior tests: 3,971
+- docs/inventory meta-tests: 55
+- `pytest`: 2284 (2242 behavior + 42 meta)
 - `vitest`: 1473 (1460 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,017
+- total: 4,026
 
 ### Testing Architecture
 

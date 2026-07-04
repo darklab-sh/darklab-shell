@@ -8,7 +8,7 @@ from unittest import mock
 
 import pytest
 
-import app as shell_app
+from conftest import make_test_app as _test_app
 import config
 from core import database
 from core.database_backend import DatabaseBackend
@@ -16,8 +16,7 @@ from services import metrics as app_metrics
 
 
 def get_client(*, use_forwarded_for=True):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+    client = _test_app(init_db=False).test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client

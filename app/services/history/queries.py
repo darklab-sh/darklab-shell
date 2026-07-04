@@ -16,7 +16,7 @@ from core.database_backend import DatabaseBackend, SQLiteOperationalError, diale
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id, is_failed_exit_code
 from core.output_signals import command_root as output_command_root
 from core.process import active_runs_for_session
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.history.run_metadata import (
     history_add_filters,
     history_column_exists,

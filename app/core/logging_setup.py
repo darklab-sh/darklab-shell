@@ -9,14 +9,16 @@ Log level is controlled by CFG['log_level'] (default: INFO).
 Structured context is passed via Python's logging extra={} mechanism — extra
 fields appear as _field_name in GELF output and as key=value pairs in text mode.
 
-Call configure_logging(cfg) once, before importing any local module that may
-emit log records at import time (e.g. process.py, which attempts a Redis
-connection and logs the result during module initialisation).
+Call configure_logging(cfg) from the explicit runtime bootstrap before startup
+work emits operational logs. Importing app modules should not configure logging
+or connect to Redis by itself.
 """
 
 import json
 import logging
 import socket
+from collections.abc import Mapping
+from typing import Any
 
 from config import APP_VERSION
 
@@ -139,12 +141,12 @@ class _TextFormatter(logging.Formatter):
 # Public API
 # ---------------------------------------------------------------------------
 
-def configure_logging(cfg: dict) -> None:
+def configure_logging(cfg: Mapping[str, Any]) -> None:
     """
     Apply level and format from cfg to the 'shell' logger.
 
-    Must be called before any local module import that emits log records,
-    specifically before 'from process import ...' in app.py.
+    Runtime bootstrap calls this before process, database, or app startup work
+    emits operational logs.
     """
     level_name = str(cfg.get("log_level", "INFO")).upper()
     level      = getattr(logging, level_name, logging.INFO)

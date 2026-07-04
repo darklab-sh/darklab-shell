@@ -10,10 +10,8 @@ Usage in app.py:
 from flask_limiter import Limiter
 
 from core.helpers import get_client_ip
-from core.process import REDIS_URL, redis_client
 
 limiter = Limiter(
     key_func=get_client_ip,
     default_limits=[],
-    storage_uri=REDIS_URL if redis_client else "memory://",
 )

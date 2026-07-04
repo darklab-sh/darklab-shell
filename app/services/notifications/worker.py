@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 
 from config import CFG
 from core.database_backend import is_transient_postgres_error
-from core.logging_setup import configure_logging
+from runtime_bootstrap import bootstrap_runtime
 from services.notifications.dispatcher import dispatch_due_events, prune_sent_events
 
 log = logging.getLogger("shell")
@@ -31,7 +32,7 @@ def run_once(*, limit: int = 100) -> int:
 def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS, limit: int = 100) -> None:
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
-    log.info("NOTIFICATION_WORKER_STARTED")
+    log.info("NOTIFICATION_WORKER_STARTED", extra={"pid": os.getpid(), "poll_seconds": poll_seconds, "limit": limit})
     while not _STOP:
         phase = "run_once"
         try:
@@ -59,11 +60,15 @@ def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS, limit: int = 100)
         log.debug("NOTIFICATION_WORKER_TICK", extra={"delivered": delivered, "limit": limit})
         if delivered == 0:
             time.sleep(max(0.1, float(poll_seconds)))
-    log.info("NOTIFICATION_WORKER_STOPPED")
+    log.info("NOTIFICATION_WORKER_STOPPED", extra={"pid": os.getpid()})
 
 
 def main() -> None:
-    configure_logging(CFG)
+    try:
+        bootstrap_runtime(CFG, init_metrics=False, init_process=False, init_db=True, runtime_name="notification_worker")
+    except Exception:
+        log.error("NOTIFICATION_WORKER_BOOTSTRAP_FAILED", exc_info=True, extra={"phase": "bootstrap_runtime"})
+        raise
     run_forever()
 
 

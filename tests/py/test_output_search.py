@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import app as shell_app
+from conftest import make_test_app as _test_app
 import core.database as shell_db
 import services.runs.output_store as run_output_store
 from core.database import db_connect
@@ -18,9 +18,8 @@ SESSION_A = "test-session-fts-a"
 SESSION_B = "test-session-fts-b"
 
 
-def get_client(session_id=SESSION_A):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+def get_client(session_id=SESSION_A, *, init_db: bool = True):
+    client = _test_app(init_db=init_db).test_client()
     client.environ_base["HTTP_X_SESSION_ID"] = session_id
     return client
 
@@ -367,7 +366,7 @@ class TestOutputSearch:
 
         run_id = _insert_run(SESSION_A, "dig example.com", ["93.184.216.34"])
 
-        client = get_client(SESSION_A)
+        client = get_client(SESSION_A, init_db=False)
         # Command-text queries must still work via LIKE fallback.
         resp = client.get("/history?q=dig")
         assert resp.status_code == 200

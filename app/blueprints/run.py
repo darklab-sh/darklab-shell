@@ -136,7 +136,7 @@ from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.targets import (
     record_project_target_discoveries,
 )
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
 from services.session.variables import SessionVariableError, expand_session_variables
 from services.workspace.files import WorkspaceDisabled, owner_workspace_dir
