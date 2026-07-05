@@ -481,14 +481,40 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── app.py                  # Local development entrypoint that boots the runtime and starts Flask
 │   ├── app_factory.py          # Generic Flask constructor used behind app.create_app()
 │   ├── blueprints/
-│   │   ├── api_v1.py           # /api/v1 headless REST, run streaming, artifact, and read-only project routes
-│   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
-│   │   ├── atlas.py           # /atlas* session entity summary, list, and detail routes
+│   │   ├── api_v1.py           # Shared /api/v1 blueprint, helpers, and route registration
+│   │   ├── api_v1_notifications.py # API notification channel and event routes
+│   │   ├── api_v1_read.py      # API health, OpenAPI, history, output, Atlas, and project read routes
+│   │   ├── api_v1_runs.py      # API run start, status, wait, stream, cancel, and AI routes
+│   │   ├── api_v1_schedules.py # API schedule list, create, update, delete, and fire routes
+│   │   ├── api_v1_streaming.py # API run SSE-to-NDJSON stream adapter helpers
+│   │   ├── api_v1_teams.py     # API team create, list, member, invite, and recovery routes
+│   │   ├── api_v1_watchers.py  # API watcher list, create, update, delete, and run-now routes
+│   │   ├── assets.py           # Shared assets blueprint, client logs, vendor files, health, and status routes
+│   │   ├── assets_audit.py     # IP-gated diagnostics audit log and export routes
+│   │   ├── assets_diag.py      # IP-gated diagnostics, classifier, AI-test, and metrics routes
+│   │   ├── atlas.py           # Shared Atlas blueprint, import, saved-view, and route registration
+│   │   ├── atlas_mutations.py # Atlas cleanup, suppression, delete, intel refresh, and project-link routes
+│   │   ├── atlas_read.py      # Atlas run, entity, finding, detail, and export read routes
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
 │   │   ├── notifications.py    # /session/notification-channels* browser notification-channel CRUD and test-send routes
-│   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
+│   │   ├── projects.py         # Shared project blueprint, helpers, and route registration
+│   │   ├── projects_artifacts.py # Project artifact list, preview, download, and download-ticket routes
+│   │   ├── projects_auto_promote.py # Project auto-promote rule preview, apply, and management routes
+│   │   ├── projects_core.py    # Project list, create, active-project, overview, activity, run, and entity routes
+│   │   ├── projects_findings.py # Project finding list, review, run finding, and triage routes
+│   │   ├── projects_links.py   # Project link and run-entity relationship routes
+│   │   ├── projects_metadata.py # Atlas/project entity label, note, and metadata routes
+│   │   ├── projects_monitoring.py # Project monitoring, alert acknowledgment, and digest settings routes
+│   │   ├── projects_packages.py # Project evidence package create, download, job, and delete routes
+│   │   ├── projects_report.py  # Project report draft, preview, export job, and download-ticket routes
+│   │   ├── projects_targets.py # Project target list, create, update, and delete routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
+│   │   ├── run_broker.py       # Brokered /runs start, replay, and SSE stream routes
+│   │   ├── run_client.py       # Browser-owned built-in run persistence route
+│   │   ├── run_kill.py         # /kill route for active command and PTY runs
+│   │   ├── run_pty.py          # Interactive PTY run start, stream, snapshot, input, and resize routes
+│   │   ├── run_support.py      # Shared run-route helpers for scope, ownership, limits, and capability checks
 │   │   ├── schedules.py        # /schedules* browser scheduled-run CRUD and manual fire routes
 │   │   ├── secrets.py          # /session/secrets* encrypted personal/team secret metadata and write routes
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
@@ -564,7 +590,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
 │   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
 │   │   │   └── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
-│   │   ├── output_signals.py   # Server-side output signal and entity classifier
+│   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
+│   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
+│   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
+│   │   ├── output_signals.py   # Server-side output signal classifier and scanner-specific entity shaping
+│   │   ├── output_structured_signals.py # JSON and structured scanner signal/entity helpers
+│   │   ├── output_targets.py   # Command root and target extraction helpers
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   │   └── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
@@ -599,11 +630,21 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
 │   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
+│   │   │   ├── import_analysis.py # Atlas import option, duplicate, and apply-count analysis helpers
+│   │   │   ├── import_helpers.py # Safe Atlas import text, hash, count, and log helpers
+│   │   │   ├── import_limits.py # Atlas import limit configuration and safe workflow errors
 │   │   │   ├── import_parser.py # Atlas import file parsing and normalization helpers
 │   │   │   ├── import_sources.py # Atlas import draft, batch, and provenance storage helpers
 │   │   │   ├── import_workflow.py # Atlas import preview/apply workflow helpers
 │   │   │   ├── intel_bridge.py # Atlas entity intel refresh and snapshot persistence helpers
-│   │   │   ├── lookup.py       # Session entity list/detail queries and Atlas metadata shaping
+│   │   │   ├── intel_summary.py # Atlas intel snapshot shaping and highlights
+│   │   │   ├── lookup.py       # Session entity summary, list, and detail queries
+│   │   │   ├── lookup_export.py # Atlas entity export queries and CSV/JSONL rendering helpers
+│   │   │   ├── lookup_filters.py # Atlas list/search orphan, suppression, and run-filter SQL helpers
+│   │   │   ├── lookup_metadata.py # Atlas metadata and import-source shaping helpers
+│   │   │   ├── lookup_mutations.py # Atlas entity and finding suppression/review mutation helpers
+│   │   │   ├── lookup_runs.py # Atlas source-run list and count query helpers
+│   │   │   ├── lookup_search.py # Shared Atlas text and metadata search SQL helpers
 │   │   │   ├── materializer.py # Run-output entity materialization into the Atlas tables
 │   │   │   ├── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
 │   │   │   ├── schema.py       # Atlas entity type registry
@@ -638,10 +679,19 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_wordlist.py # Wordlist built-in command handler backed by the SecLists catalog service
 │   │   │   ├── builtins_workspace.py # Session file built-in command family and workspace aliases
 │   │   │   ├── postfilters.py  # Synthetic pipe-helper post-filter parser for app-native pipelines
-│   │   │   ├── registry.py     # Command loading, validation, autocomplete derivation, and registry-driven rewrites
-│   │   │   ├── registry_content.py # Welcome, tour, ASCII art, and hint content loaders
+│   │   │   ├── registry.py     # Public command-registry surface for loading, autocomplete, validation, and rewrites
+│   │   │   ├── registry_autocomplete.py # Autocomplete context normalization, merging, and feature filtering
+│   │   │   ├── registry_cache.py # Read-only containers for cached command registry data
+│   │   │   ├── registry_catalog.py # Command catalog, secret-consumer, and interactive PTY registry shaping
+│   │   │   ├── registry_content.py # Workflow, welcome, tour, ASCII art, and hint content loaders
+│   │   │   ├── registry_faq.py # Built-in/custom FAQ entries and FAQ markup rendering helpers
 │   │   │   ├── registry_loader.py # Command registry YAML loading, normalization, and overlay merging
+│   │   │   ├── registry_runtime.py # Runtime command adaptation helpers for registry entries
+│   │   │   ├── registry_smoke.py # Command-registry driven smoke-test command corpus helpers
+│   │   │   ├── registry_targets.py # Typed command-input and restricted-target helpers
+│   │   │   ├── registry_validate.py # High-level command validation orchestration
 │   │   │   ├── registry_validation.py # Command tokenization, policy matching, deny checks, and runtime-command detection
+│   │   │   ├── registry_workspace.py # Workspace flag/path rewriting and file-target validation helpers
 │   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
 │   │   ├── diagnostics/
 │   │   │   ├── __init__.py     # Diagnostics service package marker
@@ -663,8 +713,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
+│   │   │   ├── insights.py     # History activity, command-mix, and run-constellation insight helpers
+│   │   │   ├── mutations.py    # History delete, export, and snapshot persistence helpers
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
-│   │   │   ├── queries.py      # History list, search, export, share, and cleanup persistence helpers
+│   │   │   ├── queries.py      # History list, search, run metadata, and compare query helpers
 │   │   │   ├── run_metadata.py # Shared run-history metadata, artifact, count, and table-introspection helpers
 │   │   │   └── search.py       # Backend-aware run-history search SQL helpers
 │   │   ├── intel/
@@ -730,6 +782,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── active.py       # Active project preference and lookup helpers
+│   │   │   ├── actors.py       # Team actor display helpers for project payloads
+│   │   │   ├── artifact_queries.py # Project artifact page, detail, and target-filter query helpers
 │   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
 │   │   │   ├── auto_promote.py # Project Atlas auto-promote rule matching and apply helpers
 │   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
@@ -738,19 +792,24 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── digests.py      # Project attack-surface digest settings and delivery join-key helpers
 │   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
 │   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
+│   │   │   ├── list_metrics.py # Project list count and finding-summary query helpers
+│   │   │   ├── list_queries.py # Project list and switcher query helpers
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
 │   │   │   ├── monitoring.py   # Project Monitoring tab payload, watcher status cards, and fire timeline helpers
-│   │   │   ├── overview.py     # Project overview payload contract, target identity, and status helpers
+│   │   │   ├── overview.py     # Project overview payload assembly, target identity, and status helpers
+│   │   │   ├── overview_app.py # Project overview app-scan, app-port, URL-host, and provenance helpers
+│   │   │   ├── overview_intel.py # Project overview intel extraction and certificate status helpers
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
+│   │   │   ├── package_queries.py # Evidence package list/detail read helpers
 │   │   │   ├── package_rendering.py # Evidence package HTML, Markdown, JSON, and transcript export helpers
 │   │   │   ├── packages.py     # Evidence package payload, manifest, redaction, and archive-name helpers
 │   │   │   ├── preferences.py  # Project-related session preference helpers
 │   │   │   ├── provenance.py   # Safe project-link provenance shaping helpers
-│   │   │   ├── queries.py      # Project list, summary, run, entity, and artifact query helpers
+│   │   │   ├── queries.py      # Project summary, run, and entity query helpers
 │   │   │   ├── scope.py        # Project personal/team owner-scope SQL helpers
 │   │   │   ├── slugs.py        # Project slug normalization and allocation helpers
 │   │   │   ├── targets.py      # Project target validation, discovery, and mutation helpers
@@ -759,8 +818,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── pty/
 │   │   │   ├── __init__.py     # PTY service package marker
 │   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
+│   │   │   ├── runtime.py      # Low-level PTY process, sizing, environment, and termination helpers
 │   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
-│   │   │   └── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
+│   │   │   ├── settings.py     # Interactive PTY default limits and bounded config helpers
+│   │   │   ├── snapshots.py    # PTY snapshot payload shaping helpers
+│   │   │   ├── state.py        # Redis-backed PTY metadata, cleanup, scope, and snapshot reload helpers
+│   │   │   ├── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
+│   │   │   └── wire.py         # PTY Redis key, event-id, and payload decode helpers
 │   │   ├── reports/
 │   │   │   ├── __init__.py     # Public report helper exports
 │   │   │   ├── composition.py  # Report composition context helpers
@@ -774,11 +838,18 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── runs/
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
+│   │   │   ├── broker_worker.py # Brokered synthetic and subprocess worker output publishing
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
+│   │   │   ├── finalization.py # Completed-run capture, Atlas/finding/project hooks, and PTY persistence
 │   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
+│   │   │   ├── lifecycle.py    # Command preparation and process spawn helpers
 │   │   │   ├── output_model.py # Typed run-output line-event schema plus legacy wire compatibility helpers
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
 │   │   │   ├── persistence.py  # Completed-run save, artifact, Atlas, finding, and project-link persistence helpers
+│   │   │   ├── postfilters.py  # Synthetic jq/workspace/trufflehog output filters used by run streaming
+│   │   │   ├── process_control.py # Process-group signaling and scanner PID freshness helpers
+│   │   │   ├── project_notices.py # Project-related run notice formatting helpers
+│   │   │   ├── scope.py        # Run scope visibility and command-validation owner helpers
 │   │   │   ├── start.py        # Shared brokered run-start orchestration for browser and API routes
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   ├── structured_filters.py # Structured output filter parsing and summary-backed history clauses
@@ -840,7 +911,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── user_workflows.py # Personal/team workflow storage, validation, and serialization helpers
 │   │   └── workspace/
 │   │       ├── __init__.py     # Workspace service package marker
-│   │       └── files.py        # App-mediated personal/team workspace path, quota, and cleanup helpers
+│   │       ├── files.py        # App-mediated personal/team workspace quota, permission, and file helpers
+│   │       ├── maintenance.py  # Workspace migration and inactive-cleanup helpers
+│   │       ├── metadata.py     # Workspace file label, note, artifact, and project metadata queries
+│   │       ├── models.py       # Workspace exception, settings, usage, and operation-result models
+│   │       ├── modes.py        # Workspace filesystem mode constants
+│   │       ├── paths.py        # Workspace directory, validation, symlink, and path-resolution helpers
+│   │       └── settings.py     # Workspace settings and owner directory naming helpers
 │   ├── static/
 │   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/

@@ -34,6 +34,17 @@ function _searchGlobalValue(name) {
   return SEARCH_GLOBAL ? SEARCH_GLOBAL[name] : undefined;
 }
 
+function _isSearchElement(value) {
+  if (!value || typeof value !== 'object') return false;
+  const ownerElement = value.ownerDocument?.defaultView?.Element;
+  if (typeof ownerElement === 'function' && value instanceof ownerElement) return true;
+  const globalElement = typeof SEARCH_GLOBAL?.Element === 'function'
+    ? SEARCH_GLOBAL.Element
+    : (typeof globalThis.Element === 'function' ? globalThis.Element : null);
+  if (typeof globalElement === 'function' && value instanceof globalElement) return true;
+  return value.nodeType === 1;
+}
+
 const _searchCore = typeof importedSearchCore !== 'undefined' && importedSearchCore
   ? importedSearchCore
   : (_searchGlobalValue('DarklabSearchCore') || null);
@@ -235,7 +246,7 @@ function _formatFindingSummary(counts) {
 }
 
 function _renderCompactSignalSummary(container, counts) {
-  if (!(container instanceof Element)) return;
+  if (!_isSearchElement(container)) return;
   container.replaceChildren();
   const chips = [
     ['findings', 'F', counts.findings],
@@ -299,14 +310,14 @@ function syncSearchScopeUi() {
 }
 
 function _lineServerSignals(line) {
-  if (!(line instanceof Element)) return [];
+  if (!_isSearchElement(line)) return [];
   const raw = String(line.dataset?.signals || '').trim();
   if (!raw) return [];
   return raw.split(',').map(signal => signal.trim()).filter(Boolean);
 }
 
 function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
-  if (!(line instanceof Element) || scope === 'text') return false;
+  if (!_isSearchElement(line) || scope === 'text') return false;
   const serverSignals = _lineServerSignals(line);
   if (!serverSignals.includes(scope)) return false;
   if (
@@ -343,10 +354,10 @@ function _getSearchSignalCounts(out) {
   const cached = _getCachedSearchSignalCounts();
   if (cached) return cached;
   const counts = { findings: 0, warnings: 0, errors: 0, summaries: 0 };
-  if (!(out instanceof Element)) return counts;
+  if (!_isSearchElement(out)) return counts;
   const lines = Array.from(out.querySelectorAll('.line'));
   lines.forEach((line) => {
-    if (!(line instanceof Element)) return;
+    if (!_isSearchElement(line)) return;
     if (line.classList.contains('prompt-echo')) return;
     if (_lineMatchesSearchScope(line, 'findings')) counts.findings += 1;
     if (_lineMatchesSearchScope(line, 'warnings')) counts.warnings += 1;
@@ -606,7 +617,7 @@ function _lineMatchesSearchScope(line, scope) {
 }
 
 function _clearTextSearchHighlights(root) {
-  if (!(root instanceof Element)) return;
+  if (!_isSearchElement(root)) return;
   const touched = new Set();
   root.querySelectorAll('mark.search-hl').forEach((m) => {
     const line = m.closest('.line, .workspace-line-row');
@@ -621,7 +632,7 @@ function _collectTextSearchMatches(root, query, {
   regexMode = false,
   lineSelector = '.line',
 } = {}) {
-  if (!(root instanceof Element) || !query) return { matches: [], error: '' };
+  if (!_isSearchElement(root) || !query) return { matches: [], error: '' };
   const flags = caseSensitive ? 'g' : 'gi';
   const pattern = regexMode ? query : _escapeSearchRegex(query);
   let re;
@@ -650,7 +661,7 @@ function _collectLazyTextSearchMatches(root, query, {
   lineTextSelector = null,
   preserveDom = false,
 } = {}) {
-  if (!(root instanceof Element) || !query) return { matches: [], error: '' };
+  if (!_isSearchElement(root) || !query) return { matches: [], error: '' };
   const flags = caseSensitive ? 'g' : 'gi';
   const pattern = regexMode ? query : _escapeSearchRegex(query);
   let re;
@@ -661,9 +672,9 @@ function _collectLazyTextSearchMatches(root, query, {
   }
   const matches = [];
   root.querySelectorAll(lineSelector).forEach((line) => {
-    if (!(line instanceof Element)) return;
+    if (!_isSearchElement(line)) return;
     const textEl = lineTextSelector ? line.querySelector(lineTextSelector) : line;
-    if (!(textEl instanceof Element)) return;
+    if (!_isSearchElement(textEl)) return;
     const text = textEl.textContent || '';
     re.lastIndex = 0;
     let match;
@@ -687,7 +698,7 @@ function _collectLazyTextSearchMatches(root, query, {
 
 function _clearLazySearchHighlight(match) {
   const textEl = match?.textEl;
-  if (!(textEl instanceof Element)) return;
+  if (!_isSearchElement(textEl)) return;
   if (match?.preserveDom && Array.isArray(match.originalChildNodes)) {
     textEl.replaceChildren(...match.originalChildNodes.map(node => node.cloneNode(true)));
     match.originalChildNodes = null;
@@ -698,7 +709,7 @@ function _clearLazySearchHighlight(match) {
 
 function _highlightLazySearchMatch(match, index) {
   const textEl = match?.textEl;
-  if (!(textEl instanceof Element)) return null;
+  if (!_isSearchElement(textEl)) return null;
   const text = String(match?.text || '');
   const start = Math.max(0, Number(match?.start) || 0);
   const end = Math.max(start, Number(match?.end) || start);
@@ -875,7 +886,7 @@ function createTextSearchController({
 }
 
 function _promptEchoCommandText(line) {
-  if (!(line instanceof Element)) return '';
+  if (!_isSearchElement(line)) return '';
   const text = (line.textContent || '').trim();
   const prefix = String(line.querySelector('.prompt-prefix')?.textContent || '').trim();
   if (prefix && text.startsWith(prefix)) return text.slice(prefix.length).trim();
@@ -887,12 +898,12 @@ function _summaryCommandRoot(command) {
 }
 
 function _lineCommandRoot(line) {
-  if (line instanceof Element) {
+  if (_isSearchElement(line)) {
     const metadataRoot = String(line.dataset?.commandRoot || '').trim();
     if (metadataRoot) return metadataRoot;
   }
   let cursor = line;
-  while (cursor instanceof Element) {
+  while (_isSearchElement(cursor)) {
     if (cursor.classList.contains('prompt-echo')) {
       return _summaryCommandRoot(_promptEchoCommandText(cursor));
     }
@@ -912,7 +923,7 @@ function _collectSearchCommandBlocks(out) {
   const blocks = [];
   let current = null;
   lines.forEach((line) => {
-    if (!(line instanceof Element)) return;
+    if (!_isSearchElement(line)) return;
     if (
       line.classList.contains('builtin-signal-summary-header')
       || line.classList.contains('builtin-signal-summary-section')
@@ -950,7 +961,7 @@ function _summaryBlockSections(block, root = null) {
 
 function _summaryFirstLineDatasetValue(lines, name) {
   for (const line of Array.isArray(lines) ? lines : []) {
-    if (!(line instanceof Element)) continue;
+    if (!_isSearchElement(line)) continue;
     const value = String(line.dataset?.[name] || '').trim();
     if (value) return value;
   }
@@ -969,7 +980,7 @@ function _summaryBuildItems(blocks, tab) {
     const targetBuckets = new Map();
     const ungroupedLines = [];
     (Array.isArray(block.lines) ? block.lines : []).forEach((line) => {
-      if (!(line instanceof Element)) return;
+      if (!_isSearchElement(line)) return;
       const target = String(line.dataset?.signalTarget || '').trim();
       if (!target) {
         ungroupedLines.push(line);
@@ -1105,7 +1116,7 @@ function summarizeCurrentOutputSignals() {
   if (tab && tab.st === 'running') return false;
   const blocks = _collectSearchCommandBlocks(out);
   if (!blocks.length) {
-    const transcriptLines = Array.from(out.querySelectorAll('.line')).filter((line) => line instanceof Element);
+    const transcriptLines = Array.from(out.querySelectorAll('.line')).filter((line) => _isSearchElement(line));
     blocks.push({
       command: String(tab?.command || '').trim(),
       lines: transcriptLines,
@@ -1135,7 +1146,7 @@ function _collectScopedSearchMatches(out, scope) {
   const lines = Array.from(out.querySelectorAll('.line'));
   const matches = [];
   lines.forEach((line) => {
-    if (!(line instanceof Element)) return;
+    if (!_isSearchElement(line)) return;
     if (line.classList.contains('prompt-echo')) return;
     if (!_lineMatchesSearchScope(line, scope)) return;
     line.classList.add('search-signal-hl');
@@ -1159,7 +1170,7 @@ function _clearTerminalLazyHighlight() {
 function _terminalOutputSearchStats(out) {
   let lineCount = 0;
   let charCount = 0;
-  if (!(out instanceof Element)) return { lineCount, charCount };
+  if (!_isSearchElement(out)) return { lineCount, charCount };
   out.querySelectorAll('.line').forEach((line) => {
     lineCount += 1;
     charCount += (line.textContent || '').length;
@@ -1178,7 +1189,7 @@ function _terminalUsesLargeSearchMode(out) {
 function _scrollTerminalLazySearchMatchIntoView(match, mark) {
   const out = _getOutputForTab(_activeTabId());
   const line = match?.line;
-  if (out instanceof Element && line instanceof Element && out.contains(line)) {
+  if (_isSearchElement(out) && _isSearchElement(line) && out.contains(line)) {
     const outRect = out.getBoundingClientRect();
     const lineRect = line.getBoundingClientRect();
     const targetTop = Number(lineRect.top) - Number(outRect.top);

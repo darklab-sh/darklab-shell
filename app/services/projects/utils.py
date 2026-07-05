@@ -76,6 +76,28 @@ def page_payload(items_key, items, total, limit, offset, *, has_more=None, extra
     return payload
 
 
+def metadata_filter_values(filters, key, max_len, *, lower=False):
+    raw_values = filters.get(key)
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, str):
+        raw_items = [raw_values]
+    elif isinstance(raw_values, list):
+        raw_items = raw_values
+    else:
+        raw_items = []
+    values = []
+    seen = set()
+    for raw_value in raw_items:
+        value = trim_text(raw_value, max_len)
+        if lower:
+            value = value.lower()
+        if value and value not in seen:
+            seen.add(value)
+            values.append(value)
+    return values
+
+
 def raise_quota(message):
     log.warning("PROJECT_QUOTA_HIT", extra={"reason": str(message or "")})
     raise ProjectWorkspaceQuotaExceeded(message)

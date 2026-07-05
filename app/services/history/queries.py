@@ -7,13 +7,12 @@ import math
 import time
 from hashlib import sha256
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import services.runs.comparison as run_comparison
-from core.database import DB_BACKEND, db_connect, delete_run_artifacts, delete_snapshot_metadata
+from core.database import DB_BACKEND, db_connect
 from core.database_backend import DatabaseBackend, SQLiteOperationalError, dialect_for_backend
-from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id, is_failed_exit_code
+from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id
 from core.output_signals import command_root as output_command_root
 from core.process import active_runs_for_session
 from services.metrics_lazy import app_metrics
@@ -40,9 +39,8 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
-from services.audit.models import AuditEventType, AuditTargetType
-from services.audit.recorder import record_event
-from services.atlas.cleanup import atlas_run_cleanup_preview, delete_atlas_cleanup_preview
+from services.history.insights import history_insights as history_insights
+from services.history import mutations as _history_mutations
 
 log = logging.getLogger("shell")
 
@@ -56,6 +54,55 @@ class HistoryListResult:
     page_count: int
     current_page: int
     fts_query: str | None
+
+
+def _sync_mutation_backend() -> None:
+    _history_mutations.db_connect = db_connect
+
+
+def delete_history_run(**kwargs):
+    _sync_mutation_backend()
+    return _history_mutations.delete_history_run(**kwargs)
+
+
+def history_run_cleanup_preview(session_id: str, run_id: str):
+    _sync_mutation_backend()
+    return _history_mutations.history_run_cleanup_preview(session_id, run_id)
+
+
+def bulk_export_rows(owner_scope, run_ids: list[str], snapshot_ids: list[str]):
+    _sync_mutation_backend()
+    return _history_mutations.bulk_export_rows(owner_scope, run_ids, snapshot_ids)
+
+
+def bulk_delete_runs(**kwargs):
+    _sync_mutation_backend()
+    return _history_mutations.bulk_delete_runs(**kwargs)
+
+
+def clear_history_runs(**kwargs):
+    _sync_mutation_backend()
+    return _history_mutations.clear_history_runs(**kwargs)
+
+
+def save_snapshot(**kwargs):
+    _sync_mutation_backend()
+    return _history_mutations.save_snapshot(**kwargs)
+
+
+def bulk_delete_snapshots(**kwargs):
+    _sync_mutation_backend()
+    return _history_mutations.bulk_delete_snapshots(**kwargs)
+
+
+def snapshot_row(share_id: str):
+    _sync_mutation_backend()
+    return _history_mutations.snapshot_row(share_id)
+
+
+def delete_snapshot(**kwargs):
+    _sync_mutation_backend()
+    return _history_mutations.delete_snapshot(**kwargs)
 
 
 def build_fts_query(raw: str) -> str | None:
@@ -710,297 +757,6 @@ def session_history_stats(session_id: str, owner_scope) -> dict[str, Any]:
     }
 
 
-def _parse_iso_datetime(value):
-    return run_comparison.parse_iso_datetime(value)
-
-
-def _history_run_elapsed_seconds(row) -> float | None:
-    started = _parse_iso_datetime(row["started"])
-    finished = _parse_iso_datetime(row["finished"])
-    if not started or not finished:
-        return None
-    return max(0.0, (finished - started).total_seconds())
-
-
-_HISTORY_OUTPUT_KIND_ORDER = {"error": 3, "warn": 2, "notice": 1, "info": 0}
-
-
-def _row_value(row, key: str, default=None):
-    if isinstance(row, dict):
-        return row.get(key, default)
-    try:
-        return row[key]
-    except (IndexError, KeyError, TypeError):
-        return default
-
-
-def _history_run_max_output_kind(row) -> str:
-    import json
-
-    summary_kind = str(_row_value(row, "max_output_kind", "") or "").strip()
-    if summary_kind in _HISTORY_OUTPUT_KIND_ORDER:
-        return summary_kind
-    best = "info"
-    try:
-        entries = json.loads(str(_row_value(row, "output_preview", "[]") or "[]"))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return best
-    for entry in entries if isinstance(entries, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        kind = str(entry.get("kind") or "").strip()
-        if _HISTORY_OUTPUT_KIND_ORDER.get(kind, -1) > _HISTORY_OUTPUT_KIND_ORDER.get(best, -1):
-            best = kind
-    return best
-
-
-def _command_category_map() -> dict[str, str]:
-    try:
-        from services.commands.registry import load_commands_registry
-
-        registry = load_commands_registry()
-    except Exception:
-        return {}
-    categories: dict[str, str] = {}
-    for entry in registry.get("commands", []) or []:
-        if not isinstance(entry, dict):
-            continue
-        root = str(entry.get("root") or "").strip().lower()
-        if root:
-            categories[root] = str(entry.get("category") or "Allowed commands").strip() or "Allowed commands"
-    return categories
-
-
-def history_insights(session_id: str, owner_scope, *, days: int | None = None) -> dict[str, Any]:
-    with db_connect() as conn:
-        return _history_insights_from_conn(conn, session_id, owner_scope, days=days)
-
-
-def _history_insights_from_conn(conn, session_id: str, owner_scope, *, days: int | None = None) -> dict[str, Any]:
-    today = datetime.now(timezone.utc).date()
-    scope_sql, scope_params = owner_scope.predicate()
-    first_row = conn.execute(
-        "SELECT MIN(started) AS first_started FROM runs WHERE " + scope_sql,  # nosec
-        scope_params,
-    ).fetchone()
-    first_started = _parse_iso_datetime(first_row["first_started"]) if first_row else None
-    first_run_date = first_started.date() if first_started else None
-    if days is None:
-        first_day = first_run_date or today
-        days = min(365, max(28, (today - first_day).days + 1))
-    else:
-        days = min(365, max(28, int(days or 28)))
-    start_date = today - timedelta(days=days - 1)
-    fetch_days = max(days, 90)
-    fetch_start_date = today - timedelta(days=fetch_days - 1)
-    cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
-    insights_sql = (
-        "SELECT id, run_kind, command, started, finished, exit_code, output_line_count, "  # nosec
-        "COALESCE(( "
-        "SELECT CASE MAX(CASE s.value "
-        "WHEN 'error' THEN 3 "
-        "WHEN 'warn' THEN 2 "
-        "WHEN 'notice' THEN 1 "
-        "WHEN 'info' THEN 0 "
-        "ELSE 0 END) "
-        "WHEN 3 THEN 'error' "
-        "WHEN 2 THEN 'warn' "
-        "WHEN 1 THEN 'notice' "
-        "ELSE 'info' "
-        "END "
-        "FROM run_output_summary s "
-        "WHERE s.run_id = runs.id AND s.family = 'kind' "
-        "), 'info') AS max_output_kind, "
-        "( "
-        "SELECT COUNT(*) FROM findings_occurrences fo "
-        "WHERE fo.run_id = runs.id "
-        ") AS finding_count "
-        "FROM runs "
-        "WHERE "
-        + scope_sql
-        + " AND started >= ? "
-        + "ORDER BY started ASC, id ASC"
-    )
-    rows = conn.execute(insights_sql, (*scope_params, cutoff)).fetchall()
-    rows = [row for row in rows if str(row["run_kind"] or RUN_KIND_EXTERNAL) == RUN_KIND_EXTERNAL]
-    categories = _command_category_map()
-    activity: dict[str, dict[str, Any]] = {
-        (start_date + timedelta(days=offset)).isoformat(): {
-            "date": (start_date + timedelta(days=offset)).isoformat(),
-            "count": 0,
-            "succeeded": 0,
-            "failed": 0,
-            "incomplete": 0,
-        }
-        for offset in range(days)
-    }
-    records: list[dict[str, Any]] = []
-    recent_events: list[dict[str, Any]] = []
-
-    for row in rows:
-        root = history_run_root(str(row["command"] or ""))
-        category = categories.get(root, "Other")
-        elapsed = _history_run_elapsed_seconds(row)
-        exit_code = row["exit_code"]
-        started_dt = _parse_iso_datetime(row["started"])
-        records.append({
-            "row": row,
-            "root": root,
-            "category": category,
-            "elapsed": elapsed,
-            "exit_code": exit_code,
-            "finding_count": int(row["finding_count"] or 0),
-            "max_kind": _history_run_max_output_kind(row),
-            "started_dt": started_dt,
-            "started_date": started_dt.date() if started_dt else None,
-        })
-        day_key = started_dt.date().isoformat() if started_dt else str(row["started"] or "")[:10]
-        if day_key in activity:
-            activity[day_key]["count"] += 1
-            if exit_code is None:
-                activity[day_key]["incomplete"] += 1
-            elif int(exit_code) == 0:
-                activity[day_key]["succeeded"] += 1
-            elif is_failed_exit_code(exit_code):
-                activity[day_key]["failed"] += 1
-
-    def _records_for_window(window_days: int) -> tuple[date, list[dict[str, Any]]]:
-        window_start = today - timedelta(days=window_days - 1)
-        return (
-            window_start,
-            [
-                record for record in records
-                if record["started_date"] and record["started_date"] >= window_start
-            ],
-        )
-
-    command_mix_start_30, command_mix_records_30 = _records_for_window(30)
-    command_mix_days = 30 if len(command_mix_records_30) >= 25 else 90
-    command_mix_start, command_mix_records = (
-        (command_mix_start_30, command_mix_records_30)
-        if command_mix_days == 30
-        else _records_for_window(90)
-    )
-
-    constellation_start_30, constellation_records_30 = _records_for_window(30)
-    constellation_days = 30 if len(constellation_records_30) >= 40 else 90
-    constellation_start, constellation_records = (
-        (constellation_start_30, constellation_records_30)
-        if constellation_days == 30
-        else _records_for_window(90)
-    )
-
-    command_buckets: dict[str, dict[str, Any]] = {}
-    for record in command_mix_records:
-        row = record["row"]
-        root = record["root"]
-        exit_code = record["exit_code"]
-        elapsed = record["elapsed"]
-        bucket = command_buckets.setdefault(root, {
-            "root": root,
-            "category": record["category"],
-            "count": 0,
-            "succeeded": 0,
-            "failed": 0,
-            "incomplete": 0,
-            "durations": [],
-            "total_elapsed_seconds": 0.0,
-            "last_started": "",
-        })
-        bucket["count"] += 1
-        bucket["last_started"] = str(row["started"] or bucket["last_started"])
-        if exit_code is None:
-            bucket["incomplete"] += 1
-        elif int(exit_code) == 0:
-            bucket["succeeded"] += 1
-        elif is_failed_exit_code(exit_code):
-            bucket["failed"] += 1
-        if elapsed is not None:
-            bucket["durations"].append(elapsed)
-            bucket["total_elapsed_seconds"] += elapsed
-
-    constellation: list[dict[str, Any]] = []
-    for record in constellation_records:
-        row = record["row"]
-        constellation.append({
-            "id": str(row["id"]),
-            "root": record["root"],
-            "category": record["category"],
-            "command": str(row["command"] or ""),
-            "started": str(row["started"] or ""),
-            "elapsed_seconds": record["elapsed"],
-            "exit_code": record["exit_code"],
-            "output_line_count": int(row["output_line_count"] or 0),
-            "finding_count": int(record.get("finding_count") or 0),
-            "max_kind": str(record.get("max_kind") or "info"),
-        })
-
-    command_mix = []
-    for bucket in command_buckets.values():
-        durations = bucket.pop("durations")
-        bucket["average_elapsed_seconds"] = (
-            sum(durations) / len(durations)
-            if durations
-            else None
-        )
-        command_mix.append(bucket)
-    command_mix.sort(key=lambda item: (int(item["count"]), float(item["total_elapsed_seconds"])), reverse=True)
-
-    for row in reversed(rows[-18:]):
-        elapsed = _history_run_elapsed_seconds(row)
-        recent_events.append({
-            "type": "run-finished" if row["finished"] else "run-started",
-            "root": history_run_root(str(row["command"] or "")),
-            "command": str(row["command"] or ""),
-            "started": str(row["started"] or ""),
-            "finished": str(row["finished"] or ""),
-            "exit_code": row["exit_code"],
-            "elapsed_seconds": elapsed,
-        })
-
-    max_day_count = max((day["count"] for day in activity.values()), default=0)
-    activity_total = sum(day["count"] for day in activity.values())
-    constellation_plotted = constellation[-350:]
-    windows = {
-        "activity": {
-            "days": days,
-            "start_date": start_date.isoformat(),
-            "end_date": today.isoformat(),
-            "label": f"last {days} days",
-            "total_runs": activity_total,
-        },
-        "command_mix": {
-            "days": command_mix_days,
-            "start_date": command_mix_start.isoformat(),
-            "end_date": today.isoformat(),
-            "label": f"last {command_mix_days} days",
-            "total_runs": len(command_mix_records),
-            "sparse": command_mix_days == 90 and len(command_mix_records) < 25,
-        },
-        "constellation": {
-            "days": constellation_days,
-            "start_date": constellation_start.isoformat(),
-            "end_date": today.isoformat(),
-            "label": f"last {constellation_days} days",
-            "total_runs": len(constellation_records),
-            "plotted_runs": len(constellation_plotted),
-            "sparse": constellation_days == 90 and len(constellation_records) < 40,
-        },
-    }
-    return {
-        "days": days,
-        "start_date": start_date.isoformat(),
-        "end_date": today.isoformat(),
-        "first_run_date": first_run_date.isoformat() if first_run_date else None,
-        "activity": list(activity.values()),
-        "max_day_count": max_day_count,
-        "command_mix": command_mix[:18],
-        "constellation": constellation_plotted,
-        "events": recent_events,
-        "windows": windows,
-    }
-
-
 def schedule_refs_for_active_runs(run_ids) -> dict[str, dict[str, str]]:
     with db_connect() as conn:
         return schedule_refs_by_run(conn, [str(run_id) for run_id in run_ids if str(run_id or "")])
@@ -1146,283 +902,3 @@ def history_run_private_metadata(run_id: str, session_id: str, run_team_id: str,
         "notes_by_run": notes_by_run,
         "scheduled_by_run": scheduled_by_run,
     }
-
-
-def delete_history_run(
-    *,
-    session_id: str,
-    owner_scope,
-    run_id: str,
-    prune_atlas: bool,
-    prune_curated_atlas: bool,
-    audit_fields: dict[str, Any],
-) -> tuple[int, dict[str, int]]:
-    scope_sql, scope_params = owner_scope.predicate()
-    atlas_cleanup = {"entities": 0, "findings": 0}
-    with db_connect() as conn:
-        owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
-            (run_id, *scope_params),
-        ).fetchone()
-        if owned:
-            cleanup_preview = (
-                atlas_run_cleanup_preview(conn, session_id, [run_id], include_curated=prune_curated_atlas)
-                if prune_atlas
-                else None
-            )
-            delete_run_artifacts(conn, [run_id])
-            if cleanup_preview:
-                atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
-        cur = conn.execute("DELETE FROM runs WHERE id = ? AND " + scope_sql, (run_id, *scope_params))  # nosec
-        if cur.rowcount:
-            record_event(
-                AuditEventType.HISTORY_DELETE,
-                target_id=run_id,
-                details={
-                    "run_id": run_id,
-                    "deleted_count": int(cur.rowcount or 0),
-                    "source": "history",
-                },
-                conn=conn,
-                **audit_fields,
-            )
-        conn.commit()
-    return int(cur.rowcount or 0), atlas_cleanup
-
-
-def history_run_cleanup_preview(session_id: str, run_id: str):
-    with db_connect() as conn:
-        owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
-            (run_id, session_id),
-        ).fetchone()
-        if not owned:
-            return None
-        return atlas_run_cleanup_preview(conn, session_id, [run_id])
-
-
-def bulk_export_rows(owner_scope, run_ids: list[str], snapshot_ids: list[str]):
-    with db_connect() as conn:
-        owned_runs = {}
-        if run_ids:
-            placeholders = ",".join("?" for _ in run_ids)
-            scope_sql, scope_params = owner_scope.predicate(table_alias="runs")
-            rows = conn.execute(
-                f"SELECT runs.*, art.rel_path "  # nosec
-                f"FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-                f"WHERE {scope_sql} AND runs.id IN ({placeholders})",
-                [*scope_params, *run_ids],
-            ).fetchall()
-            owned_runs = {str(row["id"]): dict(row) for row in rows}
-        owned_snapshots = {}
-        if snapshot_ids:
-            placeholders = ",".join("?" for _ in snapshot_ids)
-            scope_sql, scope_params = owner_scope.predicate()
-            rows = conn.execute(
-                f"SELECT * FROM snapshots WHERE {scope_sql} AND id IN ({placeholders})",  # nosec
-                [*scope_params, *snapshot_ids],
-            ).fetchall()
-            owned_snapshots = {str(row["id"]): dict(row) for row in rows}
-    return owned_runs, owned_snapshots
-
-
-def bulk_delete_runs(
-    *,
-    owner_scope,
-    session_id: str,
-    run_ids: list[str],
-    active_ids: set[str],
-    result_factory,
-    audit_fields: dict[str, Any],
-) -> tuple[dict[str, int], list[dict[str, Any]]]:
-    counts = {"deleted": 0, "not_found": 0, "rejected": 0}
-    results = []
-    deletable_ids = []
-    with db_connect() as conn:
-        placeholders = ",".join("?" for _ in run_ids)
-        scope_sql, scope_params = owner_scope.predicate(table_alias="runs")
-        rows = conn.execute(
-            f"SELECT id, finished, exit_code FROM runs WHERE {scope_sql} AND id IN ({placeholders})",  # nosec
-            [*scope_params, *run_ids],
-        ).fetchall()
-        owned_by_id = {str(row["id"]): row for row in rows}
-        for run_id in run_ids:
-            if run_id in active_ids:
-                results.append(result_factory(counts, run_id, "rejected", reason="running"))
-                continue
-            row = owned_by_id.get(run_id)
-            if row is None:
-                results.append(result_factory(counts, run_id, "not_found"))
-                continue
-            if row["finished"] is None and row["exit_code"] is None:
-                results.append(result_factory(counts, run_id, "rejected", reason="incomplete"))
-                continue
-            deletable_ids.append(run_id)
-            results.append(result_factory(counts, run_id, "deleted"))
-        if deletable_ids:
-            delete_run_artifacts(conn, deletable_ids)
-            delete_placeholders = ",".join("?" for _ in deletable_ids)
-            delete_scope_sql, delete_scope_params = owner_scope.predicate()
-            conn.execute(
-                f"DELETE FROM runs WHERE {delete_scope_sql} AND id IN ({delete_placeholders})",  # nosec
-                [*delete_scope_params, *deletable_ids],
-            )
-            record_event(
-                AuditEventType.HISTORY_DELETE,
-                target_id="",
-                details={
-                    "run_ids": deletable_ids,
-                    "deleted_count": len(deletable_ids),
-                    "source": "history_bulk",
-                },
-                conn=conn,
-                **audit_fields,
-            )
-        conn.commit()
-    return counts, results
-
-
-def clear_history_runs(*, owner_scope, audit_fields: dict[str, Any]) -> int:
-    with db_connect() as conn:
-        scope_sql, scope_params = owner_scope.predicate()
-        run_ids = [
-            row["id"]
-            for row in conn.execute(
-                "SELECT id FROM runs WHERE " + scope_sql,  # nosec
-                scope_params,
-            ).fetchall()
-        ]
-        delete_run_artifacts(conn, run_ids)
-        cur = conn.execute("DELETE FROM runs WHERE " + scope_sql, scope_params)  # nosec
-        if cur.rowcount:
-            record_event(
-                AuditEventType.HISTORY_DELETE,
-                target_id="",
-                details={
-                    "run_count": int(cur.rowcount or 0),
-                    "deleted_count": int(cur.rowcount or 0),
-                    "source": "history_clear",
-                },
-                conn=conn,
-                **audit_fields,
-            )
-        conn.commit()
-    return int(cur.rowcount or 0)
-
-
-def save_snapshot(
-    *,
-    session_id: str,
-    team_id: str,
-    share_id: str,
-    label: str,
-    created: str,
-    stored_content: str,
-    audit_fields: dict[str, Any],
-    audit_details: dict[str, Any],
-    redaction_audit: bool,
-) -> None:
-    with db_connect() as conn:
-        conn.execute(
-            "INSERT INTO snapshots (id, session_id, team_id, label, created, content) VALUES (?, ?, ?, ?, ?, ?)",
-            (share_id, session_id, team_id, label, created, stored_content),
-        )
-        record_event(
-            AuditEventType.SNAPSHOT_CREATE,
-            target_id=share_id,
-            details=audit_details,
-            conn=conn,
-            **audit_fields,
-        )
-        if redaction_audit:
-            record_event(
-                AuditEventType.REDACTION_USE,
-                target_type=AuditTargetType.SNAPSHOT,
-                target_id=share_id,
-                details={
-                    "snapshot_id": share_id,
-                    "redaction_mode": "configured",
-                    "source": "share",
-                },
-                conn=conn,
-                **audit_fields,
-            )
-        conn.commit()
-
-
-def bulk_delete_snapshots(
-    *,
-    session_id: str,
-    snapshot_ids: list[str],
-    result_factory,
-    audit_fields: dict[str, Any],
-) -> tuple[dict[str, int], list[dict[str, Any]]]:
-    counts = {"deleted": 0, "not_found": 0, "rejected": 0}
-    results = []
-    deletable_ids = []
-    with db_connect() as conn:
-        placeholders = ",".join("?" for _ in snapshot_ids)
-        rows = conn.execute(
-            f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-            [session_id, *snapshot_ids],
-        ).fetchall()
-        owned_ids = {str(row["id"]) for row in rows}
-        for snapshot_id in snapshot_ids:
-            if snapshot_id not in owned_ids:
-                results.append(result_factory(counts, snapshot_id, "not_found", key="snapshot_id"))
-                continue
-            deletable_ids.append(snapshot_id)
-            results.append(result_factory(counts, snapshot_id, "deleted", key="snapshot_id"))
-        if deletable_ids:
-            delete_snapshot_metadata(conn, deletable_ids)
-            delete_placeholders = ",".join("?" for _ in deletable_ids)
-            conn.execute(
-                f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
-                [session_id, *deletable_ids],
-            )
-            record_event(
-                AuditEventType.SNAPSHOT_DELETE,
-                target_id="",
-                details={
-                    "snapshot_ids": deletable_ids,
-                    "deleted_count": len(deletable_ids),
-                    "source": "share_bulk",
-                },
-                conn=conn,
-                **audit_fields,
-            )
-        conn.commit()
-    return counts, results
-
-
-def snapshot_row(share_id: str):
-    with db_connect() as conn:
-        row = conn.execute("SELECT * FROM snapshots WHERE id = ?", (share_id,)).fetchone()
-    return dict(row) if row else None
-
-
-def delete_snapshot(*, session_id: str, share_id: str, audit_fields: dict[str, Any]) -> int:
-    with db_connect() as conn:
-        snapshot_rows = conn.execute(
-            "SELECT id FROM snapshots WHERE id = ? AND session_id = ?",
-            (share_id, session_id),
-        ).fetchall()
-        delete_snapshot_metadata(conn, [row["id"] for row in snapshot_rows])
-        cur = conn.execute(
-            "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
-            (share_id, session_id),
-        )
-        if cur.rowcount:
-            record_event(
-                AuditEventType.SNAPSHOT_DELETE,
-                target_id=share_id,
-                details={
-                    "snapshot_id": share_id,
-                    "deleted_count": int(cur.rowcount or 0),
-                    "source": "share",
-                },
-                conn=conn,
-                **audit_fields,
-            )
-        conn.commit()
-    return int(cur.rowcount or 0)

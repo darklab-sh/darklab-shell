@@ -156,6 +156,8 @@ Before merging a version branch back to `main`:
 
 **Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
+**Python module layout** — keep blueprints as HTTP adapters. New persistence and business logic belongs in `services/` or shared `core/` helpers, while blueprint siblings should group routes by resource family and register onto the parent blueprint object. Split service files by a real responsibility boundary such as query reads, payload shaping, lifecycle orchestration, defaults/settings, or import/export helpers. If a file is a cohesive artifact, leave it together and let the architecture ratchet guard it from quiet growth.
+
 **JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports intentional browser globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks an intentional browser-boundary publish path. Match the existing style of the file you are editing. ESLint checks app source, tests, tooling, and scripts, enforces syntax/global safety for browser code, and keeps the 2-space indentation, single quote, and no-semicolon rules scoped to config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
@@ -212,8 +214,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2284 pytest + 1473 Vitest + 269 Playwright = 4,026 tests**.
-That total includes 3,971 behavior tests plus 55 docs/inventory meta-tests.
+Current totals: **2292 pytest + 1474 Vitest + 269 Playwright = 4,035 tests**.
+That total includes 3,975 behavior tests plus 60 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration

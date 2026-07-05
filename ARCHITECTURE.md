@@ -976,6 +976,14 @@ Service functions open their own `db_connect()` context by default, with common 
 
 `tests/py/test_architecture.py` enforces that boundary. It scans every blueprint for direct connection calls, aliased `db_connect` imports, raw execute-family calls, SQL-shaped string fragments, core database imports, backend/dialect imports, and persistence cleanup helper imports. The execute-family check is intentionally conservative: any `.execute()`, `.executemany()`, or `.executescript()` attribute call in a blueprint is treated as persistence-like and fails the suite.
 
+### Python Module Layout
+
+Route modules are grouped by the user-facing resource they handle. Large blueprints keep one public blueprint object in the parent module, define that object before importing route-group siblings, and let those sibling modules register routes by importing the parent blueprint. This keeps `app.create_app()` pointed at the same parent blueprint while avoiding one route file that owns every endpoint for a surface.
+
+Service modules are split by responsibility rather than by line count alone. Query helpers, payload shaping, lifecycle orchestration, config/default helpers, and import/export helpers live in focused sibling modules when there is a clean seam. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay in one file because splitting them would make them harder to read.
+
+`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional.
+
 ### Backend Runtime Boundaries
 
 This boundary view answers a different question than the dependency graph above: not "which module imports which," but "which runtime service owns which responsibility."
@@ -2211,12 +2219,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,971
-- docs/inventory meta-tests: 55
-- `pytest`: 2284 (2242 behavior + 42 meta)
-- `vitest`: 1473 (1460 behavior + 13 meta)
+- behavior tests: 3,975
+- docs/inventory meta-tests: 60
+- `pytest`: 2292 (2245 behavior + 47 meta)
+- `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,026
+- total: 4,035
 
 ### Testing Architecture
 

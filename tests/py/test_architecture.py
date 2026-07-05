@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import importlib
+import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +54,197 @@ _PERSISTENCE_CONNECTION_SYMBOLS = {
 }
 
 _BLUEPRINT_PERSISTENCE_RATCHET = {}
+
+
+@dataclass(frozen=True)
+class ModuleSizeBudget:
+    path: str
+    max_lines: int
+    treatment: str
+
+
+_MODULE_SIZE_RATCHET = (
+    ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
+    ModuleSizeBudget("app/services/commands/registry_autocomplete.py", 564, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_cache.py", 104, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_catalog.py", 359, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_content.py", 580, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_faq.py", 505, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_loader.py", 744, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_runtime.py", 173, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_smoke.py", 194, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_targets.py", 345, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_validate.py", 178, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_validation.py", 239, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_workspace.py", 466, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run.py", 799, "split-target-phase2"),
+    ModuleSizeBudget("app/blueprints/run_broker.py", 135, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_client.py", 153, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_kill.py", 123, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects.py", 575, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/projects_artifacts.py", 155, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_auto_promote.py", 204, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_core.py", 412, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_findings.py", 272, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_links.py", 242, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_metadata.py", 158, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_monitoring.py", 238, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_packages.py", 386, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1.py", 794, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/api_v1_notifications.py", 159, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_read.py", 399, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_runs.py", 340, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_schedules.py", 211, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_watchers.py", 240, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/atlas.py", 680, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/atlas_mutations.py", 680, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/atlas_read.py", 155, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/database.py", 1005, "already-resolved-ratchet"),
+    ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi.py", 2597, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_shodan.py", 74, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_signals.py", 1167, "split-target-phase4"),
+    ModuleSizeBudget("app/core/output_structured_signals.py", 223, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_targets.py", 239, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/intel_summary.py", 370, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup.py", 949, "split-target-phase4"),
+    ModuleSizeBudget("app/services/atlas/lookup_export.py", 277, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_filters.py", 169, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_metadata.py", 210, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_mutations.py", 122, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_runs.py", 200, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_search.py", 73, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/actors.py", 39, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/artifact_queries.py", 249, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/overview.py", 1081, "split-target-phase4"),
+    ModuleSizeBudget("app/services/projects/overview_app.py", 452, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/overview_intel.py", 294, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/files.py", 1080, "split-target-phase4"),
+    ModuleSizeBudget("app/services/workspace/maintenance.py", 401, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/metadata.py", 172, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/modes.py", 6, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/models.py", 87, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/paths.py", 165, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/settings.py", 77, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/migrations/baseline.py", 1689, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/pty/runtime.py", 106, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/service.py", 1191, "split-target-phase4"),
+    ModuleSizeBudget("app/services/pty/settings.py", 95, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/snapshots.py", 64, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/state.py", 155, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/wire.py", 96, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/insights.py", 305, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/mutations.py", 290, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/queries.py", 904, "split-target-phase4"),
+    ModuleSizeBudget("app/services/projects/package_queries.py", 71, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/list_queries.py", 217, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/list_metrics.py", 200, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/queries.py", 777, "split-target-phase4"),
+    ModuleSizeBudget("app/services/atlas/import_analysis.py", 265, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_helpers.py", 131, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_limits.py", 150, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_workflow.py", 956, "split-target-phase4"),
+    ModuleSizeBudget("app/blueprints/assets.py", 371, "split-target-phase4"),
+    ModuleSizeBudget("app/blueprints/assets_audit.py", 391, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/assets_diag.py", 656, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/process.py", 1169, "ratchet-only"),
+    ModuleSizeBudget("app/services/metrics/__init__.py", 983, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker_worker.py", 462, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/finalization.py", 1006, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/lifecycle.py", 635, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/schema_manifest.py", 899, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/database_backend.py", 845, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/commands/builtins_runtime.py", 830, "ratchet-only"),
+    ModuleSizeBudget("app/blueprints/teams.py", 796, "ratchet-only"),
+    ModuleSizeBudget("app/services/runs/postfilters.py", 368, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/process_control.py", 85, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_parser.py", 856, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/transcript.py", 73, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/__init__.py", 0, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker.py", 716, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/comparison.py", 1263, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/runs/kinds.py", 53, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/output_model.py", 534, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/output_store.py", 423, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/persistence.py", 161, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/start.py", 230, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/streaming.py", 156, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/structured_filters.py", 317, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/structured_summary.py", 59, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/workspace_artifacts.py", 92, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/__init__.py", 0, "split-package-ratchet"),
+)
+
+_MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
+    "app/blueprints/api_v1*.py",
+    "app/blueprints/projects*.py",
+    "app/blueprints/run*.py",
+    "app/blueprints/atlas*.py",
+    "app/blueprints/assets*.py",
+    "app/core/output*.py",
+    "app/services/commands/registry*.py",
+    "app/services/runs/*.py",
+    "app/services/pty/*.py",
+    "app/services/workspace/*.py",
+    "app/services/history/insights.py",
+    "app/services/history/mutations.py",
+    "app/services/history/queries.py",
+    "app/services/atlas/import*.py",
+    "app/services/atlas/intel_summary.py",
+    "app/services/atlas/lookup*.py",
+    "app/services/projects/actors.py",
+    "app/services/projects/artifact_queries.py",
+    "app/services/projects/list*.py",
+    "app/services/projects/overview*.py",
+    "app/services/projects/package_queries.py",
+    "app/services/projects/queries.py",
+)
+
+_DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 188
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "87bd8bd1306755a26a4b1871cb9057a07bbb0467cbd63e4f04101683eda3021e"
+
+_PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
+    ("blueprints.api_v1", "api_health", "callable"),
+    ("blueprints.api_v1", "api_runs_start", "callable"),
+    ("blueprints.api_v1", "_sse_after_id", "callable"),
+    ("blueprints.projects", "projects_list", "callable"),
+    ("blueprints.projects", "projects_create", "callable"),
+    ("blueprints.projects", "get_project_intel_overview", "callable"),
+    ("blueprints.run", "start_brokered_run", "callable"),
+    ("blueprints.run", "start_interactive_pty_run", "callable"),
+    ("blueprints.run", "_interactive_pty_input_limit", "callable"),
+    ("services.commands.registry", "load_commands_registry", "callable"),
+    ("services.commands.registry", "render_faq_markup", "callable"),
+    ("services.commands.registry", "rewrite_command", "callable"),
+    ("services.pty.service", "PtyTerminalCapture", "type"),
+    ("services.pty.service", "_pty_input_max_bytes", "callable"),
+    ("services.atlas.lookup", "list_entities", "callable"),
+    ("services.atlas.lookup", "entity_detail", "callable"),
+    ("services.atlas.lookup", "atlas_entities_export_csv", "callable"),
+    ("services.workspace.files", "workspace_settings", "callable"),
+    ("services.workspace.files", "ensure_session_workspace", "callable"),
+    ("services.workspace.files", "list_workspace_files", "callable"),
+)
+
+
+def _wc_line_count(path: Path) -> int:
+    return path.read_bytes().count(b"\n")
+
 
 _SQL_STRING_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE | re.DOTALL)
@@ -144,6 +340,33 @@ def _blueprint_python_files(root: Path = _BLUEPRINT_DIR) -> list[Path]:
 
 def _blueprint_ratcheted_path(path: Path, root: Path = _BLUEPRINT_DIR) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _decomposed_route_contract_entries() -> list[tuple[str, str, str]]:
+    from app import create_app
+
+    app = create_app()
+    entries = []
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint.split(".", 1)[0] not in _DECOMPOSED_ROUTE_BLUEPRINTS:
+            continue
+        for method in sorted((rule.methods or set()) - {"HEAD", "OPTIONS"}):
+            entries.append((method, rule.rule, rule.endpoint))
+    return sorted(entries)
+
+
+def _route_contract_digest(entries: list[tuple[str, str, str]]) -> str:
+    canonical = "\n".join("\t".join(entry) for entry in entries)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _required_module_size_ratchet_paths() -> set[str]:
+    required = set()
+    for pattern in _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS:
+        for path in _REPO_ROOT.glob(pattern):
+            if path.is_file():
+                required.add(path.relative_to(_REPO_ROOT).as_posix())
+    return required
 
 
 class TestBlueprintPersistenceBoundary:
@@ -251,4 +474,90 @@ def route(conn):
             "services/api_v1 should stay limited to auth, serialization, and OpenAPI helpers. "
             "Put persistence and database-backed operations in the owning domain service instead.\n"
             f"actual={sorted(actual)!r}"
+        )
+
+
+class TestBlueprintImportOrder:
+    def test_split_route_modules_import_without_parent_order_cycle(self):
+        script = (
+            "import blueprints.run_broker, blueprints.run_client, blueprints.run_kill, "
+            "blueprints.run_pty, blueprints.assets_diag, blueprints.assets_audit"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=_REPO_ROOT,
+            env={**os.environ, "PYTHONPATH": str(_REPO_ROOT / "app")},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+
+class TestDecomposedRouteContract:
+    def test_decomposed_blueprint_route_contract_matches_pre_split_set(self):
+        entries = _decomposed_route_contract_entries()
+        actual_count = len(entries)
+        actual_digest = _route_contract_digest(entries)
+
+        assert actual_count == _DECOMPOSED_ROUTE_CONTRACT_COUNT, (
+            "Decomposed blueprint route count changed. Review the route contract "
+            "before updating the expected count.\n"
+            + "\n".join(repr(entry) for entry in entries)
+        )
+        assert actual_digest == _DECOMPOSED_ROUTE_CONTRACT_SHA256, (
+            "Decomposed blueprint route contract drifted. Keep method, path, and "
+            "endpoint names stable unless this is an intentional route change.\n"
+            + "\n".join(repr(entry) for entry in entries)
+        )
+
+
+class TestModuleSizeRatchet:
+    def test_tracked_modules_do_not_grow_past_baseline(self):
+        over_budget = []
+        for budget in _MODULE_SIZE_RATCHET:
+            path = _REPO_ROOT / budget.path
+            assert path.exists(), f"Tracked module size budget path is missing: {budget.path}"
+            actual = _wc_line_count(path)
+            if actual > budget.max_lines:
+                over_budget.append(
+                    f"{budget.path}: {actual} lines > {budget.max_lines} "
+                    f"({budget.treatment})"
+                )
+
+        assert not over_budget, (
+            "Module size ratchet drift detected. Keep the tracked file at or below "
+            "its current baseline, split it, or intentionally lower/replace the "
+            "budget after decomposition.\n"
+            + "\n".join(over_budget)
+        )
+
+    def test_decomposed_module_families_are_all_classified(self):
+        tracked = {budget.path for budget in _MODULE_SIZE_RATCHET}
+        missing = sorted(_required_module_size_ratchet_paths() - tracked)
+
+        assert not missing, (
+            "Module size ratchet coverage drift detected. Add a budget treatment "
+            "for each new file in the decomposed families.\n"
+            + "\n".join(missing)
+        )
+
+
+class TestPublicImportCompatibility:
+    def test_moved_public_symbols_remain_available_from_parent_modules(self):
+        issues = []
+        for module_name, symbol, expected_kind in _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT:
+            module = importlib.import_module(module_name)
+            if not hasattr(module, symbol):
+                issues.append(f"{module_name}.{symbol}: missing")
+                continue
+            value = getattr(module, symbol)
+            if expected_kind == "callable" and not callable(value):
+                issues.append(f"{module_name}.{symbol}: expected callable, got {type(value).__name__}")
+            elif expected_kind == "type" and not isinstance(value, type):
+                issues.append(f"{module_name}.{symbol}: expected type, got {type(value).__name__}")
+
+        assert not issues, (
+            "Public import compatibility drift detected for moved decomposition symbols.\n"
+            + "\n".join(issues)
         )

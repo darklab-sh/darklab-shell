@@ -4,19 +4,54 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
-import json
 import logging
-import re
 import uuid
 from typing import Any, BinaryIO, IO
 
-from config import CFG
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend, parse_database_backend
 from core.helpers import get_log_session_id
+from services.atlas.import_analysis import (
+    analysis_counts as _analysis_counts,
+    available_options as _available_options,
+    current_apply_counts as _current_apply_counts,
+    entity_id_for as _entity_id_for,
+    entity_key as _entity_key,
+    entity_occurrence_stats as _entity_occurrence_stats,
+    finding_id_for as _finding_id_for,
+    normalize_options as _normalize_options,
+    preview_counts as _preview_counts,
+    project_accessible as _project_accessible,
+    project_target_exists as _project_target_exists,
+    required_capabilities as _required_capabilities,
+    required_capabilities_for_apply as _required_capabilities_for_apply,
+    target_entity_candidates as _target_entity_candidates,
+)
+from services.atlas.import_helpers import (
+    MAX_SOURCE_TOOL_LEN,
+    apply_context_fields as _apply_context_fields,
+    filename_log_fields as _filename_log_fields,
+    option_log_fields as _option_log_fields,
+    required_capability_values as _required_capability_values,
+    row_set_digest as _row_set_digest,
+    safe_count_fields as _safe_count_fields,
+    safe_filename as _safe_filename,
+    safe_label as _safe_label,
+    safe_text as _safe_text,
+    source_tool_key as _source_tool_key,
+    update_apply_log_context as _update_apply_log_context,
+)
+from services.atlas.import_limits import (
+    AtlasImportError,
+    _INVALID_CFG_LIMIT_WARNED as _INVALID_CFG_LIMIT_WARNED,
+    draft_ttl_minutes as _draft_ttl_minutes,
+    enforce_import_limits as _enforce_import_limits,
+    parser_limits as _parser_limits,
+    preview_sample_limit as _preview_sample_limit,
+    warning_sample_limit as _warning_sample_limit,
+)
 from services.atlas.import_parser import (
     ImportParseError,
-    ImportParserLimits,
     parse_import_file,
     read_import_source_bytes,
 )
@@ -33,7 +68,7 @@ from services.projects.findings import _finding_signature, _normalize_finding_si
 from services.projects.contracts import MAX_FINDING_REMEDIATION_LEN, ProjectWorkspaceQuotaExceeded
 from services.projects.links import insert_project_link_with_quota
 from services.projects.metadata import _finding_triage_by_id, upsert_finding_triage_details_on_conn
-from services.projects.scope import normalize_team_id, shared_owner_where
+from services.projects.scope import normalize_team_id
 from services.projects.targets import ensure_project_target_on_conn
 from services.projects.utils import now as project_now
 from services.teams.capabilities import Capability, role_can
@@ -43,107 +78,15 @@ log = logging.getLogger("shell")
 DRAFT_TTL_MINUTES = 30
 PREVIEW_SAMPLE_LIMIT = 20
 WARNING_SAMPLE_LIMIT = 50
-DEFAULT_MAX_UPLOAD_MB = 10
-DEFAULT_MAX_ROWS = 5000
-DEFAULT_MAX_FINDINGS = 5000
-DEFAULT_MAX_WARNINGS = 100
-DEFAULT_MAX_XML_ELEMENTS = 100000
 MAX_IMPORT_NAME_LEN = 120
-MAX_SOURCE_TOOL_LEN = 64
-MAX_FILENAME_LEN = 160
-_INVALID_CFG_LIMIT_WARNED: set[str] = set()
-
-
-class AtlasImportError(ValueError):
-    """Safe import workflow error intended for JSON responses."""
-
-    def __init__(self, code: str, message: str, *, status_code: int = 400):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status_code = status_code
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _cfg_limit(key: str, default: int) -> int:
-    raw_value = CFG.get(key, default)
-    invalid = False
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError):
-        value = default
-        invalid = True
-    if value <= 0:
-        value = default
-        invalid = True
-    if invalid and key not in _INVALID_CFG_LIMIT_WARNED:
-        _INVALID_CFG_LIMIT_WARNED.add(key)
-        log.warning("ATLAS_IMPORT_CONFIG_LIMIT_INVALID", extra={
-            "key": key,
-            "default": default,
-            "configured_type": type(raw_value).__name__[:64],
-            "configured_value": _safe_label(raw_value, 120),
-        })
-    return value
-
-
-def _draft_ttl_minutes() -> int:
-    return _cfg_limit("atlas_import_draft_ttl_minutes", DRAFT_TTL_MINUTES)
-
-
-def _preview_sample_limit() -> int:
-    return _cfg_limit("atlas_import_preview_sample_limit", PREVIEW_SAMPLE_LIMIT)
-
-
-def _warning_sample_limit() -> int:
-    return _cfg_limit("atlas_import_warning_sample_limit", WARNING_SAMPLE_LIMIT)
-
-
-def _parser_limits() -> ImportParserLimits:
-    return ImportParserLimits(
-        max_upload_bytes=_cfg_limit("atlas_import_max_upload_mb", DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024,
-        max_rows=_cfg_limit("atlas_import_max_rows", DEFAULT_MAX_ROWS),
-        max_warnings=_cfg_limit("atlas_import_max_warnings", DEFAULT_MAX_WARNINGS),
-        max_xml_elements=_cfg_limit("atlas_import_max_xml_elements", DEFAULT_MAX_XML_ELEMENTS),
-    )
-
-
 def _timestamp(value: datetime | None = None) -> str:
     return (value or _utc_now()).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _safe_label(value: Any, limit: int) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
-
-
-def _safe_text(value: Any, limit: int) -> str:
-    return str(value or "").strip()[:limit]
-
-
-def _safe_filename(value: Any) -> str:
-    filename = str(value or "").replace("\\", "/").split("/")[-1]
-    filename = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" .")
-    return filename[:MAX_FILENAME_LEN]
-
-
-def _source_tool_key(value: Any) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
-    return normalized.strip("_")[:MAX_SOURCE_TOOL_LEN]
-
-
-def _stable_json(value: Any) -> str:
-    return json.dumps(value, separators=(",", ":"), sort_keys=True)
-
-
-def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _row_set_digest(normalized_rows: dict[str, Any]) -> str:
-    return _sha256_text(_stable_json(normalized_rows))
 
 
 def _conn_dialect(conn):
@@ -159,421 +102,8 @@ def _decode_json_list(conn, value: Any) -> list[Any]:
     return _conn_dialect(conn).decode_json_list(value)
 
 
-def _normalize_options(raw_options: Any) -> dict[str, bool]:
-    options = raw_options if isinstance(raw_options, dict) else {}
-    return {
-        "import_entities": bool(options.get("import_entities")),
-        "import_findings": bool(options.get("import_findings")),
-        "link_to_project": bool(options.get("link_to_project")),
-        "create_project_targets": bool(options.get("create_project_targets")),
-    }
-
-
-def _option_log_fields(options: dict[str, bool]) -> dict[str, bool]:
-    return {
-        **options,
-        **{f"option_{key}": value for key, value in options.items()},
-    }
-
-
-def _safe_count_fields(counts: dict[str, Any]) -> dict[str, int]:
-    fields: dict[str, int] = {}
-    for key in (
-        "rows",
-        "valid",
-        "skipped",
-        "warnings",
-        "duplicate",
-        "new",
-        "updated",
-        "entity_valid",
-        "entity_new",
-        "entity_duplicate",
-        "finding_valid",
-        "finding_new",
-        "finding_duplicate",
-        "finding_subject_entities_to_create",
-        "project_target_candidates",
-        "entities_created",
-        "entities_updated",
-        "findings_created",
-        "findings_updated",
-        "finding_remediations_imported",
-        "entity_links",
-        "finding_occurrences",
-        "project_links_added",
-        "project_links_existing",
-        "project_targets_created",
-        "project_targets_existing",
-    ):
-        if key not in counts:
-            continue
-        try:
-            fields[key] = int(counts.get(key) or 0)
-        except (TypeError, ValueError):
-            fields[key] = 0
-    return fields
-
-
-def _required_capability_values(required: set[Capability] | list[Capability] | tuple[Capability, ...]) -> list[str]:
-    return sorted(capability.value for capability in required)
-
-
-def _filename_log_fields(filename: str) -> dict[str, Any]:
-    return {
-        "has_filename": bool(filename),
-        "filename_sha256_prefix": hashlib.sha256(filename.encode("utf-8", errors="replace")).hexdigest()[:12]
-        if filename else "",
-    }
-
-
-def _apply_context_fields(
-    *,
-    session_id: str,
-    team_id: str,
-    actor_member_id: str,
-    role: str,
-    draft_id: str,
-    batch_id: str,
-    project_id: str,
-    options: dict[str, bool],
-) -> dict[str, Any]:
-    return {
-        "session": get_log_session_id(session_id),
-        "team_id": team_id,
-        "actor_member_id": actor_member_id,
-        "actor_role": role,
-        "draft_id": draft_id,
-        "batch_id": batch_id,
-        "project_id": project_id,
-        **_option_log_fields(options),
-    }
-
-
-def _update_apply_log_context(log_context: dict[str, Any] | None, **fields: Any) -> None:
-    if log_context is not None:
-        log_context.update(fields)
-
-
-def _required_capabilities(options: dict[str, bool], preview_counts: dict[str, Any]) -> set[Capability]:
-    required: set[Capability] = set()
-    if options["import_entities"]:
-        required.add(Capability.MUTATE_PROJECTS)
-    if options["import_findings"]:
-        required.add(Capability.TRIAGE_FINDINGS)
-        if int(preview_counts.get("finding_subject_entities_to_create") or 0) > 0:
-            required.add(Capability.MUTATE_PROJECTS)
-    if options["link_to_project"] or options["create_project_targets"]:
-        required.add(Capability.MUTATE_PROJECTS)
-    return required
-
-
 def required_capabilities_for_apply(options: dict[str, Any], preview_counts: dict[str, Any]) -> set[Capability]:
-    return _required_capabilities(_normalize_options(options), preview_counts)
-
-
-def _available_options(*, role: str = "", is_team: bool = False, preview_counts: dict[str, Any]) -> dict[str, Any]:
-    def allowed(capability: Capability) -> bool:
-        return (not is_team) or role_can(role, capability)
-
-    finding_requires_entities = int(preview_counts.get("finding_subject_entities_to_create") or 0) > 0
-    import_findings_allowed = allowed(Capability.TRIAGE_FINDINGS) and (
-        not finding_requires_entities or allowed(Capability.MUTATE_PROJECTS)
-    )
-    return {
-        "import_entities": {
-            "available": int(preview_counts.get("entity_valid") or 0) > 0 and allowed(Capability.MUTATE_PROJECTS),
-            "requires": [Capability.MUTATE_PROJECTS.value],
-        },
-        "import_findings": {
-            "available": int(preview_counts.get("finding_valid") or 0) > 0 and import_findings_allowed,
-            "requires": [
-                Capability.TRIAGE_FINDINGS.value,
-                *([Capability.MUTATE_PROJECTS.value] if finding_requires_entities else []),
-            ],
-        },
-        "link_to_project": {
-            "available": allowed(Capability.MUTATE_PROJECTS),
-            "requires": [Capability.MUTATE_PROJECTS.value],
-        },
-        "create_project_targets": {
-            "available": int(preview_counts.get("project_target_candidates") or 0) > 0
-            and allowed(Capability.MUTATE_PROJECTS),
-            "requires": [Capability.MUTATE_PROJECTS.value],
-        },
-    }
-
-
-def _entity_key(entity: dict[str, Any]) -> tuple[str, str]:
-    return str(entity.get("kind") or ""), str(entity.get("canonical_value") or entity.get("value") or "")
-
-
-def _target_entity_candidates(normalized_rows: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
-    candidates: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def add(entity: Any) -> None:
-        if not isinstance(entity, dict):
-            return
-        key = _entity_key(entity)
-        if key[0] in {"domain", "ip", "url"} and key[1]:
-            candidates.setdefault(key, entity)
-
-    for entity in normalized_rows.get("entities") or []:
-        add(entity)
-    for finding in normalized_rows.get("findings") or []:
-        affected = finding.get("affected_entity") if isinstance(finding, dict) else None
-        add(affected)
-    return candidates
-
-
-def _project_target_exists(conn, project_id: str, key: tuple[str, str]) -> bool:
-    entity_type, canonical_value = key
-    row = conn.execute(
-        "SELECT 1 FROM project_links pl "
-        "JOIN entities e ON e.id = pl.entity_id "
-        "WHERE pl.project_id = ? AND pl.entity_type = 'atlas_entity' "
-        "AND e.type = ? AND e.canonical_value = ?",
-        (project_id, entity_type, canonical_value),
-    ).fetchone()
-    return row is not None
-
-
-def _entity_id_for(conn, session_id: str, team_id: str, entity: dict[str, Any]) -> str:
-    entity_type, canonical_value = _entity_key(entity)
-    signature_hash = entity_signature(entity_type, canonical_value)
-    if team_id:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
-            (team_id, entity_type, signature_hash),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
-            (session_id, entity_type, signature_hash),
-        ).fetchone()
-    return str(row["id"]) if row else ""
-
-
-def _finding_id_for(conn, session_id: str, team_id: str, finding: dict[str, Any]) -> str:
-    signature_hash = str(finding.get("signature_hash") or "")
-    if team_id:
-        row = conn.execute(
-            "SELECT id FROM findings WHERE team_id = ? AND signature_hash = ?",
-            (team_id, signature_hash),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? AND team_id = '' AND signature_hash = ?",
-            (session_id, signature_hash),
-        ).fetchone()
-    return str(row["id"]) if row else ""
-
-
-def _project_accessible(conn, session_id: str, project_id: str, *, team_id: str = "") -> bool:
-    if not project_id:
-        return False
-    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
-    row = conn.execute(
-        "SELECT 1 FROM projects WHERE " + owner_sql + " AND id = ? AND status != 'archived'",  # nosec
-        (*owner_params, project_id),
-    ).fetchone()
-    return row is not None
-
-
-def _analysis_counts(conn, session_id: str, team_id: str, normalized_rows: dict[str, Any]) -> dict[str, int]:
-    entities = [item for item in normalized_rows.get("entities") or [] if isinstance(item, dict)]
-    findings = [item for item in normalized_rows.get("findings") or [] if isinstance(item, dict)]
-    entity_keys = {_entity_key(entity) for entity in entities}
-    finding_entity_keys = {
-        _entity_key(entity)
-        for finding in findings
-        if isinstance((entity := finding.get("affected_entity")), dict)
-    }
-    target_candidates = _target_entity_candidates(normalized_rows)
-    all_entity_keys = sorted(entity_keys | finding_entity_keys)
-    existing_entity_keys = set()
-    for entity_type, canonical_value in all_entity_keys:
-        if not entity_type or not canonical_value:
-            continue
-        probe = {"kind": entity_type, "canonical_value": canonical_value}
-        if _entity_id_for(conn, session_id, team_id, probe):
-            existing_entity_keys.add((entity_type, canonical_value))
-    existing_findings = sum(1 for finding in findings if _finding_id_for(conn, session_id, team_id, finding))
-    return {
-        "entity_valid": len(entity_keys),
-        "entity_new": len(entity_keys - existing_entity_keys),
-        "entity_duplicate": len(entity_keys & existing_entity_keys),
-        "finding_valid": len(findings),
-        "finding_new": max(0, len(findings) - existing_findings),
-        "finding_duplicate": existing_findings,
-        "finding_subject_entities_to_create": len(finding_entity_keys - existing_entity_keys),
-        "project_target_candidates": len(target_candidates),
-    }
-
-
-def _preview_counts(parse_payload: dict[str, Any], analysis: dict[str, int]) -> dict[str, Any]:
-    raw_entities = parse_payload.get("entities")
-    raw_findings = parse_payload.get("findings")
-    raw_warnings = parse_payload.get("warnings")
-    entities: list[Any] = raw_entities if isinstance(raw_entities, list) else []
-    findings: list[Any] = raw_findings if isinstance(raw_findings, list) else []
-    warnings: list[Any] = raw_warnings if isinstance(raw_warnings, list) else []
-    return {
-        "rows": int(parse_payload.get("row_count") or 0),
-        "skipped": int(parse_payload.get("skipped_count") or 0),
-        "valid": len(entities) + len(findings),
-        "warnings": len(warnings),
-        "duplicate": int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"]),
-        "new": int(analysis["entity_new"]) + int(analysis["finding_new"]),
-        "updated": int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"]),
-        **analysis,
-    }
-
-
-def _current_apply_counts(
-    conn,
-    session_id: str,
-    team_id: str,
-    normalized_rows: dict[str, Any],
-    preview_counts: dict[str, Any],
-) -> dict[str, Any]:
-    counts = dict(preview_counts)
-    analysis = _analysis_counts(conn, session_id, team_id, normalized_rows)
-    counts.update(analysis)
-    counts["duplicate"] = int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"])
-    counts["new"] = int(analysis["entity_new"]) + int(analysis["finding_new"])
-    counts["updated"] = int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"])
-    return counts
-
-
-def _entity_occurrence_stats(
-    normalized_rows: dict[str, Any],
-    options: dict[str, bool],
-    now: str,
-) -> dict[tuple[str, str], dict[str, Any]]:
-    stats: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def add(entity: dict[str, Any]) -> None:
-        key = _entity_key(entity)
-        entity_type, canonical_value = key
-        if not entity_type or not canonical_value:
-            return
-        observed_at = str(entity.get("observed_at") or now)
-        current = stats.get(key)
-        if current is None:
-            stats[key] = {
-                "count": 1,
-                "first_observed_at": observed_at,
-                "last_observed_at": observed_at,
-                "row_number": int(entity.get("row_number") or 0),
-                "row_numbers": {int(entity.get("row_number") or 0)} if int(entity.get("row_number") or 0) > 0 else set(),
-                "external_id": str(entity.get("external_id") or ""),
-                "source_detail": entity.get("source_detail") if isinstance(entity.get("source_detail"), dict) else {},
-            }
-            return
-        row_number = int(entity.get("row_number") or 0)
-        row_numbers = current["row_numbers"] if isinstance(current.get("row_numbers"), set) else set()
-        if row_number > 0 and row_number in row_numbers:
-            return
-        if row_number > 0:
-            row_numbers.add(row_number)
-            current["row_numbers"] = row_numbers
-        current["count"] = int(current["count"]) + 1
-        if observed_at < str(current["first_observed_at"]):
-            current["first_observed_at"] = observed_at
-            current["row_number"] = row_number
-        if observed_at > str(current["last_observed_at"]):
-            current["last_observed_at"] = observed_at
-        if not current["external_id"] and entity.get("external_id"):
-            current["external_id"] = str(entity.get("external_id") or "")
-        if not current["source_detail"] and isinstance(entity.get("source_detail"), dict):
-            current["source_detail"] = entity.get("source_detail")
-
-    if options["import_entities"] or options["create_project_targets"]:
-        for entity in normalized_rows.get("entities") or []:
-            if isinstance(entity, dict):
-                add(entity)
-    if options["import_findings"] or options["create_project_targets"]:
-        for finding in normalized_rows.get("findings") or []:
-            affected = finding.get("affected_entity") if isinstance(finding, dict) else None
-            if isinstance(affected, dict):
-                add(affected)
-    return stats
-
-
-def _raise_import_limit_rejected(
-    *,
-    limit_key: str,
-    configured_limit: int,
-    actual_count: int,
-    stage: str,
-    draft_id: str = "",
-    format_id: str = "",
-    team_id: str = "",
-    message: str,
-) -> None:
-    log.warning("ATLAS_IMPORT_LIMIT_REJECTED", extra={
-        "limit_key": limit_key,
-        "configured_limit": configured_limit,
-        "actual_count": actual_count,
-        "draft_id": draft_id,
-        "format_id": format_id,
-        "team_id": team_id,
-        "stage": stage,
-    })
-    raise AtlasImportError("import_limit_exceeded", message)
-
-
-def _enforce_import_limits(
-    counts: dict[str, Any],
-    normalized_rows: dict[str, Any],
-    *,
-    stage: str,
-    draft_id: str = "",
-    format_id: str = "",
-    team_id: str = "",
-) -> None:
-    rows = int(counts.get("rows") or 0)
-    raw_findings = normalized_rows.get("findings")
-    raw_warnings = normalized_rows.get("warnings")
-    findings = raw_findings if isinstance(raw_findings, list) else []
-    warnings = raw_warnings if isinstance(raw_warnings, list) else []
-    max_rows = _cfg_limit("atlas_import_max_rows", DEFAULT_MAX_ROWS)
-    max_findings = _cfg_limit("atlas_import_max_findings", DEFAULT_MAX_FINDINGS)
-    max_warnings = _cfg_limit("atlas_import_max_warnings", DEFAULT_MAX_WARNINGS)
-    if rows > max_rows:
-        _raise_import_limit_rejected(
-            limit_key="atlas_import_max_rows",
-            configured_limit=max_rows,
-            actual_count=rows,
-            draft_id=draft_id,
-            format_id=format_id,
-            team_id=team_id,
-            stage=stage,
-            message=f"Import row count exceeds the configured limit ({max_rows}).",
-        )
-    if len(findings) > max_findings:
-        _raise_import_limit_rejected(
-            limit_key="atlas_import_max_findings",
-            configured_limit=max_findings,
-            actual_count=len(findings),
-            draft_id=draft_id,
-            format_id=format_id,
-            team_id=team_id,
-            stage=stage,
-            message=f"Import finding count exceeds the configured limit ({max_findings}).",
-        )
-    if len(warnings) > max_warnings:
-        _raise_import_limit_rejected(
-            limit_key="atlas_import_max_warnings",
-            configured_limit=max_warnings,
-            actual_count=len(warnings),
-            draft_id=draft_id,
-            format_id=format_id,
-            team_id=team_id,
-            stage=stage,
-            message=f"Import warning count exceeds the configured limit ({max_warnings}).",
-        )
+    return _required_capabilities_for_apply(options, preview_counts)
 
 
 def _normalized_row_set(parse_payload: dict[str, Any]) -> dict[str, Any]:

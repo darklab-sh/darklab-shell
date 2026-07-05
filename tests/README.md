@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,971
-- docs/inventory meta-tests: 55
-- `pytest`: 2284 (2242 behavior + 42 meta)
-- `vitest`: 1473 (1460 behavior + 13 meta)
+- behavior tests: 3,975
+- docs/inventory meta-tests: 60
+- `pytest`: 2292 (2245 behavior + 47 meta)
+- `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,026
+- total: 4,035
 
 This document is organized in two parts:
 
@@ -456,6 +456,11 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestBlueprintPersistenceBoundary.test_blueprint_scan_recurses_into_subpackages` | Verifies the blueprint persistence boundary scans Python files inside blueprint subpackages. |
 | `TestBlueprintPersistenceBoundary.test_blueprint_direct_database_access_matches_ratchet` | Verifies blueprints do not open database connections, execute SQL, or import database/backend helpers directly. |
 | `TestBlueprintPersistenceBoundary.test_api_v1_service_package_stays_non_persistence` | Verifies the API v1 service package stays limited to auth, serialization, and OpenAPI helpers. |
+| `TestBlueprintImportOrder.test_split_route_modules_import_without_parent_order_cycle` | Verifies split route modules can import directly without depending on parent-first import order. |
+| `TestDecomposedRouteContract.test_decomposed_blueprint_route_contract_matches_pre_split_set` | Verifies decomposed blueprint route families keep the same method, path, and endpoint contract as the pre-split route set. |
+| `TestModuleSizeRatchet.test_tracked_modules_do_not_grow_past_baseline` | Verifies oversized split targets and cohesive ratchet-only modules do not grow past their current line-count baselines. |
+| `TestModuleSizeRatchet.test_decomposed_module_families_are_all_classified` | Verifies every file in the decomposed module families has an explicit size-ratchet budget. |
+| `TestPublicImportCompatibility.test_moved_public_symbols_remain_available_from_parent_modules` | Verifies representative moved route and service helpers remain available from their parent import surfaces. |
 
 #### `test_backend_modules.py`
 
@@ -1061,6 +1066,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
 | `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry built-in commands such as `bogus-command`. |
 | `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
+| `TestRewriteIdempotent.test_injected_flags_without_position_default_to_prepend` | Verifies runtime-injected command flags without an explicit position are inserted after the command root. |
 | `TestRewriteIdempotent.test_curl_progress_meter_is_suppressed_by_default` | Verifies that app-launched curl commands inject `--no-progress-meter` by default. |
 | `TestRewriteIdempotent.test_curl_progress_rewrite_preserves_explicit_output_modes` | Verifies that curl help, silent, explicit progress, and already-quiet modes are not rewritten again. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
@@ -1101,6 +1107,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_scoped_events_team_viewer_reads_project_activity_only_for_own_team` | Verifies team viewers can read safe project activity for their team but cannot read foreign projects or broad team activity. |
 | `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
+| `TestDatabaseInit.test_atlas_lookup_syncs_split_module_backend_seams` | Verifies Atlas lookup wrappers sync the patched backend into split lookup helper modules before delegating. |
+| `TestDatabaseInit.test_project_queries_sync_split_module_db_connect_seams` | Verifies project query wrappers sync the patched database connection seam into split artifact and package query modules before delegating. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_run_output_summary_backfill_marks_empty_runs_once` | Verifies startup marks legacy runs with empty structured output as handled instead of retrying them on every restart. |
 | `TestDatabaseInit.test_run_output_summary_backfill_marks_failures_once` | Verifies startup records unreadable run-output summary backfill attempts once, logs the degraded reason counts, and skips them on the next normal pass. |
@@ -3641,6 +3649,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `clearSearch resets scoped search back to text mode` | Verifies that closing search clears any active findings/warnings/errors/summaries scope and returns to plain text mode. |
 | `updates the search button and scope labels with scoped counts` | Verifies that the tabbar search affordance and scoped buttons expose live signal counts. |
 | `uses cached signal counts without scanning large output buffers` | Verifies that discoverability counts can use the per-tab signal cache without scanning rendered output rows. |
+| `keeps discoverability refresh safe when the Element global is unavailable` | Verifies that delayed search discoverability refreshes do not crash when a test or partial DOM environment lacks the global `Element` constructor. |
 | `renders signal summary chips with DOM APIs instead of parsing markup` | Verifies that compact signal chips render unsafe-looking values as text instead of parsing them as HTML. |
 | `clears the discoverability pulse when the active output has no findings` | Verifies that a stale findings pulse is removed when the active tab changes to output with no findings. |
 | `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
@@ -4266,6 +4275,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `the shell does not request external font assets on load` | Verifies that the shell does not request external font assets on load. |
 
 #### `commands.spec.js`
+
+The interactive PTY browser checks in this spec mock the PTY HTTP and SSE layer so they can focus on modal behavior, resize wiring, stream rendering, reload recovery, and kill confirmation. Real `/pty/runs` start, stream, snapshot, resize, and kill route coverage lives in pytest, while the optional container smoke lane runs registry-declared interactive PTY examples against the live PTY routes.
 
 | Test | Description |
 | --- | --- |

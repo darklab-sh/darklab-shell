@@ -33,6 +33,9 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Structured Logging](#structured-logging)
 - [Atlas Decisions](#atlas-decisions)
   - [Port Entity Identity and Evidence](#port-entity-identity-and-evidence)
+  - [URL Entity Host Links](#url-entity-host-links)
+- [Backend Architecture Decisions](#backend-architecture-decisions)
+  - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
 - [Frontend Decisions](#frontend-decisions)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Export Rendering Centralization (ExportHtmlUtils)](#export-rendering-centralization-exporthtmlutils)
@@ -145,6 +148,22 @@ Ports do not offer provider intel refresh. They are app-captured scan evidence f
 **URL entities reuse the host relationship instead of introducing a URL-only link.**
 
 URL entities belong to a host in the same way port entities do, so they use the existing `host_entity_id` field. The relationship points at the scoped `domain` or `ip` entity derived from the canonical URL host. That keeps the URL canonical value stable and readable while letting Atlas and Project Overview roll URL evidence up through the host.
+
+---
+
+## Backend Architecture Decisions
+
+### Blueprint Parent Modules and Size Ratchets
+
+**Parent blueprint modules stay as stable registration surfaces while route groups live in focused sibling modules.**
+
+The app factory imports the parent blueprint modules, so those modules keep the public `Blueprint` object and define it before importing route-group siblings. The sibling modules register their routes by importing that parent blueprint. That import side effect is allowed only for route assembly: importing a route module should not start workers, open databases, spawn processes, or perform runtime maintenance.
+
+This pattern keeps Flask registration stable for `app.create_app()` while letting large route surfaces such as runs, projects, API v1, Atlas, and diagnostics split by resource group. It also preserves compatibility imports and monkeypatch seams during refactors, so tests and callers do not have to chase every internal move.
+
+Services split on real responsibility boundaries rather than line count alone. Query reads, payload shaping, lifecycle orchestration, settings/defaults, import/export helpers, and low-level process helpers can live in focused siblings when that makes ownership clearer. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay whole because splitting them would make review harder, not easier.
+
+The size ratchet in `tests/py/test_architecture.py` records that intent. Split files and cohesive ratchet-only files cannot quietly grow past their current baseline, and every file in the decomposed families must have an explicit budget entry. The route contract and import-compatibility tests make the same point from another angle: decomposition is allowed to move code, but it is not allowed to change user-visible routes or supported parent import surfaces by accident.
 
 ---
 

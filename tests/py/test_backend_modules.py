@@ -16892,7 +16892,7 @@ class TestLoadFaq:
         finally:
             os.unlink(path)
         assert len(result) == 1
-        html = result[0]["answer_html"]
+        html = cast(str, result[0]["answer_html"])
         assert "<strong>bold</strong>" in html
         assert "<em>italic</em>" in html
         assert "<u>underline</u>" in html
@@ -17361,8 +17361,8 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/README.md" in result[0]["answer"]
-        assert "https://example.invalid/README.md" in result[0]["answer_html"]
+        assert "https://example.invalid/README.md" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/README.md" in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_uses_config_project_readme_by_default(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -17376,8 +17376,8 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/config-readme" in result[0]["answer"]
-        assert "https://example.invalid/config-readme" in result[0]["answer_html"]
+        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_promotes_workspace_builtin_entry_when_enabled(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -17421,10 +17421,10 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
-        by_question = {item["question"]: item for item in result}
-        share_html = by_question["How do I save or share my results?"]["answer_html"]
-        tabs_html = by_question["How do tabs and permalinks work?"]["answer_html"]
-        shortcuts_html = by_question["Are there keyboard shortcuts?"]["answer_html"]
+        by_question = {cast(str, item["question"]): item for item in result}
+        share_html = cast(str, by_question["How do I save or share my results?"]["answer_html"])
+        tabs_html = cast(str, by_question["How do tabs and permalinks work?"]["answer_html"])
+        shortcuts_html = cast(str, by_question["Are there keyboard shortcuts?"]["answer_html"])
         assert "share snapshot" in share_html
         assert "run permalink" in share_html
         assert "/share" in share_html
@@ -17445,8 +17445,8 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
-        by_question = {item["question"]: item for item in result}
-        built_in_html = by_question["What built-in shell features are supported?"]["answer_html"]
+        by_question = {cast(str, item["question"]): item for item in result}
+        built_in_html = cast(str, by_question["What built-in shell features are supported?"]["answer_html"])
         assert "Built-in commands" in built_in_html
         assert "commands --built-in</code>" in built_in_html
         assert "history</code>" in built_in_html
@@ -22168,7 +22168,8 @@ class TestWorkflowInputLoading:
 
         subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
         assert subdomain["feature_required"] == "workspace"
-        assert [step["cmd"] for step in subdomain["steps"]] == [
+        subdomain_steps = cast(list[dict[str, object]], subdomain["steps"])
+        assert [step["cmd"] for step in subdomain_steps] == [
             "subfinder -d {{domain}} -silent -o subdomains.txt",
             "httpx -l subdomains.txt -silent -o live-urls.txt",
             "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
@@ -22244,6 +22245,16 @@ class TestSeedHistoryFixtures:
 # ── rewrite_command idempotency ───────────────────────────────────────────────
 
 class TestRewriteIdempotent:
+    def test_injected_flags_without_position_default_to_prepend(self):
+        with mock.patch(
+            "services.commands.registry._runtime_adaptations_by_root",
+            return_value={"curl": {"inject_flags": [{"flags": ["--extra"]}]}},
+        ):
+            cmd, notice = rewrite_command("curl https://example.com --verbose")
+
+        assert cmd == "curl --extra https://example.com --verbose"
+        assert notice is None
+
     def test_curl_progress_meter_is_suppressed_by_default(self):
         cmd, notice = rewrite_command("curl https://ip.darklab.sh")
         assert cmd == "curl --no-progress-meter https://ip.darklab.sh"
@@ -23293,6 +23304,44 @@ class TestDatabaseInit:
         with mock.patch("core.database.DB_PATH", db_path):
             with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                 database.db_init()
+
+    def test_atlas_lookup_syncs_split_module_backend_seams(self, monkeypatch):
+        from services.atlas import intel_summary, lookup as atlas_lookup
+        from services.atlas import lookup_export, lookup_metadata, lookup_runs, lookup_search
+
+        monkeypatch.setattr(atlas_lookup, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
+        for module in (intel_summary, lookup_export, lookup_metadata, lookup_runs, lookup_search):
+            monkeypatch.setattr(module, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(atlas_lookup, "_list_source_runs_impl", lambda *args, **kwargs: {"runs": []})
+
+        assert atlas_lookup.list_source_runs(object(), "session") == {"runs": []}
+        assert {
+            module.DB_BACKEND
+            for module in (intel_summary, lookup_export, lookup_metadata, lookup_runs, lookup_search)
+        } == {database_backend.DatabaseBackend.POSTGRES}
+
+    def test_project_queries_sync_split_module_db_connect_seams(self, monkeypatch):
+        from services.projects import artifact_queries, package_queries, queries as project_queries
+
+        def sentinel_connect():
+            raise AssertionError("delegated implementation should be patched")
+
+        monkeypatch.setattr(project_queries, "db_connect", sentinel_connect)
+        monkeypatch.setattr(artifact_queries, "db_connect", lambda: None)
+        monkeypatch.setattr(package_queries, "db_connect", lambda: None)
+        monkeypatch.setattr(project_queries, "_list_project_artifacts_impl", lambda *args, **kwargs: {"artifacts": []})
+        monkeypatch.setattr(project_queries, "_get_project_run_file_artifact_impl", lambda *args, **kwargs: {"id": "artifact"})
+        monkeypatch.setattr(project_queries, "_list_all_project_artifacts_impl", lambda *args, **kwargs: [])
+        monkeypatch.setattr(project_queries, "_list_evidence_packages_impl", lambda *args, **kwargs: [{"id": "pkg"}])
+        monkeypatch.setattr(project_queries, "_get_evidence_package_impl", lambda *args, **kwargs: {"id": "pkg"})
+
+        assert project_queries.list_project_artifacts("session", "project") == {"artifacts": []}
+        assert project_queries.get_project_run_file_artifact("session", "project", "artifact") == {"id": "artifact"}
+        assert project_queries._list_all_project_artifacts("session", "project") == []
+        assert project_queries.list_evidence_packages("session", "project") == [{"id": "pkg"}]
+        assert project_queries.get_evidence_package("session", "project", "pkg") == {"id": "pkg"}
+        assert artifact_queries.db_connect is sentinel_connect
+        assert package_queries.db_connect is sentinel_connect
 
     def test_creates_runs_and_snapshots_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

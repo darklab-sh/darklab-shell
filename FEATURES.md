@@ -244,7 +244,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 When command outcome summaries are enabled, text, HTML, PDF, Run Details, and permalink/share exports include the same visible summary block. The saved raw transcript remains unchanged, so the summary is always a derived view of the captured output rather than a replacement for it.
 
-**Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run.py` (server-side SSE generator).
+**Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run_broker.py` (server-side SSE routes), and `app/blueprints/run.py` (shared run blueprint and compatibility imports).
 
 ---
 
@@ -262,7 +262,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Configuration:** none — the kill path is not user-tunable.
 
-**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run.py` (`POST /kill`), `app/core/process.py` (`pid_register` / `pid_pop`).
+**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run_kill.py` (`POST /kill`), `app/blueprints/run.py` (shared run blueprint and compatibility imports), and `app/core/process.py` (`pid_register` / `pid_pop`).
 
 ---
 
@@ -321,7 +321,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Configuration:** pipe helper metadata lives in `app/conf/commands.yaml`; parser and execution limits live in `app/services/commands/postfilters.py`, `app/blueprints/run.py`, and `app/static/js/core/runner_core.js`.
 
-**Related files:** `app/conf/commands.yaml`, `app/services/commands/postfilters.py`, `app/blueprints/run.py`, `app/static/js/core/runner_core.js`.
+**Related files:** `app/conf/commands.yaml`, `app/services/commands/postfilters.py`, `app/blueprints/run.py` (shared run helpers and command-prep compatibility imports), `app/blueprints/run_broker.py` (`/runs` route), and `app/static/js/core/runner_core.js`.
 
 **Supported pipe forms:**
 
@@ -422,7 +422,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Configuration:** `output_entity_extra_domain_suffixes` can opt generic bare-hostname extraction into internal suffixes such as `.local` or `.corp`. The current scopes, server matchers, and summary format are otherwise app-defined and not operator-configurable.
 
-**Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run.py` (SSE metadata), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
+**Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run_broker.py` (SSE metadata routes), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
 
 ---
 
@@ -579,7 +579,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `AI_ENABLED`, `AI_WORKER_ENABLED`, `AI_BASE_URL`, `AI_MODEL`, `AI_FEATURE_SUMMARY`, `AI_FEATURE_NEXT_COMMANDS`, and `AI_FEATURE_RUN_SUGGESTIONS` control the common setup. See [Configuration](CONFIGURATION.md#environment-variables-and-env) for the full operator list and [AI Privacy Posture](docs/ai-privacy.md) for provider, storage, and logging details.
 
-**Related files:** `app/services/ai/` (provider client, context, coordination, storage, worker orchestration, prompts, schemas, and suggestion validation), `app/blueprints/history.py` (browser AI routes), `app/blueprints/api_v1.py` (headless API routes), `app/static/js/features/history/history_run_details.js` (Run Details AI cards), and `app/static/css/features/history.css` (Run Details AI card layout).
+**Related files:** `app/services/ai/` (provider client, context, coordination, storage, worker orchestration, prompts, schemas, and suggestion validation), `app/blueprints/history.py` (browser AI routes), `app/blueprints/api_v1_runs.py` (headless run AI routes), `app/blueprints/api_v1.py` (shared API blueprint and route registration), `app/static/js/features/history/history_run_details.js` (Run Details AI cards), and `app/static/css/features/history.css` (Run Details AI card layout).
 
 ---
 
@@ -602,7 +602,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** compare view and compare context defaults are saved user options. Server-side compare limits are fixed application constants rather than operator-facing `config.yaml` settings.
 
-**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/features/run-comparison/` (compare launcher, controls, navigation, and renderer), and `app/static/css/features/run-comparison.css` (desktop/mobile compare layout).
+**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects_core.py` (project compare route), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/static/js/features/run-comparison/` (compare launcher, controls, navigation, and renderer), and `app/static/css/features/run-comparison.css` (desktop/mobile compare layout).
 
 ---
 
@@ -830,7 +830,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** no server-side API-specific settings. CLI users can set `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, `DARKLAB_TIMEOUT`, or `~/.config/darklab/config.toml`; see [docs/api.md](docs/api.md).
 
-**Related files:** `app/blueprints/api_v1.py` (`/api/v1` routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
+**Related files:** `app/blueprints/api_v1.py` (shared `/api/v1` blueprint, helpers, and route registration), `app/blueprints/api_v1_read.py`, `app/blueprints/api_v1_runs.py`, `app/blueprints/api_v1_schedules.py`, `app/blueprints/api_v1_teams.py`, `app/blueprints/api_v1_watchers.py`, and `app/blueprints/api_v1_notifications.py` (resource routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
 
 ---
 
@@ -856,7 +856,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP/test timeouts, private webhook destination allowlisting, SMTP transport, sent-event retention, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
 
-**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/services/commands/builtins_notify.py` (terminal `notify` built-in), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1.py` (API channel and audit routes), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
+**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/services/commands/builtins_notify.py` (terminal `notify` built-in), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1_notifications.py` (API channel and audit routes), `app/blueprints/api_v1.py` (shared API blueprint and route registration), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
 
 ---
 
@@ -876,7 +876,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** variables are intended for targets, ports, and paths, not secrets. Values are not redacted and are visible in `var list`, autocomplete descriptions, and the expansion notice.
 
-**Related files:** `app/services/session/variables.py`, `app/services/commands/builtins.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
+**Related files:** `app/services/session/variables.py`, `app/services/commands/builtins.py`, `app/blueprints/run.py` (shared run helpers and compatibility imports), `app/blueprints/run_broker.py` (`/runs` route), `app/static/js/app.js`.
 
 ---
 
@@ -1028,7 +1028,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** project, metadata, auto-promote, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/overview.py` (Project Overview target rollups), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/projects/monitoring.py` (Project Monitoring payloads and triage updates), `app/services/diff/rollups.py` (Monitoring severity and top-signal rollups), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/services/audit/` (scoped activity rows and safe details), `app/blueprints/projects.py` (project routes), `app/static/js/features/projects/project_overview.js` (Overview tab rollups and target actions), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/features/projects/project_activity.js` (Activity tab filters, rows, and paging), `app/static/js/features/projects/project_monitoring.js` (Monitoring tab cards, timeline, run actions, and triage controls), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
+**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/overview.py` (Project Overview target rollups), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/projects/monitoring.py` (Project Monitoring payloads and triage updates), `app/services/diff/rollups.py` (Monitoring severity and top-signal rollups), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/services/audit/` (scoped activity rows and safe details), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/blueprints/projects_core.py`, `app/blueprints/projects_packages.py`, `app/blueprints/projects_monitoring.py`, `app/blueprints/projects_links.py`, and `app/blueprints/projects_metadata.py` (project route groups), `app/static/js/features/projects/project_overview.js` (Overview tab rollups and target actions), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/features/projects/project_activity.js` (Activity tab filters, rows, and paging), `app/static/js/features/projects/project_monitoring.js` (Monitoring tab cards, timeline, run actions, and triage controls), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
 
 ---
 
@@ -1048,7 +1048,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/projects/workspace.py` (manifest and archive builder), `app/blueprints/projects.py` (package routes), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
+**Related files:** `app/services/projects/workspace.py` (manifest and archive builder), `app/blueprints/projects_packages.py` (package routes), `app/blueprints/projects.py` (shared project blueprint and route registration), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
 
 ---
 
@@ -1096,7 +1096,7 @@ commands:
 - `autocomplete.*.value_type` — declares target-like values for autocomplete and optional restricted-input checks.
 - `knowledge` — optional descriptive guidance (`notes`, `gotchas`, `safe_defaults`, `common_flags`, `artifact_behavior`) shown in discovery surfaces; never policy-bearing. See [CONFIGURATION.md](CONFIGURATION.md#command-knowledge).
 
-**Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/runs` entry point).
+**Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (shared run helpers and compatibility imports), `app/blueprints/run_broker.py` (policy gate at the `/runs` entry point).
 
 ### Deny Prefixes
 
@@ -1130,7 +1130,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/services/pty/transcript.py` (saved transcript shaping), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
+**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/services/pty/transcript.py` (saved transcript shaping), `app/blueprints/run_pty.py` (PTY routes), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
 
 ---
 
@@ -1466,7 +1466,7 @@ If a session has run history, workspace files, project workspace records, user w
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`, `/diag/audit`, and `/metrics`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
-**Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
+**Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run_broker.py` (subprocess run start), `app/blueprints/run_kill.py` (`/kill` route), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
 
 ---
 
@@ -1485,7 +1485,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** `log_format` and `log_level` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/core/logging_setup.py` (format + level wiring), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets.py` (diagnostics events).
+**Related files:** `app/core/logging_setup.py` (format + level wiring), `app/blueprints/run_broker.py`, `app/blueprints/run_kill.py`, and `app/blueprints/run_pty.py` (run lifecycle route events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets_diag.py` and `app/blueprints/assets_audit.py` (diagnostics events).
 
 ---
 
@@ -1509,7 +1509,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag/audit` HTML/JSON responses and exports), `app/blueprints/projects.py` (Project Activity route), `app/blueprints/teams.py` (Team Activity route), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, scoped queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `app/static/js/features/projects/project_activity.js` (Project Activity tab), `app/static/js/features/preferences/teams_panel.js` (Team Activity subtab), `tests/py/test_routes.py`, `tests/js/unit/diag_audit.test.js`, `tests/js/unit/project_activity.test.js`, and `tests/js/unit/teams_panel.test.js` (viewer/export and scoped activity coverage).
+**Related files:** `app/blueprints/assets_audit.py` (`/diag/audit` HTML/JSON responses and exports), `app/blueprints/assets.py` (shared assets blueprint and route registration), `app/blueprints/projects_core.py` (Project Activity route), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/blueprints/teams.py` (Team Activity route), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, scoped queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `app/static/js/features/projects/project_activity.js` (Project Activity tab), `app/static/js/features/preferences/teams_panel.js` (Team Activity subtab), `tests/py/test_routes.py`, `tests/js/unit/diag_audit.test.js`, `tests/js/unit/project_activity.test.js`, and `tests/js/unit/teams_panel.test.js` (viewer/export and scoped activity coverage).
 
 ---
 
@@ -1579,7 +1579,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses, `/diag/audit`, and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` and `app/templates/diag_audit.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics, audit, and logging runtime details).
+**Related files:** `app/blueprints/assets_diag.py` (`/diag` HTML/JSON responses and `/metrics`), `app/blueprints/assets_audit.py` (`/diag/audit`), `app/blueprints/assets.py` (shared assets blueprint and route registration), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` and `app/templates/diag_audit.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics, audit, and logging runtime details).
 
 ---
 
