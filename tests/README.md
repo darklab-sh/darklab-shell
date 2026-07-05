@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,975
+- behavior tests: 3,976
 - docs/inventory meta-tests: 60
-- `pytest`: 2292 (2245 behavior + 47 meta)
+- `pytest`: 2293 (2246 behavior + 47 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,035
+- total: 4,036
 
 This document is organized in two parts:
 
@@ -763,6 +763,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_enforces_file_size_quota_and_file_count` | Verifies max-file-size, total-quota, and max-file-count enforcement. |
 | `TestSessionWorkspace.test_cleanup_removes_only_expired_session_directories` | Verifies that cleanup removes only expired hashed session directories and leaves unrelated paths alone. |
 | `TestSessionWorkspace.test_cleanup_repairs_scanner_owned_child_directories_before_remove` | Verifies that inactive workspace cleanup repairs scanner-owned child directories before removing expired session workspaces. |
+| `TestSessionWorkspace.test_cleanup_repairs_after_scanner_rm_fallback_fails` | Verifies that inactive workspace cleanup retries through repair when the scanner-owned directory removal helper returns an error. |
 | `TestSessionWorkspace.test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure` | Verifies that inactive workspace cleanup can remove empty unreadable direct child directories after recursive permission repair fails. |
 | `TestSessionWorkspace.test_cleanup_uses_session_directory_activity_not_file_mtime` | Verifies that workspace cleanup uses the session directory activity timestamp rather than preserving a session because one file has a newer timestamp. |
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |

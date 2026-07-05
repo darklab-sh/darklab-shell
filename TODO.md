@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
 - [Known Issues](#known-issues)
-  - [Workspace cleanup can loop on scanner-owned files](#workspace-cleanup-can-loop-on-scanner-owned-files)
 - [Technical Debt](#technical-debt)
   - [Dedicated positional workspace-file value type](#dedicated-positional-workspace-file-value-type)
 - [Feature Enhancements](#feature-enhancements)
@@ -40,12 +39,7 @@ No Open TODOs are currently tracked.
 
 ## Known Issues
 
-### Workspace cleanup can loop on scanner-owned files
-
-- Inactive workspace cleanup can repeatedly log `WORKSPACE_CLEANUP_ERROR` when a stale `sess_*` workspace contains scanner-created files or directories that `appuser` cannot remove.
-- The likely failure path is that `_remove_workspace_directory()` first calls `shutil.rmtree()` as `appuser`, then falls back to `sudo -u scanner -g appuser rm -rf`. If that scanner-user fallback fails, it raises `CalledProcessError` before the higher-level cleanup repair path can normalize scanner-owned entries and retry. The stale directory remains eligible, so each Gunicorn worker can hit the same failure on its own cleanup interval.
-- This can happen even with `workspace_backend: tmpfs` and `WORKSPACE_ROOT=/tmp/darklab_shell-workspaces`: tmpfs workspace files disappear on container restart, but they still persist for the lifetime of the running container.
-- Fix direction: make failed scanner-user removal fall back into the existing inactive-workspace repair flow instead of escaping as an unhandled cleanup error. Preserve bounded stderr from the failed helper for diagnosis, repair scanner-owned directory/file modes where possible, and add a regression test that simulates `shutil.rmtree()` failing on a scanner-owned child plus the scanner `rm -rf` helper returning non-zero.
+No open Known Issues are currently tracked.
 
 ---
 

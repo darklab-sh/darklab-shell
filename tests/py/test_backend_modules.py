@@ -14514,6 +14514,54 @@ class TestSessionWorkspace:
             assert removed == 1
             assert not root.exists()
 
+    def test_cleanup_repairs_after_scanner_rm_fallback_fails(self, monkeypatch, caplog):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("scanner-rm-fallback-session", cfg)
+            scanner_child = root / "tools" / "cdncheck"
+            scanner_child.parent.mkdir()
+            scanner_child.write_text("scanner-owned output\n", encoding="utf-8")
+            os.utime(root, (1000, 1000))
+            original_rmtree = workspace_module.shutil.rmtree
+            rmtree_attempts = 0
+
+            def fake_rmtree(path, *args, **kwargs):
+                nonlocal rmtree_attempts
+                if Path(path) == root:
+                    rmtree_attempts += 1
+                    if rmtree_attempts == 1:
+                        raise PermissionError("permission denied")
+                return original_rmtree(path, *args, **kwargs)
+
+            def fake_scanner_rm(command, **kwargs):
+                assert command == [
+                    "/usr/bin/sudo",
+                    "-u",
+                    "scanner",
+                    "-g",
+                    "appuser",
+                    "rm",
+                    "-rf",
+                    "--",
+                    str(root),
+                ]
+                assert kwargs["stderr"] == subprocess.PIPE
+                assert kwargs["text"] is True
+                raise subprocess.CalledProcessError(1, command, stderr="rm: operation not permitted: cdncheck")
+
+            monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
+            monkeypatch.setattr(workspace_module, "_sudo_bin", lambda: "/usr/bin/sudo")
+            monkeypatch.setattr(workspace_module, "_scanner_user_exists", lambda: True)
+            monkeypatch.setattr(workspace_module.subprocess, "run", fake_scanner_rm)
+            caplog.set_level("WARNING", logger=workspace_module.log.name)
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert rmtree_attempts == 2
+            assert not root.exists()
+            assert "WORKSPACE_CLEANUP_SKIP" not in caplog.text
+
     def test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)

@@ -783,13 +783,12 @@ def _remove_workspace_directory(path: Path) -> None:
         sudo_bin = _sudo_bin()
         if not sudo_bin or not _scanner_user_exists():
             raise
-        subprocess.run(
-            [sudo_bin, "-u", "scanner", "-g", "appuser", "rm", "-rf", "--", str(path)],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
+        command = [sudo_bin, "-u", "scanner", "-g", "appuser", "rm", "-rf", "--", str(path)]
+        try:
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=5)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            error = str(getattr(exc, "stderr", "") or exc).strip()[:500]
+            raise PermissionError(f"scanner cleanup helper failed: {error}") from exc
 
 
 def _repair_workspace_tree_for_cleanup(path: Path) -> None:
