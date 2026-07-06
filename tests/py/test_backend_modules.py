@@ -1055,6 +1055,22 @@ class TestAIAssistContextAndStorage:
         debug.assert_any_call("AI_WORKER_DEPENDENCIES_LOADING")
         debug.assert_any_call("AI_WORKER_BUSY", extra={"max_concurrent": 1})
 
+    def test_ai_worker_dependency_load_is_idempotent_after_bootstrap(self, monkeypatch):
+        from services.ai import worker
+
+        for name in worker._RUNTIME_DEPENDENCY_NAMES:
+            monkeypatch.setattr(worker, name, object())
+        monkeypatch.setattr(worker, "_VARIANT_RUNNERS", {"summary": object(), "next_commands": object()})
+
+        with mock.patch.object(worker, "setup_metrics_environment") as setup_metrics, \
+                mock.patch.object(worker.log, "debug") as debug, \
+                mock.patch.object(worker.log, "info") as info:
+            worker._load_runtime_dependencies()
+
+        setup_metrics.assert_not_called()
+        info.assert_not_called()
+        debug.assert_called_once_with("AI_WORKER_DEPENDENCIES_SKIPPED", extra={"reason": "already_loaded"})
+
     def test_ai_assist_storage_reuses_completed_cache_and_active_rows(self, monkeypatch, tmp_path):
         from services.ai.context import build_run_context
         from services.ai.prompts import resolved_prompt_version

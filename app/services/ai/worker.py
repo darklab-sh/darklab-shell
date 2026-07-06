@@ -41,6 +41,27 @@ reclaim_stale_assists: Any = None
 replace_suggestion_validations: Any = None
 update_assist_progress: Any = None
 _VARIANT_RUNNERS: dict[str, Any] = {}
+_RUNTIME_DEPENDENCY_NAMES = (
+    "app_metrics",
+    "AIClientError",
+    "OpenAICompatibleClient",
+    "AICoordinationUnavailable",
+    "acquire_worker_slot",
+    "release_worker_slot",
+    "worker_slot_heartbeat",
+    "build_run_context",
+    "claim_next_assist",
+    "complete_assist",
+    "fail_assist",
+    "heartbeat_assist",
+    "reclaim_stale_assists",
+    "replace_suggestion_validations",
+    "update_assist_progress",
+)
+
+
+def _runtime_dependencies_loaded() -> bool:
+    return bool(_VARIANT_RUNNERS) and all(globals().get(name) is not None for name in _RUNTIME_DEPENDENCY_NAMES)
 
 
 def _load_runtime_dependencies() -> None:
@@ -49,10 +70,10 @@ def _load_runtime_dependencies() -> None:
     global claim_next_assist, complete_assist, fail_assist, heartbeat_assist
     global reclaim_stale_assists, replace_suggestion_validations, update_assist_progress
 
-    if app_metrics is not None and _VARIANT_RUNNERS:
+    if _runtime_dependencies_loaded():
         log.debug("AI_WORKER_DEPENDENCIES_SKIPPED", extra={"reason": "already_loaded"})
-    else:
-        log.debug("AI_WORKER_DEPENDENCIES_LOADING")
+        return
+    log.debug("AI_WORKER_DEPENDENCIES_LOADING")
     setup_metrics_environment(resolve_effective_cfg())
     from services import metrics as loaded_metrics  # noqa: PLC0415
     from services.ai import next_commands, summarize  # noqa: PLC0415

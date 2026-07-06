@@ -24,10 +24,10 @@ Current totals:
 
 - behavior tests: 3,991
 - docs/inventory meta-tests: 62
-- `pytest`: 2310 (2261 behavior + 49 meta)
+- `pytest`: 2311 (2262 behavior + 49 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,053
+- total: 4,054
 
 This document is organized in two parts:
 
@@ -489,6 +489,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_reachable_model_inventory` | Checks that AI provider diagnostics report reachable provider inventory and installed-model status. |
 | `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_reachable_missing_model` | Checks that AI provider diagnostics keep reachable providers distinct from missing configured models. |
 | `TestAIAssistContextAndStorage.test_ai_worker_logs_stale_reclaims_and_busy_at_debug` | Checks that the AI worker logs stale-assist recovery and keeps busy-slot chatter at debug level. |
+| `TestAIAssistContextAndStorage.test_ai_worker_dependency_load_is_idempotent_after_bootstrap` | Checks that the AI worker does not rerun dependency and metrics setup after bootstrap. |
 | `TestAIAssistContextAndStorage.test_ai_assist_storage_reuses_completed_cache_and_active_rows` | Checks that AI assist storage reuses active rows and completed cache hits. |
 | `TestAIAssistContextAndStorage.test_ai_coordination_uses_redis_for_rate_limits_locks_and_slots` | Checks that AI assist coordination uses Redis for write limits, enqueue locks, and worker slots. |
 | `TestAIAssistContextAndStorage.test_ai_assist_storage_owned_connections_use_context_manager` | Checks that AI assist storage owned connections work through the database context-manager contract. |
