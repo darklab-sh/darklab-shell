@@ -368,6 +368,8 @@ import {
 } from '../../../app/static/js/features/atlas/atlas_tabs.js'
 import {
   DarklabAtlasEntityRow,
+  formatCompactPortLabel,
+  formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,
 } from '../../../app/static/js/features/atlas/atlas_entity_row.js'
@@ -1001,6 +1003,178 @@ describe('core ESM exports', () => {
       if (originalLazyAssetsJson) document.body.appendChild(originalLazyAssetsJson)
       restoreGlobals(lazyGlobal, globals)
     }
+  })
+
+  it('renders port metadata in Atlas and Project entity rows', () => {
+    const entity = {
+      id: 'ent-port-443',
+      type: 'port',
+      canonical_value: 'example.com:443/tcp',
+      host_entity_id: 'ent-host-example',
+      occurrence_count: 2,
+      run_count: 1,
+      attributes: { service: 'https', version: 'nginx', banner: 'nginx TLS' },
+    }
+
+    expect(formatPortEntityMetadata(entity, { includeHost: true })).toEqual([
+      'proto tcp',
+      'service https',
+      'version nginx',
+      'banner nginx TLS',
+      'host ent-host-example',
+    ])
+    expect(formatCompactPortLabel(entity)).toBe('443/tcp https (nginx)')
+    expect(formatCompactPortLabel({
+      port: 8443,
+      proto: 'tcp',
+      service: 'https-alt',
+      version: '',
+    })).toBe('8443/tcp https-alt')
+
+    const atlasRow = renderAtlasEntityRow({ entity })
+    expect(atlasRow.textContent).toContain('2 hits · 1 run')
+    expect(atlasRow.textContent).toContain('proto tcp')
+    expect(atlasRow.textContent).toContain('service https')
+    expect(atlasRow.textContent).toContain('version nginx')
+    expect(atlasRow.textContent).toContain('banner nginx TLS')
+
+    const projectController = DarklabProjectEntities.createProjectEntitiesController({
+      formatDate: value => String(value || ''),
+    })
+    const projectRow = renderProjectEntityRow({
+      entity,
+      title: entity.canonical_value,
+      meta: 'Ports · 2 hits',
+      detail: projectController.portSummary(entity, { includeHost: true }),
+    })
+    expect(projectRow.textContent).toContain('proto tcp')
+    expect(projectRow.textContent).toContain('service https')
+    expect(projectRow.textContent).toContain('version nginx')
+    expect(projectRow.textContent).toContain('banner nginx TLS')
+    expect(projectRow.textContent).toContain('host ent-host-example')
+  })
+
+  it('applies host entity filters only to Project port entity requests', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        entities: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+        has_more: false,
+        counts_by_type: {},
+      }),
+    }))
+    const hostFilters = new Map([['project-1', new Set(['ent-host-example'])]])
+    let activeEntityTab = 'ip'
+    const projectController = DarklabProjectEntities.createProjectEntitiesController({
+      apiFetch,
+      getActiveTab: () => activeEntityTab,
+      setActiveTab: tabId => { activeEntityTab = String(tabId || 'ip') },
+      getSelectedProjectId: () => 'project-1',
+      getSummary: () => ({ project: { id: 'project-1' }, targets: [] }),
+      projectHostFilterSet: projectId => hostFilters.get(projectId) || new Set(),
+      projectResponseError: async (_resp, fallback) => new Error(fallback),
+    })
+
+    projectController.setActiveTab('ip')
+    await projectController.load('project-1', { skipFinalRender: true })
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/entities?limit=50&offset=0&type=ip',
+      { cache: 'no-store' },
+    )
+
+    projectController.setActiveTab('port')
+    await projectController.load('project-1', { force: true, skipFinalRender: true })
+
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/projects/project-1/entities?host_entity_id=ent-host-example&limit=50&offset=0&type=port',
+      { cache: 'no-store' },
+    )
+  })
+
+  it('renders and clears host entity filter chips in Project filters', async () => {
+    const projectSummary = {
+      project: { id: 'project-1' },
+      runs: [],
+      targets: [{
+        id: 'target-1',
+        entity_id: 'ent-host-example',
+        type: 'domain',
+        value: 'example.com',
+      }],
+    }
+    const filtersController = DarklabProjectFilters.createProjectFiltersController({
+      bindProjectRuntimePressable: vi.fn(),
+      entityLabelValues: () => [],
+      findingReviewStates: [],
+      projectFindingItems: () => [],
+      projectFindingNoteStateOptions: [{ value: 'all', label: 'All notes' }],
+      projectFindingOrphanOptions: [{ value: 'hide', label: 'Hide orphaned' }],
+      projectFindingScopeOptions: [],
+      projectFindingSeverityOptions: [],
+      projectRunById: () => null,
+      projectRunItems: () => [],
+      projectSummary: () => projectSummary,
+      projectTargetItems: summary => summary.targets || [],
+      projectWorkspaceTab: () => 'entities',
+    })
+    filtersController.hostFilterSet('project-1').add('ent-host-example')
+    const eventsController = DarklabProjectWorkspaceEvents.createProjectWorkspaceEventsController({
+      projectHostFilterSet: projectId => filtersController.hostFilterSet(projectId),
+      renderProjectExplorer: vi.fn(),
+      selectedProjectId: () => 'project-1',
+      workspaceTab: () => 'entities',
+    })
+
+    const filterBar = filtersController.renderFilterBar('project-1', projectSummary)
+    document.body.appendChild(filterBar)
+    const chip = filterBar.querySelector('[data-project-host-filter-clear="ent-host-example"]')
+    expect(chip?.textContent).toContain('host: domain: example.com')
+
+    await eventsController.handleClick({
+      target: chip,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+    expect([...filtersController.hostFilterSet('project-1')]).toEqual([])
+  })
+
+  it('renders port metadata in Atlas entity detail', () => {
+    const container = document.createElement('div')
+    renderAtlasDetail(container, {
+      entity: {
+        id: 'ent-port-443',
+        type: 'port',
+        canonical_value: 'example.com:443/tcp',
+        host_entity_id: 'ent-host-example',
+        occurrence_count: 2,
+        first_seen_at: '2026-06-01T00:00:00Z',
+        last_seen_at: '2026-06-02T00:00:00Z',
+        attributes: { service: 'https', version: 'nginx', banner: 'nginx TLS' },
+        project_links: [],
+        labels: [],
+      },
+      intel_summary: {},
+      intel_snapshots: [],
+      import_sources: [],
+      runs: [],
+      findings: [],
+      detail_limits: {},
+    }, { hideInlineActions: true })
+
+    expect(container.textContent).toContain('Proto')
+    expect(container.textContent).toContain('tcp')
+    expect(container.textContent).toContain('Service')
+    expect(container.textContent).toContain('https')
+    expect(container.textContent).toContain('Version')
+    expect(container.textContent).toContain('nginx')
+    expect(container.textContent).toContain('Banner')
+    expect(container.textContent).toContain('nginx TLS')
+    expect(container.textContent).toContain('Host')
+    expect(container.textContent).toContain('ent-host-example')
   })
 
   it('logs a bounded error when a lazy module API contract is missing', async () => {

@@ -1,6 +1,9 @@
 // Project Entities tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
-import { DarklabAtlasEntityRow as importedAtlasEntityRow } from '../atlas/atlas_entity_row.js';
+import {
+  DarklabAtlasEntityRow as importedAtlasEntityRow,
+  formatPortEntityMetadata as importedFormatPortEntityMetadata,
+} from '../atlas/atlas_entity_row.js';
 import { DarklabAtlasTabs as importedAtlasTabs } from '../atlas/atlas_tabs.js';
 import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
 import {
@@ -28,8 +31,9 @@ let exportedDarklabProjectEntities = null;
     const atlasTabs = atlasTabsApi && Array.isArray(atlasTabsApi.tabs)
       ? atlasTabsApi.tabs
       : [
-          { id: 'ip', label: 'Hosts/IPs', type: 'ip' },
+          { id: 'ip', label: 'IPs', type: 'ip' },
           { id: 'domain', label: 'Domains', type: 'domain' },
+          { id: 'port', label: 'Ports', type: 'port' },
           { id: 'hash', label: 'Hashes', type: 'hash' },
           { id: 'cve', label: 'CVEs', type: 'cve' },
           { id: 'url', label: 'URLs', type: 'url' },
@@ -66,6 +70,13 @@ let exportedDarklabProjectEntities = null;
       ? ` · refreshed ${formatDate(entity.intel_last_refreshed)}`
       : '';
     return `intel: ${providerText}${refreshed}`;
+  }
+
+  function _portEntitySummary(entity, options = {}) {
+    const formatPortEntityMetadata = typeof importedFormatPortEntityMetadata === 'function'
+      ? importedFormatPortEntityMetadata
+      : () => [];
+    return formatPortEntityMetadata(entity, options).join(' · ');
   }
 
   function _appendDataset(el, dataset = {}) {
@@ -160,11 +171,12 @@ let exportedDarklabProjectEntities = null;
     const ruleStates = new Map();
     const targetKinds = [
       { value: 'any', label: 'Any' },
-      { value: 'domain', label: 'Domain' },
       { value: 'ip', label: 'IP' },
-      { value: 'url', label: 'URL' },
-      { value: 'cve', label: 'CVE' },
+      { value: 'domain', label: 'Domain' },
+      { value: 'port', label: 'Port' },
       { value: 'hash', label: 'Hash' },
+      { value: 'cve', label: 'CVE' },
+      { value: 'url', label: 'URL' },
     ];
     const matchModes = [
       { value: 'exact', label: 'Exact' },
@@ -438,6 +450,14 @@ let exportedDarklabProjectEntities = null;
       runFilters.forEach((runId) => {
         if (runId) params.append('run_id', runId);
       });
+      const hostFilters = typeof ctx.projectHostFilterSet === 'function'
+        ? ctx.projectHostFilterSet(normalizedProjectId)
+        : new Set();
+      if (activeType() === 'port') {
+        hostFilters.forEach((hostEntityId) => {
+          if (hostEntityId) params.append('host_entity_id', hostEntityId);
+        });
+      }
     }
 
     function entityFilterScopeKey(projectId) {
@@ -562,6 +582,10 @@ let exportedDarklabProjectEntities = null;
 
     function intelSummary(entity) {
       return _entityIntelSummary(entity, ctx.formatDate || (value => String(value || '')));
+    }
+
+    function portSummary(entity, options = {}) {
+      return _portEntitySummary(entity, options);
     }
 
     function counts(summary) {
@@ -1644,6 +1668,7 @@ let exportedDarklabProjectEntities = null;
           entity.last_seen ? `last seen ${ctx.formatDate(entity.last_seen)}` : '',
         ].filter(Boolean);
         const detailParts = [
+          portSummary(entity, { includeHost: true }),
           entity.source_run_id ? `source run ${ctx.shortProjectRunId(entity.source_run_id)}` : '',
           intelSummary(entity),
         ].filter(Boolean);
@@ -1744,6 +1769,7 @@ let exportedDarklabProjectEntities = null;
           meta: typeLabel(entity.type),
           detail: [
             `${hitCount.toLocaleString()} hit${hitCount === 1 ? '' : 's'}`,
+            portSummary(entity, { includeHost: true }),
             intelSummary(entity),
           ].filter(Boolean),
           chips: chips(entity),
@@ -1990,6 +2016,7 @@ let exportedDarklabProjectEntities = null;
       tabs,
       typeLabel,
       intelSummary,
+      portSummary,
       counts,
       itemsForActiveTab,
       pagedItemsForActiveTab,

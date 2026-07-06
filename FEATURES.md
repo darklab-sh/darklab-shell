@@ -105,7 +105,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - Tool suggestions load from the command registry at page load and use ranked exact, prefix, token-boundary, substring, and fuzzy matching. Matched text is highlighted in green.
 - App-owned built-in commands use the same matching engine as YAML-backed tools.
 - Workspace file paths and installed wordlist paths match by useful path segments and filename substrings, so users can type the part they remember instead of the beginning of the path.
-- Workspace move slots marked as target values suggest loaded active-scope Files and folders. `file move` and `mv` suggest sources first, then destination folders (including `/`) once the source is selected.
+- Workspace move slots marked as workspace paths suggest loaded active-scope Files and folders. `file move` and `mv` suggest sources first, then destination folders (including `/`) once the source is selected.
 - Value slots marked as domains, hosts, targets, IPs, URLs, or port sets capture up to 10 recent targets per kind for the active session token. They show back up only in compatible autocomplete slots, and URLs are saved without query strings or fragments. Recents persist across browser restarts and devices when the same `tok_...` session token is active.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
@@ -244,7 +244,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 When command outcome summaries are enabled, text, HTML, PDF, Run Details, and permalink/share exports include the same visible summary block. The saved raw transcript remains unchanged, so the summary is always a derived view of the captured output rather than a replacement for it.
 
-**Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run.py` (server-side SSE generator).
+**Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run_broker.py` (server-side SSE routes), and `app/blueprints/run.py` (shared run blueprint and compatibility imports).
 
 ---
 
@@ -262,7 +262,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Configuration:** none — the kill path is not user-tunable.
 
-**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run.py` (`POST /kill`), `app/core/process.py` (`pid_register` / `pid_pop`).
+**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run_kill.py` (`POST /kill`), `app/blueprints/run.py` (shared run blueprint and compatibility imports), and `app/core/process.py` (`pid_register` / `pid_pop`).
 
 ---
 
@@ -321,7 +321,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Configuration:** pipe helper metadata lives in `app/conf/commands.yaml`; parser and execution limits live in `app/services/commands/postfilters.py`, `app/blueprints/run.py`, and `app/static/js/core/runner_core.js`.
 
-**Related files:** `app/conf/commands.yaml`, `app/services/commands/postfilters.py`, `app/blueprints/run.py`, `app/static/js/core/runner_core.js`.
+**Related files:** `app/conf/commands.yaml`, `app/services/commands/postfilters.py`, `app/blueprints/run.py` (shared run helpers and command-prep compatibility imports), `app/blueprints/run_broker.py` (`/runs` route), and `app/static/js/core/runner_core.js`.
 
 **Supported pipe forms:**
 
@@ -409,7 +409,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
   - `puredns` valid-domain rows create domain entities and findings, while wildcard rows are warnings and workspace output files stay tied to run-file artifact records.
   - Nuclei output and Nuclei JSONL imports keep template-source provenance so later review can tell whether findings came from the managed template cache, a workspace template path, a pinned-looking clone, or an operator-updated template set.
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
-- The same server pass also attaches structured entity metadata to external command output lines when it sees public IPs, hostnames, hashes, or CVE IDs. That metadata is kept with live streams, restored history, saved full-output artifacts, and the Session Entity Atlas without re-parsing transcripts.
+- The same server pass also attaches structured entity metadata to external command output lines when it sees public IPs, hostnames, hashes, or CVE IDs. Generic hostname extraction uses an offline Public Suffix List check so dotted code snippets like `classlist.add` or `document.queryselector` do not become domains. Full URLs, scanner-specific rows, imports, and explicit project targets use stronger parser paths and keep their current behavior. That metadata is kept with live streams, restored history, saved full-output artifacts, and the Session Entity Atlas without re-parsing transcripts.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
 - The **summarize** button appends a synthetic **Command Findings:** block to the active tab after the tab is idle. The summary groups external command blocks by server-provided command and target metadata when present, merges repeated runs for the same command/target, collapses duplicate full-command labels with a repeat count, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when target metadata is unavailable. The button stays disabled while the active tab has a running command so synthetic summary output cannot mix into live command output.
 - Run Details shows a compact output summary above restored transcripts, including counts by severity kind, signal, and entity type plus quick outline rows for section headers, key/value rows, and signal-bearing lines.
@@ -420,9 +420,9 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Limits:** signal detection is server-classified, scoped to the active tab’s transcript, and intentionally favors the project’s supported toolset over arbitrary command output. Browser-side signal fallback is intentionally not used; older restored output without signal metadata is treated as signal-unavailable. A command with no matched findings, warnings, errors, or summary lines does not appear in the generated summary block.
 
-**Configuration:** none — the current scopes, server matchers, and summary format are app-defined and not operator-configurable.
+**Configuration:** `output_entity_extra_domain_suffixes` can opt generic bare-hostname extraction into internal suffixes such as `.local` or `.corp`. The current scopes, server matchers, and summary format are otherwise app-defined and not operator-configurable.
 
-**Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run.py` (SSE metadata), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
+**Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run_broker.py` (SSE metadata routes), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
 
 ---
 
@@ -433,24 +433,24 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Behavior:**
 
 - Open **Atlas** from the desktop rail, mobile menu, `Alt+A`, History row actions, Run Details, or a project filtered view.
-- Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
+- Atlas groups saved entities by **Findings**, **IPs**, **Domains**, **Ports**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels. Port rows come from app-captured scanner output and can show the service or version when the tool reported it. Domain and IP details also list related URL entities, so you can jump from a host to the URL evidence found under it.
 - Atlas search matches entity values plus Atlas labels and notes, so curated metadata is as findable as values copied from command output.
-- Atlas can be scoped to one source run from Run Details or from the Atlas run filter. The filter applies across the Findings queue, entity tabs, tab counts, and entity exports until you clear the visible run chip.
+- Atlas can be scoped to one source run from Run Details or from the Atlas run filter, and to one project from Projects or from the Atlas project filter. Those filters apply across the Findings queue, entity tabs, tab counts, and entity exports until you clear the visible chip or use **Clear filters**.
 - The Atlas toolbar can import external triage files from Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL. Imports show a preview with counts, samples, and row warnings before anything is written. Applying an import writes a high-level audit row with the source tool, format, selected options, project id, row/count summary, and created/updated counts without storing imported row bodies. From a project-filtered Atlas view, you can also link imported entities to that project or create project targets from imported domains, IPs, and URLs.
 - When a team scope is active, Atlas views follow team-owned source runs. Team members can review deduplicated team-owned entities, source runs, and findings produced by shared runs, add shared labels and notes, refresh cached intel, update finding review/suppression state, and link Atlas entities into team projects without pulling in their personal Atlas rows.
-- Run Details shows the source run's Atlas entity count and includes paged entity tabs for the same entity types, so you can inspect generated hosts, domains, hashes, CVEs, and URLs without leaving the run modal.
+- Run Details shows the source run's Atlas entity count and includes paged entity tabs for the same entity types, so you can inspect generated IPs, domains, ports, hashes, CVEs, and URLs without leaving the run modal.
 - Entity details page through source runs and findings when an entity appears across more rows than fit in one view, so older evidence stays reachable without loading the whole collection at once.
-- Saved views remember useful Atlas filter sets for the active session token, including search text, source run, orphan filter, suppression filter, Findings review state, and project scope. Applying a saved view keeps you on the current Atlas tab, and **Clear filters** returns the visible filter controls and saved-view picker to their defaults while keeping a project-scoped Atlas launch anchored to that project.
+- Saved views remember useful Atlas filter sets for the active session token, including search text, source run, orphan filter, suppression filter, Findings review state, and project scope. Applying a saved view keeps you on the current Atlas tab, and **Clear filters** returns the visible filter controls, project scope, source-run scope, and saved-view picker to their defaults.
 - On mobile, Atlas uses a list/detail flow with Back navigation, compact filters, bottom-sheet actions, and select mode from the overflow menu so entity triage fits the same touch pattern as Projects and History.
 - The **Findings** tab works as the cross-run triage queue. It lists deduped findings, supports text, project, source-run, review-state, and verification-status filters, opens finding detail with source-run and entity navigation, and can update or delete selected visible findings in bulk. Findings can also carry remediation guidance, verification steps, a verification status, and optional verification notes; compact badges show when that follow-up work exists without crowding the list. Verification status uses `not_started`, `ready_to_verify`, `verified`, `needs_retest`, or `not_applicable`. On desktop, the larger Findings Board opens from the rail, Atlas toolbar, or Projects and groups findings into New, Reviewed, False positive, and Follow-up lanes for quicker review-state triage. Mobile keeps Findings in the list flow so the review tools fit the narrow screen.
 - Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, import sources, source runs, and related findings.
 - Select mode adds checkboxes on the visible page for any Atlas tab. You can suppress or restore selected noisy rows without deleting source data, delete selected findings directly, or delete selected entities and their attached findings in one confirmed action.
 - Entity tokens in saved and live transcripts can open Atlas directly. Long-pressing or right-clicking a token opens quick actions for copying the value, refreshing intel, editing metadata in Atlas, or refocusing the transcript line.
-- **Refresh intel** fetches current app-native intel for that entity, shows a progress panel while slower providers run, and stores normalized provider snapshots back on the entity.
+- **Refresh intel** fetches current app-native intel for provider-backed entities, shows a progress panel while slower providers run, and stores normalized provider snapshots back on the entity. Port entities are app-captured scanner evidence, so they don't offer provider refresh.
 - **Clean Atlas** on a source run removes that run's Atlas links while keeping the run transcript in History. Disposable single-source rows can be removed at the same time, while curated rows are kept by default when they have a project link, project-visible finding relationship, label, note, or review state. Cleanup confirmations include a separate opt-in when you really do want to delete those curated single-source rows too.
 - **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
 - Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
-- Entity tabs can export the current Atlas filter as CSV or JSONL. Exports include summary fields, suppression state, labels, notes, project names, and provider names that have cached intel, but they leave raw provider response bodies out.
+- Entity tabs can export the current Atlas filter as CSV or JSONL. Exports include summary fields, port host/service metadata, suppression state, labels, notes, project names, and provider names that have cached intel, but they leave raw provider response bodies out.
 
 **Importing external reports:** Atlas imports are for bringing third-party triage results into the entity and finding view without pretending those results came from a shell command.
 
@@ -471,18 +471,21 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 Supported fields:
 
 - `row_type` or `type`: use `entity` for entity-only rows. Rows with a finding title are treated as finding rows.
-- `entity_kind` or `kind`: one of `domain`, `ip`, `url`, `cve`, or `hash`. `host` is accepted as a domain alias.
+- `entity_kind` or `kind`: one of `domain`, `ip`, `port`, `url`, `cve`, or `hash`. `host` is accepted as a domain alias. Imported URL rows create or reuse the scoped domain or IP host entity and store that relationship on the URL row. Imported port rows accept `host:port/proto` values, default to TCP when the protocol is omitted, and support TCP or UDP. IPv6 hosts use brackets, such as `[2001:db8::1]:443/tcp`. Port rows do not create a separate host row unless the file also includes that host as its own entity.
 - `entity_value` or `value`: the value to normalize into Atlas.
 - `subject_key` or `subject`: a stable subject for a finding that does not have a normalizable entity.
 - `title` or `finding_title`: the finding title.
 - `severity`: `info`, `low`, `medium`, `high`, or `critical`. Numeric scores and common words such as `moderate` are normalized when possible.
 - `description`, `evidence`, `external_id`, `references`, and `observed_at`: optional provenance and finding detail fields. CSV references can be separated by commas or whitespace; JSONL references can be a string or an array.
 
+Malformed or ambiguous port values stay out of apply and show up as preview warnings, so the import can be corrected before it changes Atlas.
+
 Runnable Generic CSV example:
 
 ```csv
 row_type,entity_kind,entity_value,subject_key,title,severity,description,evidence,references,external_id,observed_at
 entity,domain,darklab.sh,,,,,,inventory-1,2026-06-01T12:00:00Z
+entity,port,darklab.sh:443/tcp,,,,,,inventory-2,2026-06-01T12:02:00Z
 finding,url,https://darklab.sh/login,,Missing CSP,medium,Header missing,No CSP,https://owasp.org,ext-1,2026-06-01T12:05:00Z
 finding,,,third-party-app,Vendor finding,high,Manual review,Tool reported finding,,ext-2,2026-06-01T12:10:00Z
 ```
@@ -491,6 +494,7 @@ Runnable Generic JSONL example:
 
 ```jsonl
 {"row_type":"entity","entity_kind":"domain","entity_value":"darklab.sh","external_id":"inventory-1","observed_at":"2026-06-01T12:00:00Z"}
+{"row_type":"entity","entity_kind":"port","entity_value":"[2001:db8::1]:53/udp","external_id":"inventory-2","observed_at":"2026-06-01T12:02:00Z"}
 {"row_type":"finding","entity_kind":"url","entity_value":"https://darklab.sh/login","title":"Missing CSP","severity":"medium","description":"Header missing","evidence":"No CSP","references":["https://owasp.org"],"external_id":"ext-1","observed_at":"2026-06-01T12:05:00Z"}
 {"row_type":"finding","subject_key":"third-party-app","title":"Vendor finding","severity":"high","description":"Manual review","evidence":"Tool reported finding","external_id":"ext-2","observed_at":"2026-06-01T12:10:00Z"}
 ```
@@ -575,7 +579,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `AI_ENABLED`, `AI_WORKER_ENABLED`, `AI_BASE_URL`, `AI_MODEL`, `AI_FEATURE_SUMMARY`, `AI_FEATURE_NEXT_COMMANDS`, and `AI_FEATURE_RUN_SUGGESTIONS` control the common setup. See [Configuration](CONFIGURATION.md#environment-variables-and-env) for the full operator list and [AI Privacy Posture](docs/ai-privacy.md) for provider, storage, and logging details.
 
-**Related files:** `app/services/ai/` (provider client, context, coordination, storage, worker orchestration, prompts, schemas, and suggestion validation), `app/blueprints/history.py` (browser AI routes), `app/blueprints/api_v1.py` (headless API routes), `app/static/js/features/history/history_run_details.js` (Run Details AI cards), and `app/static/css/features/history.css` (Run Details AI card layout).
+**Related files:** `app/services/ai/` (provider client, context, coordination, storage, worker orchestration, prompts, schemas, and suggestion validation), `app/blueprints/history.py` (browser AI routes), `app/blueprints/api_v1_runs.py` (headless run AI routes), `app/blueprints/api_v1.py` (shared API blueprint and route registration), `app/static/js/features/history/history_run_details.js` (Run Details AI cards), and `app/static/css/features/history.css` (Run Details AI card layout).
 
 ---
 
@@ -598,7 +602,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** compare view and compare context defaults are saved user options. Server-side compare limits are fixed application constants rather than operator-facing `config.yaml` settings.
 
-**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/features/run-comparison/` (compare launcher, controls, navigation, and renderer), and `app/static/css/features/run-comparison.css` (desktop/mobile compare layout).
+**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects_core.py` (project compare route), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/static/js/features/run-comparison/` (compare launcher, controls, navigation, and renderer), and `app/static/css/features/run-comparison.css` (desktop/mobile compare layout).
 
 ---
 
@@ -826,7 +830,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** no server-side API-specific settings. CLI users can set `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, `DARKLAB_TIMEOUT`, or `~/.config/darklab/config.toml`; see [docs/api.md](docs/api.md).
 
-**Related files:** `app/blueprints/api_v1.py` (`/api/v1` routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
+**Related files:** `app/blueprints/api_v1.py` (shared `/api/v1` blueprint, helpers, and route registration), `app/blueprints/api_v1_read.py`, `app/blueprints/api_v1_runs.py`, `app/blueprints/api_v1_schedules.py`, `app/blueprints/api_v1_teams.py`, `app/blueprints/api_v1_watchers.py`, and `app/blueprints/api_v1_notifications.py` (resource routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
 
 ---
 
@@ -852,7 +856,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP/test timeouts, private webhook destination allowlisting, SMTP transport, sent-event retention, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
 
-**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/services/commands/builtins_notify.py` (terminal `notify` built-in), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1.py` (API channel and audit routes), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
+**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/services/commands/builtins_notify.py` (terminal `notify` built-in), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1_notifications.py` (API channel and audit routes), `app/blueprints/api_v1.py` (shared API blueprint and route registration), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
 
 ---
 
@@ -872,7 +876,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** variables are intended for targets, ports, and paths, not secrets. Values are not redacted and are visible in `var list`, autocomplete descriptions, and the expansion notice.
 
-**Related files:** `app/services/session/variables.py`, `app/services/commands/builtins.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
+**Related files:** `app/services/session/variables.py`, `app/services/commands/builtins.py`, `app/blueprints/run.py` (shared run helpers and compatibility imports), `app/blueprints/run_broker.py` (`/runs` route), `app/static/js/app.js`.
 
 ---
 
@@ -960,11 +964,17 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Projects group top-level source records by link rather than copy. Current project links support completed runs and Atlas entities; Targets stay as the curated domain/IP/URL subset for scope tracking, while the Entities tab shows every linked Atlas entity type. Run-owned artifacts surface through linked runs, and findings surface through linked runs or linked Atlas entities. Project list rows show run, finding, artifact, and package counts before you open a project, and the Findings tab label can show prefetched new/high counts when that project has triage work waiting. When team scope is active, team-owned Projects and team-owned run links are visible to other members of that team. Snapshots and manually selected workspace files stay in their history/files surfaces and are intentionally not project-linked.
+- Projects group top-level source records by link rather than copy. Current project links support completed runs and Atlas entities; Targets are the curated `domain`, `url`, and `ip` set used for scope tracking, while the Entities tab shows every linked Atlas entity type. Domain targets accept DNS names, URL targets accept full HTTP(S) URLs, and IP targets accept single IPv4 or IPv6 addresses. Legacy `host` target inputs from older API/import callers are still accepted as compatibility aliases and saved as `domain` or `ip`; the target editor and new validation messages only present `domain`, `url`, and `ip`. Run-owned artifacts surface through linked runs, and findings surface through linked runs or linked Atlas entities. Project list rows show run, finding, artifact, and package counts before you open a project, and the Findings tab label can show prefetched new/high counts when that project has triage work waiting. When team scope is active, team-owned Projects and team-owned run links are visible to other members of that team. Snapshots and manually selected workspace files stay in their history/files surfaces and are intentionally not project-linked.
 - The desktop rail and mobile menu open the Projects modal for creating, selecting, clearing, archiving, deleting, and reviewing projects. The active-project HUD shows current project context and opens a compact switcher for quickly choosing or clearing the active project without leaving the terminal. Project changes broadcast across same-session tabs.
 - Active projects can automatically link completed external command runs and, when enabled, the Atlas entities those runs produce. Project Entities rules can also preview and save recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes, then apply those matches manually or to new runs as they finish. A rule set to apply automatically watches every new run in the same personal or team scope and adds matches to the project that owns the rule, even when that project is not the active project for the command. If a rule matches entities for the active project, those entities are added as confirmed rule-created links instead of waiting in the normal confirm/dismiss queue. Broad patterns and regex rules are rejected instead of quietly linking too much. Manual run-link actions confirm first and can also add the Atlas entities found in those runs, with the entity count shown before anything is saved. When automatic entity linking reaches the project link limit, the run stream reports the skipped entity count. Removing a run from a project can also remove same-run disposable Atlas entity links, while curated entity links are counted separately and kept unless you opt in; the confirmation also shows how many related findings will stop appearing in the project. Built-in runs stay in history without project links or project-derived findings, and **Link last run** backfills the most recent eligible run when needed. In the terminal, `project link run last` resolves within the current tab so parallel tabs don't steal each other's latest run.
-- Project details expose project labels, project notes stored through `entity_notes` with `entity_type='project'`, editable Atlas-backed targets, linked Atlas entities, linked runs, findings, artifacts, and packages. Team-owned projects share linked-run artifacts and evidence packages with team members, while package and artifact rows keep creator/member context when it is available. Artifact previews, downloads, and package archives read files from the source run's personal or team Files workspace, so a teammate can open artifacts from a team run without switching into the run creator's personal workspace. Suppressed Atlas entities and findings stay hidden from default project views until they're restored in Atlas. The Findings tab pages through large result sets, shows each finding's source command, and keeps its tab count tied to the full server-side total, including findings attached through linked runs or linked Atlas entities. Command, severity, scope, run, target, review-state, verification-status, label, and note filters help narrow busy projects without loading every finding at once; verification status uses `not_started`, `ready_to_verify`, `verified`, `needs_retest`, or `not_applicable`. The list view keeps visible-page bulk review, the inline board groups the current filtered findings into review lanes, and the larger board modal gives the same project a roomier drag/drop triage surface. Finding rows and board cards can open the shared triage editor for remediation and verification handoff work, and board cards show the saved verification/remediation badges after triage changes. Labels and notes remain editable for linked runs, findings, Atlas entities, run file artifacts, workspace files, and packages through the shared entity metadata editor.
-- The Overview tab gives each project a target-first attack-surface summary. It rolls up target count, open ports, services, targets with critical or high findings, certificate status, provider highlights, and recent-change state, then lets you jump into the existing Entities or Findings tabs with the selected target and high-signal finding filters already applied.
+- Project details expose project labels, project notes stored through `entity_notes` with `entity_type='project'`, editable Atlas-backed targets, linked Atlas entities, linked runs, findings, artifacts, and packages. Team-owned projects share linked-run artifacts and evidence packages with team members, while package and artifact rows keep creator/member context when it is available. Artifact previews, downloads, and package archives read files from the source run's personal or team Files workspace, so a teammate can open artifacts from a team run without switching into the run creator's personal workspace. Suppressed Atlas entities and findings stay hidden from default project views until they're restored in Atlas. The Findings tab pages through large result sets, shows each finding's source command, and keeps its tab count tied to the full server-side total, including findings attached through linked runs or linked Atlas entities. Command, severity, scope, run, target, review-state, verification-status, label, and note filters help narrow busy projects without loading every finding at once; verification status uses `not_started`, `ready_to_verify`, `verified`, `needs_retest`, or `not_applicable`. The list view keeps visible-page bulk review, the inline board groups the current filtered findings into review lanes, and the larger board modal gives the same project a roomier drag/drop triage surface. Finding rows open the matching Atlas finding, **See in run** jumps back to the exact raw output line, and rows/cards can open the shared triage editor for remediation and verification handoff work. Board cards show the saved verification/remediation badges after triage changes. Labels and notes remain editable for linked runs, findings, Atlas entities, run file artifacts, workspace files, and packages through the shared entity metadata editor.
+- The Overview tab gives each project a target-first attack-surface summary. It rolls up target count, app-captured open ports and services, cached-provider open ports and services, app/provider port drift, app-captured scan coverage, coverage gaps, finding review progress, verification progress, recent run/triage/artifact tempo, deliverables status, targets with critical or high findings, certificate status, provider highlights, recent project activity, and recent-change state, then lets you jump into the existing workspace tabs with the selected target and high-signal filters already applied. App-captured ports and services are shown first when available, with long port lists summarized so the Overview stays readable. Provider-backed ports, services, certificates, and highlights are labeled as cached data, with stale/no-intel states and the latest checked time shown on each target row when available. URL targets use their stored Atlas host link when available, so host-level ports and services show up without reparsing the URL each time. The target worklist keeps findings and severity visible, skips repeated empty-state rows, and includes an optional filter for hiding unscanned targets that have no findings.
+- App-captured scan coverage comes from supported scanner families: nmap, masscan, rustscan, naabu, and `nc` port checks. Curl connection lines can add positive port evidence when the transcript reports a connection, but they are not counted as scan-coverage observations. Quiet scans are counted as "scanned with no app-captured ports" only when darklab_shell can associate the run with a concrete project target.
+- The finding progress strip shows New → Reviewed → Important/follow-up and Not started → Ready → Verified → Needs retest, with false-positive, suppressed, and not-applicable counts called out separately so the totals stay honest.
+- The tempo strip shows the last linked run, runs in the last seven days, the latest triage update, the latest captured run artifact, and a short activity trail from the project's own audit history.
+- The coverage-gap worklist calls out targets with no app-captured scan, targets with findings awaiting verification, and targets that still need review or follow-up. Each row opens the existing Entities or Findings tab with the matching filters applied.
+- The deliverables strip shows the latest package save/build, latest report save/export, and whether the report is fresh against the newest finding or triage activity.
+- Overview target rows label cached provider ports separately from app-captured scan evidence. When scanner output includes service or version metadata, the row shows it with the app-captured port. When a supported scan touched a target but surfaced no app-captured ports, the row says that plainly without claiming the host has no open ports. URL targets use the app-captured evidence from their linked host entity when that host is known, and port-drift actions open the Project Entities Ports tab filtered to that host with a clearable host chip.
 - The Entities tab mirrors Atlas entity types for project-linked rows with compact type tabs, shows cached intel provider context, opens entities in Atlas for deeper intel review or refresh, links more session Atlas entities from a picker, bulk-unlinks visible entities from the project, exports project-scoped entities as CSV or JSONL, and labels rule-created rows with the auto-promote rule that added them. The Rules panel is available on desktop and mobile; view-only users can preview readable rules but cannot create, change, apply, or delete them.
 - Finding review supports status updates, visible-page bulk review/delete, source-run restore with line highlighting, target attribution, orphan-source filtering, filtering, and sorting. Artifact rows show availability/checksum state and offer scoped preview/download actions for still-available workspace files.
 - Evidence packages are draft project manifests built from selected project material.
@@ -1007,7 +1017,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Auto-promote rules:** the Project Entities **Rules** panel lets a project keep known-good Atlas entities linked without repeating the same picker work.
 
-- Each rule chooses an entity kind, a match mode, and a pattern. Supported kinds are **Any**, domain, IP, URL, CVE, and hash. Supported match modes are exact, contains, wildcard, domain suffix, and CIDR, with only the modes that make sense for the selected kind shown in the editor. Regex rules are unavailable and are rejected by the server.
+- Each rule chooses an entity kind, a match mode, and a pattern. Supported kinds are **Any**, domain, IP, port, URL, CVE, and hash. Supported match modes are exact, contains, wildcard, domain suffix, and CIDR, with only the modes that make sense for the selected kind shown in the editor. Regex rules are unavailable and are rejected by the server.
 - Domain suffix rules match the apex domain and its subdomains, so `darklab.sh` matches both `darklab.sh` and `graph.darklab.sh`. CIDR rules support IPv4 and IPv6 addresses. Contains and wildcard rules reject very short or overly broad patterns so one loose rule doesn't link most of Atlas by accident.
 - Optional filters can narrow a rule to entities first seen after the rule was created, entities from specific source runs, entities seen in runs with selected command roots, or suppressed entities. Suppressed entities are skipped unless the rule explicitly includes them.
 - Preview shows the matches and must be refreshed before saving an enabled rule whenever match-affecting fields change. **Apply now** links the current matches once. **Apply automatically to new runs** watches new runs in the same personal or team scope and links matching entities into the project that owns the rule, even when another project is active for the command.
@@ -1018,7 +1028,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** project, metadata, auto-promote, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/overview.py` (Project Overview target rollups), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/projects/monitoring.py` (Project Monitoring payloads and triage updates), `app/services/diff/rollups.py` (Monitoring severity and top-signal rollups), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/services/audit/` (scoped activity rows and safe details), `app/blueprints/projects.py` (project routes), `app/static/js/features/projects/project_overview.js` (Overview tab rollups and target actions), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/features/projects/project_activity.js` (Activity tab filters, rows, and paging), `app/static/js/features/projects/project_monitoring.js` (Monitoring tab cards, timeline, run actions, and triage controls), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
+**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/overview.py` (Project Overview target rollups), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/projects/monitoring.py` (Project Monitoring payloads and triage updates), `app/services/diff/rollups.py` (Monitoring severity and top-signal rollups), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/services/audit/` (scoped activity rows and safe details), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/blueprints/projects_core.py`, `app/blueprints/projects_packages.py`, `app/blueprints/projects_monitoring.py`, `app/blueprints/projects_links.py`, and `app/blueprints/projects_metadata.py` (project route groups), `app/static/js/features/projects/project_overview.js` (Overview tab rollups and target actions), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/features/projects/project_activity.js` (Activity tab filters, rows, and paging), `app/static/js/features/projects/project_monitoring.js` (Monitoring tab cards, timeline, run actions, and triage controls), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
 
 ---
 
@@ -1038,7 +1048,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/projects/workspace.py` (manifest and archive builder), `app/blueprints/projects.py` (package routes), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
+**Related files:** `app/services/projects/workspace.py` (manifest and archive builder), `app/blueprints/projects_packages.py` (package routes), `app/blueprints/projects.py` (shared project blueprint and route registration), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
 
 ---
 
@@ -1056,7 +1066,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The registry is re-read on every request for command policy, so edits take effect without a restart. Deleting or emptying the registry disables restrictions entirely.
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
-- Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags.
+- Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags. Built-in workspace path slots such as `mv` and `file move` stay out of this target check.
 - Command-specific runtime adaptations are also declared in the registry. `inject_flags` handles safe default flags such as `nmap -sT`, `nuclei -ud /tmp/nuclei-templates`, `naabu -scan-type c`, and `mtr --report-wide`; managed workspace directories and environment wrappers handle Amass' active personal/team database path.
 - The same registry feeds terminal discovery commands that share the modal's catalog data and hide entries whose `feature_required` is disabled:
   - `commands` lists built-in and allowed external roots, followed by an app-native pipe-helpers section (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) labeled as app-managed filters rather than arbitrary shell pipelines.
@@ -1086,7 +1096,7 @@ commands:
 - `autocomplete.*.value_type` — declares target-like values for autocomplete and optional restricted-input checks.
 - `knowledge` — optional descriptive guidance (`notes`, `gotchas`, `safe_defaults`, `common_flags`, `artifact_behavior`) shown in discovery surfaces; never policy-bearing. See [CONFIGURATION.md](CONFIGURATION.md#command-knowledge).
 
-**Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/runs` entry point).
+**Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (shared run helpers and compatibility imports), `app/blueprints/run_broker.py` (policy gate at the `/runs` entry point).
 
 ### Deny Prefixes
 
@@ -1120,7 +1130,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/services/pty/transcript.py` (saved transcript shaping), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
+**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/services/pty/transcript.py` (saved transcript shaping), `app/blueprints/run_pty.py` (PTY routes), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
 
 ---
 
@@ -1456,7 +1466,7 @@ If a session has run history, workspace files, project workspace records, user w
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`, `/diag/audit`, and `/metrics`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
-**Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
+**Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run_broker.py` (subprocess run start), `app/blueprints/run_kill.py` (`/kill` route), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
 
 ---
 
@@ -1475,7 +1485,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** `log_format` and `log_level` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/core/logging_setup.py` (format + level wiring), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets.py` (diagnostics events).
+**Related files:** `app/core/logging_setup.py` (format + level wiring), `app/blueprints/run_broker.py`, `app/blueprints/run_kill.py`, and `app/blueprints/run_pty.py` (run lifecycle route events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets_diag.py` and `app/blueprints/assets_audit.py` (diagnostics events).
 
 ---
 
@@ -1499,7 +1509,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag/audit` HTML/JSON responses and exports), `app/blueprints/projects.py` (Project Activity route), `app/blueprints/teams.py` (Team Activity route), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, scoped queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `app/static/js/features/projects/project_activity.js` (Project Activity tab), `app/static/js/features/preferences/teams_panel.js` (Team Activity subtab), `tests/py/test_routes.py`, `tests/js/unit/diag_audit.test.js`, `tests/js/unit/project_activity.test.js`, and `tests/js/unit/teams_panel.test.js` (viewer/export and scoped activity coverage).
+**Related files:** `app/blueprints/assets_audit.py` (`/diag/audit` HTML/JSON responses and exports), `app/blueprints/assets.py` (shared assets blueprint and route registration), `app/blueprints/projects_core.py` (Project Activity route), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/blueprints/teams.py` (Team Activity route), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, scoped queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `app/static/js/features/projects/project_activity.js` (Project Activity tab), `app/static/js/features/preferences/teams_panel.js` (Team Activity subtab), `tests/py/test_routes.py`, `tests/js/unit/diag_audit.test.js`, `tests/js/unit/project_activity.test.js`, and `tests/js/unit/teams_panel.test.js` (viewer/export and scoped activity coverage).
 
 ---
 
@@ -1569,7 +1579,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses, `/diag/audit`, and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` and `app/templates/diag_audit.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics, audit, and logging runtime details).
+**Related files:** `app/blueprints/assets_diag.py` (`/diag` HTML/JSON responses and `/metrics`), `app/blueprints/assets_audit.py` (`/diag/audit`), `app/blueprints/assets.py` (shared assets blueprint and route registration), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` and `app/templates/diag_audit.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics, audit, and logging runtime details).
 
 ---
 

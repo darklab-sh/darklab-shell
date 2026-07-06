@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.projects.active import clear_active_project, get_active_project, set_active_project
@@ -99,7 +99,7 @@ def _resolve_project_ref(
 
 
 def _latest_run_id(session_id: str, *, tab_id: str = "") -> str:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if tab_id:
             row = conn.execute(
                 "SELECT id FROM runs "

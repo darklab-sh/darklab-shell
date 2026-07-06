@@ -14,8 +14,8 @@ from typing import Any, cast
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from config import CFG
-from core.process import redis_client
+from config import resolve_effective_cfg
+from core import process
 from services.runs.output_model import (
     LINE_EVENT_SCHEMA_VERSION,
     LineEvent,
@@ -39,6 +39,10 @@ SCHEMA_EVENT_PAYLOAD = {
     "v": LINE_EVENT_SCHEMA_VERSION,
     "kind": "line_event",
 }
+
+
+def _redis_client() -> Any | None:
+    return process.redis_client
 
 
 def _stream_key(run_id: str) -> str:
@@ -398,6 +402,7 @@ class _RedisRunBrokerStore:
         event_type: str,
         payload: dict[str, Any] | LineEvent | None = None,
     ) -> BrokerEvent:
+        redis_client = _redis_client()
         if not redis_client:
             raise RuntimeError("Redis is not available for run broker events")
         key = _stream_key(run_id)
@@ -413,6 +418,7 @@ class _RedisRunBrokerStore:
         after_id: str = "0-0",
         limit: int = 100,
     ) -> list[BrokerEvent]:
+        redis_client = _redis_client()
         if not redis_client:
             return []
         after_id = _normalize_resume_event_id(after_id)
@@ -436,6 +442,7 @@ class _RedisRunBrokerStore:
         after_id: str = "0-0",
         timeout: float = 15.0,
     ) -> list[BrokerEvent]:
+        redis_client = _redis_client()
         if not redis_client:
             return []
         after_id = _normalize_resume_event_id(after_id)
@@ -461,6 +468,7 @@ class _RedisRunBrokerStore:
         return events
 
     def replay(self, run_id: str) -> list[BrokerEvent]:
+        redis_client = _redis_client()
         if not redis_client:
             return []
         key = _stream_key(run_id)
@@ -537,19 +545,19 @@ def _decode_payload(fields: object, *, run_id: str = "", event_id: str = "") -> 
 
 
 def _active_ttl() -> int:
-    return max(1, int(CFG.get("run_broker_active_stream_ttl_seconds", 14400) or 14400))
+    return max(1, int(resolve_effective_cfg().get("run_broker_active_stream_ttl_seconds", 14400) or 14400))
 
 
 def _completed_ttl() -> int:
-    return max(1, int(CFG.get("run_broker_completed_stream_ttl_seconds", 3600) or 3600))
+    return max(1, int(resolve_effective_cfg().get("run_broker_completed_stream_ttl_seconds", 3600) or 3600))
 
 
 def _max_replay_bytes() -> int:
-    return max(0, int(CFG.get("run_broker_max_replay_bytes", 10485760) or 0))
+    return max(0, int(resolve_effective_cfg().get("run_broker_max_replay_bytes", 10485760) or 0))
 
 
 def _max_replay_events() -> int:
-    return max(0, int(CFG.get("max_output_lines", 5000) or 0))
+    return max(0, int(resolve_effective_cfg().get("max_output_lines", 5000) or 0))
 
 
 def _replay_fetch_count() -> int:
@@ -564,6 +572,7 @@ def _redis_stream_maxlen() -> int:
 
 
 def _trim_redis_stream(key: str) -> None:
+    redis_client = _redis_client()
     if not redis_client:
         return
     try:
@@ -584,17 +593,17 @@ def _trim_redis_stream(key: str) -> None:
 
 
 def broker_available() -> bool:
-    if not CFG.get("run_broker_enabled", True):
-        return False
-    if CFG.get("run_broker_require_redis", True) and not redis_client:
-        return False
-    return True
+    active_cfg = resolve_effective_cfg()
+    return bool(active_cfg.get("run_broker_enabled", True)) and (
+        not active_cfg.get("run_broker_require_redis", True) or bool(_redis_client())
+    )
 
 
 def broker_unavailable_reason() -> str:
-    if not CFG.get("run_broker_enabled", True):
+    active_cfg = resolve_effective_cfg()
+    if not active_cfg.get("run_broker_enabled", True):
         return "Run broker is disabled by configuration."
-    if CFG.get("run_broker_require_redis", True) and not redis_client:
+    if active_cfg.get("run_broker_require_redis", True) and not _redis_client():
         return "Run broker requires Redis, but Redis is not available."
     return ""
 
@@ -610,11 +619,11 @@ def memory_store_snapshot() -> dict[str, int]:
 def broker_mode() -> str:
     """`redis` when the configured Redis client is in use, `in_process` when
     the in-memory fallback is the active backend."""
-    return "redis" if redis_client else "in_process"
+    return "redis" if _redis_client() else "in_process"
 
 
 def _store():
-    if redis_client:
+    if _redis_client():
         return _RedisRunBrokerStore()
     return _memory_store
 
@@ -671,7 +680,7 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
     yield _schema_sse()
     if not _is_beginning_event_id(current_id):
         log.debug("BROKER_STREAM_REATTACHED", extra={"run_id": run_id, "after_id": current_id})
-    block_seconds = max(1.0, float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15))
+    block_seconds = max(1.0, float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15))
     try:
         if _is_beginning_event_id(current_id):
             for event in replay_run_events(run_id):

@@ -11,8 +11,8 @@ import logging
 import re
 from typing import Any, Mapping
 
-from config import CFG, get_share_redaction_rules
-from core.database import db_connect
+from config import get_share_redaction_rules, resolve_effective_cfg
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, redact_line_entries
 from services.ai import ai_cfg
@@ -65,13 +65,13 @@ def build_run_context(
     *,
     session_id: str | None = None,
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     variant: str = "default",
 ) -> AIContextResult:
     """Return capped, redacted context for a saved run."""
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         run_row = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
@@ -187,7 +187,7 @@ def _assemble_context(
     max_input_chars: int,
     redaction_rules: list[dict[str, Any]],
     secret_names: set[str],
-    active_cfg: dict,
+    active_cfg: Mapping[str, Any],
     variant: str,
 ) -> dict[str, Any]:
     runtime_seconds = _runtime_seconds(run)
@@ -329,7 +329,7 @@ def _finalize_context(
     )
 
 
-def _redact_value(value: Any, rules: list[dict[str, Any]], secret_names: set[str], cfg: dict) -> Any:
+def _redact_value(value: Any, rules: list[dict[str, Any]], secret_names: set[str], cfg: Mapping[str, Any]) -> Any:
     pre_bytes = 0
     redacted_bytes = 0
 
@@ -357,7 +357,7 @@ def _redact_value(value: Any, rules: list[dict[str, Any]], secret_names: set[str
     return loaded
 
 
-def _redact_text(text: str, rules: list[dict[str, Any]], secret_names: set[str], cfg: dict) -> tuple[str, int, int]:
+def _redact_text(text: str, rules: list[dict[str, Any]], secret_names: set[str], cfg: Mapping[str, Any]) -> tuple[str, int, int]:
     scrubbed = scrub_prompt_boundaries(_strip_workspace_paths(text, cfg))
     redacted = apply_redaction_rules(scrubbed, rules)
     redacted = _strip_secret_names(redacted, secret_names)
@@ -370,7 +370,7 @@ def _redact_events(
     events: list[LineEvent],
     rules: list[dict[str, Any]],
     secret_names: set[str],
-    cfg: dict,
+    cfg: Mapping[str, Any],
     *,
     compact: bool = False,
 ) -> list[dict[str, Any]]:
@@ -798,7 +798,7 @@ def _strip_secret_names(text: str, secret_names: set[str]) -> str:
     )
 
 
-def _strip_workspace_paths(text: str, cfg: dict) -> str:
+def _strip_workspace_paths(text: str, cfg: Mapping[str, Any]) -> str:
     if not cfg.get("workspace_enabled"):
         return text
     try:

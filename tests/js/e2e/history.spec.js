@@ -300,7 +300,8 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   await forceComparePaneOverflow(overlay)
   await expectSplitPaneScrollSync(overlay)
 
-  const foldButton = overlay.getByRole('button', { name: /Show 2 unchanged line/ }).first()
+  const rightPane = overlay.locator('.history-compare-pane[data-side="b"]')
+  const foldButton = rightPane.getByRole('button', { name: /Show 2 unchanged line/ }).first()
   await expect(foldButton).toBeVisible()
   const lineResponses = Promise.all(['a', 'b'].map(side => page.waitForResponse((response) => {
     const url = new URL(response.url())
@@ -312,7 +313,7 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   for (const response of await lineResponses) {
     expect(response.ok()).toBe(true)
   }
-  await expect(overlay.getByRole('button', { name: /Hide unchanged lines/ }).first()).toBeVisible({
+  await expect(rightPane.getByRole('button', { name: /Hide unchanged lines/ }).first()).toBeVisible({
     timeout: 10_000,
   })
   await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(

@@ -10,7 +10,7 @@ Covers:
 
 Log event tests avoid pytest's caplog because the 'shell' logger has
 propagate=False (records don't reach the root handler that caplog attaches).
-Instead, we use mock.patch.object on shell_app.log to intercept calls directly.
+Instead, we use mock.patch.object on shell_app_module.log to intercept calls directly.
 
 Run with: pytest tests/ (from the repo root)
 """
@@ -25,7 +25,10 @@ import unittest.mock as mock
 
 import pytest
 
-import app as shell_app
+import app as shell_app_module
+import config as app_config
+from conftest import build_test_config
+from conftest import make_test_app as _test_app
 import core.database as db_module
 from core.database import DB_PATH, db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields, configure_logging
@@ -47,8 +50,7 @@ def _emit(formatter, level, msg, extra=None):
 
 
 def get_client(*, use_forwarded_for=True):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+    client = _test_app().test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
@@ -287,7 +289,7 @@ class TestGELFFormatter:
 
     def test_app_version_in_payload_comes_from_config(self):
         data = json.loads(_emit(GELFFormatter(), logging.INFO, "TEST"))
-        assert data["_app_version"] == shell_app.APP_VERSION
+        assert data["_app_version"] == shell_app_module.APP_VERSION
 
     def test_logger_name_in_payload(self):
         data = json.loads(_emit(GELFFormatter(), logging.INFO, "TEST"))
@@ -335,7 +337,7 @@ class TestGELFFormatter:
 class TestConfigureLogging:
     def teardown_method(self, method):  # noqa: ARG002
         """Restore the 'shell' logger to the app's normal state after each test."""
-        configure_logging(shell_app.CFG)
+        configure_logging(shell_app_module.CFG)
 
     def _logger(self):
         return logging.getLogger("shell")
@@ -357,7 +359,7 @@ class TestConfigureLogging:
         formatter = self._logger().handlers[0].formatter
         assert isinstance(formatter, GELFFormatter)
         assert formatter._app_name == "test-app"
-        assert formatter._app_version == shell_app.APP_VERSION
+        assert formatter._app_version == shell_app_module.APP_VERSION
 
     def test_log_level_info_by_default(self):
         configure_logging({})
@@ -384,19 +386,19 @@ class TestConfigureLogging:
         assert self._logger().propagate is False
 
     def test_logging_configured_includes_app_version(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
-            configure_logging(shell_app.CFG)
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
+            configure_logging(shell_app_module.CFG)
         mock_info.assert_called_once()
         _, kwargs = mock_info.call_args
-        assert kwargs["extra"]["app_version"] == shell_app.APP_VERSION
+        assert kwargs["extra"]["app_version"] == shell_app_module.APP_VERSION
 
     def test_exactly_one_handler_attached(self):
-        configure_logging(shell_app.CFG)
+        configure_logging(shell_app_module.CFG)
         assert len(self._logger().handlers) == 1
 
     def test_reconfigure_does_not_duplicate_handlers(self):
-        configure_logging(shell_app.CFG)
-        configure_logging(shell_app.CFG)
+        configure_logging(shell_app_module.CFG)
+        configure_logging(shell_app_module.CFG)
         assert len(self._logger().handlers) == 1
 
     def test_werkzeug_logger_silenced_to_error(self):
@@ -425,7 +427,7 @@ class TestCmdDeniedEvent:
 
     def test_cmd_denied_emits_warning(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         denied = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED"]
@@ -433,7 +435,7 @@ class TestCmdDeniedEvent:
 
     def test_cmd_denied_extra_has_ip(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
@@ -441,7 +443,7 @@ class TestCmdDeniedEvent:
 
     def test_cmd_denied_extra_has_reason(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
@@ -450,7 +452,7 @@ class TestCmdDeniedEvent:
 
     def test_cmd_denied_extra_has_cmd(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
@@ -461,7 +463,7 @@ class TestCmdDeniedEvent:
     def test_shell_operator_block_also_emits_cmd_denied(self):
         # Shell operator blocks are a special case of is_command_allowed returning False
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "ping google.com | cat /etc/passwd")
         denied = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED"]
@@ -475,9 +477,9 @@ class TestRateLimitEvent:
         from werkzeug.exceptions import TooManyRequests
         e = TooManyRequests()
         e.description = "5 per 1 second"
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/runs", method="POST"):
-                shell_app._rate_limit_handler(e)
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+            with _test_app().test_request_context("/runs", method="POST"):
+                shell_app_module._rate_limit_handler(e)
         rl_calls = [c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT"]
         assert len(rl_calls) == 1
 
@@ -485,19 +487,21 @@ class TestRateLimitEvent:
         from werkzeug.exceptions import TooManyRequests
         e = TooManyRequests()
         e.description = "5 per 1 second"
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/runs", method="POST"):
-                shell_app._rate_limit_handler(e)
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+            with _test_app().test_request_context("/runs", method="POST"):
+                shell_app_module._log_request()
+                shell_app_module._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert "ip" in call.kwargs["extra"]
+        assert "request_id" in call.kwargs["extra"]
 
     def test_rate_limit_extra_has_limit_description(self):
         from werkzeug.exceptions import TooManyRequests
         e = TooManyRequests()
         e.description = "5 per 1 second"
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/runs", method="POST"):
-                shell_app._rate_limit_handler(e)
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+            with _test_app().test_request_context("/runs", method="POST"):
+                shell_app_module._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert call.kwargs["extra"]["limit"] == "5 per 1 second"
         assert call.kwargs["extra"]["scope"] == "global"
@@ -506,14 +510,14 @@ class TestRateLimitEvent:
         from werkzeug.exceptions import TooManyRequests
         e = TooManyRequests()
         e.description = "30 per 1 minute"
-        with shell_app.app.test_request_context("/runs", method="POST"):
-            response, status = shell_app._rate_limit_handler(e)
+        with _test_app().test_request_context("/runs", method="POST"):
+            response, status = shell_app_module._rate_limit_handler(e)
         assert status == 429
         data = json.loads(response.data)
         assert "error" in data
 
-        with shell_app.app.test_request_context("/session/secrets", method="POST"):
-            response, status = shell_app._rate_limit_handler(e)
+        with _test_app().test_request_context("/session/secrets", method="POST"):
+            response, status = shell_app_module._rate_limit_handler(e)
         assert status == 429
         data = json.loads(response.data)
         assert data["error"] == "rate_limited"
@@ -525,8 +529,8 @@ class TestHealthFailEvents:
 
     def test_db_fail_emits_error(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "error") as mock_err:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+        with mock.patch.object(shell_app_module.log, "error") as mock_err:
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         db_fail = [c for c in mock_err.call_args_list if c[0][0] == "HEALTH_DB_FAIL"]
         assert len(db_fail) == 1
@@ -535,7 +539,7 @@ class TestHealthFailEvents:
         client = get_client()
         fake_redis = mock.MagicMock()
         fake_redis.ping.side_effect = Exception("redis down")
-        with mock.patch.object(shell_app.log, "error") as mock_err:
+        with mock.patch.object(shell_app_module.log, "error") as mock_err:
             with mock.patch("blueprints.assets.redis_client", fake_redis):
                 client.get("/health")
         redis_fail = [c for c in mock_err.call_args_list if c[0][0] == "HEALTH_REDIS_FAIL"]
@@ -547,7 +551,7 @@ class TestShareCreatedEvent:
 
     def test_share_created_emits_info(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.post(
                 "/share",
                 json={"label": "test label", "content": ["line1"]},
@@ -558,7 +562,7 @@ class TestShareCreatedEvent:
 
     def test_share_created_extra_has_label(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.post(
                 "/share",
                 json={"label": "my-label", "content": []},
@@ -569,7 +573,7 @@ class TestShareCreatedEvent:
 
     def test_share_created_extra_has_share_id(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = client.post(
                 "/share",
                 json={"label": "lbl", "content": []},
@@ -594,7 +598,7 @@ class TestCmdRewriteEvent:
 
     def test_nmap_rewrite_emits_debug(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 # Popen raises so we don't actually spawn — rewrite logging fires before Popen
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
@@ -604,7 +608,7 @@ class TestCmdRewriteEvent:
 
     def test_nmap_rewrite_extra_omits_raw_commands(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
@@ -616,7 +620,7 @@ class TestCmdRewriteEvent:
 
     def test_nmap_rewrite_extra_has_structured_fields(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
@@ -631,7 +635,7 @@ class TestCmdRewriteEvent:
     def test_unrewritten_command_does_not_emit_cmd_rewrite(self):
         # A plain allowed command (ping) is not rewritten — no rewrite log
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "ping google.com")
@@ -665,7 +669,7 @@ class TestRunLifecycleEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", ""])
 
-        with mock.patch.object(shell_app.log, "info") as mock_info, \
+        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
@@ -682,7 +686,7 @@ class TestRunLifecycleEvents:
         token = json.loads(client.get("/session/token/generate").data)["session_token"]
         fake_proc = _FakeProc(lines=["hello\n", ""])
 
-        with mock.patch.object(shell_app.log, "info") as mock_info, \
+        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
@@ -701,7 +705,7 @@ class TestRunLifecycleEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", ""], returncode=7)
 
-        with mock.patch.object(shell_app.log, "info") as mock_info, \
+        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
@@ -716,7 +720,7 @@ class TestRunLifecycleEvents:
     def test_run_kill_emits_info(self):
         client = get_client()
 
-        with mock.patch.object(shell_app.log, "info") as mock_info, \
+        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
              mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"):
@@ -729,7 +733,7 @@ class TestRunLifecycleEvents:
     def test_kill_miss_emits_debug(self):
         client = get_client()
 
-        with mock.patch.object(shell_app.log, "debug") as mock_debug, \
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug, \
              mock.patch("blueprints.run.pid_for_session", return_value=None):
             resp = client.post("/kill", headers={"X-Session-ID": "session-1"}, json={"run_id": "missing-run"})
 
@@ -743,7 +747,7 @@ class TestRunFailureEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["still running\n"], returncode=-15)
 
-        with mock.patch.object(shell_app.log, "warning") as mock_warn, \
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn, \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
@@ -761,13 +765,13 @@ class TestRunFailureEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
-        with mock.patch.object(shell_app.log, "error") as mock_error, \
+        with mock.patch.object(shell_app_module.log, "error") as mock_error, \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]), \
-             mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
+             mock.patch("blueprints.run.run_persistence_transaction", side_effect=Exception("db write failed")):
             resp = _post_brokered_run(client, "echo saved")
             _ = resp.get_data(as_text=True)
 
@@ -778,7 +782,7 @@ class TestRunFailureEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n"])
 
-        with mock.patch.object(shell_app.log, "error") as mock_error, \
+        with mock.patch.object(shell_app_module.log, "error") as mock_error, \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
@@ -790,78 +794,128 @@ class TestRunFailureEvents:
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_BROKER_STREAM_ERROR"]
         assert len(calls) == 1
 
+        from services.runs import broker_worker
+
+        cleanup_calls = []
+        removed = []
+        published = []
+        with mock.patch.object(broker_worker.log, "error") as mock_error:
+            broker_worker.brokered_real_run_worker(
+                proc=fake_proc,
+                run_id="run-broker-config",
+                session_id="broker-config-session",
+                team_id="team-config",
+                client_ip="203.0.113.44",
+                original_command="echo bad-config",
+                run_started="2026-05-20T12:00:00+00:00",
+                capture=object(),
+                signal_classifier=object(),
+                postfilter=object(),
+                workspace_path_filter=object(),
+                variable_notice="",
+                rewrite_notice="",
+                workspace_notices=[],
+                workspace_artifacts=[],
+                owner_tab_id="",
+                cfg={},
+                trufflehog_output_filter_cls=lambda _command: object(),
+                publish_broker_captured_line_fn=lambda *args, **kwargs: None,
+                output_batcher_cls=object,
+                make_nonblocking_stream_reader_fn=lambda _stdout: {},
+                stdout_ready_fn=lambda *_args: False,
+                read_available_stream_lines_fn=lambda *_args, **_kwargs: ([], True),
+                wait_for_proc_exit_code_fn=lambda _proc: 0,
+                timeout_notice_fn=lambda _timeout: "",
+                terminate_process_group_fn=lambda _proc: None,
+                finalize_completed_run_fn=lambda *args, **kwargs: {"elapsed": 0},
+                publish_project_finalize_notices_fn=lambda *args: None,
+                publish_run_event_fn=lambda *args: published.append(args),
+                cleanup_proc_stream_fn=lambda _proc: cleanup_calls.append(True),
+                pid_pop_fn=lambda run_id: removed.append(("pid", run_id)),
+                active_run_remove_fn=lambda run_id: removed.append(("active", run_id)),
+                poll_seconds=0.01,
+            )
+
+            config_calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_BROKER_STREAM_CONFIG_ERROR"]
+        assert len(config_calls) == 1
+        assert config_calls[0].kwargs["extra"]["missing_key"] == "command_timeout_seconds"
+        assert published == [("run-broker-config", "error", {"text": "'command_timeout_seconds'"})]
+        assert cleanup_calls == [True]
+        assert removed == [("pid", "run-broker-config"), ("active", "run-broker-config")]
+
 
 class TestRequestResponseDebugEvents:
     """REQUEST/RESPONSE stay DEBUG-only while REQUEST_COMPLETED keeps routine probes quiet."""
 
     def test_request_not_logged_at_info_level(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.INFO)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.INFO)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             request_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
             assert len(request_calls) == 0
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_response_not_logged_at_info_level(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.INFO)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.INFO)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             response_calls = [c for c in mock_debug.call_args_list if c[0][0] == "RESPONSE"]
             assert len(response_calls) == 0
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_completed_logged_at_info_level(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.INFO)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.INFO)
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get("/config")
             completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 1
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_completed_demotes_successful_probe_paths_to_debug(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.INFO)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.INFO)
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get("/health")
                 get_client().get("/status")
                 with mock.patch.dict(
-                    shell_app.CFG,
+                    shell_app_module.CFG,
                     {"diagnostics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": True},
                 ):
                     get_client(use_forwarded_for=False).get("/metrics")
             completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 0
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_completed_probe_debug_event_keeps_bounded_fields(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             completed_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 1
             assert completed_calls[0].kwargs["extra"]["path"] == "/health"
             assert completed_calls[0].kwargs["extra"]["status"] == 200
+            assert "request_id" in completed_calls[0].kwargs["extra"]
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_completed_extra_has_bounded_request_fields(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.INFO)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.INFO)
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get("/config?debug=1")
             call = next(c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED")
             assert call.kwargs["extra"]["method"] == "GET"
@@ -869,81 +923,84 @@ class TestRequestResponseDebugEvents:
             assert call.kwargs["extra"]["endpoint"] == "content.get_config"
             assert call.kwargs["extra"]["status"] == 200
             assert "duration_ms" in call.kwargs["extra"]
+            assert "request_id" in call.kwargs["extra"]
             assert "qs" not in call.kwargs["extra"]
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_completed_skips_static_asset_noise(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.INFO)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.INFO)
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get("/favicon.ico")
             completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 0
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_logged_at_debug_level(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             request_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
             assert len(request_calls) >= 1
+            assert "request_id" in request_calls[0].kwargs["extra"]
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_debug_extra_has_path(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             call = next(c for c in mock_debug.call_args_list if c[0][0] == "REQUEST")
             assert call.kwargs["extra"]["path"] == "/health"
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_debug_extra_has_method(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             call = next(c for c in mock_debug.call_args_list if c[0][0] == "REQUEST")
             assert call.kwargs["extra"]["method"] == "GET"
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_response_logged_at_debug_level(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             response_calls = [c for c in mock_debug.call_args_list if c[0][0] == "RESPONSE"]
             assert len(response_calls) >= 1
+            assert "request_id" in response_calls[0].kwargs["extra"]
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_response_debug_extra_has_status(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             call = next(c for c in mock_debug.call_args_list if c[0][0] == "RESPONSE")
             assert call.kwargs["extra"]["status"] == 200
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
     def test_request_debug_logs_query_keys_without_raw_query_values(self):
-        original_level = shell_app.log.level
-        shell_app.log.setLevel(logging.DEBUG)
+        original_level = shell_app_module.log.level
+        shell_app_module.log.setLevel(logging.DEBUG)
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/history/nonexistent?json&token=secret-token&debug=1")
             request_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
             assert len(request_calls) >= 1
@@ -952,7 +1009,7 @@ class TestRequestResponseDebugEvents:
             assert "qs" not in call.kwargs["extra"]
             assert "secret-token" not in json.dumps(call.kwargs["extra"])
         finally:
-            shell_app.log.setLevel(original_level)
+            shell_app_module.log.setLevel(original_level)
 
 
 # ── worker entrypoint logging setup ──────────────────────────────────────────
@@ -960,25 +1017,119 @@ class TestRequestResponseDebugEvents:
 class TestWorkerEntrypointLoggingSetup:
     """Dedicated worker processes configure structured logging before they run."""
 
-    def test_notification_worker_main_configures_logging(self):
+    def test_app_main_bootstraps_before_serving_dev_app(self):
+        order = []
+        fake_app = mock.Mock()
+
+        def fake_bootstrap(*_args, **_kwargs):
+            order.append("bootstrap")
+
+        def fake_create_app(*_args, **_kwargs):
+            order.append("create_app")
+            return fake_app
+
+        def fake_log_initialized(*_args, **_kwargs):
+            order.append("log_initialized")
+
+        fake_app.run.side_effect = lambda **_kwargs: order.append("run")
+
+        with mock.patch.object(shell_app_module, "bootstrap_runtime", side_effect=fake_bootstrap) as bootstrap_runtime, \
+             mock.patch.object(shell_app_module, "create_app", side_effect=fake_create_app) as create_app, \
+             mock.patch.object(shell_app_module, "_log_app_initialized", side_effect=fake_log_initialized) as log_initialized, \
+             mock.patch.object(shell_app_module.time, "monotonic", side_effect=[10.0, 10.25]), \
+             mock.patch("builtins.print"):
+            shell_app_module.main()
+
+        assert order == ["bootstrap", "create_app", "log_initialized", "run"]
+        bootstrap_runtime.assert_called_once_with(shell_app_module.CFG, cleanup_active_runs=True, runtime_name="dev")
+        create_app.assert_called_once_with()
+        log_initialized.assert_called_once_with(flask_app=fake_app, duration_ms=250)
+        fake_app.run.assert_called_once_with(host="0.0.0.0", port=8888, threaded=True)
+
+    def test_ai_worker_main_bootstraps_loads_dependencies_then_runs(self, monkeypatch):
+        from services.ai import worker
+
+        order = []
+        replacement_cfg = build_test_config({"app_name": "late-ai-worker-config"})
+        monkeypatch.setattr(app_config, "CFG", replacement_cfg)
+
+        with mock.patch.object(
+            worker,
+            "bootstrap_runtime",
+            side_effect=lambda *_args, **_kwargs: order.append("bootstrap")
+        ) as bootstrap_runtime, \
+             mock.patch.object(
+                 worker, "_load_runtime_dependencies",
+                 side_effect=lambda: order.append("load_dependencies")
+            ) as load_runtime_dependencies, \
+             mock.patch.object(
+                 worker,
+                 "run_forever", side_effect=lambda: order.append("run_forever")
+            ) as run_forever:
+            worker.main()
+
+        assert order == ["bootstrap", "load_dependencies", "run_forever"]
+        bootstrap_runtime.assert_called_once_with(
+            replacement_cfg,
+            init_process=True,
+            init_db=True,
+            runtime_name="ai_worker",
+        )
+        load_runtime_dependencies.assert_called_once_with()
+        run_forever.assert_called_once_with()
+
+    def test_notification_worker_main_configures_logging(self, monkeypatch):
         from services.notifications import worker
 
-        with mock.patch.object(worker, "configure_logging") as configure, \
+        replacement_cfg = build_test_config({"app_name": "late-notification-worker-config"})
+        monkeypatch.setattr(app_config, "CFG", replacement_cfg)
+
+        with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
              mock.patch.object(worker, "run_forever") as run_forever:
             worker.main()
 
-        configure.assert_called_once_with(worker.CFG)
+        bootstrap_runtime.assert_called_once_with(
+            replacement_cfg,
+            init_metrics=False,
+            init_process=False,
+            init_db=True,
+            runtime_name="notification_worker",
+        )
         run_forever.assert_called_once_with()
 
-    def test_scheduler_worker_main_configures_logging(self):
+    def test_scheduler_worker_main_configures_logging(self, monkeypatch):
         from services.scheduler import worker
 
-        with mock.patch.object(worker, "configure_logging") as configure, \
+        replacement_cfg = build_test_config({"app_name": "late-scheduler-worker-config"})
+        monkeypatch.setattr(app_config, "CFG", replacement_cfg)
+
+        with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
              mock.patch.object(worker, "run_forever") as run_forever:
             worker.main()
 
-        configure.assert_called_once_with(worker.CFG)
+        bootstrap_runtime.assert_called_once_with(
+            replacement_cfg,
+            init_metrics=False,
+            init_process=True,
+            init_db=True,
+            runtime_name="scheduler_worker",
+        )
         run_forever.assert_called_once_with()
+
+    def test_app_initialized_extra_has_factory_context(self):
+        flask_app = _test_app()
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
+            shell_app_module._log_app_initialized(flask_app=flask_app, duration_ms=12)
+
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "APP_INITIALIZED")
+        extra = call.kwargs["extra"]
+        assert extra["pid"] > 0
+        assert extra["app_name"] == flask_app.name
+        assert extra["blueprint_count"] == len(flask_app.blueprints)
+        assert extra["before_request_handlers"] >= 1
+        assert extra["after_request_handlers"] >= 1
+        assert extra["limiter_storage"] in {"redis", "memory"}
+        assert extra["duration_ms"] == 12
 
 
 # ── DB_PRUNED log event ───────────────────────────────────────────────────────
@@ -998,7 +1149,7 @@ class TestDbPrunedEvent:
         conn.close()
 
         try:
-            patched_cfg = {**shell_app.CFG, "permalink_retention_days": 5}
+            patched_cfg = build_test_config({"permalink_retention_days": 5})
             with mock.patch("core.database.CFG", patched_cfg):
                 with mock.patch.object(db_module.log, "info") as mock_info:
                     db_init()
@@ -1037,7 +1188,7 @@ class TestDbPrunedEvent:
         conn.close()
 
         try:
-            patched_cfg = {**shell_app.CFG, "permalink_retention_days": 5}
+            patched_cfg = build_test_config({"permalink_retention_days": 5})
             with mock.patch("core.database.CFG", patched_cfg):
                 with mock.patch.object(db_module.log, "info") as mock_info, \
                      mock.patch.object(db_module.log, "warning") as mock_warning:
@@ -1059,7 +1210,7 @@ class TestDbPrunedEvent:
 
     def test_db_pruned_not_emitted_when_retention_disabled(self):
         # permalink_retention_days=0 means disabled — no prune, no log
-        patched_cfg = {**shell_app.CFG, "permalink_retention_days": 0}
+        patched_cfg = build_test_config({"permalink_retention_days": 0})
         with mock.patch("core.database.CFG", patched_cfg):
             with mock.patch.object(db_module.log, "info") as mock_info:
                 db_init()
@@ -1069,7 +1220,7 @@ class TestDbPrunedEvent:
 
     def test_db_pruned_not_emitted_when_no_old_records(self):
         # Retention is active but no records are old enough to prune
-        patched_cfg = {**shell_app.CFG, "permalink_retention_days": 3650}  # 10 years
+        patched_cfg = build_test_config({"permalink_retention_days": 3650})  # 10 years
         with mock.patch("core.database.CFG", patched_cfg):
             with mock.patch.object(db_module.log, "info") as mock_info:
                 db_init()
@@ -1084,7 +1235,7 @@ class TestLoggingConfiguredEvent:
     """LOGGING_CONFIGURED is emitted at INFO when configure_logging() completes."""
 
     def teardown_method(self, method):  # noqa: ARG002
-        configure_logging(shell_app.CFG)
+        configure_logging(shell_app_module.CFG)
 
     def test_logging_configured_emits_info(self):
         with mock.patch.object(logging.getLogger("shell"), "info") as mock_info:
@@ -1112,31 +1263,31 @@ class TestHealthStatusEvents:
 
     def test_health_ok_emits_debug(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             client.get("/health")
         ok_calls = [c for c in mock_debug.call_args_list if c[0][0] == "HEALTH_OK"]
         assert len(ok_calls) == 1
 
     def test_health_ok_not_emitted_when_db_fails(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         ok_calls = [c for c in mock_debug.call_args_list if c[0][0] == "HEALTH_OK"]
         assert len(ok_calls) == 0
 
     def test_health_degraded_emits_warning_when_db_fails(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         degraded = [c for c in mock_warn.call_args_list if c[0][0] == "HEALTH_DEGRADED"]
         assert len(degraded) == 1
 
     def test_health_degraded_extra_has_db_false(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+            with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 client.get("/health")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "HEALTH_DEGRADED")
         assert call.kwargs["extra"]["db"] is False
@@ -1151,7 +1302,7 @@ class TestKillFailedEvent:
         client = get_client()
         with mock.patch("blueprints.run.pid_for_session", return_value=99999):
             with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
-                with mock.patch.object(shell_app.log, "warning") as mock_warn:
+                with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
                     client.post("/kill", headers={"X-Session-ID": "session-1"}, json={"run_id": "fake-run-id"})
         kill_failed = [c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED"]
         assert len(kill_failed) == 1
@@ -1163,7 +1314,7 @@ class TestKillFailedEvent:
              mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "test-run-xyz"}]), \
              mock.patch("blueprints.run.pid_for_team", return_value=99999), \
              mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")), \
-             mock.patch.object(shell_app.log, "warning") as mock_warn:
+             mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             client.post(
                 "/kill",
                 headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1"},
@@ -1195,7 +1346,7 @@ class TestShareViewedEvent:
     def test_share_viewed_emits_info(self):
         client = get_client()
         share_id = self._create_share(client)
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.get(f"/share/{share_id}")
         viewed = [c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED"]
         assert len(viewed) == 1
@@ -1203,7 +1354,7 @@ class TestShareViewedEvent:
     def test_share_viewed_extra_has_share_id(self):
         client = get_client()
         share_id = self._create_share(client)
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.get(f"/share/{share_id}")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED")
         assert call.kwargs["extra"]["share_id"] == share_id
@@ -1211,14 +1362,14 @@ class TestShareViewedEvent:
     def test_share_viewed_extra_has_label(self):
         client = get_client()
         share_id = self._create_share(client)
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.get(f"/share/{share_id}")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED")
         assert call.kwargs["extra"]["label"] == "test-snap"
 
     def test_share_viewed_not_emitted_for_missing_share(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.get("/share/nonexistent-id")
         viewed = [c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED"]
         assert len(viewed) == 0
@@ -1247,7 +1398,7 @@ class TestRunViewedEvent:
         run_id = "rv-test-run-1"
         self._insert_run(run_id, "ping test")
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
             assert len(viewed) == 1
@@ -1258,7 +1409,7 @@ class TestRunViewedEvent:
         run_id = "rv-test-run-2"
         self._insert_run(run_id, "ping test")
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["run_id"] == run_id
@@ -1269,7 +1420,7 @@ class TestRunViewedEvent:
         run_id = "rv-test-run-3"
         self._insert_run(run_id, "nmap 8.8.8.8")
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["cmd"] == "nmap 8.8.8.8"
@@ -1277,7 +1428,7 @@ class TestRunViewedEvent:
             self._delete_run(run_id)
 
     def test_run_viewed_not_emitted_for_missing_run(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/history/nonexistent-run-id")
         viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
         assert len(viewed) == 0
@@ -1300,7 +1451,7 @@ class TestHistoryDeletedEvent:
     def test_history_deleted_emits_info(self):
         run_id = "hd-test-run-1"
         self._insert_run(run_id)
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": "hd-session"})
         deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
         assert len(deleted) == 1
@@ -1308,7 +1459,7 @@ class TestHistoryDeletedEvent:
     def test_history_deleted_extra_has_run_id(self):
         run_id = "hd-test-run-2"
         self._insert_run(run_id)
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": "hd-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED")
         assert call.kwargs["extra"]["run_id"] == run_id
@@ -1316,7 +1467,7 @@ class TestHistoryDeletedEvent:
     def test_history_deleted_not_emitted_for_wrong_session(self):
         run_id = "hd-test-run-3"
         self._insert_run(run_id, session_id="owner-session")
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": "other-session"})
         deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
         assert len(deleted) == 0
@@ -1332,7 +1483,7 @@ class TestHistoryClearedEvent:
     """HISTORY_CLEARED is emitted at INFO when all history for a session is deleted."""
 
     def test_history_cleared_emits_info(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().delete("/history", headers={"X-Session-ID": "hc-session"})
         cleared = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED"]
         assert len(cleared) == 1
@@ -1349,14 +1500,14 @@ class TestHistoryClearedEvent:
                      "2026-01-01T00:00:01", 0, "[]"),
                 )
             conn.commit()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().delete("/history", headers={"X-Session-ID": session})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED")
         assert call.kwargs["extra"]["count"] == 2
 
     def test_history_cleared_count_is_zero_for_empty_session(self):
         # Clearing a session with no history still emits HISTORY_CLEARED with count=0
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().delete("/history", headers={"X-Session-ID": "hc-empty-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED")
         assert call.kwargs["extra"]["count"] == 0
@@ -1380,7 +1531,7 @@ class TestHistoryViewedEvent:
         run_id = "hv-test-run-1"
         self._insert_run(run_id)
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
                 get_client().get("/history", headers={"X-Session-ID": "hv-session"})
             viewed = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED"]
             assert len(viewed) == 1
@@ -1393,11 +1544,15 @@ class TestHistoryViewedEvent:
         run_id = "hv-test-run-2"
         self._insert_run(run_id)
         try:
-            with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get("/history", headers={"X-Session-ID": "hv-session"})
+            with mock.patch.object(shell_app_module.log, "info") as mock_info:
+                get_client().get("/history?q=ping", headers={"X-Session-ID": "hv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED")
             assert call.kwargs["extra"]["count"] == 1
             assert call.kwargs["extra"]["session"] == "hv-session"
+            assert call.kwargs["extra"]["query_present"] is True
+            assert call.kwargs["extra"]["query_len"] == len("ping")
+            assert "q" not in call.kwargs["extra"]
+            assert "ping" not in str(call.kwargs["extra"])
         finally:
             with db_connect() as conn:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
@@ -1422,7 +1577,7 @@ class TestHistoryCommandsViewedEvent:
             )
             conn.commit()
         try:
-            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 resp = client.get("/history/commands", headers={"X-Session-ID": token})
             assert resp.status_code == 200
             call = next(c for c in mock_debug.call_args_list if c[0][0] == "HISTORY_COMMANDS_VIEWED")
@@ -1442,19 +1597,19 @@ class TestPageLoadEvent:
     """PAGE_LOAD is emitted at INFO on every GET /."""
 
     def test_page_load_emits_info(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/")
         loaded = [c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD"]
         assert len(loaded) == 1
 
     def test_page_load_extra_has_ip(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/", headers={"X-Forwarded-For": "9.9.9.9"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         assert call.kwargs["extra"]["ip"] == "9.9.9.9"
 
     def test_page_load_extra_has_session_when_present(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/", headers={"X-Session-ID": "page-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         assert call.kwargs["extra"]["session"] == "page-session"
@@ -1462,7 +1617,7 @@ class TestPageLoadEvent:
     def test_page_load_masks_token_session_id(self):
         client = get_client()
         token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             client.get("/", headers={"X-Session-ID": token})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         extra = call.kwargs["extra"]
@@ -1471,7 +1626,7 @@ class TestPageLoadEvent:
         assert token not in extra.values()
 
     def test_page_load_extra_has_theme(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         assert call.kwargs["extra"]["theme"]
@@ -1481,13 +1636,13 @@ class TestThemeSelectedDebugEvent:
     """THEME_SELECTED is emitted at DEBUG when the current theme is resolved."""
 
     def test_theme_selected_emits_debug(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/themes")
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "THEME_SELECTED"]
         assert len(calls) == 1
 
     def test_theme_selected_extra_has_theme_and_source(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
             get_client().get("/themes", headers={"X-Session-ID": "theme-session"})
         call = next(c for c in mock_debug.call_args_list if c[0][0] == "THEME_SELECTED")
         assert call.kwargs["extra"]["theme"]
@@ -1514,7 +1669,7 @@ class TestContentViewedEvents:
         ],
     )
     def test_content_viewed_emits_info(self, route):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get(route, headers={"X-Session-ID": "content-session"})
         calls = [c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED"]
         assert len(calls) == 1
@@ -1523,7 +1678,7 @@ class TestContentViewedEvents:
         assert call.kwargs["extra"]["session"] == "content-session"
 
     def test_config_viewed_extra_has_key_count(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/config", headers={"X-Session-ID": "cfg-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/config"
@@ -1531,7 +1686,7 @@ class TestContentViewedEvents:
         assert call.kwargs["extra"]["key_count"] >= 1
 
     def test_themes_viewed_extra_has_current_and_count(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             get_client().get("/themes", headers={"X-Session-ID": "themes-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/themes"
@@ -1540,7 +1695,7 @@ class TestContentViewedEvents:
         assert call.kwargs["extra"]["count"] >= 1
 
     def test_allowed_commands_viewed_extra_reflects_restricted_list(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             with mock.patch("blueprints.content.load_commands_registry", return_value={
                 "commands": [
                     {"root": "ping", "category": "Network", "policy": {"allow": ["ping"], "deny": []}},
@@ -1556,7 +1711,7 @@ class TestContentViewedEvents:
         assert call.kwargs["extra"]["count"] == 2
 
     def test_allowed_commands_viewed_extra_reflects_unrestricted_mode(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             with mock.patch("blueprints.content.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
                 get_client().get("/allowed-commands", headers={"X-Session-ID": "ac-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
@@ -1572,13 +1727,13 @@ class TestNotFoundEvents:
     """RUN_NOT_FOUND and SHARE_NOT_FOUND are emitted at WARN for missing permalinks."""
 
     def test_run_not_found_emits_warning(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             get_client().get("/history/no-such-run")
         calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
         assert len(calls) == 1
 
     def test_run_not_found_extra_has_run_id(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             get_client().get("/history/missing-run-id")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND")
         assert call.kwargs["extra"]["run_id"] == "missing-run-id"
@@ -1594,7 +1749,7 @@ class TestNotFoundEvents:
             )
             conn.commit()
         try:
-            with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
                 get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "pnf-session"})
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
             assert len(calls) == 0
@@ -1604,13 +1759,13 @@ class TestNotFoundEvents:
                 conn.commit()
 
     def test_share_not_found_emits_warning(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             get_client().get("/share/no-such-share")
         calls = [c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND"]
         assert len(calls) == 1
 
     def test_share_not_found_extra_has_share_id(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             get_client().get("/share/missing-share-id")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND")
         assert call.kwargs["extra"]["share_id"] == "missing-share-id"
@@ -1623,7 +1778,7 @@ class TestNotFoundEvents:
             headers={"X-Session-ID": "pnf-share-session"},
         )
         share_id = json.loads(resp.data)["id"]
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             client.get(f"/share/{share_id}")
         calls = [c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND"]
         assert len(calls) == 0
@@ -1635,7 +1790,7 @@ class TestSessionStateEvents:
     """Session-token, preference, and starred-command state changes emit logs."""
 
     def test_session_token_generate_emits_info_without_token_field(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = get_client().get("/session/token/generate")
         assert resp.status_code == 200
         call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_TOKEN_GENERATED")
@@ -1643,7 +1798,7 @@ class TestSessionStateEvents:
         assert "token" not in call.kwargs["extra"]
 
     def test_session_token_revoke_not_found_emits_warning_without_token_field(self):
-        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
             resp = get_client().post("/session/token/revoke", json={"token": "tok_" + "a" * 32})
         assert resp.status_code == 404
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "SESSION_TOKEN_REVOKE_DENIED")
@@ -1654,7 +1809,7 @@ class TestSessionStateEvents:
         client = get_client()
         generate_resp = client.get("/session/token/generate")
         token = json.loads(generate_resp.data)["session_token"]
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = client.post(
                 "/session/token/revoke",
                 json={"token": token},
@@ -1671,7 +1826,7 @@ class TestSessionStateEvents:
         client = get_client()
         from_id = "log-migrate-from-" + uuid.uuid4().hex[:8]
         to_id = str(uuid.uuid4())
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = client.post(
                 "/session/migrate",
                 json={"from_session_id": from_id, "to_session_id": to_id},
@@ -1687,7 +1842,7 @@ class TestSessionStateEvents:
         assert "to_session_id" not in extra
 
     def test_session_preferences_save_emits_key_count(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = get_client().post(
                 "/session/preferences",
                 json={"preferences": {"pref_theme_name": "darklab_obsidian.yaml", "ignored": "x"}},
@@ -1698,6 +1853,8 @@ class TestSessionStateEvents:
         assert call.kwargs["extra"]["key_count"] == 1
 
     def test_session_preferences_invalid_json_emits_warning(self):
+        from services.session.storage import decode_preferences
+
         session_id = "prefs-invalid-" + uuid.uuid4().hex[:8]
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -1707,18 +1864,27 @@ class TestSessionStateEvents:
             )
             conn.commit()
         try:
-            with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
                 resp = get_client().get("/session/preferences", headers={"X-Session-ID": session_id})
+                token_id = "tok_" + uuid.uuid4().hex
+                decode_preferences("{not-json", session_id=token_id)
             assert resp.status_code == 200
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "SESSION_PREFERENCES_INVALID"]
-            assert len(calls) == 1
+            assert len(calls) == 2
+            extra = calls[0].kwargs["extra"]
+            assert extra["error_type"] == "JSONDecodeError"
+            assert "not-json" not in str(extra)
+            token_extra = calls[-1].kwargs["extra"]
+            assert token_extra["session_kind"] == "token"
+            assert token_extra["session"] != token_id
+            assert token_id not in str(token_extra)
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session_id,))
                 conn.commit()
 
     def test_starred_command_add_logs_command_root_not_full_command(self):
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = get_client().post(
                 "/session/starred",
                 json={"command": "curl -H Authorization:secret https://darklab.sh"},
@@ -1739,7 +1905,7 @@ class TestSessionStateEvents:
                 (session_id, "dig darklab.sh"),
             )
             conn.commit()
-        with mock.patch.object(shell_app.log, "info") as mock_info:
+        with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = client.delete("/session/starred", headers={"X-Session-ID": session_id})
         assert resp.status_code == 200
         call = next(c for c in mock_info.call_args_list if c[0][0] == "STARRED_COMMANDS_CLEARED")
@@ -1771,7 +1937,7 @@ class TestRunSpawnErrorEvent:
 
     def test_spawn_error_emits_error_log(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "error") as mock_error:
+        with mock.patch.object(shell_app_module.log, "error") as mock_error:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                     with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
@@ -1779,9 +1945,21 @@ class TestRunSpawnErrorEvent:
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR"]
         assert len(calls) == 1
 
+        with mock.patch.object(shell_app_module.log, "error") as mock_error:
+            with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
+                with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
+                    with mock.patch("blueprints.run._WorkspacePathOutputFilter", side_effect=RuntimeError("filter setup failed")):
+                        self._post_run(client, "ping 8.8.4.4")
+        setup_calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_SETUP_FAILED"]
+        assert len(setup_calls) == 1
+        extra = setup_calls[0].kwargs["extra"]
+        assert extra["cfg_source"] == "explicit"
+        assert extra["workspace_filter"] == "init"
+        assert extra["cmd"] == "ping 8.8.4.4"
+
     def test_spawn_error_extra_has_ip(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "error") as mock_error:
+        with mock.patch.object(shell_app_module.log, "error") as mock_error:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                     with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
@@ -1791,7 +1969,7 @@ class TestRunSpawnErrorEvent:
 
     def test_spawn_error_extra_has_cmd(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "error") as mock_error:
+        with mock.patch.object(shell_app_module.log, "error") as mock_error:
             with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                     with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):

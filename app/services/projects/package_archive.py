@@ -13,7 +13,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from typing import cast
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
@@ -120,7 +120,7 @@ def _redacted_artifact_bytes(resolved, redaction_rules):
 def _raw_artifact_row_for_archive(session_id, project_id, artifact_id, *, team_id=""):
     if not str(artifact_id or "").strip():
         return None
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         row = conn.execute(
@@ -145,7 +145,7 @@ def _attach_package_finding_triage(session_id, findings, *, team_id=""):
     finding_ids = [str(finding.get("id") or "") for finding in items if finding.get("id")]
     if not finding_ids:
         return findings
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
     for finding in items:
         triage = triage_by_id.get(str(finding.get("id") or ""))
@@ -292,7 +292,7 @@ def build_evidence_package_archive(
     if not render_manifest.get("include_private_notes"):
         render_manifest = _package_manifest_without_private_notes(render_manifest)
     metadata_targets = _package_metadata_targets(package, manifest)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         label_rows = _package_metadata_rows(conn, session_id, "entity_labels", metadata_targets, team_id=team_id)
         note_rows = (
             _package_metadata_rows(conn, session_id, "entity_notes", metadata_targets, team_id=team_id)
@@ -499,7 +499,7 @@ def build_evidence_package_archive(
                     transcript_run_ids = [run_id for run_id in run_ids if run_id in selected_transcripts]
                 else:
                     transcript_run_ids = list(run_ids)
-            with db_connect() as conn:
+            with get_db_connect()() as conn:
                 run_rows = _package_run_rows(conn, session_id, transcript_run_ids, team_id=team_id)
             found_run_ids = {str(row.get("id") or "") for row in run_rows}
             for run_id in transcript_run_ids:
@@ -877,7 +877,7 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         payload["name"] = apply_redaction_rules(payload["name"], redaction_rules)
         payload["description"] = apply_redaction_rules(payload["description"], redaction_rules)
     created = _now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         package_where = "project_id = ?"
         package_params = [project_id]
         if not team_id:
@@ -908,8 +908,8 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
                     payload["name"],
                     payload["description"],
                     payload["redaction_mode"],
-                    dialect_for_backend(DB_BACKEND).boolean_param(payload["include_artifacts"]),
-                    dialect_for_backend(DB_BACKEND).json_param(manifest),
+                    dialect_for_backend(get_db_backend()).boolean_param(payload["include_artifacts"]),
+                    dialect_for_backend(get_db_backend()).json_param(manifest),
                     created,
                     created,
                 ),
@@ -930,7 +930,7 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
 
 def delete_evidence_package(session_id, project_id, package_id, *, team_id="", conn=None):
     if conn is None:
-        with db_connect() as opened:
+        with get_db_connect()() as opened:
             deleted = delete_evidence_package(
                 session_id,
                 project_id,

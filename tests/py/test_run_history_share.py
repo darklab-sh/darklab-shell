@@ -10,6 +10,7 @@ import gzip
 import json
 import json as json_module
 import os
+import signal
 import time
 import uuid
 import unittest.mock as mock
@@ -20,7 +21,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import app as shell_app
+import app as shell_app_module
+import config as app_config
+from conftest import build_test_config
+from conftest import make_test_app as _test_app
 import blueprints.run as run_routes
 import core.database as shell_db
 import services.secrets.storage as secrets_storage
@@ -36,8 +40,7 @@ from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 # the real SQLite/artifact flow rather than heavy mocking.
 
 def get_client(*, use_forwarded_for=True):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+    client = _test_app().test_client()
     if use_forwarded_for:
         token = uuid.uuid4().hex
         client.environ_base["HTTP_X_FORWARDED_FOR"] = (
@@ -1192,7 +1195,7 @@ class TestRunStreaming:
         )
         data = json.loads(target_resp.data)
         assert target_resp.status_code == 400
-        assert data["error"] == "target type must be domain, url, host, or ip"
+        assert data["error"] == "target type must be domain, url, or ip"
 
     def test_project_targets_reject_port_set_targets(self):
         client = get_client()
@@ -1216,7 +1219,7 @@ class TestRunStreaming:
         )
         data = json.loads(ports_resp.data)
         assert ports_resp.status_code == 400
-        assert data["error"] == "target type must be domain, url, host, or ip"
+        assert data["error"] == "target type must be domain, url, or ip"
 
     def test_active_project_auto_discovers_typed_command_targets(self):
         client = get_client()
@@ -1288,11 +1291,11 @@ class TestRunStreaming:
         assert rerun.status_code == 200
         assert "[project] discovered" not in rerun_body
 
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
+        with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}, clear=False):
             target_file = shell_workspace.resolve_workspace_path(
                 session_id,
                 "targets.txt",
-                shell_app.CFG,
+                shell_app_module.CFG,
                 ensure_parent=True,
             )
             target_file.write_text("ip.darklab.sh\n# ignored.example\n", encoding="utf-8")
@@ -1860,7 +1863,7 @@ class TestRunStreaming:
         assert "[timeout] Command exceeded 1s limit and was killed." in body
         assert '"type": "notice"' in body
         assert '"type": "exit"' in body
-        killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
+        killpg.assert_called_once_with(4321, signal.SIGTERM)
 
     def test_run_still_exits_when_history_save_fails(self):
         client = get_client()
@@ -1875,7 +1878,7 @@ class TestRunStreaming:
                  True,
              ]), \
              mock.patch("blueprints.run._run_belongs_to_session", return_value=True), \
-             mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
+             mock.patch("blueprints.run.run_persistence_transaction", side_effect=Exception("db write failed")):
             resp = _post_run(client, json={"command": "echo saved"})
             body = resp.get_data(as_text=True)
 
@@ -1984,7 +1987,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert f"APP_NAME={shell_app.CFG['app_name']}\\n" in body
+        assert f"APP_NAME={shell_app_module.CFG['app_name']}\\n" in body
         assert "SESSION_ID=sess-env\\n" in body
         assert "SHELL=/bin/bash\\n" in body
         assert "TERM=xterm-256color\\n" in body
@@ -2157,7 +2160,7 @@ class TestRunStreaming:
             "workspace_inactivity_ttl_hours": 1,
         }
 
-        with mock.patch.dict(shell_app.CFG, workspace_cfg):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg):
             created = client.post(
                 "/workspace/files",
                 json={"path": "targets.txt", "text": "darklab.sh\nip.darklab.sh\n"},
@@ -2253,7 +2256,7 @@ class TestRunStreaming:
             "workspace_inactivity_ttl_hours": 1,
         }
 
-        with mock.patch.dict(shell_app.CFG, workspace_cfg):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg):
             created = client.post(
                 "/workspace/files",
                 json={"path": "urls.txt", "text": "https://ip.darklab.sh\n"},
@@ -2307,11 +2310,11 @@ class TestRunStreaming:
             "workspace_inactivity_ttl_hours": 1,
         }
 
-        with mock.patch.dict(shell_app.CFG, workspace_cfg):
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg):
             binary_path = shell_workspace.resolve_workspace_path(
                 session,
                 "amass/asset.db",
-                shell_app.CFG,
+                shell_app_module.CFG,
                 ensure_parent=True,
             )
             binary_path.write_bytes(b"SQLite format 3\x00binary")
@@ -2436,7 +2439,7 @@ class TestRunStreaming:
             )
             conn.commit()
 
-        with mock.patch.dict(shell_app.CFG, {
+        with mock.patch.dict(shell_app_module.CFG, {
             "max_tabs": 4,
             "permalink_retention_days": 365,
             "workspace_enabled": True,
@@ -2455,7 +2458,7 @@ class TestRunStreaming:
 
         assert limits_resp.status_code == 200
         assert "live preview lines" in limits_body
-        assert f"{shell_app.CFG['max_output_lines']}\\n" in limits_body
+        assert f"{shell_app_module.CFG['max_output_lines']}\\n" in limits_body
         assert "files enabled" in limits_body
         assert "\\u001b[32myes\\u001b[0m\\n" in limits_body
         assert "files quota" in limits_body
@@ -2533,14 +2536,14 @@ class TestRunStreaming:
         version_body = version_resp.get_data(as_text=True)
 
         assert who_resp.status_code == 200
-        assert f"{shell_app.CFG['app_name']}  pts/web  sess-who\\n" in who_body
+        assert f"{shell_app_module.CFG['app_name']}  pts/web  sess-who\\n" in who_body
         assert tty_resp.status_code == 200
         assert "/dev/pts/web\\n" in tty_body
         assert groups_resp.status_code == 200
-        assert f"{shell_app.CFG['app_name']} operators\\n" in groups_body
+        assert f"{shell_app_module.CFG['app_name']} operators\\n" in groups_body
         assert version_resp.status_code == 200
-        assert f"{shell_app.CFG['app_name']} web shell\\n" in version_body
-        assert f"App {shell_app.APP_VERSION}\\n" in version_body
+        assert f"{shell_app_module.CFG['app_name']} web shell\\n" in version_body
+        assert f"App {shell_app_module.APP_VERSION}\\n" in version_body
         assert "Flask " in version_body
         assert "Python " in version_body
         builtins_system._flask_version.cache_clear()
@@ -2573,12 +2576,11 @@ class TestRunStreaming:
     def test_builtin_retention_reports_preview_and_full_output_policy(self):
         client = get_client()
 
-        with mock.patch("services.commands.builtins.CFG", {
-            **shell_app.CFG,
+        with mock.patch("config.CFG", build_test_config({
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
             "full_output_max_mb": 5,
-        }):
+        })):
             resp = _post_run(client, json={"command": "retention"})
             body = resp.get_data(as_text=True)
 
@@ -2731,7 +2733,7 @@ class TestRunStreaming:
         assert date_resp.status_code == 200
         assert '"type": "output"' in date_body
         assert host_resp.status_code == 200
-        assert f"{shell_app.CFG['app_name']}\\n" in host_body
+        assert f"{shell_app_module.CFG['app_name']}\\n" in host_body
         assert uptime_resp.status_code == 200
         assert "up " in uptime_body
 
@@ -2895,7 +2897,7 @@ class TestRunStreaming:
         with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
              mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc), \
-             mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "max_output_lines": 2}):
+             mock.patch("config.CFG", build_test_config({"max_output_lines": 2})):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -3004,7 +3006,7 @@ class TestRunStreaming:
                 )
             conn.commit()
 
-        with mock.patch.dict("services.commands.builtins.CFG", {"recent_commands_limit": 3}):
+        with mock.patch.dict(app_config.CFG, {"recent_commands_limit": 3}):
             resp = _post_run(
                 client,
                 json={"command": "history"},
@@ -3043,24 +3045,24 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "workspace_enabled": False}):
+        with mock.patch("config.CFG", build_test_config({"workspace_enabled": False})):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert f"/app/{shell_app.CFG['app_name']}/bin\\n" in body
+        assert f"/app/{shell_app_module.CFG['app_name']}/bin\\n" in body
         assert '"type": "exit"' in body
 
     def test_builtin_pwd_returns_workspace_root_when_workspace_enabled(self):
         client = get_client()
 
-        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "workspace_enabled": True}):
+        with mock.patch("config.CFG", build_test_config({"workspace_enabled": True})):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert '"text": "/\\n"' in body
-        assert f"/app/{shell_app.CFG['app_name']}/bin\\n" not in body
+        assert f"/app/{shell_app_module.CFG['app_name']}/bin\\n" not in body
         assert '"type": "exit"' in body
 
     def test_builtin_uname_a_returns_web_shell_environment(self):
@@ -3070,7 +3072,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert f"{shell_app.CFG['app_name']} Linux web-terminal x86_64 app-runtime\\n" in body
+        assert f"{shell_app_module.CFG['app_name']} Linux web-terminal x86_64 app-runtime\\n" in body
         assert '"type": "exit"' in body
 
     def test_builtin_uname_without_flags_returns_kernel_name(self):
@@ -3110,8 +3112,8 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert (
-            f"uid=1000({shell_app.CFG['app_name']}) gid=1000({shell_app.CFG['app_name']}) "
-            f"groups=1000({shell_app.CFG['app_name']})\\n"
+            f"uid=1000({shell_app_module.CFG['app_name']}) gid=1000({shell_app_module.CFG['app_name']}) "
+            f"groups=1000({shell_app_module.CFG['app_name']})\\n"
         ) in body
         assert '"type": "exit"' in body
 
@@ -3122,7 +3124,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert f"{shell_app.CFG['app_name']}\\n" in body
+        assert f"{shell_app_module.CFG['app_name']}\\n" in body
         assert f"README: see the project README at {PROJECT_README}\\n" in body
         assert '"type": "exit"' in body
 
@@ -3226,8 +3228,9 @@ class TestRunStreaming:
             headers={"X-Session-ID": session_id},
         )
 
-        with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
+        patched_cfg = build_test_config(cfg)
+        with mock.patch("config.CFG", patched_cfg), \
+             mock.patch("blueprints.run.CFG", patched_cfg), \
              mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
@@ -3319,8 +3322,9 @@ class TestRunStreaming:
             "pipe_helpers": [],
         }
 
-        with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
+        patched_cfg = build_test_config(cfg)
+        with mock.patch("config.CFG", patched_cfg), \
+             mock.patch("blueprints.run.CFG", patched_cfg), \
              mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \

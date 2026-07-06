@@ -1045,10 +1045,12 @@ def _documented_architecture_routes() -> set[tuple[str, str]]:
 
 def _registered_flask_routes() -> set[tuple[str, str]]:
     """Return registered Flask (method, route) pairs, excluding automatic methods."""
-    from app import app as flask_app
+    from app import create_app
+    app = create_app()
+    app.config["TESTING"] = True
 
     routes: set[tuple[str, str]] = set()
-    for rule in flask_app.url_map.iter_rules():
+    for rule in app.url_map.iter_rules():
         methods = rule.methods or set()
         for method in sorted(methods - {"HEAD", "OPTIONS"}):
             routes.add((method, rule.rule))
@@ -1091,6 +1093,32 @@ class TestProjectStructureCoverage:
             "assets.config.json lazy:\n"
             + "\n".join(f"  {item}" for item in eager_lazy_sources)
         )
+
+    def test_pytest_files_do_not_import_legacy_flask_singleton(self):
+        offenders: list[str] = []
+        for path in sorted(_HERE.glob("test_*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            app_aliases: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name == "app":
+                            app_aliases.add(alias.asname or alias.name)
+                            if alias.asname == "shell_app":
+                                offenders.append(f"{path.name}:{node.lineno}: import app as shell_app")
+                elif isinstance(node, ast.ImportFrom) and node.module == "app":
+                    for alias in node.names:
+                        if alias.name == "app":
+                            offenders.append(f"{path.name}:{node.lineno}: from app import app")
+                elif (
+                    isinstance(node, ast.Attribute)
+                    and node.attr == "app"
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id in app_aliases
+                ):
+                    offenders.append(f"{path.name}:{node.lineno}: {node.value.id}.app")
+
+        assert not offenders, "Tests must build Flask apps through create_app():\n" + "\n".join(offenders)
 
     def test_asset_build_output_does_not_depend_on_cwd(self, tmp_path):
         if shutil.which("node") is None:

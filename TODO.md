@@ -20,6 +20,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
+  - [Right-size project documentation](#right-size-project-documentation)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Lightweight Jinja base template](#lightweight-jinja-base-template)
@@ -170,6 +171,13 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
+
+### Right-size project documentation
+- Problem: several docs are treated as append-only logs and have grown past the point of being read or kept accurate — `CHANGELOG.md` (~792K), `README.md` (~127K), `ARCHITECTURE.md` (~280K), `FEATURES.md` (~188K). Documentation this large drifts from reality and buries the parts newcomers actually need.
+- Approach:
+  - Keep the README navigational and short; let it point into deeper docs rather than duplicating them.
+  - Make `ARCHITECTURE.md` and `FEATURES.md` describe current state concisely, and confine chronological history to `CHANGELOG.md`.
+  - Align with the existing documentation standards work so state docs stay free of migration/phase narrative that belongs in the changelog.
 
 ### Unified terminal built-in lifecycle
 - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.

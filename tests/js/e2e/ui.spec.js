@@ -323,7 +323,7 @@ import uuid
 data_dir, session_id = sys.argv[1:3]
 run_id = "run_auto_promote_e2e_" + uuid.uuid4().hex[:16]
 entity_id = "ent_auto_promote_e2e_" + uuid.uuid4().hex[:16]
-entity_value = "portal.autopromote-e2e.test"
+entity_value = "portal.autopromote-e2e.example.com"
 now = "2026-05-31 00:00:00"
 
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
@@ -332,7 +332,7 @@ try:
         "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 1, 0, 0)",
-        (run_id, session_id, "nmap portal.autopromote-e2e.test", json.dumps(["portal.autopromote-e2e.test"])),
+        (run_id, session_id, "nmap portal.autopromote-e2e.example.com", json.dumps(["portal.autopromote-e2e.example.com"])),
     )
     conn.execute(
         "INSERT INTO entities "
@@ -591,7 +591,7 @@ test.describe('Status Monitor', () => {
 
   test('visual cards open filtered history and restore constellation runs', async ({ page }) => {
     test.setTimeout(60_000)
-    const command = 'ping -c 1 darklab.sh'
+    const command = 'ping -c 1 -W 1 192.0.2.1'
     await runCommand(page, command)
     await waitForHistoryRuns(page, 1)
     await expect.poll(async () => page.evaluate(async () => {
@@ -1026,7 +1026,7 @@ test.describe('project workspace modal', () => {
     await editor.locator('[data-project-auto-promote-field="name"]').fill('E2E owned domains')
     await editor.locator('[data-project-auto-promote-field="target_entity_kind"]').selectOption('domain')
     await editor.locator('[data-project-auto-promote-field="match_mode"]').selectOption('domain_suffix')
-    await editor.locator('[data-project-auto-promote-field="pattern"]').fill('autopromote-e2e.test')
+    await editor.locator('[data-project-auto-promote-field="pattern"]').fill('autopromote-e2e.example.com')
 
     await expect(editor.locator('.project-auto-promote-preview')).toContainText('Preview required before save.')
 
@@ -1087,7 +1087,7 @@ test.describe('project workspace modal', () => {
     await switchProjectTab(page, 'entities')
     await expect(page.locator('#project-explorer-body')).toContainText('No Atlas entities are linked')
 
-    const suffix = `stream-${Date.now()}.autopromote-e2e.test`
+    const suffix = `stream-${Date.now()}.autopromote-e2e.example.com`
     const entityValue = `portal.${suffix}`
     const createdRule = await page.evaluate(async ({ id, pattern }) => {
       const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/auto-promote-rules`, {

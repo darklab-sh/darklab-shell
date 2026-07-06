@@ -13,7 +13,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-import app as shell_app
+import app as shell_app_module
+from conftest import make_test_app as _test_app
 import config
 import core.process as process
 from core.database import DB_PATH
@@ -29,13 +30,12 @@ if str(CLI_SRC) not in sys.path:
 
 
 def get_client():
-    shell_app.app.config["TESTING"] = True
-    return shell_app.app.test_client()
+    return _test_app().test_client()
 
 
 class _LiveCliServer:
     def __init__(self) -> None:
-        self._server = make_server("127.0.0.1", 0, shell_app.app, threaded=True)
+        self._server = make_server("127.0.0.1", 0, _test_app(), threaded=True)
         host, port = self._server.server_address[:2]
         self.base_url = f"http://{host}:{port}"
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -323,7 +323,7 @@ def test_api_v1_whoami_accepts_bearer_token():
     assert "tok_" not in json.dumps(data["token_created"])
     assert "tok_" not in json.dumps(data["last_seen_at"])
 
-    with shell_app.app.test_request_context("/api/v1/whoami", headers=_headers(token)):
+    with _test_app().test_request_context("/api/v1/whoami", headers=_headers(token)):
         try:
             current_api_session()
         except RuntimeError as exc:
@@ -336,8 +336,8 @@ def test_api_v1_read_routes_use_api_rate_limit(monkeypatch):
     client = get_client()
     token = _token(client)
     remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1)
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1)
 
     first = client.get("/api/v1/whoami", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
     second = client.get("/api/v1/whoami", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
@@ -352,11 +352,11 @@ def test_api_v1_team_routes_use_team_rate_limit_per_token(monkeypatch):
     token = _token(client)
     other_token = _token(client)
     remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 100)
-    monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_second", 100)
+    monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1000)
 
     first = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
     second = client.get("/api/v1/teams", headers=_headers(token), environ_base={"REMOTE_ADDR": remote_addr})
@@ -372,11 +372,11 @@ def test_api_v1_team_write_routes_use_separate_team_rate_limit(monkeypatch):
     client = get_client()
     token = _token(client)
     remote_addr = f"198.51.100.{int(uuid.uuid4().hex[:2], 16)}"
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_minute", 1000)
-    monkeypatch.setitem(shell_app.CFG, "rate_limit_per_second", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_minute", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_read_rate_limit_per_second", 1000)
-    monkeypatch.setitem(shell_app.CFG, "team_write_rate_limit_per_minute", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1)
 
     first = client.post(
         "/api/v1/teams",
@@ -1051,7 +1051,7 @@ def test_api_v1_team_project_readers_include_cross_member_entities_and_findings(
 
 
 def test_api_v1_history_detail_output_and_cross_session_404():
-    import blueprints.history as history_blueprint
+    from services.history import queries as history_queries
     from services.runs.structured_summary import replace_run_output_summary
 
     client = get_client()
@@ -1141,7 +1141,7 @@ def test_api_v1_history_detail_output_and_cross_session_404():
         headers=_headers(token),
     )
     with mock.patch.object(
-        history_blueprint,
+        history_queries,
         "load_run_output_events_for_run",
         side_effect=AssertionError("summary-backed history filters should not load transcript events"),
     ):
@@ -1173,6 +1173,52 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     assert invalid_range.status_code == 400
     assert json.loads(invalid_range.data)["error"]["code"] == "invalid_range"
     assert cross_session.status_code == 404
+
+
+def test_api_v1_output_fallback_preserves_api_log_event_and_metadata():
+    from services.history import api_queries as history_api_queries
+    from services.runs import output_store
+
+    client = get_client()
+    token = _token(client)
+    run_id = _seed_run(token, output=["preview fallback line"])
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE runs SET full_output_available = 1, full_output_truncated = 0 WHERE id = ?",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO run_output_artifacts "
+            "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+            "VALUES (?, ?, 'gzip', 12, 1, 0, '2026-05-19T00:00:01+00:00')",
+            (run_id, "missing/api-output-artifact.txt.gz"),
+        )
+        conn.commit()
+
+    with mock.patch.object(output_store.log, "warning") as warning_log:
+        output_json = client.get(f"/api/v1/history/{run_id}/output?format=json", headers=_headers(token))
+
+    assert output_json.status_code == 200
+    payload = json.loads(output_json.data)
+    assert payload["lines"] == ["preview fallback line"]
+    assert payload["preview"] is True
+    assert payload["full_output_available"] is True
+    assert [call.args[0] for call in warning_log.call_args_list] == ["API_FULL_OUTPUT_LOAD_FAILED"]
+
+    run = {
+        "id": run_id,
+        "session_id": token,
+        "full_output_available": True,
+        "rel_path": "missing/api-output-artifact.txt.gz",
+        "output_preview": json.dumps([{"text": "preview fallback line", "cls": "", "tsC": "", "tsE": ""}]),
+    }
+    with mock.patch.object(output_store.log, "warning") as helper_warning_log:
+        events = history_api_queries.run_output_events(run)
+
+    assert [event.text for event in events] == ["preview fallback line"]
+    assert run["_output_source"] == "preview"
+    assert run["_output_fallback"] is True
+    assert [call.args[0] for call in helper_warning_log.call_args_list] == ["API_FULL_OUTPUT_LOAD_FAILED"]
 
 
 def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
@@ -1426,20 +1472,20 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
     )
     artifact_id = "rfa_" + uuid.uuid4().hex[:16]
     team_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
-    monkeypatch.setitem(shell_app.CFG, "workspace_enabled", True)
-    monkeypatch.setitem(shell_app.CFG, "workspace_backend", "tmpfs")
-    monkeypatch.setitem(shell_app.CFG, "workspace_root", str(tmp_path))
-    monkeypatch.setitem(shell_app.CFG, "workspace_quota_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_file_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_files", 10)
-    workspace_dir = ensure_session_workspace(token, shell_app.CFG)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_enabled", True)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_backend", "tmpfs")
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_root", str(tmp_path))
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_quota_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_file_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_files", 10)
+    workspace_dir = ensure_session_workspace(token, shell_app_module.CFG)
     (workspace_dir / "reports").mkdir()
     (workspace_dir / "reports" / "artifact.txt").write_text("artifact body", encoding="utf-8")
     (workspace_dir / "reports" / "team-artifact.txt").write_text("personal shadow body", encoding="utf-8")
     team_artifact_path = resolve_owner_workspace_path(
         team_owner_context(team_id, actor_session_id=token),
         "reports/team-artifact.txt",
-        shell_app.CFG,
+        shell_app_module.CFG,
         ensure_parent=True,
     )
     team_artifact_path.write_text("team artifact body", encoding="utf-8")
@@ -1538,6 +1584,7 @@ def test_api_v1_project_readers_are_token_scoped():
     project = _create_project(client, token, name="Scoped API Project")
     run_id = _seed_run(token, command="echo project api", output="project api")
     entity_id = "ent_" + uuid.uuid4().hex[:16]
+    port_entity_id = "ent_" + uuid.uuid4().hex[:16]
     finding_id = "fnd_" + uuid.uuid4().hex[:16]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -1566,9 +1613,27 @@ def test_api_v1_project_readers_are_token_scoped():
             (entity_id, run_id),
         )
         conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
+            "first_seen_at, last_seen_at, occurrence_count, created) "
+            "VALUES (?, ?, 'port', 'api.darklab.sh:443/tcp', ?, ?, ?, "
+            "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 1, '2026-05-19T00:00:00+00:00')",
+            (port_entity_id, token, "sig_" + uuid.uuid4().hex, entity_id, json.dumps({"service": "https"})),
+        )
+        conn.execute(
+            "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+            "VALUES (?, ?, '2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 1)",
+            (port_entity_id, run_id),
+        )
+        conn.execute(
             "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
             "VALUES (?, ?, 'atlas_entity', ?, 'manual', '2026-05-19T00:00:00+00:00')",
             ("ple_" + uuid.uuid4().hex[:16], project["id"], entity_id),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', '2026-05-19T00:00:00+00:00')",
+            ("ple_" + uuid.uuid4().hex[:16], project["id"], port_entity_id),
         )
         conn.execute(
             "INSERT INTO findings "
@@ -1590,10 +1655,12 @@ def test_api_v1_project_readers_are_token_scoped():
     owner_findings = client.get(f"/api/v1/projects/{project['id']}/findings", headers=_headers(token))
     owner_runs = client.get(f"/api/v1/projects/{project['id']}/runs", headers=_headers(token))
     owner_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=domain", headers=_headers(token))
+    owner_port_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=port", headers=_headers(token))
     owner_packages = client.get(f"/api/v1/projects/{project['id']}/packages", headers=_headers(token))
     atlas_summary_resp = client.get("/api/v1/atlas", headers=_headers(token))
     atlas_runs = client.get("/api/v1/atlas/runs", headers=_headers(token))
     atlas_entities = client.get("/api/v1/atlas/entities?entity_type=domain&q=api", headers=_headers(token))
+    atlas_port_entities = client.get("/api/v1/atlas/entities?entity_type=port&q=443", headers=_headers(token))
     atlas_entity = client.get(f"/api/v1/atlas/entities/{entity_id}", headers=_headers(token))
     atlas_findings = client.get("/api/v1/atlas/findings?q=finding&review_state=new", headers=_headers(token))
     atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(token))
@@ -1613,7 +1680,13 @@ def test_api_v1_project_readers_are_token_scoped():
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
     assert owner_entities.status_code == 200
     assert json.loads(owner_entities.data)["entities"][0]["id"] == entity_id
-    assert json.loads(owner_entities.data)["counts_by_type"] == {"domain": 1}
+    assert json.loads(owner_entities.data)["counts_by_type"] == {"domain": 1, "port": 1}
+    assert owner_port_entities.status_code == 200
+    owner_port_payload = json.loads(owner_port_entities.data)
+    assert owner_port_payload["entities"][0]["id"] == port_entity_id
+    assert owner_port_payload["entities"][0]["type"] == "port"
+    assert owner_port_payload["entities"][0]["host_entity_id"] == entity_id
+    assert owner_port_payload["entities"][0]["attributes"] == {"service": "https"}
     assert owner_packages.status_code == 200
     assert json.loads(owner_packages.data)["total"] == 1
     assert atlas_summary_resp.status_code == 200
@@ -1622,6 +1695,12 @@ def test_api_v1_project_readers_are_token_scoped():
     assert json.loads(atlas_runs.data)["runs"][0]["id"] == run_id
     assert atlas_entities.status_code == 200
     assert json.loads(atlas_entities.data)["entities"][0]["id"] == entity_id
+    assert atlas_port_entities.status_code == 200
+    atlas_port_payload = json.loads(atlas_port_entities.data)
+    assert atlas_port_payload["entities"][0]["id"] == port_entity_id
+    assert atlas_port_payload["entities"][0]["type"] == "port"
+    assert atlas_port_payload["entities"][0]["host_entity_id"] == entity_id
+    assert atlas_port_payload["entities"][0]["attributes"] == {"service": "https"}
     assert atlas_entity.status_code == 200
     assert json.loads(atlas_entity.data)["entity"]["id"] == entity_id
     assert atlas_findings.status_code == 200
@@ -1642,7 +1721,7 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
 
     client = get_client()
     token = _token(client)
-    monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
+    monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
 
     start = client.post("/api/v1/runs", json={"command": "help"}, headers=_headers(token))
     run_id = json.loads(start.data)["id"]
@@ -1745,7 +1824,7 @@ def test_api_v1_run_start_reports_broker_unavailable(monkeypatch):
 def test_api_v1_run_start_rejects_archived_project_link(monkeypatch):
     client = get_client()
     token = _token(client)
-    monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
+    monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
     project_resp = client.post("/projects", json={"name": "Archived API"}, headers={"X-Session-ID": token})
     project = json.loads(project_resp.data)["project"]
     client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers={"X-Session-ID": token})
@@ -1861,14 +1940,14 @@ def test_api_v1_run_start_rewrites_workspace_root_output_paths(monkeypatch, tmp_
     token = _token(client)
     seen = {}
 
-    monkeypatch.setitem(shell_app.CFG, "run_broker_require_redis", False)
-    monkeypatch.setitem(shell_app.CFG, "workspace_enabled", True)
-    monkeypatch.setitem(shell_app.CFG, "workspace_backend", "tmpfs")
-    monkeypatch.setitem(shell_app.CFG, "workspace_root", str(tmp_path))
-    monkeypatch.setitem(shell_app.CFG, "workspace_quota_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_file_mb", 1)
-    monkeypatch.setitem(shell_app.CFG, "workspace_max_files", 10)
-    monkeypatch.setitem(shell_app.CFG, "workspace_inactivity_ttl_hours", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_enabled", True)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_backend", "tmpfs")
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_root", str(tmp_path))
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_quota_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_file_mb", 1)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_max_files", 10)
+    monkeypatch.setitem(shell_app_module.CFG, "workspace_inactivity_ttl_hours", 1)
 
     def fake_start(_original_command, _session_id, _client_ip, prepared_real):
         seen["command"] = prepared_real.command
@@ -3516,10 +3595,11 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["HistorySearchPage"]["properties"]["matches"]["items"] == {"$ref": "#/components/schemas/HistorySearchMatch"}
     atlas_summary_params = {param["name"] for param in spec["paths"]["/atlas"]["get"]["parameters"]}
     assert {"project_id", "run_id", "orphan_filter", "suppression_filter"}.issubset(atlas_summary_params)
-    atlas_entity_params = {param["name"] for param in spec["paths"]["/atlas/entities"]["get"]["parameters"]}
+    atlas_entity_params = {param["name"]: param for param in spec["paths"]["/atlas/entities"]["get"]["parameters"]}
     assert {"entity_type", "q", "project_id", "run_id", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
         atlas_entity_params
     )
+    assert "port" in atlas_entity_params["entity_type"]["schema"]["enum"]
     atlas_finding_params = {param["name"] for param in spec["paths"]["/atlas/findings"]["get"]["parameters"]}
     assert {"q", "project_id", "run_id", "review_state", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
         atlas_finding_params
@@ -3536,8 +3616,11 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "severity",
         "target_id",
     }.issubset(project_finding_params)
-    project_entity_params = {param["name"] for param in spec["paths"]["/projects/{project_id}/entities"]["get"]["parameters"]}
+    project_entity_params = {
+        param["name"]: param for param in spec["paths"]["/projects/{project_id}/entities"]["get"]["parameters"]
+    }
     assert {"entity_type", "run_id", "target_id", "limit", "offset"}.issubset(project_entity_params)
+    assert "port" in project_entity_params["entity_type"]["schema"]["enum"]
     run_output_params = {param["name"] for param in spec["paths"]["/runs/{run_id}/output"]["get"]["parameters"]}
     assert {"format", "range"}.issubset(run_output_params)
     assert spec["paths"]["/runs/{run_id}/wait"]["post"]["responses"]["408"]["content"]["application/json"]["schema"] == {
@@ -4228,7 +4311,6 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
 
 def test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history(monkeypatch, capsys):
     cli_main = import_module("darklab_cli.__main__")
-    shell_app.app.config["TESTING"] = True
     server = _LiveCliServer()
     server.start()
     try:

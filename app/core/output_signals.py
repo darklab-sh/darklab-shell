@@ -7,31 +7,74 @@ can agree on what counts as a finding, warning, error, or summary line.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import lru_cache
-import json
-import ipaddress
 import logging
 import re
 from urllib.parse import urlparse
 
+from core.output_targets import (
+    _find_flag_value,
+    _is_help_output_command,
+    command_root,
+    extract_target,
+    tokenize_command,
+)
+from core.output_entities import (
+    _add_entity,
+    _is_public_ip,
+    _normalize_entity_text as _normalize_signal_text,
+    _seen_entities,
+    _strip_ansi_codes,
+    strip_ansi_codes as _entity_strip_ansi_codes,
+    extract_entities,
+)
+from core.output_port_entities import (
+    _nc_bracket_entity_host,
+    _nmap_port_entities,
+    _nmap_service_context,
+    _nmap_target_entities,
+    _port_entities_for_host,
+)
+from core.output_shodan import (
+    _SHODAN_DNS_FINDING_TYPES,
+    _SHODAN_LABEL_RE,
+    _is_shodan_dns_text_row,
+    _is_shodan_finding,
+    _is_shodan_summary,
+    _is_shodan_warning,
+    _parse_shodan_dns_row,
+)
+from core.output_structured_signals import (
+    _cdncheck_json_entities,
+    _is_cdncheck_json_summary,
+    _is_puredns_finding,
+    _is_puredns_summary,
+    _is_puredns_warning,
+    _is_trufflehog_json_finding,
+    _is_tlsx_json_finding,
+    _is_tlsx_json_warning,
+    _json_object_line,
+    _puredns_entities,
+    _trufflehog_json_entities,
+    _tlsx_json_entities,
+)
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
 from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
 from services.intel.canonical import (
     CanonicalizationError,
-    canonical_cve,
     canonical_domain,
-    canonical_hash,
     canonical_ip,
     canonical_url,
-    detect_hash_algorithm,
 )
 
 
 log = logging.getLogger("shell")
 SIGNAL_SCOPES = ("findings", "warnings", "errors", "summaries")
 
-_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+
+def strip_ansi_codes(value: str) -> str:
+    return _entity_strip_ansi_codes(value)
 
 _SIGNAL_PATTERNS = {
     "findings": [
@@ -181,8 +224,35 @@ _SSLYZE_FINDING_RE = re.compile(
     r"TLS_FALLBACK_SCSV:\s+OK - Supported|Supported curves:)",
     re.I,
 )
-_HOST_PORT_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}:\d+$", re.I)
-_RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+[0-9a-f:.]+:\d+$", re.I)
+_HOST_PORT_RE = re.compile(
+    r"^(?P<host>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}):(?P<port>\d+)(?:/(?P<proto>tcp|udp))?$",
+    re.I,
+)
+_NAABU_HOST_PORT_RE = re.compile(
+    r"^(?P<host>"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}|"
+    r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)|"
+    r"\[[0-9a-f:.]*:[0-9a-f:.]*\]"
+    r"):(?P<port>\d+)(?:/(?P<proto>tcp|udp))?$",
+    re.I,
+)
+_RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+(?P<host>[0-9a-f:.]+):(?P<port>\d+)(?:/(?P<proto>tcp|udp))?$", re.I)
+_MASSCAN_OPEN_PORT_RE = re.compile(
+    r"^Discovered\s+open\s+port\s+(?P<port>\d+)/(?P<proto>tcp|udp)\s+on\s+(?P<host>\S+)",
+    re.I,
+)
+_NC_OPEN_PORT_RE = re.compile(
+    r"^Connection\s+to\s+(?P<host>\S+)\s+(?P<port>\d+)(?:\s+port)?\s+.*\bsucceeded\b",
+    re.I,
+)
+_NC_BRACKET_OPEN_PORT_RE = re.compile(
+    r"^(?P<host>\S+)\s+\[(?P<ip>[^\]]+)\]\s+(?P<port>\d+)\s+\((?P<service>[^)]+)\)\s+open\b",
+    re.I,
+)
+_CURL_CONNECTED_PORT_RE = re.compile(
+    r"^\*\s+Connected\s+to\s+(?P<host>\S+)\s+\((?P<ip>[^)]+)\)\s+port\s+(?P<port>\d+)\b",
+    re.I,
+)
 _NAABU_FOUND_PORTS_RE = re.compile(r"^\[INF\]\s+Found\s+\d+\s+ports?\s+on host\b", re.I)
 _NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|medium|high|critical)\]\s+\S+", re.I)
 _SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
@@ -254,26 +324,6 @@ _WGET_SUMMARY_RE = re.compile(
 )
 _PUREDNS_WILDCARD_RE = re.compile(r"\bwildcard\b", re.I)
 _PUREDNS_PROGRESS_RE = re.compile(r"^(?:[*-]\s+)?(?:resolving|validating|loading|starting|finished|done)\b", re.I)
-_SHODAN_DNS_RECORD_TYPES = {"A", "AAAA", "CNAME", "MX", "NS", "SOA", "TXT"}
-_SHODAN_DNS_FINDING_TYPES = {"A", "AAAA", "CNAME", "MX", "NS", "SOA"}
-_SHODAN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.I)
-_SHODAN_HOST_IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
-_SHODAN_HOSTNAME_RE = re.compile(r"^Hostnames:\s+\S", re.I)
-_SHODAN_PORT_RE = re.compile(r"^\s*\d+/(?:tcp|udp)(?:\s+\S.*)?$", re.I)
-_SHODAN_HTTP_TITLE_RE = re.compile(r"^\s*\|--\s+HTTP title:\s+\S", re.I)
-_SHODAN_HOST_SUMMARY_RE = re.compile(
-    r"^(?:(?:City|Country|Organization|Updated|Number of open ports):\s+\S|Ports:\s*$)",
-    re.I,
-)
-_SHODAN_WEAK_MAIL_POLICY_RE = re.compile(
-    r"\bv=DMARC1\b[^;\n]*(?:;\s*)?p=none\b|"
-    r"\bv=spf1\b.*(?:~all|\?all)\b",
-    re.I,
-)
-_SHODAN_HTTP_WARNING_RE = re.compile(
-    r"HTTP title:.*(?:\b5\d\d\b|Service Temporarily Unavailable|Index of /|Default Page)",
-    re.I,
-)
 _IPINFO_FINDING_RE = re.compile(r"^-\s+(?:IP|Hostname|Organization)\s+\S", re.I)
 _IPINFO_SUMMARY_RE = re.compile(
     r"^-\s+(?:Anycast|City|Region|Country|Currency|Location|Postal|Timezone)\s+\S",
@@ -325,22 +375,12 @@ _OPENSSL_PEM_BOUNDARY_RE = re.compile(r"^-{5}(?:BEGIN|END) CERTIFICATE-{5}$")
 _OPENSSL_PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{32,}={0,2}$")
 _OPENSSL_CONNECTED_RE = re.compile(r"^CONNECTED\([0-9A-Fa-f]+\)$")
 _NIKTO_PLUS_LINE_RE = re.compile(r"^\+\s+\S")
-_FLAG_ASSIGNMENT_RE = re.compile(r"^([^=]+)=(.+)$")
-_NSLOOKUP_SERVER_RE = re.compile(r"^server$", re.I)
-_FUZZ_SUFFIX_RE = re.compile(r"/FUZZ\b.*$", re.I)
-_NMAP_OUTPUT_PREFIX_RE = re.compile(r"^-o[AGNX]$", re.I)
-_PORT_LIST_RE = re.compile(r"^\d+(?:,\d+)*$")
-_PORT_RANGE_RE = re.compile(r"^\d+(?:-\d+)?$")
 _NMAP_DONE_RE = re.compile(r"^Nmap done:\b", re.I)
 _NMAP_RDNS_RE = re.compile(r"^rDNS record for\s+\S+:\s+\S+", re.I)
 _NMAP_HOST_UP_RE = re.compile(r"^Host is up\b", re.I)
 _NMAP_VULNERS_ROW_RE = re.compile(
     r"^\|_?\s+(?P<id>\S+)\s+(?P<score>10(?:\.0)?|[0-9](?:\.\d)?)\s+"
     r"https://vulners\.com/\S+(?P<exploit>\s+\*EXPLOIT\*)?\s*$",
-    re.I,
-)
-_NMAP_OPEN_PORT_ROW_RE = re.compile(
-    r"^(?P<port>\d+)/(?:tcp|udp)\s+open\S*\s+(?P<service>\S+)(?:\s+(?P<version>.*\S))?\s*$",
     re.I,
 )
 _KILLED_BY_USER_RE = re.compile(r"^\[killed by user(?:\b|[^\w])", re.I)
@@ -377,271 +417,6 @@ _NMAP_ENTITY_NOISE_RE = re.compile(
     r"SF:)",
     re.I,
 )
-_ENTITY_IPV4_RE = re.compile(
-    r"(?<![\w.])(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?![\w.])"
-)
-_ENTITY_IPV6_RE = re.compile(r"(?<![\w:])(?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]{0,45}(?![\w:])", re.I)
-_ENTITY_HOSTNAME_RE = re.compile(
-    r"(?<![@\w-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}\.?(?![\w-])",
-    re.I,
-)
-_ENTITY_URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.I)
-_ENTITY_HASH_RE = re.compile(r"(?<![0-9a-f])(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})(?![0-9a-f])", re.I)
-_ENTITY_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.I)
-_ENTITY_FILELIKE_SUFFIXES = {
-    "bak",
-    "cfg",
-    "conf",
-    "css",
-    "csv",
-    "db",
-    "eot",
-    "gif",
-    "gz",
-    "html",
-    "ico",
-    "ini",
-    "jpeg",
-    "jpg",
-    "js",
-    "json",
-    "log",
-    "map",
-    "md",
-    "out",
-    "php",
-    "png",
-    "sqlite",
-    "svg",
-    "ttf",
-    "txt",
-    "wasm",
-    "webp",
-    "woff",
-    "woff2",
-    "xml",
-    "yaml",
-    "yml",
-    "zip",
-}
-
-
-def _is_public_ip(value: str) -> bool:
-    try:
-        return ipaddress.ip_address(value).is_global
-    except ValueError:
-        return False
-
-
-def _is_private_or_reserved_ip(value: str) -> bool:
-    try:
-        return not ipaddress.ip_address(value).is_global
-    except ValueError:
-        return False
-
-
-def _entity_confidence(entity_type: str) -> str:
-    return "medium" if entity_type == "domain" else "high"
-
-
-def _add_entity(
-    entities: list[dict[str, object]],
-    seen: set[tuple[str, str]],
-    *,
-    entity_type: str,
-    value: str,
-    canonical_value: str,
-    source_line: int | None,
-    start: int | None = None,
-    end: int | None = None,
-) -> None:
-    key = (entity_type, canonical_value)
-    if key in seen:
-        return
-    seen.add(key)
-    item: dict[str, object] = {
-        "type": entity_type,
-        "value": value,
-        "canonical_value": canonical_value,
-        "confidence": _entity_confidence(entity_type),
-    }
-    if source_line is not None:
-        item["source_line"] = source_line
-    if start is not None and end is not None and 0 <= start < end:
-        item["start"] = start
-        item["end"] = end
-    entities.append(item)
-
-
-def _seen_entities(entities: list[dict[str, object]]) -> set[tuple[str, str]]:
-    return {
-        (str(item.get("type") or ""), str(item.get("canonical_value") or ""))
-        for item in entities
-        if isinstance(item, dict)
-    }
-
-
-def _looks_like_file_hostname(value: str) -> bool:
-    token = str(value or "").strip().rstrip(".").lower()
-    suffix = token.rsplit(".", 1)[-1] if "." in token else ""
-    return suffix in _ENTITY_FILELIKE_SUFFIXES
-
-
-def _span_overlaps(spans: list[tuple[int, int]], start: int, end: int) -> bool:
-    return any(start < span_end and end > span_start for span_start, span_end in spans)
-
-
-def strip_ansi_codes(value: str) -> str:
-    return _ANSI_ESCAPE_RE.sub("", str(value or ""))
-
-
-def _strip_ansi_codes(value: str) -> str:
-    return strip_ansi_codes(value)
-
-
-def _normalize_signal_text(value: str) -> str:
-    # Match against plain text while preserving the original ANSI-rich line for
-    # terminal rendering, history, exports, and shares.
-    return _strip_ansi_codes(str(value or "")).strip()
-
-
-def extract_entities(
-    text: str,
-    *,
-    include_private_ips: bool = False,
-    source_line: int | None = None,
-    normalized_text: str | None = None,
-) -> list[dict[str, object]]:
-    stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
-    if not stripped:
-        return []
-
-    entities: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    url_tail_spans: list[tuple[int, int]] = []
-
-    for match in _ENTITY_IPV4_RE.finditer(stripped):
-        raw = match.group(0)
-        try:
-            canonical = canonical_ip(raw)
-        except CanonicalizationError:
-            continue
-        if not include_private_ips and not _is_public_ip(canonical):
-            continue
-        _add_entity(
-            entities,
-            seen,
-            entity_type="ip",
-            value=raw,
-            canonical_value=canonical,
-            source_line=source_line,
-            start=match.start(),
-            end=match.end(),
-        )
-
-    for match in _ENTITY_IPV6_RE.finditer(stripped):
-        raw = match.group(0).strip("[]")
-        try:
-            canonical = canonical_ip(raw)
-        except CanonicalizationError:
-            continue
-        if "." in canonical:
-            continue
-        if not include_private_ips and not _is_public_ip(canonical):
-            continue
-        _add_entity(
-            entities,
-            seen,
-            entity_type="ip",
-            value=raw,
-            canonical_value=canonical,
-            source_line=source_line,
-            start=match.start(),
-            end=match.end(),
-        )
-
-    for match in _ENTITY_URL_RE.finditer(stripped):
-        raw_url = match.group(0)
-        host = urlparse(raw_url).hostname or ""
-        if not host or "\\" in host or _looks_like_file_hostname(host):
-            continue
-        try:
-            canonical = canonical_domain(host)
-        except CanonicalizationError:
-            continue
-        host_offset = raw_url.lower().find(host.lower())
-        start = match.start() + host_offset if host_offset >= 0 else match.start()
-        end = start + len(host) if host_offset >= 0 else match.end()
-        if host_offset >= 0 and end < match.end():
-            url_tail_spans.append((end, match.end()))
-        _add_entity(
-            entities,
-            seen,
-            entity_type="domain",
-            value=host,
-            canonical_value=canonical,
-            source_line=source_line,
-            start=start,
-            end=end,
-        )
-
-    for match in _ENTITY_HOSTNAME_RE.finditer(stripped):
-        if _span_overlaps(url_tail_spans, match.start(), match.end()):
-            continue
-        raw = match.group(0).rstrip(".")
-        if "\\" in raw or _looks_like_file_hostname(raw):
-            continue
-        try:
-            canonical = canonical_domain(raw)
-        except CanonicalizationError:
-            continue
-        _add_entity(
-            entities,
-            seen,
-            entity_type="domain",
-            value=raw,
-            canonical_value=canonical,
-            source_line=source_line,
-            start=match.start(),
-            end=match.end(),
-        )
-
-    for match in _ENTITY_HASH_RE.finditer(stripped):
-        raw = match.group(0)
-        try:
-            algorithm = detect_hash_algorithm(raw)
-            canonical = canonical_hash(raw, algorithm=algorithm)
-        except CanonicalizationError:
-            continue
-        _add_entity(
-            entities,
-            seen,
-            entity_type="hash",
-            value=raw,
-            canonical_value=canonical,
-            source_line=source_line,
-            start=match.start(),
-            end=match.end(),
-        )
-
-    for match in _ENTITY_CVE_RE.finditer(stripped):
-        raw = match.group(0)
-        try:
-            canonical = canonical_cve(raw)
-        except CanonicalizationError:
-            continue
-        _add_entity(
-            entities,
-            seen,
-            entity_type="cve",
-            value=raw,
-            canonical_value=canonical,
-            source_line=source_line,
-            start=match.start(),
-            end=match.end(),
-        )
-
-    return entities
 
 
 def _looks_like_clean_url(value: str) -> bool:
@@ -651,17 +426,6 @@ def _looks_like_clean_url(value: str) -> bool:
     return not _SHELL_TEMPLATE_URL_NOISE_RE.search(raw)
 
 
-def _parse_shodan_dns_row(stripped: str) -> tuple[str, str, str] | None:
-    parts = str(stripped or "").strip().split(None, 2)
-    if len(parts) < 2:
-        return None
-    first = parts[0].upper()
-    if first in _SHODAN_DNS_RECORD_TYPES:
-        value = parts[1] if len(parts) == 2 else f"{parts[1]} {parts[2]}"
-        return "", first, value
-    if len(parts) >= 3 and parts[1].upper() in _SHODAN_DNS_RECORD_TYPES:
-        return parts[0], parts[1].upper(), parts[2]
-    return None
 
 
 def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[str, object]]:
@@ -686,7 +450,7 @@ def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[s
             _add_entity(
                 entities,
                 seen,
-                entity_type="host",
+                entity_type="domain",
                 value=value,
                 canonical_value=canonical,
                 source_line=source_line,
@@ -711,92 +475,8 @@ def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[s
     return entities
 
 
-def _nmap_target_host(value: str) -> str:
-    token = str(value or "").strip().split(maxsplit=1)[0] if str(value or "").strip() else ""
-    if token.startswith("[") and "]" in token:
-        return token[1:token.index("]")]
-    if token.count(":") == 1:
-        host, port = token.rsplit(":", 1)
-        if port.isdigit():
-            return host
-    return token
 
 
-def _nmap_target_entities(value: str, source_line: int | None) -> list[dict[str, object]]:
-    host = _nmap_target_host(value)
-    if not host:
-        return []
-    try:
-        canonical = canonical_ip(host)
-    except CanonicalizationError:
-        try:
-            canonical = canonical_domain(host)
-        except CanonicalizationError:
-            return []
-        return [{
-            "type": "host",
-            "value": host,
-            "canonical_value": canonical,
-            "confidence": "medium",
-            **({"source_line": source_line} if source_line is not None else {}),
-        }]
-    return [{
-        "type": "ip",
-        "value": host,
-        "canonical_value": canonical,
-        "confidence": "high",
-        **({"source_line": source_line} if source_line is not None else {}),
-    }]
-
-
-def _nmap_service_context(scan_target: str | None, port_line: str) -> str:
-    target = str(scan_target or "").strip()
-    if not target:
-        return ""
-    match = _NMAP_OPEN_PORT_ROW_RE.match(str(port_line or "").strip())
-    if not match:
-        return ""
-    service = str(match.group("service") or "").strip()
-    version = str(match.group("version") or "").strip()
-    if service.lower() in {"netbios-ssn", "microsoft-ds"} and version.lower().startswith("samba"):
-        service = "samba"
-    if not service:
-        return ""
-    host = target if ":" not in target or target.startswith("[") else f"[{target}]"
-    return f"{host}:{match.group('port')} {service.lower()}"
-
-
-def _is_shodan_dns_text_row(stripped: str) -> bool:
-    parsed = _parse_shodan_dns_row(stripped)
-    return bool(parsed and parsed[1] == "TXT")
-
-
-def _is_shodan_finding(stripped: str) -> bool:
-    parsed = _parse_shodan_dns_row(stripped)
-    if parsed:
-        _, record_type, _ = parsed
-        return record_type in _SHODAN_DNS_FINDING_TYPES
-    return (
-        (bool(_SHODAN_HOST_IP_RE.match(stripped)) and _is_public_ip(stripped))
-        or bool(_SHODAN_HOSTNAME_RE.search(stripped))
-        or bool(_SHODAN_PORT_RE.search(stripped))
-        or bool(_SHODAN_HTTP_TITLE_RE.search(stripped))
-    )
-
-
-def _is_shodan_warning(stripped: str) -> bool:
-    parsed = _parse_shodan_dns_row(stripped)
-    if parsed:
-        _, record_type, value = parsed
-        if record_type in {"A", "AAAA"} and _is_private_or_reserved_ip(value.split()[0] if value else ""):
-            return True
-        if record_type == "TXT" and _SHODAN_WEAK_MAIL_POLICY_RE.search(value):
-            return True
-    return bool(_SHODAN_HTTP_WARNING_RE.search(stripped))
-
-
-def _is_shodan_summary(stripped: str) -> bool:
-    return bool(_SHODAN_HOST_SUMMARY_RE.search(stripped))
 
 
 def _is_openssl_noise(stripped: str) -> bool:
@@ -832,211 +512,6 @@ def _parse_ffuf_result(stripped: str) -> tuple[str, int] | None:
     return match.group(1).strip(), int(match.group(2))
 
 
-def _json_object_line(stripped: str) -> dict[str, object] | None:
-    if not str(stripped or "").lstrip().startswith("{"):
-        return None
-    try:
-        value = json.loads(stripped)
-    except (TypeError, ValueError):
-        return None
-    return value if isinstance(value, dict) else None
-
-
-def _truthy_json_value(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int | float):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "ok", "valid", "verified"}
-    return False
-
-
-def _json_string_values(value: object) -> list[str]:
-    if isinstance(value, str):
-        stripped = value.strip()
-        return [stripped] if stripped else []
-    if isinstance(value, list):
-        result: list[str] = []
-        for item in value:
-            result.extend(_json_string_values(item))
-        return result
-    return []
-
-
-def _json_lookup(data: dict[str, object], *keys: str) -> object:
-    for key in keys:
-        if key in data:
-            return data[key]
-    return None
-
-
-def _is_tlsx_json_finding(data: dict[str, object]) -> bool:
-    return any(key in data for key in (
-        "host",
-        "ip",
-        "tls_version",
-        "cipher",
-        "subject_cn",
-        "subject_an",
-        "fingerprint_hash",
-        "not_before",
-        "not_after",
-    ))
-
-
-def _is_tlsx_json_warning(data: dict[str, object]) -> bool:
-    warning_keys = {
-        "expired",
-        "self_signed",
-        "mismatched",
-        "revoked",
-        "untrusted",
-        "wildcard_cert",
-    }
-    if any(_truthy_json_value(data.get(key)) for key in warning_keys):
-        return True
-    probe_status = data.get("probe_status")
-    return probe_status is not None and not _truthy_json_value(probe_status)
-
-
-def _is_cdncheck_json_summary(data: dict[str, object]) -> bool:
-    return any(key in data for key in (
-        "host",
-        "ip",
-        "cdn",
-        "cdn_name",
-        "cdn_provider",
-        "cloud",
-        "cloud_name",
-        "cloud_provider",
-        "waf",
-        "waf_name",
-        "waf_provider",
-    ))
-
-
-def _is_trufflehog_json_finding(data: dict[str, object]) -> bool:
-    return any(key in data for key in ("DetectorName", "DetectorType", "Verified", "Raw", "Redacted", "SourceMetadata"))
-
-
-def _is_puredns_finding(stripped: str) -> bool:
-    return bool(_HOSTNAME_RE.match(stripped))
-
-
-def _is_puredns_warning(stripped: str) -> bool:
-    return bool(_PUREDNS_WILDCARD_RE.search(stripped))
-
-
-def _is_puredns_summary(stripped: str) -> bool:
-    return bool(_PUREDNS_PROGRESS_RE.search(stripped))
-
-
-def _add_host_or_ip_entity(
-    entities: list[dict[str, object]],
-    seen: set[tuple[str, str]],
-    value: str,
-    *,
-    source_line: int | None,
-) -> None:
-    raw = str(value or "").strip().strip("[]").rstrip(".")
-    if not raw:
-        return
-    try:
-        canonical_ip_value = canonical_ip(raw)
-    except CanonicalizationError:
-        try:
-            canonical_domain_value = canonical_domain(raw)
-        except CanonicalizationError:
-            return
-        _add_entity(
-            entities,
-            seen,
-            entity_type="domain",
-            value=raw,
-            canonical_value=canonical_domain_value,
-            source_line=source_line,
-        )
-        return
-    if _is_public_ip(canonical_ip_value):
-        _add_entity(
-            entities,
-            seen,
-            entity_type="ip",
-            value=raw,
-            canonical_value=canonical_ip_value,
-            source_line=source_line,
-        )
-
-
-def _tlsx_json_entities(data: dict[str, object], source_line: int | None) -> list[dict[str, object]]:
-    entities: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    for raw in [
-        *_json_string_values(_json_lookup(data, "host", "input")),
-        *_json_string_values(data.get("ip")),
-        *_json_string_values(_json_lookup(data, "subject_cn", "subject_common_name")),
-        *_json_string_values(_json_lookup(data, "subject_an", "subject_alt_names")),
-    ]:
-        _add_host_or_ip_entity(entities, seen, raw, source_line=source_line)
-    fingerprints = data.get("fingerprint_hash")
-    if isinstance(fingerprints, dict):
-        for algorithm, raw_value in fingerprints.items():
-            for raw_hash in _json_string_values(raw_value):
-                try:
-                    canonical = canonical_hash(raw_hash, algorithm=str(algorithm or "").strip().lower())
-                except CanonicalizationError:
-                    continue
-                _add_entity(
-                    entities,
-                    seen,
-                    entity_type="hash",
-                    value=raw_hash,
-                    canonical_value=canonical,
-                    source_line=source_line,
-                )
-    return entities
-
-
-def _cdncheck_json_entities(data: dict[str, object], source_line: int | None) -> list[dict[str, object]]:
-    entities: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    for raw in [
-        *_json_string_values(_json_lookup(data, "host", "input", "domain")),
-        *_json_string_values(data.get("ip")),
-    ]:
-        _add_host_or_ip_entity(entities, seen, raw, source_line=source_line)
-    return entities
-
-
-def _nested_dict(value: object, *keys: str) -> dict[str, object]:
-    current = value
-    for key in keys:
-        if not isinstance(current, dict):
-            return {}
-        current = current.get(key)
-    return current if isinstance(current, dict) else {}
-
-
-def _trufflehog_json_entities(data: dict[str, object], source_line: int | None) -> list[dict[str, object]]:
-    entities: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    git_data = _nested_dict(data.get("SourceMetadata"), "Data", "Git")
-    repository = str(git_data.get("repository") or "").strip()
-    if repository:
-        host = urlparse(repository).hostname or ""
-        if host:
-            _add_host_or_ip_entity(entities, seen, host, source_line=source_line)
-    return entities
-
-
-def _puredns_entities(stripped: str, source_line: int | None) -> list[dict[str, object]]:
-    if not _is_puredns_finding(stripped):
-        return []
-    entities: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    _add_host_or_ip_entity(entities, seen, stripped, source_line=source_line)
-    return entities
 
 
 def _is_ffuf_warning(stripped: str) -> bool:
@@ -1159,7 +634,7 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root == "sslyze":
         return bool(_SSLYZE_FINDING_RE.search(stripped))
     if root == "naabu":
-        return bool(_HOST_PORT_RE.search(stripped))
+        return bool(_NAABU_HOST_PORT_RE.search(stripped))
     if root == "rustscan":
         return bool(_RUSTSCAN_OPEN_RE.search(stripped))
     if root == "nuclei":
@@ -1276,6 +751,7 @@ def _extract_entities_for_command(
     root: str,
     text: str,
     *,
+    extra_domain_suffixes: Sequence[str] = (),
     source_line: int | None = None,
     normalized_text: str | None = None,
     ansi_stripped_text: str | None = None,
@@ -1297,14 +773,31 @@ def _extract_entities_for_command(
         nmap_report_entities = _nmap_report_entities(stripped, source_line)
         if nmap_report_entities:
             return nmap_report_entities
+        nmap_port_entities = _nmap_port_entities(line_target or command_target or "", stripped, source_line)
+        if nmap_port_entities:
+            return nmap_port_entities
         if _NMAP_RDNS_RE.search(stripped):
-            return extract_entities(text, source_line=source_line, normalized_text=stripped)
+            return extract_entities(
+                text,
+                extra_domain_suffixes=extra_domain_suffixes,
+                source_line=source_line,
+                normalized_text=stripped,
+            )
         if _is_nmap_vulners_finding(stripped):
             entities = _nmap_target_entities(line_target or command_target or "", source_line)
             seen = _seen_entities(entities)
-            for entity in extract_entities(text, source_line=source_line, normalized_text=stripped):
+            for entity in extract_entities(
+                text,
+                extra_domain_suffixes=extra_domain_suffixes,
+                source_line=source_line,
+                normalized_text=stripped,
+            ):
                 if str(entity.get("type") or "") == "domain" and str(entity.get("canonical_value") or "") == "vulners.com":
                     continue
+                if str(entity.get("type") or "") == "url":
+                    parsed_url = urlparse(str(entity.get("canonical_value") or ""))
+                    if (parsed_url.hostname or "").lower() == "vulners.com":
+                        continue
                 key = (str(entity.get("type") or ""), str(entity.get("canonical_value") or ""))
                 if key in seen:
                     continue
@@ -1312,6 +805,66 @@ def _extract_entities_for_command(
                 entities.append(entity)
             return entities
         return []
+    if root == "masscan":
+        match = _MASSCAN_OPEN_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("host"),
+                match.group("port"),
+                match.group("proto"),
+                source_line,
+                scanner_root=root,
+            )
+        return []
+    if root == "rustscan":
+        match = _RUSTSCAN_OPEN_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("host"),
+                match.group("port"),
+                match.group("proto") or "tcp",
+                source_line,
+                scanner_root=root,
+            )
+        return []
+    if root == "naabu":
+        match = _NAABU_HOST_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("host"),
+                match.group("port"),
+                match.group("proto") or "tcp",
+                source_line,
+                scanner_root=root,
+            )
+        return []
+    if root == "nc":
+        bracket_match = _NC_BRACKET_OPEN_PORT_RE.match(stripped)
+        if bracket_match:
+            return _port_entities_for_host(
+                _nc_bracket_entity_host(bracket_match.group("host"), bracket_match.group("ip")),
+                bracket_match.group("port"),
+                "tcp",
+                source_line,
+                service=bracket_match.group("service"),
+                scanner_root=root,
+            )
+        match = _NC_OPEN_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(match.group("host"), match.group("port"), "tcp", source_line, scanner_root=root)
+        return []
+    if root == "curl":
+        match = _CURL_CONNECTED_PORT_RE.match(stripped)
+        if match:
+            return _port_entities_for_host(
+                match.group("ip") or match.group("host"),
+                match.group("port"),
+                "tcp",
+                source_line,
+                scanner_root=root,
+            )
+        # Keep curl on the generic extraction path: verbose/header output often
+        # contains useful domains or URLs even when it is not a connect line.
     if root == "tlsx":
         data = _json_object_line(stripped)
         return _tlsx_json_entities(data, source_line) if data else []
@@ -1327,7 +880,12 @@ def _extract_entities_for_command(
         return []
     if root == "ffuf" and (_is_ffuf_noise(stripped) or bool(_FFUF_CONFIG_RE.search(stripped))):
         return []
-    entities = extract_entities(text, source_line=source_line, normalized_text=stripped)
+    entities = extract_entities(
+        text,
+        extra_domain_suffixes=extra_domain_suffixes,
+        source_line=source_line,
+        normalized_text=stripped,
+    )
     if root == "ffuf" and (command_url_template or command_target):
         parsed_result = _parse_ffuf_result(stripped)
         if not parsed_result:
@@ -1381,234 +939,11 @@ def _extract_entities_for_command(
     )
     return entities
 
-
-def tokenize_command(command: str) -> list[str]:
-    tokens: list[str] = []
-    source = str(command or "").strip()
-    current = ""
-    quote = ""
-    i = 0
-    while i < len(source):
-        ch = source[i]
-        if quote:
-            if ch == quote:
-                quote = ""
-            elif ch == "\\" and i + 1 < len(source):
-                i += 1
-                current += source[i]
-            else:
-                current += ch
-            i += 1
-            continue
-        if ch in {"'", '"'}:
-            quote = ch
-            i += 1
-            continue
-        if ch.isspace():
-            if current:
-                tokens.append(current)
-                current = ""
-            i += 1
-            continue
-        current += ch
-        i += 1
-    if current:
-        tokens.append(current)
-    return tokens
-
-
-@lru_cache(maxsize=512)
-def _is_help_output_command(command: str, root: str | None = None) -> bool:
-    if not str(command or "").strip():
-        return False
-    try:
-        from services.commands.registry import is_help_invocation
-    except Exception:
-        return False
-    return is_help_invocation(command, root=root)
-
-
-def command_root(command: str) -> str:
-    tokens = tokenize_command(command)
-    return str(tokens[0] if tokens else "").lower()
-
-
-def _strip_url_target(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    if _URL_SCHEME_RE.match(raw):
-        parsed = urlparse(raw)
-        return parsed.netloc or raw
-    return _URL_TAIL_RE.sub("", _URL_SCHEME_RE.sub("", raw))
-
-
-def _find_flag_value(tokens: list[str], names: set[str]) -> str:
-    for index, token in enumerate(tokens[1:], start=1):
-        if token in names and index + 1 < len(tokens) and not tokens[index + 1].startswith("-"):
-            return tokens[index + 1]
-        match = _FLAG_ASSIGNMENT_RE.match(token)
-        if match and match.group(1) in names:
-            return match.group(2)
-    return ""
-
-
-def _positional_targets(
-    tokens: list[str],
-    *,
-    skip_values_after: set[str] | None = None,
-    skip_values_for_prefix: re.Pattern[str] | None = None,
-) -> list[str]:
-    skip_values_after = skip_values_after or set()
-    skip_values_for_prefix = skip_values_for_prefix or re.compile(r"^$")
-    result: list[str] = []
-    index = 1
-    while index < len(tokens):
-        token = tokens[index]
-        if not token:
-            index += 1
-            continue
-        if token.startswith("-"):
-            if token in skip_values_after or skip_values_for_prefix.search(token):
-                next_token = tokens[index + 1] if index + 1 < len(tokens) else ""
-                if next_token and not next_token.startswith("-"):
-                    index += 1
-            index += 1
-            continue
-        result.append(token)
-        index += 1
-    return result
-
-
-def _dns_target(tokens: list[str], root: str) -> str:
-    record_types = {"a", "aaaa", "cname", "mx", "ns", "txt", "soa", "ptr", "srv", "caa", "any"}
-    positionals = [
-        token for token in tokens[1:]
-        if token and not token.startswith("-") and not token.startswith("+")
-        and not token.startswith("@") and token.lower() not in record_types
-    ]
-    if root == "nslookup" and _NSLOOKUP_SERVER_RE.match(positionals[0] if positionals else ""):
-        return positionals[1] if len(positionals) > 1 else ""
-    return positionals[0] if positionals else ""
-
-
-def extract_target(command: str) -> str | None:
-    tokens = tokenize_command(command)
-    root = str(tokens[0] if tokens else "").lower()
-    if not root:
-        return None
-
-    if root in {"dig", "host", "nslookup"}:
-        target = _dns_target(tokens, root)
-        return _strip_url_target(target) if target else None
-
-    if root == "dnsrecon":
-        target = _find_flag_value(tokens, {"-d", "--domain"})
-        return _strip_url_target(target) if target else None
-
-    if root in {"curl", "httpx", "wafw00f"}:
-        positionals = _positional_targets(
-            tokens,
-            skip_values_after={
-                "-H", "--header", "-A", "--user-agent", "-o", "--output",
-                "-w", "--write-out", "--connect-timeout", "-m", "--max-time",
-            },
-        )
-        target = next((token for token in positionals if _URL_SCHEME_RE.match(token)), "")
-        if not target:
-            target = next((token for token in positionals if "." in token), "")
-        return _strip_url_target(target) if target else None
-
-    if root == "nikto":
-        target = _find_flag_value(tokens, {"-h", "-u", "--url", "-target", "--target"})
-        return _strip_url_target(_FUZZ_SUFFIX_RE.sub("", target)) if target else None
-
-    if root in {"ffuf", "gobuster", "feroxbuster", "katana", "nuclei"}:
-        target = _find_flag_value(tokens, {"-u", "--url", "-target", "--target"})
-        return _strip_url_target(_FUZZ_SUFFIX_RE.sub("", target)) if target else None
-
-    if root == "assetfinder":
-        positionals = _positional_targets(tokens)
-        target = next((token for token in positionals if "." in token), "")
-        return _strip_url_target(target) if target else None
-
-    if root == "tlsx":
-        target = _find_flag_value(tokens, {"-u", "-host"})
-        return _strip_url_target(target) if target else None
-
-    if root == "cdncheck":
-        target = _find_flag_value(tokens, {"-i", "-input"})
-        return _strip_url_target(target) if target else None
-
-    if root == "puredns" and len(tokens) > 1 and tokens[1].lower() == "bruteforce":
-        positionals = _positional_targets(
-            tokens[1:],
-            skip_values_after={
-                "-r", "--resolvers", "--resolvers-trusted", "-d", "--domains",
-                "-w", "--write", "--write-massdns", "--write-wildcards",
-            },
-        )
-        target = next((token for token in positionals if "." in token and not token.startswith("/")), "")
-        return _strip_url_target(target) if target else None
-
-    if root == "shodan" and len(tokens) >= 3 and tokens[1].lower() in {"domain", "host"}:
-        positionals = _positional_targets(tokens[1:], skip_values_after={"--fields", "--limit"})
-        target = positionals[0] if positionals else ""
-        return _strip_url_target(target) if target else None
-
-    if root == "ipinfo":
-        positionals = _positional_targets(tokens, skip_values_after={"--format", "--token"})
-        target = positionals[0] if positionals else ""
-        return _strip_url_target(target) if target else None
-
-    if root in {"nmap", "rustscan", "naabu", "sslscan", "sslyze", "testssl"}:
-        positionals = [
-            token for token in _positional_targets(
-                tokens,
-                skip_values_after={
-                    "-p", "--ports", "--top-ports", "-oA", "-oG", "-oN", "-oX",
-                    "-iL", "-script", "--script", "--script-args", "--rate", "--timeout",
-                    "--host-timeout",
-                },
-                skip_values_for_prefix=_NMAP_OUTPUT_PREFIX_RE,
-            )
-            if not _PORT_LIST_RE.match(token)
-        ]
-        return ", ".join(positionals) if positionals else None
-
-    if root == "nc":
-        positionals = [
-            token for token in _positional_targets(tokens, skip_values_after={"-w", "-i", "-s", "-p"})
-            if not _PORT_RANGE_RE.match(token)
-        ]
-        return _strip_url_target(positionals[0]) if positionals else None
-
-    if root == "openssl":
-        target = _find_flag_value(tokens, {"-connect"})
-        return _strip_url_target(target) if target else None
-
-    if root == "trufflehog" and len(tokens) > 2 and tokens[1].lower() == "git":
-        positionals = _positional_targets(
-            tokens[1:],
-            skip_values_after={
-                "--branch",
-                "--exclude-globs",
-                "--exclude-paths",
-                "--include-paths",
-                "--max-depth",
-                "--since-commit",
-            },
-        )
-        target = next((token for token in positionals if _URL_SCHEME_RE.match(token)), "")
-        return _strip_url_target(target) if target else None
-
-    return None
-
-
 @dataclass
 class OutputSignalClassifier:
     command: str
     cmd_type: str = "real"
+    extra_domain_suffixes: Sequence[str] = ()
 
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
@@ -1706,6 +1041,7 @@ class OutputSignalClassifier:
                 self.root,
                 text,
                 source_line=self.line_index,
+                extra_domain_suffixes=self.extra_domain_suffixes,
                 normalized_text=normalized_text,
                 ansi_stripped_text=ansi_stripped,
                 command_target=self.target,

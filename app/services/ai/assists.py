@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import logging
 from typing import Any
 
 from flask import has_request_context
 
-from config import CFG
-from core.database import db_connect
+from config import resolve_effective_cfg
+from core.database_access import get_db_connect
 from core.helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs
 from core.output_signals import extract_target
 from core.process import active_run_belongs_to_scope, active_runs_for_session
@@ -18,7 +20,7 @@ from services.ai.coordination import AICoordinationUnavailable, check_ai_route_r
 from services.ai.prompts import resolved_prompt_version
 from services.ai.schemas import NEXT_COMMANDS_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION
 from services.ai.storage import enqueue_assist, list_recent_assists_for_run
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.projects.active import get_active_project
 from services.projects.targets import list_project_targets
 
@@ -47,9 +49,9 @@ def enqueue_summary_assist(
     *,
     team_id: str = "",
     force: bool = False,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
     if not settings["enabled"]:
         raise AIAssistRouteError("ai_disabled", "AI assists are disabled.", status_code=403)
@@ -124,9 +126,9 @@ def enqueue_next_commands_assist(
     *,
     team_id: str = "",
     force: bool = False,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
     if not settings["enabled"]:
         raise AIAssistRouteError("ai_disabled", "AI assists are disabled.", status_code=403)
@@ -195,7 +197,7 @@ def enqueue_next_commands_assist(
     return public, status_code
 
 
-def _enforce_ai_write_rate_limit(session_id: str, cfg: dict, *, variant: str) -> None:
+def _enforce_ai_write_rate_limit(session_id: str, cfg: Mapping[str, Any], *, variant: str) -> None:
     bypass_session_limit, client_ip = _diagnostics_client_bypasses_session_limit(cfg)
     try:
         result = check_ai_route_rate_limit(session_id, cfg=cfg, bypass_session_limit=bypass_session_limit)
@@ -231,7 +233,7 @@ def _enforce_ai_write_rate_limit(session_id: str, cfg: dict, *, variant: str) ->
     )
 
 
-def _diagnostics_client_bypasses_session_limit(cfg: dict) -> tuple[bool, str]:
+def _diagnostics_client_bypasses_session_limit(cfg: Mapping[str, Any]) -> tuple[bool, str]:
     if not has_request_context():
         return False, ""
     client_ip = get_client_ip()
@@ -285,7 +287,7 @@ def _owned_run_row(session_id: str, run_id: str, *, team_id: str = "") -> dict[s
             "WHERE session_id = ? AND (team_id IS NULL OR team_id = '') AND id = ?"
         )
         params = (session_id, run_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
 

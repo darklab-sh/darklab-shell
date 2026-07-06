@@ -478,12 +478,6 @@ function _hintsContainValueType(hints, type) {
   return (Array.isArray(hints) ? hints : []).some(hint => _itemValueTypeIs(hint, type));
 }
 
-function _autocompleteSpecRequiresWorkspace(spec) {
-  const feature = spec && (spec.feature_required || spec.requires_feature || spec.feature);
-  const features = Array.isArray(feature) ? feature : [feature];
-  return features.some(item => String(item || '').trim().toLowerCase() === 'workspace');
-}
-
 function _wordlistCategoriesFromHints(hints) {
   const categories = [];
   (Array.isArray(hints) ? hints : []).forEach((hint) => {
@@ -556,6 +550,15 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
       slot && slot.active ? _withWordlistSuggestions(ctx, baseItems, slot.categories) : baseItems
     ),
   },
+  workspace_path: {
+    emptySlot: false,
+    slotFromHints: hints => _hintsContainValueType(hints, 'workspace_path'),
+    applySuggestions: (ctx, baseItems) => baseItems,
+    sourceHints: (_spec, hints) => {
+      if (!(Array.isArray(hints) && hints.some(hint => _itemValueTypeIs(hint, 'workspace_path')))) return null;
+      return _workspaceAutocompleteEntryHints();
+    },
+  },
   target: {
     emptySlot: false,
     slotFromHints: hints => _hintsContainValueType(hints, 'target'),
@@ -564,11 +567,6 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
       _withRecentValueSuggestions(ctx, baseItems, ['domain', 'ip', 'url', 'port_set']),
       ['domain', 'host', 'ip', 'cidr', 'url', 'port_set', 'target'],
     ),
-    sourceHints: (spec, hints) => {
-      if (!_autocompleteSpecRequiresWorkspace(spec)) return null;
-      if (!(Array.isArray(hints) && hints.some(hint => _itemValueTypeIs(hint, 'target')))) return null;
-      return _workspaceAutocompleteEntryHints();
-    },
   },
 };
 
@@ -970,10 +968,27 @@ function _withWordlistSuggestions(ctx, baseItems, categories = []) {
   return _prependDedupedItems(wordlistItems, baseItems);
 }
 
-function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}) {
+// True when the hint source reported any workspace signal: a workspace file
+// flag (e.g. `-iL`), a slash-path context, or a typed workspace-path slot. In
+// all of these the base items are already workspace entries, so scan-target or
+// recent-value injection does not belong.
+function _resolvedWorkspaceContext(resolved) {
+  return !!(resolved && (
+    resolved.workspaceFlagActive
+    || resolved.workspacePathActive
+    || resolved.workspaceValueActive
+  ));
+}
+
+function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}, options = {}) {
   const wordlistHandler = _valueTypeHandler('wordlist');
   if (wordlistHandler && valueSlots.wordlist && valueSlots.wordlist.active) {
     return wordlistHandler.applySuggestions(ctx, baseItems, valueSlots.wordlist);
+  }
+  if (options.workspaceContext) {
+    // Workspace-file context: baseItems are already workspace entries, so do
+    // not prepend project targets or recent scan values.
+    return baseItems;
   }
   for (const type of ['target', 'url', 'host', 'ip', 'cidr', 'port_set', 'domain']) {
     const handler = _valueTypeHandler(type);
@@ -1035,8 +1050,15 @@ function _workspaceAutocompleteEntryHints() {
   ];
 }
 
-function _workspaceAutocompleteHintsForTargetSlot(spec, hints) {
-  return _valueTypeSourceHints('target', spec, hints);
+function _workspaceAutocompleteHintsForTypedSlot(spec, hints) {
+  const list = Array.isArray(hints) ? hints : [];
+  for (const hint of list) {
+    const valueType = String(hint && hint.value_type || '').trim().toLowerCase();
+    if (!valueType) continue;
+    const sourceHints = _valueTypeSourceHints(valueType, spec, list);
+    if (sourceHints !== null) return sourceHints;
+  }
+  return null;
 }
 
 function _autocompleteWorkspacePathKindFromArray(kinds, index) {
@@ -1097,6 +1119,7 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
     return {
       hints: workspaceHints,
       filterQuery: ctx.currentToken,
+      workspaceFlagActive: true,
       workspacePathActive: false,
     };
   }
@@ -1110,14 +1133,16 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
     };
   }
 
-  const allowWorkspaceTarget = options.allowWorkspaceTarget !== false;
-  const workspaceTargetHints = allowWorkspaceTarget && !_autocompleteSpecHasWorkspacePathKinds(spec)
-    ? _workspaceAutocompleteHintsForTargetSlot(spec, baseHints)
+  const allowWorkspaceValue = options.allowWorkspaceValue !== false;
+  const workspaceValueHints = allowWorkspaceValue && !_autocompleteSpecHasWorkspacePathKinds(spec)
+    ? _workspaceAutocompleteHintsForTypedSlot(spec, baseHints)
     : null;
   return {
-    hints: workspaceTargetHints !== null ? workspaceTargetHints : baseHints,
+    hints: workspaceValueHints !== null ? workspaceValueHints : baseHints,
     filterQuery: ctx.currentToken,
+    workspaceFlagActive: false,
     workspacePathActive: false,
+    workspaceValueActive: workspaceValueHints !== null,
   };
 }
 
@@ -1412,13 +1437,15 @@ function _buildContextAutocomplete(ctx) {
   const valueSlots = _autocompleteValueTypeSlots(ctx, spec, contextSpec);
   if (sequenceHints !== null) {
     const resolved = _resolveAutocompleteHintSource(ctx, spec, sequenceHints, {
-      allowWorkspaceTarget: false,
+      allowWorkspaceValue: false,
     });
     const sequenceItems = autocompleteCore.filterItems(
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, sequenceItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, sequenceItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolved),
+    });
   }
   if (directHints !== null) {
     const resolved = _resolveAutocompleteHintSource(ctx, spec, directHints, {
@@ -1428,7 +1455,9 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, directItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, directItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolved),
+    });
   }
 
   if (allowPositionalHints) {
@@ -1479,6 +1508,7 @@ function _buildContextAutocomplete(ctx) {
         ctx,
         filteredFlags.concat(positionalItems),
         valueSlots,
+        { workspaceContext: _resolvedWorkspaceContext(resolved) },
       );
     }
     return filteredFlags;
@@ -1490,17 +1520,21 @@ function _buildContextAutocomplete(ctx) {
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
       resolved.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, positionalItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, positionalItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolved),
+    });
   }
   const resolvedWorkspacePathHints = allowPositionalHints
-    ? _resolveAutocompleteHintSource(ctx, spec, [], { allowWorkspaceTarget: false })
+    ? _resolveAutocompleteHintSource(ctx, spec, [], { allowWorkspaceValue: false })
     : null;
   if (resolvedWorkspacePathHints && resolvedWorkspacePathHints.workspacePathActive) {
     const pathItems = autocompleteCore.filterItems(
       _hintsToItems(resolvedWorkspacePathHints.hints, ctx, { matchQuery: resolvedWorkspacePathHints.filterQuery }),
       resolvedWorkspacePathHints.filterQuery,
     );
-    return _withTypedValueSlotSuggestions(ctx, pathItems, valueSlots);
+    return _withTypedValueSlotSuggestions(ctx, pathItems, valueSlots, {
+      workspaceContext: _resolvedWorkspaceContext(resolvedWorkspacePathHints),
+    });
   }
   return [];
 }

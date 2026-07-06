@@ -9,7 +9,6 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from config import CFG
-from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
 from services.audit.automation import record_schedule_event, run_now_details
@@ -29,6 +28,7 @@ from services.scheduler.service import (
     delete_schedule,
     list_schedule_fires,
     list_for_owner,
+    run_schedule_transaction,
     update_schedule,
 )
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
@@ -283,7 +283,8 @@ def schedules_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         payload = normalize_schedule_create_payload(data, session_id)
-        with db_connect() as conn:
+
+        def _create(conn):
             schedule = create_schedule(
                 session_id,
                 team_id=owner_scope.team_id,
@@ -297,7 +298,9 @@ def schedules_create():
                 source="browser",
                 conn=conn,
             )
-            conn.commit()
+            return schedule
+
+        schedule = run_schedule_transaction(_create)
     except (
         ScheduleError,
         ScheduleCronError,
@@ -337,7 +340,8 @@ def schedules_update(schedule_id):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         updates = normalize_schedule_update_payload(data, session_id)
-        with db_connect() as conn:
+
+        def _update(conn):
             updated = update_schedule(schedule.id, updates, conn=conn)
             if updated is not None:
                 record_schedule_event(
@@ -348,7 +352,9 @@ def schedules_update(schedule_id):
                     details={"changed_fields": sorted(key for key in updates if key != "workspace_cwd")},
                     conn=conn,
                 )
-            conn.commit()
+            return updated
+
+        updated = run_schedule_transaction(_update)
     except (
         ScheduleError,
         ScheduleCronError,
@@ -389,7 +395,8 @@ def schedules_delete(schedule_id):
         schedule = _schedule_for_session_or_404(schedule_id, session_id, team_id=owner_scope.team_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
-    with db_connect() as conn:
+
+    def _delete(conn):
         removed = delete_schedule(schedule.id, conn=conn)
         record_schedule_event(
             AuditEventType.SCHEDULE_DELETE,
@@ -399,7 +406,9 @@ def schedules_delete(schedule_id):
             details={"deleted_count": 1 if removed else 0},
             conn=conn,
         )
-        conn.commit()
+        return removed
+
+    removed = run_schedule_transaction(_delete)
     log.info("SCHEDULE_DELETED", extra=_schedule_log_payload(schedule, session_id=session_id, removed=removed))
     return jsonify({"removed": removed})
 
@@ -422,7 +431,7 @@ def schedules_run_now(schedule_id):
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     try:
-        with db_connect() as conn:
+        def _run_now(conn):
             status, refreshed, fired_at = fire_schedule_now(conn, schedule)
             record_schedule_event(
                 AuditEventType.SCHEDULE_RUN_NOW,
@@ -437,7 +446,9 @@ def schedules_run_now(schedule_id):
                 ),
                 conn=conn,
             )
-            conn.commit()
+            return status, refreshed, fired_at
+
+        status, refreshed, fired_at = run_schedule_transaction(_run_now)
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _schedule_error_response(exc)
         _log_schedule_rejected("run_now", session_id, exc, response, schedule_id=schedule.id)

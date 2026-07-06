@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import hashlib
 import json
 import logging
@@ -9,7 +11,7 @@ import threading
 import time
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from core import process
 from core.helpers import get_log_session_id
 from services.intel.registry import cache_ttl_setting
@@ -36,8 +38,8 @@ def _coerce_positive_int(value: Any, fallback: int) -> int:
     return parsed if parsed > 0 else fallback
 
 
-def cache_ttl(provider: str, scope: str, cfg: dict[str, Any] | None = None) -> int:
-    active_cfg = cfg or CFG
+def cache_ttl(provider: str, scope: str, cfg: Mapping[str, Any] | None = None) -> int:
+    active_cfg = cfg if cfg is not None else resolve_effective_cfg()
     setting = cache_ttl_setting(provider, scope)
     if setting:
         return _coerce_nonnegative_int(active_cfg.get(setting.config_key), setting.default_seconds)
@@ -113,7 +115,7 @@ def set_cached_response(
         _MEMORY_CACHE[key] = (time.time() + max(1, int(ttl_seconds)), encoded)
 
 
-def quota_negative_cache_ttl(provider: str, cfg: dict[str, Any] | None = None) -> int:
+def quota_negative_cache_ttl(provider: str, cfg: Mapping[str, Any] | None = None) -> int:
     normalized_provider = str(provider or "").strip().lower()
     provider_keys = {
         "virustotal": "intel_negative_cache_virustotal_quota_seconds",
@@ -129,7 +131,8 @@ def quota_negative_cache_ttl(provider: str, cfg: dict[str, Any] | None = None) -
         "zoomeye": "intel_negative_cache_zoomeye_quota_seconds",
     }
     if normalized_provider in provider_keys:
-        return _coerce_positive_int((cfg or CFG).get(provider_keys[normalized_provider]), 21600)
+        active_cfg = cfg if cfg is not None else resolve_effective_cfg()
+        return _coerce_positive_int(active_cfg.get(provider_keys[normalized_provider]), 21600)
     return 3600
 
 
@@ -147,7 +150,7 @@ def set_quota_exhausted(
     provider: str,
     *,
     reset_at: float | int | None = None,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client=None,
     now: float | None = None,
 ) -> dict[str, Any]:

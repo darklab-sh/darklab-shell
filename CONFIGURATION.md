@@ -15,8 +15,30 @@ Resolution order for the main app config is:
 1. Built-in defaults from `app/config.py`
 2. `app/conf/config.yaml`
 3. Optional untracked `app/conf/config.local.yaml`
+4. Environment variables for the settings that support them
 
-Most settings in `config.yaml` are read at startup. After changing `config.yaml` or `config.local.yaml`, restart the app container:
+The loader validates the final config at startup. Malformed YAML, a non-mapping file root, or a structurally invalid value stops startup with a specific key/source message. Unknown keys are ignored and logged as `CONFIG_UNKNOWN_KEY_IGNORED` so typos do not quietly become live settings. Error messages redact secret-looking values, including `ai_api_key`, AI secret names, SMTP password secret ids, credential-bearing DSNs such as `database_url`, and webhook-style fields. Non-secret invalid values are shown in a shortened form so ordinary typos are easier to fix.
+
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, and `project_digests` merge by field. A local file can override one nested value without restating the whole section.
+
+The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#development-workflow).
+
+### Schema Contract
+
+The application settings table below is the operator reference. The schema contract is:
+
+| Field group | Validation posture |
+|-------------|--------------------|
+| Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Forgiving booleans | `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
+| Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
+| Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
+| Normalized lists | CIDR lists and `output_entity_extra_domain_suffixes` drop invalid entries with key/source warning logs. Redaction rules are normalized through the same snapshot-share rule validator used at runtime |
+| Derived effective keys | `output_preview_max_bytes` is derived from `output_preview_max_mb`, and `full_output_max_bytes` is derived from `full_output_max_mb` unless the legacy byte key is supplied and the MB key is still at its built-in default |
+| Secret-looking values | Load errors and config object representations redact API keys, secret names/ids, passwords, webhook-like keys, and credential-bearing URLs such as `database_url` |
+
+Most settings in `config.yaml` are read at startup. After changing `config.yaml`, `config.local.yaml`, or an environment variable used by the app config, restart the app container:
 
 ```bash
 docker compose restart
@@ -61,6 +83,7 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | `conf/themes/*.yaml` | On next page load, permalink load, diagnostics load, or HTML export |
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
+| `conf/config.local.yaml` | After `docker compose restart` |
 
 ---
 
@@ -140,7 +163,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, startup runs the app-owned Postgres schema migrations and normal `db_connect()` calls use the Postgres pool |
+| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, normal `db_connect()` calls use the Postgres pool |
 | `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
@@ -152,6 +175,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
+| `output_entity_extra_domain_suffixes` | `[]` | Server-side only. Extra non-public suffixes accepted by generic command-output domain extraction, such as `local` or `corp`. Full URLs, scanner-specific parsers, imports, and explicit project targets use their own stronger paths and are not gated by this setting |
 | `rate_limit_enabled` | `true` | Enables the shared HTTP rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
 | `http_rate_limit_per_minute` | `240` | Baseline limit for dynamic app routes that do not already have a tighter route-specific limit. Static assets are exempt, so normal page loads still work while broad scanners hitting random paths are throttled. Set to `0` to disable this baseline while keeping route-specific limits |
 | `http_rate_limit_per_second` | `60` | Baseline burst limit for dynamic app routes that do not already have a tighter route-specific limit. This leaves room for the app's first-load request fan-out while the minute limit still caps sustained unknown-path scans. Set to `0` to disable this baseline while keeping route-specific limits |
@@ -252,8 +276,10 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `high_volume_output_line_threshold` | `50000` | Browser-facing. Pauses live rendering for brokered command output after this many received lines. Output keeps counting, kill controls stay available, and backend preview/full-output storage still follows the normal output settings. `0` disables the pause |
 | `high_volume_output_status_interval_lines` | `50000` | Browser-facing. When high-volume live-output mode is active, show another status line after this many additional received lines |
 | `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
+| `output_preview_max_bytes` | derived from `output_preview_max_mb` | Server-side only. Effective byte value used by storage code after startup. Operators should set `output_preview_max_mb`; this key exists so runtime callers can use one byte-count value |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
+| `full_output_max_bytes` | derived from `full_output_max_mb` | Server-side only. Effective byte value used by artifact storage after startup. Operators should set `full_output_max_mb`; legacy byte-based config is still accepted only when the MB setting is left at its built-in default |
 | `workspace_enabled` | `false` | Server-side only. Enables app-managed personal and team Files. This does not enable shell navigation or redirection by itself |
 | `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. Team Files on `tmpfs` are single-container scratch space and disappear on restart; use `volume` for durable shared team Files |
 | `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed personal `sess_*` and team `team_*` workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
@@ -678,7 +704,7 @@ Practical authoring guidance:
 - use `position` on multi-operand commands such as `tcptraceroute <host> <port>` or `telnet --interactive <host> <port>` so each placeholder appears only when that argument is next
 - use `interactive: true` on examples that should only appear when the instance has Interactive PTY enabled
 - add value-type metadata such as `domain`, `host`, `target`, `ip`, `url`, or `port_set` to flag or positional value slots that should capture and suggest recent targets
-- add `value_type: target` to workspace-required file/folder slots that should be replaced with live session workspace suggestions
+- add `value_type: workspace_path` to workspace-required file/folder slots that should be replaced with live session workspace suggestions without being treated as scan targets
 - use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
 - use `value: "..."` when the suggestion should be inserted and prefix-filtered normally
 - use `pipe_helpers` entries with `autocomplete.pipe.enabled: true` when a helper should appear after `command |`
@@ -904,7 +930,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone local/test s
 docker compose --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. When `database_backend` is `postgres`, startup runs the app-owned schema migrations and normal app database calls route through the Postgres pool.
+The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. Startup runs the app-owned schema migrations for the selected backend, and when `database_backend` is `postgres`, normal app database calls route through the Postgres pool.
 
 The bundled Redis service runs with a read-only root filesystem and persistence disabled (`--save ""`, `--appendonly no`). It stores coordination, broker, rate-limit, and cache-like state; durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 

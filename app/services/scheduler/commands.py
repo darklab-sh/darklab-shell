@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.commands.registry import command_root, rewrite_command, validate_command
 from services.session.variables import expand_session_variables
 
@@ -25,14 +25,15 @@ def validate_schedule_command(command: Any, session_id: str, *, workspace_cwd: s
     if command_root(original_command) != "var":
         expanded_command = expand_session_variables(original_command, session_id).command
 
+    cfg = resolve_effective_cfg()
     validation = validate_command(
         expanded_command,
         session_id=session_id,
-        cfg=CFG,
+        cfg=cfg,
         workspace_cwd=str(workspace_cwd or "").strip()[:1024],
     )
     if not validation.allowed:
         raise ScheduleCommandValidationError(validation.reason or "command is not allowed")
 
-    rewrite_command(validation.exec_command or expanded_command, session_id=session_id, cfg=CFG)
+    rewrite_command(validation.exec_command or expanded_command, session_id=session_id, cfg=cfg)
     return original_command

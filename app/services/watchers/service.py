@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 import uuid
-from typing import Any
+from typing import Any, Callable, TypeVar
 
+from config import resolve_effective_cfg
 from core import database
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
@@ -47,12 +48,22 @@ from services.watchers.models import (
     Watcher,
     WatcherFire,
 )
+from services.storage.transactions import run_read, run_transaction
 
 log = logging.getLogger("shell")
+_T = TypeVar("_T")
 
 
 class WatcherError(ValueError):
     """Raised when watcher input cannot be persisted."""
+
+
+def run_watcher_read(callback: Callable[[Any], _T]) -> _T:
+    return run_read(callback, connect=database.db_connect)
+
+
+def run_watcher_transaction(callback: Callable[[Any], _T]) -> _T:
+    return run_transaction(callback, connect=database.db_connect)
 
 
 def _utc_now() -> str:
@@ -301,7 +312,7 @@ def row_to_watcher_fire(row: Any) -> WatcherFire:
 
 
 def _max_watchers_per_session() -> int:
-    raw = database.CFG.get("watchers", {}).get("max_per_session")
+    raw = resolve_effective_cfg().get("watchers", {}).get("max_per_session")
     try:
         configured = int(raw or 32)
     except (TypeError, ValueError):

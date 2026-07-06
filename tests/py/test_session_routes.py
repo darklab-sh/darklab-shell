@@ -5,15 +5,15 @@ import json
 import sqlite3
 import uuid
 
-import app as shell_app
+import config as app_config
+from conftest import make_test_app as _test_app
 from core.database import DB_PATH
 from services.teams.storage import token_hash
 import services.workspace.files as workspace
 
 
 def get_client():
-    shell_app.app.config["TESTING"] = True
-    return shell_app.app.test_client()
+    return _test_app().test_client()
 
 
 def _audit_event_rows(event_type):
@@ -283,7 +283,7 @@ class TestSessionMigrate:
         }
         cfg.update(overrides)
         for key, value in cfg.items():
-            monkeypatch.setitem(workspace.CFG, key, value)
+            monkeypatch.setitem(app_config.CFG, key, value)
         return cfg
 
     def test_returns_200_with_valid_request(self):

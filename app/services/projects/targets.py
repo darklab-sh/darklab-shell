@@ -4,17 +4,21 @@ Project target mutation and discovery helpers.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
+import logging
 import os
 import re
 from urllib.parse import urlparse
 
 import config as _config
-from core.database import DB_BACKEND, db_connect, validate_project_link_source
+from core.database import validate_project_link_source
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.atlas.materializer import upsert_entity
+from core.helpers import get_log_session_id
+from services.atlas.materializer import upsert_entity, url_host_identity
 from services.atlas.scope import metadata_owner_id
-from services.intel.canonical import CanonicalizationError, canonical_entity, entity_signature
+from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_entity, entity_signature
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
     MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES,
@@ -41,12 +45,21 @@ from services.projects.utils import (
 from services.workspace.files import WorkspaceError, read_workspace_text_file
 
 
+log = logging.getLogger("shell")
+
 PROJECT_TARGET_SOURCE_DETAIL_FLAG = "project_target"
 PROJECT_TARGET_ENTITY_TYPES = {"domain", "ip", "url"}
+# Accepted for older API/import/command metadata, but never advertised as a new target type.
+LEGACY_PROJECT_TARGET_TYPE_ALIASES = {"host"}
 
 _URL_RE = re.compile(r"https?://[^\s<>'\"`]+", re.I)
 _DOMAIN_RE = re.compile(
     r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
+    re.I,
+)
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,254}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$",
     re.I,
 )
 
@@ -59,8 +72,8 @@ def _normalize_target_payload(data, *, partial=False):
     clean = {}
     if "type" in data or not partial:
         target_type = _trim_text(data.get("type"), 32).lower()
-        if target_type not in PROJECT_TARGET_TYPES:
-            raise ProjectWorkspaceError("target type must be domain, url, host, or ip")
+        if target_type not in PROJECT_TARGET_TYPES | LEGACY_PROJECT_TARGET_TYPE_ALIASES:
+            raise ProjectWorkspaceError("target type must be domain, url, or ip")
         clean["type"] = target_type
     if "value" in data or not partial:
         value = _trim_text(data.get("value"), MAX_TARGET_VALUE_LEN)
@@ -101,6 +114,54 @@ def _strip_target_token(value):
     return str(value or "").strip().strip("[](){}<>\"'`,;")
 
 
+def _value_kind(value: object) -> str:
+    raw = str(value or "").strip().strip("[]")
+    if not raw:
+        return "empty"
+    try:
+        ipaddress.ip_address(raw)
+        return "ip_literal"
+    except ValueError:
+        return "domain_like" if "." in raw else "single_label"
+
+
+def _value_hash(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    return hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _log_target_type_canonicalized(
+    event_name: str,
+    *,
+    level: int,
+    session_id: str,
+    project_id: str,
+    input_type: object,
+    resolved_type: str,
+    value: object,
+    source: str = "",
+    team_id: str = "",
+) -> None:
+    extra = {
+        "session": get_log_session_id(session_id),
+        "project_id": str(project_id or ""),
+        "input_type": str(input_type or ""),
+        "resolved_type": str(resolved_type or ""),
+        "value_kind": _value_kind(value),
+        "value_hash": _value_hash(value),
+        "source": str(source or ""),
+        "team_scope": bool(team_id),
+    }
+    if level <= logging.DEBUG:
+        log.debug(event_name, extra=extra)
+    elif level >= logging.WARNING:
+        log.warning(event_name, extra=extra)
+    else:
+        log.info(event_name, extra=extra)
+
+
 def _target_payload_from_candidate(value):
     candidate = _strip_target_token(value)
     if not candidate:
@@ -122,7 +183,7 @@ def _target_payload_from_candidate(value):
 def _target_payload_from_typed_value(value, value_type):
     raw_value = _strip_target_token(value)
     raw_type = _trim_text(value_type, 32).lower()
-    if not raw_value or raw_type not in PROJECT_TARGET_TYPES | {"target"}:
+    if not raw_value or raw_type not in PROJECT_TARGET_TYPES | LEGACY_PROJECT_TARGET_TYPE_ALIASES | {"target"}:
         return None
     inferred = _target_payload_from_candidate(raw_value)
     if raw_type == "target":
@@ -138,8 +199,11 @@ def _target_payload_from_typed_value(value, value_type):
             return {"type": "ip", "value": str(ipaddress.ip_address(raw_value))}
         except ValueError:
             return None
-    if raw_type == "host" and raw_value and not raw_value.startswith("-"):
-        return {"type": "host", "value": raw_value.lower()}
+    if raw_type in {"domain", "host"} and _HOSTNAME_RE.fullmatch(raw_value):
+        try:
+            return {"type": "domain", "value": canonical_domain(raw_value.rstrip("."))}
+        except CanonicalizationError:
+            return None
     return None
 
 
@@ -147,7 +211,7 @@ def _atlas_type_for_target_type(target_type):
     normalized = _trim_text(target_type, 32).lower()
     if normalized == "host":
         return "domain"
-    if normalized in {"domain", "url", "ip", "hash", "cve"}:
+    if normalized in PROJECT_TARGET_ENTITY_TYPES:
         return normalized
     return ""
 
@@ -156,7 +220,7 @@ def _canonical_target_payload(payload):
     payload_type = _trim_text((payload or {}).get("type"), 32).lower()
     target_type = _atlas_type_for_target_type(payload_type)
     if not target_type:
-        raise ProjectWorkspaceError("Atlas targets support domain, url, host, ip, hash, and cve")
+        raise ProjectWorkspaceError("Atlas targets support domain, url, and ip")
     raw_value = _trim_text((payload or {}).get("value"), MAX_TARGET_VALUE_LEN)
     if not raw_value:
         raise ProjectWorkspaceError("target value is required")
@@ -208,7 +272,7 @@ def _target_source_detail(source_detail):
 
 
 def _source_detail_marks_project_target(source_detail):
-    detail = dialect_for_backend(DB_BACKEND).decode_json_dict(source_detail)
+    detail = dialect_for_backend(get_db_backend()).decode_json_dict(source_detail)
     if not isinstance(detail, dict):
         return False
     value = detail.get(PROJECT_TARGET_SOURCE_DETAIL_FLAG)
@@ -260,7 +324,7 @@ def _ensure_project_entity_link(
 ):
     source = validate_project_link_source(source)
     source_detail = _target_source_detail(source_detail)
-    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail)
+    detail_json = dialect_for_backend(get_db_backend()).json_param(source_detail)
     entity_id = upsert_entity(
         conn,
         session_id,
@@ -306,6 +370,44 @@ def _ensure_project_entity_link(
     return entity_id
 
 
+def _link_entity_to_run(conn, entity_id: str, run_id: str, timestamp: str, occurrence_count: int = 0) -> None:
+    if not entity_id or not run_id:
+        return
+    conn.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(entity_id, run_id) DO NOTHING",
+        (entity_id, run_id, timestamp, timestamp, max(0, int(occurrence_count or 0))),
+    )
+
+
+def _link_url_host_to_run(
+    conn,
+    session_id: str,
+    run_id: str,
+    canonical_url_value: str,
+    timestamp: str,
+    *,
+    team_id: str = "",
+) -> str:
+    host_identity = url_host_identity(canonical_url_value)
+    if host_identity is None:
+        return ""
+    host_type, host_value = host_identity
+    host_entity_id = upsert_entity(
+        conn,
+        session_id,
+        host_type,
+        host_value,
+        team_id=team_id,
+        seen_at=timestamp,
+        occurrence_count=0,
+    )
+    _link_entity_to_run(conn, host_entity_id, run_id, timestamp, 0)
+    return host_entity_id
+
+
 def ensure_project_target_on_conn(
     conn,
     session_id,
@@ -343,7 +445,14 @@ def _target_payloads_from_target_list_file(session_id, raw_item):
         return []
     try:
         text = read_workspace_text_file(session_id, workspace_path, _config.CFG)
-    except (OSError, WorkspaceError):
+    except (OSError, WorkspaceError) as exc:
+        log.warning("PROJECT_TARGET_DISCOVERY_FILE_READ_FAILED", extra={
+            "session": get_log_session_id(session_id),
+            "workspace_path": workspace_path[:256],
+            "error_type": type(exc).__name__,
+            "source_name": _trim_text(raw_item.get("source_name"), 128),
+            "value_type": _trim_text(raw_item.get("value_type"), 32),
+        })
         return []
     payloads = []
     seen = set()
@@ -443,7 +552,7 @@ def list_project_targets(
     include_provenance=False,
 ):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="er")
         metadata_session = metadata_owner_id(session_id, team_id)
@@ -488,7 +597,7 @@ def list_project_targets(
         if normalized_type:
             type_filter += "AND e.type = ? "
             params.append(normalized_type)
-        dialect = dialect_for_backend(DB_BACKEND)
+        dialect = dialect_for_backend(get_db_backend())
         provider_list_expr = dialect.string_agg_distinct("eis.provider")
         value_order_expr = dialect.case_insensitive_order("e.canonical_value")
         rows = conn.execute(
@@ -543,7 +652,19 @@ def list_project_targets(
 def add_project_target(session_id, project_id, data, *, team_id=""):
     payload = _normalize_target_payload(data)
     entity_type, canonical_value = _canonical_target_payload(payload)
-    with db_connect() as conn:
+    if payload.get("type") in LEGACY_PROJECT_TARGET_TYPE_ALIASES:
+        _log_target_type_canonicalized(
+            "PROJECT_TARGET_TYPE_CANONICALIZED",
+            level=logging.DEBUG,
+            session_id=session_id,
+            project_id=project_id,
+            input_type=payload.get("type"),
+            resolved_type=entity_type,
+            value=payload.get("value"),
+            source="manual",
+            team_id=team_id,
+        )
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -551,6 +672,18 @@ def add_project_target(session_id, project_id, data, *, team_id=""):
         ).fetchone()
         if not project:
             return None
+        if payload.get("type") in LEGACY_PROJECT_TARGET_TYPE_ALIASES:
+            _log_target_type_canonicalized(
+                "PROJECT_TARGET_LEGACY_TYPE_ALIAS_USED",
+                level=logging.WARNING,
+                session_id=session_id,
+                project_id=project_id,
+                input_type=payload.get("type"),
+                resolved_type=entity_type,
+                value=payload.get("value"),
+                source="manual",
+                team_id=team_id,
+            )
         if payload["source_run_id"] and not _run_belongs_to_owner(
             conn,
             session_id,
@@ -571,13 +704,17 @@ def add_project_target(session_id, project_id, data, *, team_id=""):
             team_id=team_id,
         )
         if payload["source_run_id"]:
-            conn.execute(
-                "INSERT INTO entity_run_links "
-                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0) "
-                "ON CONFLICT(entity_id, run_id) DO NOTHING",
-                (entity_id, payload["source_run_id"], _now(), _now()),
-            )
+            linked_at = _now()
+            _link_entity_to_run(conn, entity_id, payload["source_run_id"], linked_at, 0)
+            if entity_type == "url":
+                _link_url_host_to_run(
+                    conn,
+                    session_id,
+                    payload["source_run_id"],
+                    canonical_value,
+                    linked_at,
+                    team_id=team_id,
+                )
         row = _select_project_target_row(conn, session_id, project_id, entity_id, team_id=team_id)
         target = _row_to_target(row)
         _attach_target_metadata(conn, session_id, [target], team_id=team_id)
@@ -633,7 +770,17 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
             seen_values.add(key)
             try:
                 entity_type, canonical_value = _canonical_target_payload(payload)
-            except ProjectWorkspaceError:
+            except ProjectWorkspaceError as exc:
+                log.debug("PROJECT_TARGET_DISCOVERY_PAYLOAD_SKIPPED", extra={
+                    "session": get_log_session_id(session_id),
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "source": source,
+                    "value_type": _trim_text(detail.get("value_type"), 32),
+                    "value_kind": _value_kind(payload.get("value")),
+                    "value_hash": _value_hash(payload.get("value")),
+                    "reason": str(exc)[:160],
+                })
                 continue
             existing_entity = conn.execute(
                 "SELECT id FROM entities WHERE session_id = ? AND type = ? AND signature_hash = ?",
@@ -656,13 +803,9 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                 review_state="pending",
                 source_detail=detail,
             )
-            conn.execute(
-                "INSERT INTO entity_run_links "
-                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0) "
-                "ON CONFLICT(entity_id, run_id) DO NOTHING",
-                (entity_id, run_id, created, created),
-            )
+            _link_entity_to_run(conn, entity_id, run_id, created, 0)
+            if entity_type == "url":
+                _link_url_host_to_run(conn, session_id, run_id, canonical_value, created)
             if already_linked:
                 continue
             row = _select_project_target_row(conn, session_id, project_id, entity_id)
@@ -677,7 +820,7 @@ def update_project_target(session_id, project_id, target_id, data, *, team_id=""
     payload = _normalize_target_payload(data, partial=True)
     if not payload:
         raise ProjectWorkspaceError("target update payload is empty")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         current = _select_project_target_row(conn, session_id, project_id, target_id, team_id=team_id)
         if not current:
             return None
@@ -698,6 +841,29 @@ def update_project_target(session_id, project_id, target_id, data, *, team_id=""
         if source_run_id and not _run_belongs_to_owner(conn, session_id, source_run_id, team_id=team_id):
             raise ProjectWorkspaceError("source_run_id not found for this session")
         entity_type, canonical_value = _canonical_target_payload({"type": target_type, "value": value})
+        if str(target_type or "").strip().lower() in LEGACY_PROJECT_TARGET_TYPE_ALIASES:
+            _log_target_type_canonicalized(
+                "PROJECT_TARGET_TYPE_CANONICALIZED",
+                level=logging.DEBUG,
+                session_id=session_id,
+                project_id=project_id,
+                input_type=target_type,
+                resolved_type=entity_type,
+                value=value,
+                source=payload.get("source", current["source"]),
+                team_id=team_id,
+            )
+            _log_target_type_canonicalized(
+                "PROJECT_TARGET_LEGACY_TYPE_ALIAS_USED",
+                level=logging.WARNING,
+                session_id=session_id,
+                project_id=project_id,
+                input_type=target_type,
+                resolved_type=entity_type,
+                value=value,
+                source=payload.get("source", current["source"]),
+                team_id=team_id,
+            )
         entity_id = _ensure_project_entity_link(
             conn,
             session_id,
@@ -734,7 +900,7 @@ def delete_project_target(session_id, project_id, target_id, *, team_id=""):
     target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
     if not target_id:
         raise ProjectWorkspaceError("target id is required")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec

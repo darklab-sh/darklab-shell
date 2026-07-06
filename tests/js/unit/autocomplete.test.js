@@ -2773,7 +2773,7 @@ describe('autocomplete helpers', () => {
   })
 
   it('uses live workspace file hints for workspace read flags instead of static examples', () => {
-    const { getAutocompleteMatches } = fromDomScripts(
+    const { getAutocompleteMatches, setProjectAutocompleteTargets } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -2789,7 +2789,7 @@ describe('autocomplete helpers', () => {
             expects_value: ['-iL'],
             workspace_file_flags: ['-iL'],
             arg_hints: {
-              '-iL': [{ value: 'targets.txt', description: 'Static registry example' }],
+              '-iL': [{ value: 'targets.txt', description: 'Static registry example', value_type: 'target' }],
             },
           },
         },
@@ -2802,13 +2802,128 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
+      setProjectAutocompleteTargets,
     }`,
     )
+    setProjectAutocompleteTargets([
+      { type: 'domain', value: 'darklab.sh' },
+      { type: 'ip', value: '192.0.2.10' },
+    ])
 
     const items = getAutocompleteMatches('nmap -iL ', 10)
 
     expect(items.map(item => item.value)).toEqual(['inputs.txt'])
     expect(items[0].description).toBe('session file · 42 B')
+  })
+
+  it('keeps workspace file-move positional args scoped to session entries, not scan targets', () => {
+    const { getAutocompleteMatches, setProjectAutocompleteTargets } = fromDomScripts(
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'mv ',
+        acSuggestions: [],
+        acContextRegistry: {
+          mv: {
+            argument_limit: 2,
+            arg_hints: {
+              __positional__: [
+                { value: '<source> <destination>', hintOnly: true, value_type: 'workspace_path', description: 'Session file or folder path' },
+              ],
+            },
+          },
+        },
+        getWorkspaceAutocompleteFileHints: () => [
+          { value: 'notes.txt', description: 'session file · 12 B' },
+        ],
+        getWorkspaceAutocompleteDirectoryHints: () => [
+          { value: 'scans/', description: 'session folder' },
+        ],
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      setProjectAutocompleteTargets,
+    }`,
+    )
+    setProjectAutocompleteTargets([
+      { type: 'domain', value: 'darklab.sh' },
+      { type: 'ip', value: '192.0.2.10' },
+    ])
+
+    // Whitespace after the command: positional slot, no partial token typed.
+    const emptyToken = getAutocompleteMatches('mv ', 3)
+    expect(emptyToken.map(item => item.value)).toEqual(['notes.txt', 'scans/'])
+    expect(emptyToken.some(item => /Project target|Recent target/.test(item.description || ''))).toBe(false)
+
+    // Partial token: the value-type slot must still not inject scan targets.
+    const partialToken = getAutocompleteMatches('mv no', 5)
+    expect(partialToken.map(item => item.value)).toEqual(['notes.txt'])
+  })
+
+  it('keeps the `file move` subcommand scoped to session entries, not scan targets', () => {
+    const { getAutocompleteMatches, setProjectAutocompleteTargets } = fromDomScripts(
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'file move ',
+        acSuggestions: [],
+        acContextRegistry: {
+          file: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'move', insertValue: 'move ', description: 'Move or rename a session file or folder' },
+              ],
+            },
+            subcommands: {
+              move: {
+                flags: [],
+                expects_value: [],
+                arg_hints: {
+                  __positional__: [
+                    { value: '<source> <destination>', hintOnly: true, value_type: 'workspace_path', description: 'Session file or folder path' },
+                  ],
+                },
+                subcommands: {},
+              },
+            },
+          },
+        },
+        getWorkspaceAutocompleteFileHints: () => [
+          { value: 'notes.txt', description: 'session file · 12 B' },
+        ],
+        getWorkspaceAutocompleteDirectoryHints: () => [
+          { value: 'scans/', description: 'session folder' },
+        ],
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      setProjectAutocompleteTargets,
+    }`,
+    )
+    setProjectAutocompleteTargets([
+      { type: 'domain', value: 'darklab.sh' },
+      { type: 'ip', value: '192.0.2.10' },
+    ])
+
+    const items = getAutocompleteMatches('file move ', 10)
+    expect(items.map(item => item.value)).toEqual(['notes.txt', 'scans/'])
+    expect(items.some(item => /Project target|Recent target/.test(item.description || ''))).toBe(false)
   })
 
   it('uses cwd-relative workspace file hints for external workspace read flags', () => {
@@ -2905,7 +3020,7 @@ describe('autocomplete helpers', () => {
             argument_limit: 2,
             arg_hints: {
               __positional__: [
-                { value: '<source> <destination>', hintOnly: true, value_type: 'target', description: 'Session file or folder path' },
+                { value: '<source> <destination>', hintOnly: true, value_type: 'workspace_path', description: 'Session file or folder path' },
                 { value: 'root.txt', description: 'session file · 1 B' },
               ],
             },

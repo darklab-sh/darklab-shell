@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import json
 import logging
 import re
+from typing import Any
 
 from services.ai.client import AIClientError, AIProviderResult, OpenAICompatibleClient
 from services.ai.prompts import (
@@ -46,7 +49,7 @@ def run(
     client: OpenAICompatibleClient,
     *,
     context: dict,
-    active_cfg: dict,
+    active_cfg: Mapping[str, Any],
     assist: dict,
     session_id: str,
     assist_id: str,
@@ -71,7 +74,7 @@ def _provider_result(
     client: OpenAICompatibleClient,
     provider_messages: list[dict[str, str]],
     context: dict,
-    active_cfg: dict,
+    active_cfg: Mapping[str, Any],
     assist_id: str,
     run_id: str,
 ) -> AIProviderResult:

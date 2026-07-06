@@ -10,6 +10,20 @@ function setupCatalogDom() {
   `
 }
 
+function setupRegistryDom() {
+  document.body.innerHTML = `
+    <div id="command-registry-overlay"></div>
+    <div id="command-registry-subtitle"></div>
+    <input id="command-registry-search" />
+    <button id="command-registry-categories-scroll-left" class="tabs-scroll-btn u-hidden"></button>
+    <div id="command-registry-categories"></div>
+    <button id="command-registry-categories-scroll-right" class="tabs-scroll-btn u-hidden"></button>
+    <div id="command-registry-body"></div>
+    <div id="command-catalog-overlay"></div>
+    <div id="command-catalog-body"></div>
+  `
+}
+
 // Returns the base globals shared across both test loaders.
 // Called lazily inside each loader so `document` and `window` are available
 // (they are injected by the jsdom environment only when tests actually run,
@@ -63,6 +77,23 @@ function loadRowFns(extra = {}) {
       ...extra,
     }),
     '{ makeCommandRegistryRow }',
+  )
+}
+
+function loadRegistryBrowserFns(extra = {}) {
+  setupRegistryDom()
+  return fromDomScripts(
+    ['app/static/js/features/command-registry/command_registry.js'],
+    registryGlobals({
+      commandCatalogBody: document.getElementById('command-catalog-body'),
+      commandRegistryBody: document.getElementById('command-registry-body'),
+      commandRegistryCategories: document.getElementById('command-registry-categories'),
+      commandRegistryOverlay: document.getElementById('command-registry-overlay'),
+      commandRegistrySearch: document.getElementById('command-registry-search'),
+      commandRegistrySubtitle: document.getElementById('command-registry-subtitle'),
+      ...extra,
+    }),
+    '{ renderCommandRegistry }',
   )
 }
 
@@ -210,5 +241,45 @@ describe('makeCommandRegistryRow', () => {
       clearPressStyle: true,
     })
     expect(row.dataset.boundByPressable).toBe('1')
+  })
+})
+
+describe('renderCommandRegistry — category scrollers', () => {
+  it('shows arrow controls only when categories overflow and scrolls the chip strip', () => {
+    window.commandRegistryData = {
+      commands: [
+        { root: 'nmap', category: 'Discovery', description: 'Scan hosts' },
+        { root: 'nuclei', category: 'Templates', description: 'Run templates' },
+        { root: 'httpx', category: 'HTTP', description: 'Probe HTTP services' },
+        { root: 'subfinder', category: 'DNS', description: 'Find domains' },
+      ],
+    }
+    const { renderCommandRegistry } = loadRegistryBrowserFns()
+    const categories = document.getElementById('command-registry-categories')
+    const left = document.getElementById('command-registry-categories-scroll-left')
+    const right = document.getElementById('command-registry-categories-scroll-right')
+    Object.defineProperty(categories, 'clientWidth', { configurable: true, value: 120 })
+    Object.defineProperty(categories, 'scrollWidth', { configurable: true, value: 300 })
+    categories.scrollBy = ({ left: delta }) => {
+      categories.scrollLeft += delta
+      categories.dispatchEvent(new Event('scroll'))
+    }
+
+    renderCommandRegistry()
+
+    expect(left.classList.contains('u-hidden')).toBe(false)
+    expect(right.classList.contains('u-hidden')).toBe(false)
+    expect(left.disabled).toBe(true)
+    expect(right.disabled).toBe(false)
+
+    right.click()
+
+    expect(categories.scrollLeft).toBeGreaterThan(0)
+    expect(left.disabled).toBe(false)
+
+    categories.scrollLeft = 180
+    categories.dispatchEvent(new Event('scroll'))
+
+    expect(right.disabled).toBe(true)
   })
 })

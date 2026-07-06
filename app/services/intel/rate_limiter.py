@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import json
 import logging
 import threading
@@ -9,7 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from core import process
 from core.helpers import get_log_session_id
 from services.intel.registry import rate_limit_setting
@@ -35,7 +37,7 @@ def _coerce_positive_int(value: Any, fallback: int) -> int:
     return parsed if parsed > 0 else fallback
 
 
-def _bucket_settings(provider: str, cfg: dict[str, Any], profile: str = "") -> tuple[int, int]:
+def _bucket_settings(provider: str, cfg: Mapping[str, Any], profile: str = "") -> tuple[int, int]:
     setting = rate_limit_setting(provider, profile)
     if setting:
         return (
@@ -111,11 +113,11 @@ def check_rate_limit(
     provider: str,
     *,
     profile: str = "",
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client=None,
     now: float | None = None,
 ) -> RateLimitResult:
-    active_cfg = cfg or CFG
+    active_cfg = cfg if cfg is not None else resolve_effective_cfg()
     capacity, refill_seconds = _bucket_settings(provider, active_cfg, profile)
     current_time = time.time() if now is None else float(now)
     key = _bucket_key(session_token, provider, profile)

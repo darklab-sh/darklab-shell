@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
-from typing import TypedDict
+from typing import Any, TypedDict
 
-from config import CFG
-from core.database import DB_BACKEND, db_connect
+from config import resolve_effective_cfg
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend
 from core.helpers import is_failed_exit_code
-from core.process import active_runs_for_session, redis_client
+from core.process import RedisClientProxy, active_runs_for_session
 from services.commands.builtins_format import (
     ansi_amber as _ansi_amber,
     ansi_cell as _ansi_cell,
@@ -44,8 +44,11 @@ class _StatsBucket(TypedDict):
     durations: list[float]
 
 
+redis_client = RedisClientProxy()
+
+
 def _stats_elapsed_sql() -> str:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
+    if get_db_backend() == DatabaseBackend.POSTGRES:
         return """
                    CASE
                        WHEN started IS NOT NULL AND finished IS NOT NULL
@@ -65,8 +68,8 @@ def _stats_elapsed_sql() -> str:
 def _recent_runs(session_id: str, limit: int | None = None):
     # Synthetic status/history helpers stay session-scoped to match the rest of
     # the shell rather than exposing global activity.
-    effective_limit = int(limit if limit is not None else CFG["recent_commands_limit"])
-    with db_connect() as conn:
+    effective_limit = int(limit if limit is not None else resolve_effective_cfg()["recent_commands_limit"])
+    with get_db_connect()() as conn:
         return conn.execute(
             "SELECT id, command, started, finished, exit_code FROM runs "
             "WHERE session_id = ? ORDER BY started DESC LIMIT ?",
@@ -77,7 +80,7 @@ def _recent_runs(session_id: str, limit: int | None = None):
 def _session_history_runs(session_id: str):
     # The built-in `history` command should behave like a terminal history view:
     # session-scoped, chronological, and unclipped by the recent-command cache.
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return conn.execute(
             "SELECT id, command, started, finished, exit_code FROM runs "
             "WHERE session_id = ? ORDER BY started ASC, id ASC",
@@ -86,25 +89,25 @@ def _session_history_runs(session_id: str):
 
 
 def _session_run_count(session_id: str) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute("SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (session_id,)).fetchone()
     return int(row["count"]) if row else 0
 
 
 def _session_snapshot_count(session_id: str) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute("SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?", (session_id,)).fetchone()
     return int(row["count"]) if row else 0
 
 
 def _session_starred_command_count(session_id: str) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute("SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?", (session_id,)).fetchone()
     return int(row["count"]) if row else 0
 
 
 def _session_has_saved_preferences(session_id: str) -> bool:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT 1 FROM session_preferences WHERE session_id = ? LIMIT 1",
             (session_id,),
@@ -122,7 +125,7 @@ def _session_type_label(session_id: str) -> str:
 
 def _status_db_label() -> str:
     try:
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             conn.execute("SELECT 1")
         return "online"
     except Exception:
@@ -426,22 +429,23 @@ def run_builtin_last(session_id: str) -> list[dict[str, object]]:
 
 def run_builtin_limits() -> list[dict[str, object]]:
     width = 20
-    workspace_enabled = bool(CFG.get("workspace_enabled", False))
+    cfg = resolve_effective_cfg()
+    workspace_enabled = bool(cfg.get("workspace_enabled", False))
     return [
         _output_line("Configured limits:", "builtin-section"),
         _output_line(
             _format_native_record(
                 "command timeout",
-                f"{CFG['command_timeout_seconds'] or 0}s (0 = unlimited)",
+                f"{cfg['command_timeout_seconds'] or 0}s (0 = unlimited)",
                 width,
             ),
             "builtin-kv",
         ),
-        _output_line(_format_native_record("live preview lines", str(CFG['max_output_lines']), width), "builtin-kv"),
+        _output_line(_format_native_record("live preview lines", str(cfg['max_output_lines']), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "full output save",
-                _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(cfg.get('persist_full_run_output', False))),
                 width,
             ),
             "builtin-kv",
@@ -449,18 +453,18 @@ def run_builtin_limits() -> list[dict[str, object]]:
         _output_line(
             _format_native_record(
                 "full output max",
-                f"{CFG.get('full_output_max_mb', 0)} MB (0 = unlimited)",
+                f"{cfg.get('full_output_max_mb', 0)} MB (0 = unlimited)",
                 width,
             ),
             "builtin-kv",
         ),
-        _output_line(_format_native_record("history panel limit", str(CFG['history_panel_limit']), width), "builtin-kv"),
-        _output_line(_format_native_record("recent commands", str(CFG['recent_commands_limit']), width), "builtin-kv"),
-        _output_line(_format_native_record("tab limit", f"{CFG['max_tabs'] or 0} (0 = unlimited)", width), "builtin-kv"),
+        _output_line(_format_native_record("history panel limit", str(cfg['history_panel_limit']), width), "builtin-kv"),
+        _output_line(_format_native_record("recent commands", str(cfg['recent_commands_limit']), width), "builtin-kv"),
+        _output_line(_format_native_record("tab limit", f"{cfg['max_tabs'] or 0} (0 = unlimited)", width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "retention",
-                f"{CFG['permalink_retention_days']} days (0 = unlimited)",
+                f"{cfg['permalink_retention_days']} days (0 = unlimited)",
                 width,
             ),
             "builtin-kv",
@@ -468,7 +472,7 @@ def run_builtin_limits() -> list[dict[str, object]]:
         _output_line(
             _format_native_record(
                 "rate limit",
-                f"{CFG['rate_limit_per_minute']}/min, {CFG['rate_limit_per_second']}/sec",
+                f"{cfg['rate_limit_per_minute']}/min, {cfg['rate_limit_per_second']}/sec",
                 width,
             ),
             "builtin-kv",
@@ -478,23 +482,23 @@ def run_builtin_limits() -> list[dict[str, object]]:
             "builtin-kv",
         ),
         _output_line(
-            _format_native_record("files quota", f"{CFG.get('workspace_quota_mb', 0)} MB", width),
+            _format_native_record("files quota", f"{cfg.get('workspace_quota_mb', 0)} MB", width),
             "builtin-kv",
         ),
         _output_line(
-            _format_native_record("files max size", f"{CFG.get('workspace_max_file_mb', 0)} MB", width),
+            _format_native_record("files max size", f"{cfg.get('workspace_max_file_mb', 0)} MB", width),
             "builtin-kv",
         ),
         _output_line(
-            _format_native_record("files max count", str(CFG.get('workspace_max_files', 0)), width),
+            _format_native_record("files max count", str(cfg.get('workspace_max_files', 0)), width),
             "builtin-kv",
         ),
         _output_line(
             _format_native_record(
                 "files cleanup",
                 (
-                    f"{CFG.get('workspace_inactivity_ttl_hours', 0)}h (0 = disabled)"
-                    if int(CFG.get('workspace_inactivity_ttl_hours', 0) or 0) > 0
+                    f"{cfg.get('workspace_inactivity_ttl_hours', 0)}h (0 = disabled)"
+                    if int(cfg.get('workspace_inactivity_ttl_hours', 0) or 0) > 0
                     else _ansi_amber("disabled")
                 ),
                 width,
@@ -506,12 +510,13 @@ def run_builtin_limits() -> list[dict[str, object]]:
 
 def run_builtin_retention() -> list[dict[str, object]]:
     width = 22
+    cfg = resolve_effective_cfg()
     return [
         _output_line("Retention policy:", "builtin-section"),
         _output_line(
             _format_native_record(
                 "run preview retention",
-                f"{_format_limit_value(CFG['permalink_retention_days'])} days",
+                f"{_format_limit_value(cfg['permalink_retention_days'])} days",
                 width,
             ),
             "builtin-kv",
@@ -519,7 +524,7 @@ def run_builtin_retention() -> list[dict[str, object]]:
         _output_line(
             _format_native_record(
                 "full output save",
-                _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(cfg.get('persist_full_run_output', False))),
                 width,
             ),
             "builtin-kv",
@@ -527,7 +532,7 @@ def run_builtin_retention() -> list[dict[str, object]]:
         _output_line(
             _format_native_record(
                 "full output max",
-                f"{_format_limit_value(CFG.get('full_output_max_mb'))} MB",
+                f"{_format_limit_value(cfg.get('full_output_max_mb'))} MB",
                 width,
             ),
             "builtin-kv",
@@ -569,13 +574,14 @@ def run_builtin_ps(
 def run_builtin_status(
     session_id: str,
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
-    redis_client_value=redis_client,
+    redis_client_value: Any = redis_client,
 ) -> list[dict[str, object]]:
     width = 18
+    cfg = resolve_effective_cfg()
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
     lines = [
         _output_line("Shell status:", "builtin-section"),
-        _output_line(_format_native_record("app", CFG['app_name'], width), "builtin-kv"),
+        _output_line(_format_native_record("app", cfg['app_name'], width), "builtin-kv"),
         _output_line(_format_native_record("session", _ansi_dim(session_label), width), "builtin-kv"),
         _output_line(
             _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
@@ -616,28 +622,28 @@ def run_builtin_status(
         _output_line(
             _format_native_record(
                 "full output save",
-                _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(cfg.get('persist_full_run_output', False))),
                 width,
             ),
             "builtin-kv",
         ),
         _output_line(
-            _format_native_record("tab limit", _format_limit_value(CFG['max_tabs']), width),
+            _format_native_record("tab limit", _format_limit_value(cfg['max_tabs']), width),
             "builtin-kv",
         ),
         _output_line(
             _format_native_record(
                 "retention",
-                _format_limit_value(CFG['permalink_retention_days']),
+                _format_limit_value(cfg['permalink_retention_days']),
                 width,
             ),
             "builtin-kv",
         ),
     ]
-    if bool(CFG.get("workspace_enabled", False)):
+    if bool(cfg.get("workspace_enabled", False)):
         try:
-            settings = workspace_settings(CFG)
-            usage = workspace_usage(session_id, CFG)
+            settings = workspace_settings(cfg)
+            usage = workspace_usage(session_id, cfg)
             files_label = (
                 f"{usage.file_count}/{settings.max_files} files, "
                 f"{_format_bytes(usage.bytes_used)} / {_format_bytes(settings.quota_bytes)}"
@@ -655,7 +661,7 @@ def run_builtin_stats(
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
 ) -> list[dict[str, object]]:
     elapsed_sql = _stats_elapsed_sql()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         raw_rows = conn.execute(
             f"""
             SELECT command,

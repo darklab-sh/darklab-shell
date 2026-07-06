@@ -11,11 +11,11 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import config as _config
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.intel.canonical import CanonicalizationError, canonical_entity
-from services.intel.schema import ENTITY_TYPES
+from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.projects.contracts import MAX_ENTITY_ID_LEN, ProjectWorkspaceError, ProjectWorkspaceNotFound
 from services.projects.links import (
     _budget_available,
@@ -30,7 +30,7 @@ from services.projects.utils import cfg_int, now as _now, raise_quota as _raise_
 AUTO_PROMOTE_LINK_SOURCE = "auto_promote_rule"
 AUTO_PROMOTE_TABLE = "project_auto_promote_rules"
 AUTO_PROMOTE_ENTITY_TYPE = "atlas_entity"
-AUTO_PROMOTE_TARGET_KINDS = frozenset({"any", *ENTITY_TYPES})
+AUTO_PROMOTE_TARGET_KINDS = frozenset({"any", *ATLAS_ENTITY_TYPES})
 AUTO_PROMOTE_MATCH_MODES = frozenset({"exact", "contains", "wildcard", "domain_suffix", "cidr", "regex"})
 PROMOTABLE_PROJECT_LINK_SOURCES = frozenset({"auto_command", "auto_input_file"})
 MIN_BROAD_PATTERN_CHARS = 3
@@ -86,7 +86,7 @@ def _escape_like_pattern(value: str) -> str:
 
 def _exact_any_patterns(pattern: str) -> list[str]:
     values = {pattern.strip().lower()}
-    for entity_type in sorted(ENTITY_TYPES):
+    for entity_type in sorted(ATLAS_ENTITY_TYPES):
         try:
             if entity_type == "hash" and ":" in pattern:
                 algorithm, token = pattern.split(":", 1)
@@ -287,7 +287,7 @@ def normalize_rule_payload(data: Mapping[str, Any] | None, *, existing: Mapping[
 
 
 def _decode_filters(value: object) -> dict[str, Any]:
-    return _normalize_filters(dialect_for_backend(DB_BACKEND).decode_json_dict(value))
+    return _normalize_filters(dialect_for_backend(get_db_backend()).decode_json_dict(value))
 
 
 def row_to_rule(row) -> dict[str, Any]:
@@ -348,7 +348,7 @@ def create_rule_on_conn(
     payload = normalize_rule_payload(data)
     timestamp = _now()
     rule_id = _new_rule_id()
-    filters_json = dialect_for_backend(DB_BACKEND).json_param(payload["filters"])
+    filters_json = dialect_for_backend(get_db_backend()).json_param(payload["filters"])
     conn.execute(
         "INSERT INTO project_auto_promote_rules "
         "(id, project_id, name, enabled, target_entity_kind, match_mode, pattern, filters_json, apply_on_run, "
@@ -375,7 +375,7 @@ def create_rule_on_conn(
 
 
 def create_rule(session_id: str, project_id: str, data: Mapping[str, Any], *, team_id: str = "", member_id: str = ""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rule = create_rule_on_conn(conn, session_id, project_id, data, team_id=team_id, member_id=member_id)
         conn.commit()
     return rule
@@ -393,12 +393,12 @@ def list_rules_on_conn(conn, session_id: str, project_id: str, *, team_id: str =
 
 
 def list_rules(session_id: str, project_id: str, *, team_id: str = "") -> list[dict[str, Any]] | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return list_rules_on_conn(conn, session_id, project_id, team_id=team_id)
 
 
 def get_rule(session_id: str, project_id: str, rule_id: str, *, team_id: str = "") -> dict[str, Any] | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return get_rule_on_conn(conn, session_id, project_id, rule_id, team_id=team_id)
 
 
@@ -439,7 +439,7 @@ def update_rule_on_conn(
             payload["target_entity_kind"],
             payload["match_mode"],
             payload["pattern"],
-            dialect_for_backend(DB_BACKEND).json_param(payload["filters"]),
+            dialect_for_backend(get_db_backend()).json_param(payload["filters"]),
             payload["apply_on_run"],
             timestamp,
             project_id,
@@ -450,7 +450,7 @@ def update_rule_on_conn(
 
 
 def update_rule(session_id: str, project_id: str, rule_id: str, data: Mapping[str, Any], *, team_id: str = ""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rule = update_rule_on_conn(conn, session_id, project_id, rule_id, data, team_id=team_id)
         conn.commit()
     return rule
@@ -468,20 +468,20 @@ def delete_rule_on_conn(conn, session_id: str, project_id: str, rule_id: str, *,
 
 
 def delete_rule(session_id: str, project_id: str, rule_id: str, *, team_id: str = "") -> bool | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         deleted = delete_rule_on_conn(conn, session_id, project_id, rule_id, team_id=team_id)
         conn.commit()
     return deleted
 
 
 def preview_rule(session_id: str, project_id: str, rule: Mapping[str, Any], *, team_id: str = "", limit: int | None = None):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return preview_rule_on_conn(conn, session_id, project_id, rule, team_id=team_id, limit=limit)
 
 
 def apply_stored_rule(session_id: str, project_id: str, rule_id: str, *, team_id: str = "", limit: int | None = None):
-    with db_connect() as conn:
-        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
+    with get_db_connect()() as conn:
+        conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
         rule = get_rule_on_conn(conn, session_id, project_id, rule_id, team_id=team_id)
         if rule is None:
             conn.commit()
@@ -566,7 +566,7 @@ def _append_source_filters(where_parts: list[str], params: list[Any], rule: Mapp
         source_where.append("source_run.id IN (" + ",".join("?" for _ in source_run_ids) + ")")
         params.extend(source_run_ids)
     if source_command_roots:
-        command_root_sql = dialect_for_backend(DB_BACKEND).command_root_expr("source_run.command")
+        command_root_sql = dialect_for_backend(get_db_backend()).command_root_expr("source_run.command")
         source_where.append(command_root_sql + " IN (" + ",".join("?" for _ in source_command_roots) + ")")
         params.extend(source_command_roots)
     where_parts.append(
@@ -783,7 +783,7 @@ def apply_rule_on_conn(
             "pattern": normalized["pattern"],
         }
         if item.get("promotable"):
-            detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail)
+            detail_json = dialect_for_backend(get_db_backend()).json_param(source_detail)
             timestamp = _now()
             cursor = conn.execute(
                 "UPDATE project_links "

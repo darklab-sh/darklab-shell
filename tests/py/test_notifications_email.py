@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import smtplib
 
+from conftest import build_test_config
 from services.notifications.channels import register_builtin_channels
 from services.notifications.channels.email import EmailChannel
 from services.notifications.base import registered_channels
@@ -90,7 +91,7 @@ def test_email_channel_is_registered():
 
 
 def test_email_channel_rejects_missing_smtp_transport(monkeypatch):
-    monkeypatch.setattr("services.notifications.database.CFG", {"notifications": {}})
+    monkeypatch.setattr("config.CFG", build_test_config({"notifications": {}}))
 
     errors = EmailChannel(_channel()).validate_config({"recipients": ["ops@example.invalid"]})
 
@@ -102,7 +103,7 @@ def test_email_channel_rejects_missing_smtp_transport(monkeypatch):
 
 def test_email_channel_requires_recipients(monkeypatch):
     monkeypatch.setenv("DARKLAB_SMTP_PASSWORD", "smtp-secret")
-    monkeypatch.setattr("services.notifications.database.CFG", {"notifications": {"smtp": _smtp_config()}})
+    monkeypatch.setattr("config.CFG", build_test_config({"notifications": {"smtp": _smtp_config()}}))
 
     errors = EmailChannel(_channel(config={})).validate_config({})
 
@@ -112,7 +113,10 @@ def test_email_channel_requires_recipients(monkeypatch):
 def test_email_channel_sends_starttls_message(monkeypatch):
     FakeSMTP.instances = []
     monkeypatch.setenv("DARKLAB_SMTP_PASSWORD", "smtp-secret")
-    monkeypatch.setattr("services.notifications.database.CFG", {"notifications": {"smtp": _smtp_config()}})
+    monkeypatch.setattr(
+        "config.CFG",
+        build_test_config({"notifications": {"http_timeout_seconds": 15, "smtp": _smtp_config()}}),
+    )
     monkeypatch.setattr("services.notifications.channels.email.smtplib.SMTP", FakeSMTP)
 
     channel = EmailChannel(
@@ -139,7 +143,7 @@ def test_email_channel_uses_smtp_ssl_without_starttls(monkeypatch):
     FakeSMTP.instances = []
     config = dict(_smtp_config(), port=465, tls="ssl")
     monkeypatch.setenv("DARKLAB_SMTP_PASSWORD", "smtp-secret")
-    monkeypatch.setattr("services.notifications.database.CFG", {"notifications": {"smtp": config}})
+    monkeypatch.setattr("config.CFG", build_test_config({"notifications": {"smtp": config}}))
     monkeypatch.setattr("services.notifications.channels.email.smtplib.SMTP_SSL", FakeSMTP)
 
     result = EmailChannel(_channel()).send(_payload())
@@ -152,7 +156,7 @@ def test_email_channel_uses_smtp_ssl_without_starttls(monkeypatch):
 
 def test_email_channel_reports_missing_password_secret_without_leak(monkeypatch):
     monkeypatch.delenv("DARKLAB_SMTP_PASSWORD", raising=False)
-    monkeypatch.setattr("services.notifications.database.CFG", {"notifications": {"smtp": _smtp_config()}})
+    monkeypatch.setattr("config.CFG", build_test_config({"notifications": {"smtp": _smtp_config()}}))
 
     result = EmailChannel(_channel()).send(_payload())
 
@@ -165,7 +169,7 @@ def test_email_channel_reports_missing_password_secret_without_leak(monkeypatch)
 def test_email_channel_retries_smtp_exceptions(monkeypatch):
     FailingSMTP.instances = []
     monkeypatch.setenv("DARKLAB_SMTP_PASSWORD", "smtp-secret")
-    monkeypatch.setattr("services.notifications.database.CFG", {"notifications": {"smtp": _smtp_config()}})
+    monkeypatch.setattr("config.CFG", build_test_config({"notifications": {"smtp": _smtp_config()}}))
     monkeypatch.setattr("services.notifications.channels.email.smtplib.SMTP", FailingSMTP)
 
     result = EmailChannel(_channel()).send(_payload())

@@ -5,8 +5,8 @@ default:
 variables:
   CI_DEFAULT_IMAGE: "python:3.14.6-slim"
   CI_PYTHON_E2E_IMAGE: "python:3.14.6"
-  CI_NODE_IMAGE: "node:26.3.0-slim"
-  CI_DOCKER_IMAGE: "docker:29.5.3"
+  CI_NODE_IMAGE: "node:26.4.0-slim"
+  CI_DOCKER_IMAGE: "docker:29.6.1"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -33,63 +33,6 @@ cache:
 before_script:
   - pip install -q -r app/requirements.txt -r requirements-dev.txt
 
-test-py-pytest:
-  stage: test
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
-      when: never
-    - if: $CI_PIPELINE_SOURCE == "push"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-  before_script:
-    - apt-get update -q && apt-get install -y -q git
-    - pip install -q -r app/requirements.txt -r requirements-dev.txt
-  script:
-    - pytest tests/py/ -v
-
-test-py-postgres:
-  stage: test
-  services:
-    - name: postgres:18-alpine
-      alias: postgres
-  variables:
-    POSTGRES_DB: darklab_shell
-    POSTGRES_USER: darklab
-    POSTGRES_PASSWORD: darklab_dev_password
-    DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
-      when: never
-    - if: $CI_PIPELINE_SOURCE == "push"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-  before_script:
-    - apt-get update -q && apt-get install -y -q git
-    - pip install -q -r app/requirements.txt -r requirements-dev.txt
-  script:
-    - bash scripts/run_postgres_tests.sh
-
-test-js-unit:
-  stage: test
-  image: $CI_NODE_IMAGE
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
-      when: never
-    - if: $CI_PIPELINE_SOURCE == "push"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-  before_script:
-    - npm ci
-  cache:
-    key: "node-$CI_COMMIT_REF_SLUG"
-    paths:
-      - node_modules/
-  script:
-    - npm run test:unit
-
 test-js-e2e:
   stage: test
   image: $CI_PYTHON_E2E_IMAGE
@@ -115,6 +58,63 @@ test-js-e2e:
       - playwright-report/
       - test-results/
     expire_in: 1 week
+
+test-py-pytest:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
+  script:
+    - pytest tests/py/ -v
+
+test-js-unit:
+  stage: test
+  image: $CI_NODE_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run test:unit
+
+test-py-postgres:
+  stage: test
+  services:
+    - name: postgres:18-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: darklab_shell
+    POSTGRES_USER: darklab
+    POSTGRES_PASSWORD: darklab_dev_password
+    DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
+  script:
+    - bash scripts/run_postgres_tests.sh
 
 lint-py:
   stage: lint

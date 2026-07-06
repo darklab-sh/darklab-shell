@@ -531,6 +531,8 @@ OPENAPI_SPEC: dict = {
                     "session_id": {"type": "string"},
                     "type": {"type": "string"},
                     "canonical_value": {"type": "string"},
+                    "host_entity_id": {"type": "string", "nullable": True},
+                    "attributes": {"type": "object", "additionalProperties": True},
                     "first_seen_at": {"type": "string", "nullable": True},
                     "last_seen_at": {"type": "string", "nullable": True},
                     "occurrence_count": {"type": "integer"},
@@ -597,10 +599,19 @@ OPENAPI_SPEC: dict = {
             },
             "AtlasEntityDetail": {
                 "type": "object",
-                "required": ["entity", "runs", "findings", "intel_snapshots", "intel_summary", "detail_limits"],
+                "required": [
+                    "entity",
+                    "runs",
+                    "related_urls",
+                    "findings",
+                    "intel_snapshots",
+                    "intel_summary",
+                    "detail_limits",
+                ],
                 "properties": {
                     "entity": _ref("AtlasEntity"),
                     "runs": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    "related_urls": {"type": "array", "items": _ref("AtlasEntity")},
                     "findings": {"type": "array", "items": _ref("AtlasFinding")},
                     "intel_snapshots": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
                     "intel_summary": {"type": "object", "additionalProperties": True},
@@ -1866,7 +1877,7 @@ OPENAPI_SPEC: dict = {
                     {
                         "name": "entity_type",
                         "in": "query",
-                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve"]},
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
                     },
                     {
                         "name": "orphan_filter",
@@ -2128,7 +2139,7 @@ OPENAPI_SPEC: dict = {
                     {
                         "name": "entity_type",
                         "in": "query",
-                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve"]},
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
                     },
                     {
                         "name": "run_id",

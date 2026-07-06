@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from copy import deepcopy
 from typing import Any
 
 import config as _config
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import list_project_findings
@@ -301,7 +303,7 @@ def _attach_full_finding_triage(session_id: str, findings: list[dict[str, Any]],
     finding_ids = [str(finding.get("id") or "") for finding in findings if finding.get("id")]
     if not finding_ids:
         return
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
     for finding in findings:
         triage = triage_by_id.get(str(finding.get("id") or ""))
@@ -310,7 +312,7 @@ def _attach_full_finding_triage(session_id: str, findings: list[dict[str, Any]],
             finding["verification_status"] = triage.get("verification_status") or finding.get("verification_status")
 
 
-def _artifact_preview_text(session_id: str, artifact: dict[str, Any], *, cfg: dict | None = None) -> dict[str, Any]:
+def _artifact_preview_text(session_id: str, artifact: dict[str, Any], *, cfg: Mapping[str, Any] | None = None) -> dict[str, Any]:
     label = str(artifact.get("display_name") or artifact.get("workspace_path") or artifact.get("id") or "artifact")
     if not artifact.get("file_available"):
         return {"embedded": False, "reason": artifact.get("file_status_detail") or "Artifact file is not available."}
@@ -337,7 +339,7 @@ def _attach_artifact_previews(
     session_id: str,
     artifacts: list[dict[str, Any]],
     *,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rendered = []
     warnings = []
@@ -367,7 +369,7 @@ def compose_report_context(
     session_id: str = "",
     project_id: str = "",
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a bounded report context ready for renderers."""
     normalized_draft = normalize_report_draft(draft or {})

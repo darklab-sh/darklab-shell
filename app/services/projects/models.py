@@ -4,7 +4,7 @@ Project workspace row and payload shaping helpers.
 
 from __future__ import annotations
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.projects.contracts import (
     MAX_PROJECT_COLOR_LEN,
@@ -128,7 +128,7 @@ def row_to_target(row, *, include_provenance=False):
         return None
     if "canonical_value" in row.keys():
         source_detail = (
-            dialect_for_backend(DB_BACKEND).decode_json_dict(row["source_detail"])
+            dialect_for_backend(get_db_backend()).decode_json_dict(row["source_detail"])
             if "source_detail" in row.keys()
             else {}
         )
@@ -138,6 +138,12 @@ def row_to_target(row, *, include_provenance=False):
             "type": row["type"],
             "value": row["canonical_value"],
             "canonical_value": row["canonical_value"],
+            "host_entity_id": (row["host_entity_id"] if "host_entity_id" in row.keys() else "") or "",
+            "attributes": (
+                dialect_for_backend(get_db_backend()).decode_json_dict(row["attributes_json"])
+                if "attributes_json" in row.keys()
+                else {}
+            ),
             "source_run_id": row["source_run_id"] if "source_run_id" in row.keys() else "",
             "confidence": row["confidence"] if "confidence" in row.keys() else 1.0,
             "review_state": row["review_state"] if "review_state" in row.keys() else "confirmed",
@@ -175,7 +181,7 @@ def row_to_target(row, *, include_provenance=False):
                 created=_row_optional(row, "created"),
             )
         return item
-    source_detail = dialect_for_backend(DB_BACKEND).decode_json_dict(row["source_detail"])
+    source_detail = dialect_for_backend(get_db_backend()).decode_json_dict(row["source_detail"])
     item = {
         "id": row["id"],
         "project_id": row["project_id"],

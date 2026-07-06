@@ -924,7 +924,9 @@ flowchart TB
     Projects["projects.py"]
   end
 
-  App["app.py"]
+  Factory["app_factory.py"]
+  Bootstrap["runtime_bootstrap.py"]
+  Wsgi["wsgi.py"]
 
   Config --> Logging
   Logging --> Helpers
@@ -942,17 +944,51 @@ flowchart TB
   BuiltinCommands --> Run
   CommandRules --> Projects
   BuiltinCommands --> Projects
-  Http --> App
+  Http --> Factory
+  Factory --> Wsgi
+  Bootstrap --> Wsgi
 ```
 
 - `config.py` is the root configuration/theme layer and stays free of Flask app dependencies.
-- `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
+- `runtime_bootstrap.py` owns startup side effects such as logging setup, metrics environment setup, Redis/process initialization, database initialization, and startup cleanup. `app.py` assembles the product app by collecting the limiter, blueprints, hooks, error handlers, and Jinja globals, then delegates the final Flask object creation to the generic constructor in `app_factory.py`. Metrics helpers use a lazy proxy so importing route modules does not initialize Prometheus before bootstrap prepares the multiprocess directory.
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
-- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
+- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` is the app assembly module and the local development entrypoint; `app_factory.py` stays piece-agnostic and builds a Flask app from explicitly supplied registrations.
 - AI assist service code keeps provider HTTP handling in `services.ai.client`, context assembly and redaction in `services.ai.context`, Redis-backed rate/concurrency coordination in `services.ai.coordination`, queue/cache persistence in `services.ai.storage`, route orchestration in `services.ai.assists`, suggestion validation in `services.ai.suggestions`, and the provider-call loop in `services.ai.worker`.
 - Shared diff service code keeps tool-aware classifier registration and parser helpers in `services.diff.classifiers` plus shared result constants in `services.diff.models`, so Watchers and run comparison can reuse the same per-tool diff logic instead of maintaining separate parser families.
 - Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package preset catalog loading and validation helpers in `services.projects.package_presets`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, safe project-link provenance shaping helpers in `services.projects.provenance`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, personal/team project owner predicates in `services.projects.scope`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles. Engagement report draft, template, composition, rendering, redaction, storage, and async archive export helpers live in `services.reports`.
+
+### Flask Construction And Startup Contract
+
+`app.create_app(config=None)` is the app-specific factory. It builds a Flask app, registers Darklab's blueprints, hooks, error handlers, Jinja globals, and limiter extension, then returns the app without running startup I/O. Uppercase keys in the optional mapping are copied into `app.config`; the existing lowercase `rate_limit_enabled` convenience maps to `RATELIMIT_ENABLED`. Service code reads mutable runtime config through the shared effective-config helper, while app and blueprint modules keep the narrow route-layer globals that still belong to the current Flask wiring.
+
+`app_factory.create_app(...) -> Flask` is the lower-level constructor used by `app.create_app(...)`. It accepts already-chosen extensions, blueprints, hooks, error handlers, and Jinja globals. Application code should normally call `app.create_app(...)` instead of this helper so the product wiring stays centralized.
+
+`runtime_bootstrap.bootstrap_runtime(...)` owns non-Flask startup work. Its toggles choose whether to prepare metrics, configure logging, initialize process/Redis state, run database initialization, and run guarded active-run cleanup. Notification, scheduler, and AI worker entrypoints use this helper and do not build a Flask app.
+
+`runtime_bootstrap.bootstrap(config=None)` is the web startup path. It runs the runtime bootstrap, calls `app.create_app(...)`, logs app-initialization context, and returns the Flask app. `wsgi.py` exposes `application = bootstrap()` for Gunicorn, while `python app.py` calls the same runtime pieces before starting Flask's local development server. Pytest clients use `make_test_app(init_db=True)` from `tests/py/conftest.py`, which builds apps through `app.create_app(...)` and initializes the test schema only when needed.
+
+### Data Access Boundary
+
+Blueprint modules own HTTP concerns: request parsing, capability checks, response shaping, and error serialization. Persistence belongs behind `services/` modules or shared `core/` infrastructure, so new database reads and writes should land in a service query/storage helper instead of a route module.
+
+Service functions open their own `db_connect()` context by default, with common read and commit wrappers centralized in `services.storage.transactions`. When several service operations need one transaction, a service may accept a caller-owned connection; in that mode the connection owner commits or rolls back unless the service is explicitly named and documented as transactional. This keeps multi-step operations such as run deletes, bulk deletes, workspace metadata moves, and project mutations from committing halfway through a larger workflow.
+
+`tests/py/test_architecture.py` enforces that boundary. It scans every blueprint for direct connection calls, aliased `db_connect` imports, raw execute-family calls, SQL-shaped string fragments, core database imports, backend/dialect imports, and persistence cleanup helper imports. The execute-family check is intentionally conservative: any `.execute()`, `.executemany()`, or `.executescript()` attribute call in a blueprint is treated as persistence-like and fails the suite.
+
+### Shared Runtime Accessors
+
+Runtime state that tests and startup code may replace has one source of truth. Redis clients are reached through `core.process.RedisClientProxy`, database backend and connection access go through `core.database_access.get_db_backend()` and `get_db_connect()`, and mutable service config is resolved with `config.resolve_effective_cfg(cfg=None)`. These helpers read the live source at call time, so split modules observe the same test overrides and startup state without parent modules copying globals into child modules.
+
+Service modules should not import `DB_BACKEND`, `db_connect`, or `CFG` into local module globals. They should call the shared accessor/helper at the point of use or accept an explicit `cfg`/connection argument when a caller owns that context. The effective config object is a pydantic-backed `AppConfig` mapping: existing `.get(...)`, `[...]`, `.items()`, and copy/export reads keep working, while known-key code can use attribute access such as `cfg.database_backend`. Nested sections remain typed through attribute access, such as `cfg.notifications.smtp`, while mapping reads return plain Python data for compatibility. Tests that need a replacement config use `build_test_config(...)` so replacements keep the same validated shape as production config; scoped `patch.dict` overrides remain available for narrow mapping-compatibility tests. Existing route-layer globals that are still part of Flask registration or decorator-time setup are tracked as a compatibility baseline, and `tests/py/test_architecture.py` fails if a new local DB, config, or Redis singleton binding or unapproved bare-dict `CFG` replacement appears outside the approved source-of-truth, compatibility, and stale-global sentinel paths.
+
+### Python Module Layout
+
+Route modules are grouped by the user-facing resource they handle. Large blueprints keep one public blueprint object in the parent module, define that object before importing route-group siblings, and let those sibling modules register routes by importing the parent blueprint. This keeps `app.create_app()` pointed at the same parent blueprint while avoiding one route file that owns every endpoint for a surface.
+
+Service modules are split by responsibility rather than by line count alone. Query helpers, payload shaping, lifecycle orchestration, config/default helpers, and import/export helpers live in focused sibling modules when there is a clean seam. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay in one file because splitting them would make them harder to read.
+
+`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional. It also guards the approved baseline for local DB, config, and Redis singleton bindings, plus bare-dict config replacement sentinels, so new import-time bindings and unvalidated config replacement tests do not appear.
 
 ### Backend Runtime Boundaries
 
@@ -977,7 +1013,7 @@ AI assists are a sidecar workflow for completed external runs. They never become
 7. Summary orchestration repairs deterministic facts such as findings/warnings and open-port counts. Next-command orchestration validates drafts through command policy, trusted targets, known open ports, redaction sentinels, and small command-specific known-bad flag checks.
 8. Storage marks the assist completed or failed, clears progress, writes suggestion validation audit rows, and publishes a lightweight broker event so open Run Details cards can refresh without closing.
 
-AI state is intentionally small and auditable. `ai_run_assists` stores status, model, prompt version, context hash, owner scope, payload, bounded raw model response text, progress while in flight, and error metadata. `ai_suggestion_validations` stores accepted and rejected next-command drafts with validation outcomes. Postgres uses app-owned migrations for those tables; SQLite keeps the matching schema in the normal database bootstrap path.
+AI state is intentionally small and auditable. `ai_run_assists` stores status, model, prompt version, context hash, owner scope, payload, bounded raw model response text, progress while in flight, and error metadata. `ai_suggestion_validations` stores accepted and rejected next-command drafts with validation outcomes. Both SQLite and Postgres create these tables through the shared schema migration runner.
 
 Failure states are user-visible and bounded:
 
@@ -1017,6 +1053,8 @@ The legacy `cls` field still exists at storage and API boundaries so cached tran
 Full-output artifacts are versioned JSONL. New files start with a small header row that names the artifact format version, creation time, and run id. Older headerless JSONL or plain-text artifacts are upgraded in memory when read; the app does not rewrite historical files on disk. Preview output in the database keeps the existing JSON-array shape for fast history loads, and `output_search_text` is derived from decoded line events so captured entity values can be searched without teaching FTS about the line-event schema.
 
 Live streams advertise the same contract. `/runs/<id>/stream` and `/api/v1/runs/<id>/stream` send a `schema` frame or row first, then keep using `output` events with a versioned line-event payload. Older clients can keep reading `type` and `text`; newer clients use `kind`, `role`, `signals`, and `entities`.
+
+Generic command-output entity extraction keeps URL, scanner-specific, import, and project-target paths on their stronger parsers, while bare free-text hostname candidates pass through an offline Public Suffix List gate before becoming domain metadata. The gate uses the `tldextract` package snapshot pinned in `app/requirements.txt`, includes private PSL suffixes so shared-hosting names such as `foo.github.io` stay distinct, and never fetches a live list during normal extraction. Operators can add deployment-local suffixes such as `.local` or `.corp` with `output_entity_extra_domain_suffixes`; that setting is threaded per extraction call, matching the existing private-IP capture policy.
 
 Browser-side command outcome summaries are derived display metadata layered on
 top of `LineEvent` transcripts. `output_core.js` normalizes explicit summary
@@ -1103,6 +1141,7 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 
 | Command | Rewrite | Reason |
 | --------- | --------- | -------- |
+| `curl` | Adds `--no-progress-meter` unless help, silent, or explicit progress flags are present | Keeps the terminal transcript readable when curl writes progress updates to stderr and the app streams stderr with stdout. Silent. |
 | `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
 | `nmap` | Adds `-sT` when no scan mode is explicit | Uses TCP connect scanning for reliable non-root container execution; `-sS` and `--privileged` are blocked. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates`; uses owner-scoped `XDG_CONFIG_HOME=<workspace>/tools` when Files are enabled | Redirects template storage to tmpfs while keeping useful ProjectDiscovery config/resume state under the active personal/team workspace's `tools/` folder. Output metadata records the template source for later Run Details, Atlas import, and evidence review. Silent. |
@@ -1110,7 +1149,7 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 
 Session command variables are expanded inside the app before command policy validation and execution. `app/services/session/variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. The run-start path keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
 
-Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active personal/team workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid Files name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir tools/amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the active workspace's `tools/` folder so `amass engine` and the CLI share the same per-owner database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<active workspace>/tools` prefix through the same metadata, and run output filters display absolute hashed workspace paths as user-facing paths like `/tools/katana/resume.cfg`. TruffleHog Git scans add a narrow validation check that only accepts HTTPS repository URLs, keeping local path, `file://`, and `ssh://` scans out of the web-shell runtime. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
+Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active personal/team workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid Files name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning, while app-owned workspace path slots use `workspace_path` so file and folder names do not become scan targets. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir tools/amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the active workspace's `tools/` folder so `amass engine` and the CLI share the same per-owner database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<active workspace>/tools` prefix through the same metadata, and run output filters display absolute hashed workspace paths as user-facing paths like `/tools/katana/resume.cfg`. TruffleHog Git scans add a narrow validation check that only accepts HTTPS repository URLs, keeping local path, `file://`, and `ssh://` scans out of the web-shell runtime. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
 Registry-owned `requires_secrets` declarations resolve against the encrypted personal/team vault before validation-owned runtime wrappers can change the executed shell text; required missing secrets block the launch and successful injection emits a `SECRET_INJECTED` audit event. The full vault model — master-key bootstrap, AES-GCM row encryption, alias mapping, command-catalog integration, and the Options Secrets picker — lives in **Secrets and Vault** below.
 
@@ -1259,13 +1298,13 @@ Project workspace tables are the relationship foundation for case-style grouping
 
 ### Project Overview
 
-The Project Overview tab is a read-only target intelligence rollup for the active project. `GET /projects/<project_id>/overview` calls `get_project_intel_overview(session_id, project_id, *, team_id="")`, scopes through the same personal/team owner checks as the rest of Projects, and returns 404 for missing or out-of-scope projects. The response is versioned with `payload_version`, includes `project` and `generated_at` metadata, and carries bounded `targets`, aggregate `rollups`, and `recent_changes` arrays.
+The Project Overview tab is a read-only target intelligence rollup for the active project. `GET /projects/<project_id>/overview` calls `get_project_intel_overview(session_id, project_id, *, team_id="", window_start="", window_end="")`, scopes through the same personal/team owner checks as the rest of Projects, and returns 404 for missing or out-of-scope projects. The optional window parameters come from validated `window_start` / `window_end` query values and bound the monitoring context used for recent-change state when a digest-style Overview is requested. The response is versioned with `payload_version`, includes `project` and `generated_at` metadata, and carries bounded `targets`, aggregate `rollups`, `recent_changes`, `operational_tempo`, `recent_activity`, `coverage_gaps`, and `deliverables_status` data. Overview separates app-captured ports/services from cached-provider ports/services so a target can show real scan evidence, provider context, or a supported scan that did not surface ports without blending those claims together. App-captured scan observations are recorded for nmap, masscan, rustscan, naabu, and `nc` port checks. Curl connection lines can materialize positive port entities, but they do not count as scan-coverage observations; quiet scans count as scanned-with-no-app-captured-ports only when the run can be associated with a concrete target. The UI labels provider-backed ports, services, certificates, and highlights as cached data and shows stale/no-intel freshness details from the existing snapshot flags and latest checked timestamp.
 
-Overview rows use the existing Atlas `entity_id` as their merge and filter identity. Project targets, linked Atlas target entities, cached `entity_intel_snapshots`, findings, and Project Monitoring summary rows all join back to that identifier; fallback `type:value` strings are display labels only. The aggregator keeps large projects bounded with a target limit, capped provider highlights, and deterministic ordering so the browser never has to render an unbounded engagement snapshot.
+Overview rows use the existing Atlas `entity_id` as their merge and filter identity. Project targets, linked Atlas target entities, cached `entity_intel_snapshots`, findings, app-native `scan_target_observations`, app-native port entities, and Project Monitoring summary rows all join back to that identifier; fallback `type:value` strings are display labels only. App ports attach to host entities through `host_entity_id`; URL entities store the same relationship to their domain or IP host, and URL targets borrow host-scoped app evidence from that stored link before falling back to URL parsing for older rows. The scope note keeps the row from implying the URL entity itself was scanned as a port target. The Overview only emits a Project Entities Ports drill-in when at least one displayed port is linked into the project, so app-wide evidence can still be shown without opening an empty project-scoped Ports view. The aggregator keeps large projects bounded with a target limit, capped app/provider port lists, capped provider highlights, and deterministic ordering so the browser never has to render an unbounded engagement snapshot; full port inventory remains in the Project Entities Ports view.
 
-Each target row includes the display label, target type, review state, source flags, open ports, services, provider highlights, certificate status, finding counts, recent-change markers, and backend-provided deep-link hints. Certificate status is intentionally split into `expired`, `expiring_14d`, `expiring_30d`, `healthy`, and `unknown`; missing certificate intel stays `unknown` and is never treated as healthy. Finding rollups track review-state counts, verification-state counts, suppression count, and the highest actionable severity after ignoring suppressed and `false_positive` findings.
+Each target row includes the display label, target type, review state, source flags, app-captured ports/services, cached-provider ports/services, port provenance, provider highlights, certificate status, finding counts, recent-change markers, and backend-provided deep-link hints. The generic Entities and Findings hints come from the shared target hint helper; when a displayed app port is linked into the project, row assembly also adds a separate Ports hint with `entity_type='port'` and the host-scoped `host_entity_id`. `app_evidence.port_entity_count` remains the scan-observation count across runs, `app_evidence.app_port_run_count` counts distinct runs that produced the displayed port entities, and row-level `app_port_count` carries the distinct host port total even when the displayed `app_ports` list is capped. This lets curl-derived positive port evidence say which app run saw it without pretending curl was scan coverage. The rollup `app_port_count` sums those distinct host totals once per host, falling back to the target entity id for ordinary host rows so a URL target and its host target do not double-count the same port. `port_divergence_target_count` counts scanned targets whose bounded Overview app-port comparison differs from cached-provider ports; use the Project Entities Ports view for complete port inventory review. Certificate status is intentionally split into `expired`, `expiring_14d`, `expiring_30d`, `healthy`, and `unknown`; missing certificate intel stays `unknown` and is never treated as healthy. Finding rollups track review-state counts, verification-state counts, suppression count, and the highest actionable severity after ignoring suppressed and `false_positive` findings. The browser renders project-wide triage and verification progress directly from those target counts, with false-positive, suppressed, and not-applicable findings shown as side counts instead of funnel stages. The operational tempo block stays bounded to last linked run, seven-day linked-run count, latest triage update, and latest run artifact, while recent activity reuses the Activity tab's safe audit event target types for workspace-tab jumps. Coverage gaps stay bounded too: they summarize targets with no app-captured scan, targets awaiting verification, and targets needing review or follow-up, then reuse existing Entities/Findings filter hints instead of inventing a new gap-navigation contract. Deliverables status summarizes latest package save/build, latest report save/export, latest finding activity, and report freshness, using persisted package/report rows plus scoped build/export audit events.
 
-Recent-change state is explicit instead of inferred from counts. `windowed` means the overview has a bounded monitoring/digest-style window, `watcher-context-only` means it can show latest watcher context without a digest window, and `not-monitored` means the project has no monitoring context to summarize. Target actions use existing filter parameters rather than a new query language: Entities hints can carry `target_id` or `run_id`; Findings hints can carry `target_id`, `severity`, `review_state`, and orphan-source mode. The browser clears stale Project filters before applying those hints so a row launch lands on the backend-selected target context.
+Recent-change state is explicit instead of inferred from counts. `windowed` means the overview has a bounded monitoring/digest-style window, `watcher-context-only` means it can show latest watcher context without a digest window, and `not-monitored` means the project has no monitoring context to summarize. Target actions use existing filter parameters rather than a new query language: Entities hints can carry `target_id` and `run_id`, Ports hints carry `entity_type='port'` plus `host_entity_id`, and Findings hints can carry `target_id`, `severity`, `review_state`, and orphan-source mode. The browser clears stale Project filters before applying those hints so a row launch lands on the backend-selected target context.
 
 Project Findings can be reviewed in the normal paged list, the desktop inline board on the Findings tab, or the larger desktop Findings Board modal opened from Projects, Atlas, or the rail. Mobile Projects and Atlas keep Findings in their list/detail flows instead of exposing the wide board. All review paths write through the same finding review route, so dragging a desktop card between lanes or changing its review select updates the same review state that Atlas and Run Details read.
 
@@ -1277,13 +1316,13 @@ The full route surface is enumerated in **HTTP Route Inventory →  → Project 
 
 ## Atlas and Entity Model
 
-Atlas is the entity-first triage surface that turns saved external-run output into a deduplicated graph of public IPs, domains, URLs, hashes, and CVEs. Runs are the *source* of entities; projects are a *curated subset*; the active personal or team scope owns the entity graph.
+Atlas is the entity-first triage surface that turns saved external-run output into a deduplicated graph of public IPs, domains, ports, URLs, hashes, and CVEs. Runs are the *source* of entities; projects are a *curated subset*; the active personal or team scope owns the entity graph. Port entities are app-native scanner evidence tied to a host entity, not provider-backed intel targets.
 
-**Materialization.** Entity rows are written at run-finalize time from classifier-extracted ranges, deduplicated by `(session_id, type, signature_hash)` for personal rows or `(team_id, type, signature_hash)` for team rows, and joined to runs through `entity_run_links` with per-run first/last-seen timestamps and occurrence counts. Materialization is idempotent so re-finalizing a run does not double-count. Builtin runs do not produce entities — only external-run output participates in materialization. The full schema is described under **State And Persistence →  → Database**.
+**Materialization.** Entity rows are written at run-finalize time from classifier-extracted ranges, deduplicated by `(session_id, type, signature_hash)` for personal rows or `(team_id, type, signature_hash)` for team rows, and joined to runs through `entity_run_links` with per-run first/last-seen timestamps and occurrence counts. Port entities store `host_entity_id` plus lightweight attributes such as service, version, or banner when scanner output provides them. URL entities also store `host_entity_id` after the canonical URL host is resolved to a scoped `domain` or `ip` entity; direct URL upserts and URL Project target discovery create that host row when needed so imports, package paths, and command-target evidence follow the same relationship. Materialization is idempotent so re-finalizing a run does not double-count. Builtin runs do not produce entities — only external-run output participates in materialization. The full schema is described under **State And Persistence →  → Database**.
 
-**Surface.** `static/js/features/atlas/` owns the top-level Atlas overlay used from the desktop rail, mobile menu, `Alt+A`, History actions, Run Details, project-filtered launches from Projects, and entity tokens rendered inside transcripts. The Atlas surface lists deduped active-scope entities by type, searches entity values plus labels/notes, opens an entity detail side sheet, refreshes app-native intel snapshots, links entities to the active project, exports filtered entity rows as CSV or JSONL, and edits labels/notes through `ui_entity_metadata.js`. Entity detail responses include a backend-derived `intel_summary` built from the latest normalized provider snapshots, so the detail view can show compact provider-grouped high-signal fields while expandable provider cards keep the full structured per-provider detail close by. Large source-run and finding collections are paged inside the detail view, so older entity evidence remains reachable without loading every linked row at once. Its dedicated tab row uses the same tab primitive as Run Details, and its left-side entity/finding lists use the same full-width row treatment as the History drawer. Its Findings tab reads the same unified `findings` table as Projects and Run Details, gives users a cross-run triage queue with review-state and orphan-source filters, supports single or visible-page bulk review updates, and can launch the larger desktop Findings Board with the current Atlas filters carried over. All Atlas tabs share History-style select mode for visible-page bulk deletion; entity bulk delete also removes findings attached to the selected entities. The detail view can delete one entity or finding, and the confirmation can also sweep same-source Atlas siblings, keeping curated rows by default and offering a separate opt-in for curated single-source cleanup. Source runs can also be cleaned from Atlas without deleting their History transcript; shared or curated rows are recalculated and kept by default when they still have another source, project link, project-visible finding relationship, label, note, or review state. The desktop split is tab-aware: Findings keeps the wide queue on the left, while entity tabs narrow the index column and give the detail/intel pane most of the width. Mobile Atlas uses the same controller state with a dedicated list/detail drill-in surface in `atlas_mobile.js` and `atlas-mobile.css`: tabs, filters, select mode, action sheets, Back navigation, and detail-first launches are rendered as mobile-native views instead of collapsing the desktop split. `output.js` decorates classifier-provided entity ranges as transcript tokens and routes token clicks, long-presses, and context menus into Atlas. `static/css/features/atlas.css` and `static/css/features/atlas-mobile.css` keep the surface and transcript-token actions on the same sheet/menu primitives as History, Projects, and Status Monitor.
+**Surface.** `static/js/features/atlas/` owns the top-level Atlas overlay used from the desktop rail, mobile menu, `Alt+A`, History actions, Run Details, project-filtered launches from Projects, and entity tokens rendered inside transcripts. The Atlas surface lists deduped active-scope entities by type, searches entity values plus labels/notes, opens an entity detail side sheet, refreshes app-native intel snapshots, links entities to the active project, exports filtered entity rows as CSV or JSONL, and edits labels/notes through `ui_entity_metadata.js`. Atlas filter controls include source-run and project selectors; project-scoped launches populate the project selector and chip, saved views preserve the project scope, and clearing filters clears both source-run and project scope. Entity detail responses include a backend-derived `intel_summary` built from the latest normalized provider snapshots, so the detail view can show compact provider-grouped high-signal fields while expandable provider cards keep the full structured per-provider detail close by. Large source-run and finding collections are paged inside the detail view, so older entity evidence remains reachable without loading every linked row at once. Its dedicated tab row uses the same tab primitive as Run Details, and its left-side entity/finding lists use the same full-width row treatment as the History drawer. Its Findings tab reads the same unified `findings` table as Projects and Run Details, gives users a cross-run triage queue with review-state and orphan-source filters, supports single or visible-page bulk review updates, and can launch the larger desktop Findings Board with the current Atlas filters carried over. All Atlas tabs share History-style select mode for visible-page bulk deletion; entity bulk delete also removes findings attached to the selected entities. The detail view can delete one entity or finding, and the confirmation can also sweep same-source Atlas siblings, keeping curated rows by default and offering a separate opt-in for curated single-source cleanup. Source runs can also be cleaned from Atlas without deleting their History transcript; shared or curated rows are recalculated and kept by default when they still have another source, project link, project-visible finding relationship, label, note, or review state. The desktop split is tab-aware: Findings keeps the wide queue on the left, while entity tabs narrow the index column and give the detail/intel pane most of the width. Mobile Atlas uses the same controller state with a dedicated list/detail drill-in surface in `atlas_mobile.js` and `atlas-mobile.css`: tabs, filters, select mode, action sheets, Back navigation, and detail-first launches are rendered as mobile-native views instead of collapsing the desktop split. `output.js` decorates classifier-provided entity ranges as transcript tokens and routes token clicks, long-presses, and context menus into Atlas. `static/css/features/atlas.css` and `static/css/features/atlas-mobile.css` keep the surface and transcript-token actions on the same sheet/menu primitives as History, Projects, and Status Monitor.
 
-**Intel snapshots.** Per-entity cached intel data lives in `entity_intel_snapshots`, keyed `(entity_id, provider)` so refresh, expiry, and per-provider quota stories stay tractable. The refresh route writes through the same provider orchestration used by the terminal `intel` command — see **Intel and Provider Integrations**.
+**Intel snapshots.** Per-entity cached intel data lives in `entity_intel_snapshots`, keyed `(entity_id, provider)` so refresh, expiry, and per-provider quota stories stay tractable. The refresh route writes through the same provider orchestration used by the terminal `intel` command — see **Intel and Provider Integrations**. Ports are intentionally excluded from provider refresh because they represent app-captured scan evidence.
 
 **Findings model.** `findings` is a single entity-owned table deduped across personal runs by session and across team runs by team using a stable signature; `findings_occurrences` records per-run sightings. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through linked source runs or linked Atlas entities, not separate finding membership rows. Remediation, verification steps, verification status, and verification notes live in `finding_triage_details`, scoped by the same personal/team owner model as labels and notes. List responses carry compact triage previews and flags, while the internal `/findings/<finding_id>/triage` route returns and saves the full text. Evidence package finding JSON and Markdown include remediation and verification steps/status for selected findings; verification notes are included only when private notes are enabled, and redacted packages scrub those fields before rendering.
 
@@ -1304,7 +1343,7 @@ Atlas can export the current session's entity rows as CSV or JSONL for handoff, 
 | Parameter | Values | Default | Notes |
 | --- | --- | --- | --- |
 | `format` | `csv`, `jsonl` | `csv` | Controls the file format. |
-| `type` | `ip`, `domain`, `url`, `hash`, `cve` | all types | Matches the Atlas entity tabs. |
+| `type` | `ip`, `domain`, `port`, `url`, `hash`, `cve` | all types | Matches the Atlas entity tabs. |
 | `q` | text | empty | Filters by canonical entity value. |
 | `project_id` | project id | empty | Limits results to entities linked to that project. |
 | `orphan_filter` | `hide`, `all`, `only` | `hide` | Controls whether rows without a live source run are hidden, included, or exported by themselves. |
@@ -1318,8 +1357,10 @@ The Atlas UI sends the same `type`, search text, project filter, orphan-source f
 | Field | CSV | JSONL | Description |
 | --- | --- | --- | --- |
 | `id` | string | string | Atlas entity id. |
-| `type` | string | string | Entity type: `ip`, `domain`, `url`, `hash`, or `cve`. |
+| `type` | string | string | Entity type: `ip`, `domain`, `port`, `url`, `hash`, or `cve`. |
 | `canonical_value` | string | string | Normalized entity value. |
+| `host_entity_id` | string | string | Host entity id for host-owned rows. Port rows point at the scanned host; URL rows point at the scoped domain or IP derived from the canonical URL host. Empty for entity types without a host relationship. |
+| `attributes_json` | JSON string | object | Port service/version/banner attributes when known. Empty for rows without app-captured attributes. |
 | `first_seen_at` | string | string | First time Atlas saw the entity in this session. |
 | `last_seen_at` | string | string | Most recent time Atlas saw the entity in this session. |
 | `occurrence_count` | number | number | Total materialized occurrences across saved source runs. |
@@ -1369,13 +1410,21 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, twenty-six persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. SQLite connections set `wal_autocheckpoint=1000`, and Flask workers periodically run `PRAGMA wal_checkpoint(TRUNCATE)` before requests so the WAL sidecar stays bounded during long-running containers. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, schedule storage and fire audits, audit event recording, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, notification channel/event rows, audit event rows, and triggers, then later migrations add run-history search indexes, Atlas search/detail indexes, Project Findings paging indexes, API token last-seen tracking, notification storage, team-owned workspace metadata scopes, report drafts, audit storage, and run-output summary backfill markers. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, `darklab_shell_notification_sweep`, and `darklab_shell_workspace`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
+SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, app-owned persistent tables, an FTS5 virtual table, and file-backed run-output artifacts. SQLite connections set `wal_autocheckpoint=1000`, and Flask workers periodically run `PRAGMA wal_checkpoint(TRUNCATE)` before requests so the WAL sidecar stays bounded during long-running containers. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, schedule storage and fire audits, audit event recording, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Fresh empty SQLite and Postgres schemas enter through the unified `0039` baseline path and record earlier migration versions as satisfied. The SQLite baseline definition (`core/migrations/baseline.py`) is the single source of truth for the shared schema, and the Postgres baseline is generated from it — translating the SQLite DDL, with a `_POSTGRES_COLUMN_OVERRIDES` table for the `BIGINT`/`JSONB`/`BYTEA` columns SQLite stores as plain integer/text/blob, plus explicit Postgres-only artifacts (`pg_trgm` indexes and triggers) — so fresh Postgres renders the shared tables and indexes from that source instead of replaying `0001` through `0038`. A normalized drift guard and a generated-vs-legacy equivalence test fail CI if the two backends' heads diverge, so the single definition cannot silently drift; forward schema changes are new `0040+` migrations rather than edits to the frozen baseline (see [CONTRIBUTING.md → Changing the Database Schema](CONTRIBUTING.md#changing-the-database-schema)). Ledgered SQLite startup no longer walks the retired compatibility ladder, current-head pre-ledger SQLite databases are verified against the shared schema manifest before they receive the unified `schema_migrations` ledger stamp, and unknown pre-ledger SQLite shapes fail closed before destructive mutation. `db_init()` routes both backends through the same schema-migration helper, then runs shared post-schema maintenance such as run-output summary population, URL-host linking, retention pruning, audit pruning, host-type audits, SQLite output-search text population, and watcher field inference. Postgres schema work still runs behind a transaction-scoped advisory lock; existing Postgres databases that already carry `0001` through `0038` advance by recording the `0039` reconciliation marker, while future `0040+` migrations execute normally after the frozen baseline on fresh databases. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, `darklab_shell_notification_sweep`, and `darklab_shell_workspace`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
+The supported bridge for an older pre-ledger SQLite file is to start it once with `darklab_shell` 2.3.1 so the retired compatibility ladder reaches the current head, then move to the unified schema-ledger path. Older SQLite shapes that still do not match the head fail closed before any schema mutation.
+
+Existing Postgres databases that already carry the `0001` through `0038` ledger verify their live tables, columns, shared indexes, shared triggers, and Postgres artifacts against the shared head manifest before the `0039` marker is written. If required head objects are missing, startup fails closed instead of stamping an unsafe reconciliation marker.
+
+Current-head checks build from the frozen `0039` baseline plus every later migration through each backend's `statements_for(...)` path, so dialect-specific `0040+` statements are part of the manifest and strict drift guard.
+
+The old `_create_schema`, `_create_indexes`, and `_create_fts_schema` names still exist as compatibility wrappers for tests and narrow internal callers, but they delegate to `core/migrations/baseline.py`; they are not a separate fresh-SQLite schema definition.
+
 Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Active-project capture links eligible completed runs first, then can link the Atlas entities produced by that run once entity materialization completes. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned artifacts stay attached to their source run and surface in project views through linked runs; findings surface through linked runs or linked Atlas entities.
 
-The schema is shown as one compact topology diagram for the full relationship model, then three field-level diagrams for the clusters where column shapes carry real meaning. The diagrams use SQLite table names for the default backend. Postgres creates the same app-owned tables through migrations plus `schema_migrations`, but it does not create `runs_fts`; Postgres run search uses `pg_trgm` GIN indexes on `runs.command` and `runs.output_search_text`, and Atlas search uses trigram indexes on entity values plus finding title/raw-line/tool fields. Per-table field reference continues in the prose list below.
+The schema is shown as one compact topology diagram for the full relationship model, then three field-level diagrams for the clusters where column shapes carry real meaning. The diagrams use SQLite table names for the default backend. Postgres creates the same app-owned tables through the unified baseline plus `schema_migrations`, but it does not create `runs_fts`; Postgres run search uses `pg_trgm` GIN indexes on `runs.command` and `runs.output_search_text`, and Atlas search uses trigram indexes on entity values plus finding title/raw-line/tool fields. Per-table field reference continues in the prose list below.
 
 #### Schema topology
 
@@ -1624,7 +1673,7 @@ erDiagram
 
 - `runs` — one row per completed command. Stores run metadata, including `team_id` for team-owned runs and `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores `owner_tab_id` for completed runs that came from a terminal tab, which lets terminal-native commands such as `project link run last` resolve "last" within the tab that issued the command. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries plus optional signal and entity metadata so run permalinks can preserve prompt echo, timestamp metadata, scoped findings, and extracted public IP/domain/hash/CVE hints. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects the default SQLite database from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for backend search indexing. When `runs_search_text_inline_max_bytes` is set, oversized search bodies move to `data_dir/body-store` and the column keeps pointer metadata plus a short preview. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — SQLite-only FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output on SQLite. Postgres does not create this table; its migrations create `pg_trgm` GIN indexes for the same command/output substring search behavior and for Atlas entity/finding substring search.
-- `schema_migrations` — Postgres-only migration bookkeeping table. It records app-owned migration versions so startup and the SQLite-to-Postgres migration helper can verify that a destination schema has the expected baseline before app data is copied.
+- `schema_migrations` — migration bookkeeping table for SQLite and Postgres. It records app-owned migration versions so startup and the SQLite-to-Postgres migration helper can verify that a schema has the expected baseline before app data is copied.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under hash-sharded `<data_dir>/run-output/` paths. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `run_output_summary` — compact run-level counts for structured output `kind`, `role`, and `signal` values. History and API filters such as `kind:error`, `kind!=info`, `signal:findings`, and `role:exit-fail` use this table to page through matching runs without reloading each transcript artifact. Startup backfills missing rows from the full artifact when it exists, otherwise from the stored preview.
 - `run_output_summary_status` — one row per run that startup already tried to backfill for `run_output_summary`. It marks successful empty summaries and bounded failures so legacy runs with no structured output, missing artifacts, or unreadable previews don't get retried on every restart.
@@ -1642,7 +1691,7 @@ erDiagram
 - `secrets` — one row per encrypted secret name per vault scope `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Personal scopes use the user's session token as the stored `session_token`; team scopes use the team id as the stored vault-scope id. Storage also rejects attempts to bind the same consumer env name to two different secrets in one scope, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session attribution, optional `team_id` ownership for shared team projects, display metadata, status, timestamps, and session/team-scoped slugs. Project notes are stored through `entity_notes` with `entity_type='project'`.
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Run-owned file artifacts are intentionally reached through linked runs, while findings are reached through linked runs or linked Atlas entities instead of direct project links.
-- `entities` — personal or team-owned Atlas rows for normalized public IPs, domains, URLs, hashes, and CVEs extracted from saved external-run output metadata. The app stores a canonical value, a stable signature hash, first/last seen timestamps, and an aggregate occurrence count so entity lists are deduplicated across runs in the active owner scope.
+- `entities` — personal or team-owned Atlas rows for normalized public IPs, domains, ports, URLs, hashes, and CVEs extracted from saved external-run output metadata. The app stores a canonical value, a stable signature hash, first/last seen timestamps, an aggregate occurrence count, and `host_entity_id` for host-owned rows such as ports and URLs so entity lists are deduplicated across runs in the active owner scope.
 - `entity_run_links` — many-to-many Atlas source links from entities to runs, with first/last seen timestamps and per-run occurrence counts. Run pruning removes these link rows while leaving the deduplicated entity row available for labels, notes, project links, and intel snapshots. Run-delete confirmations can also remove disposable entities and findings that only came from the deleted run, with a separate opt-in for curated single-source rows.
 - `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. When `intel_payload_inline_max_bytes` is set, oversized provider JSON moves to `data_dir/body-store` and detail reads resolve the pointer before rendering. Atlas derives compact `intel_summary` highlights from these rows at read time instead of storing duplicate summary columns. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
@@ -1743,8 +1792,18 @@ The current event inventory is:
 
 | Level | Event | Where | Key extra fields |
 | ------- | ------- | ------- | ----------------- |
-| DEBUG | `REQUEST` | `before_request` | ip, method, path, qs |
-| DEBUG | `RESPONSE` | `after_request` | ip, method, path, status, size |
+| DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
+| DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, status, size |
+| DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
+| DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
+| DEBUG | `RUNTIME_BOOTSTRAP_STEP_COMPLETED` | runtime bootstrap | step, runtime |
+| DEBUG | `RUNTIME_BOOTSTRAP_STEP_SKIPPED` | runtime bootstrap | step, reason, runtime |
+| DEBUG | `PROCESS_RUNTIME_INIT_STARTED` | process tracking startup | force, redis_configured, fake_redis |
+| DEBUG | `PROCESS_RUNTIME_INIT_SKIPPED` | process tracking startup | reason, redis_mode |
+| DEBUG | `DB_INIT_LOCK_WAITING` | database startup lock | backend, lock_path |
+| DEBUG | `DB_INIT_LOCK_ACQUIRED` | database startup lock | backend, lock_path, wait_ms |
+| DEBUG | `DB_INIT_LOCK_RELEASED` | database startup lock | backend, lock_path |
+| DEBUG | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_SKIPPED` | active-run startup cleanup | reason, pid |
 | DEBUG | `KILL_MISS` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role |
 | DEBUG | `HEALTH_OK` | `health()` | — |
 | DEBUG | `ACTIVE_RUNS_VIEWED` | `get_active_history_runs` | ip, session, count |
@@ -1759,13 +1818,15 @@ The current event inventory is:
 | DEBUG | `BROKER_STREAM_CLIENT_GONE` | `stream_run_events` | run_id, reason |
 | DEBUG | `BROKER_STREAM_REATTACHED` | `stream_run_events` | run_id, after_id |
 | DEBUG | `BROKER_REDIS_TRIM_RETRY` | broker Redis replay trimming | key, maxlen, reason |
-| DEBUG | `ADVISORY_LOCK_ACQUIRED` | Postgres migration runner | namespace, lock_id |
+| DEBUG | `ADVISORY_LOCK_ACQUIRED` | Schema migration runner | namespace, lock_id |
 | DEBUG | `PTY_METRIC_WRITE_FAILED` | PTY service metrics writes | run_id, metric, error |
 | DEBUG | `PTY_CONTROL_APPLIED` | interactive PTY control handling | run_id, action, bytes/rows/cols |
 | DEBUG | `DIAG_REDIS_SCAN_KEY_FAILED` | `/diag` Redis probes | stage, error |
 | DEBUG | `METRICS_INTEL_CACHE_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
 | DEBUG | `METRICS_AI_ASSIST_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
 | DEBUG | `AI_WORKER_TICK` | AI worker loop | processed |
+| DEBUG | `AI_WORKER_DEPENDENCIES_LOADING` | AI worker startup | — |
+| DEBUG | `AI_WORKER_DEPENDENCIES_SKIPPED` | AI worker startup | reason |
 | DEBUG | `AI_ASSIST_PROGRESS_UPDATE_FAILED` | AI worker progress storage | assist_id, run_id (+ traceback) |
 | DEBUG | `AI_COORDINATION_LEGACY_SLOT_DELETE_FAILED` | AI Redis coordination cleanup | (+ traceback) |
 | DEBUG | `NOTIFICATION_WORKER_TICK` | notification worker | delivered, limit |
@@ -1774,18 +1835,29 @@ The current event inventory is:
 | DEBUG | `NOTIFICATION_SMTP_SEND_ATTEMPT` | notification email channel | host, port, tls_mode, timeout, channel_id |
 | DEBUG | `SCHEDULE_FIRE_CLAIMED` | scheduler dispatch | schedule_id, owner_kind, session, claimed, fired_at, command_root |
 | DEBUG | `BODY_STORE_DELETE_MISS` | large body storage | rel_path, kind |
+| DEBUG | `CONFIG_SOURCE_SELECTED` | config loading | conf_dir, local_overlay |
+| DEBUG | `CONFIG_OVERLAY_APPLIED` | config loading | source, known_keys, unknown_keys |
+| DEBUG | `CONFIG_ENV_OVERRIDES_APPLIED` | config loading | env_keys |
+| DEBUG | `CONFIG_LEGACY_KEY_MIGRATED` | config loading | legacy_key, target_key, source |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format |
-| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled |
+| INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
+| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
+| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
+| INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
+| INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
 | INFO | `DB_BACKEND_SELECTED` | `db_init` | backend |
 | INFO | `POSTGRES_POOL_OPENED` | Postgres backend pool | pool_min, pool_max, jit_enabled |
 | INFO | `POSTGRES_POOL_CLOSED` | Postgres backend pool | — |
 | INFO | `REDIS_CONNECTED` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db |
 | INFO | `REDIS_FAKE_ENABLED` | process tracking startup | fallback |
-| INFO | `MIGRATION_APPLIED` | Postgres migration runner | version, migration_name |
+| INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
+| INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
+| INFO | `MIGRATION_APPLIED` | Schema migration runner | version, migration_name |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
-| INFO | `GUNICORN_WORKER_EXITED` | Gunicorn worker hook | pid |
+| INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
+| INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
+| INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, status, duration_ms |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
 | INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
@@ -1850,6 +1922,13 @@ The current event inventory is:
 | DEBUG | `PROJECT_AUTO_PROMOTE_RULE_PREVIEWED` | Project auto-promote preview route | ip, session, team_id, actor_member_id, actor_role, project_id, target_entity_kind, match_mode, matched/new/promotable/quota/cap counts, limit, truncated |
 | DEBUG | `PROJECT_AUTO_PROMOTE_MATCH_SCAN` | Project auto-promote matching service | session, team_id, project_id, rule_id, target_entity_kind, match_mode, source filter counts, sql_matched, include_suppressed, scan/candidate/match/quota/cap counts, limit, truncated |
 | DEBUG | `PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, source filter counts, linked/promoted/already-linked/new/quota/cap counts, limit, truncated |
+| DEBUG | `OUTPUT_SIGNAL_PORT_ENTITY_SKIPPED` | output signal classifier | command_root, line_index, reason, port, proto, host_kind, host_hash |
+| DEBUG | `ATLAS_ENTITY_MATERIALIZATION_SUMMARY` | Atlas entity materializer | session, team_id, run_id, command_root, entity/occurrence/invalid/port/url/url-host/attribute/scan-observation counts |
+| INFO | `ATLAS_URL_HOST_BACKFILL_COMPLETED` | startup URL host-link backfill | backend, url_entity_count, updated_count, skipped_count |
+| WARN | `ATLAS_URL_HOST_BACKFILL_SKIPPED_ROWS` | startup URL host-link backfill | backend, url_entity_count, invalid_url_count, host_upsert_miss_count, update_miss_count |
+| ERROR | `ATLAS_URL_HOST_BACKFILL_ROW_FAILED` | startup URL host-link backfill | backend, stage, url_entity_id, session, team_id, host_entity_type |
+| DEBUG | `SCAN_TARGET_OBSERVATIONS_SKIPPED` | Atlas entity materializer | session, team_id, run_id, command_root, deleted_count, reason |
+| DEBUG | `ATLAS_ENTITY_ATTRIBUTES_DROPPED` | Atlas entity materializer | session, team_id, run_id, entity_id, entity_type, value_type, reason |
 | DEBUG | `ATLAS_IMPORT_PARSE_STARTED` | Atlas import parser | format_id, upload_bytes, max_rows, max_warnings, max_xml_elements |
 | DEBUG | `ATLAS_IMPORT_PARSE_COMPLETED` | Atlas import parser | format_id, upload_bytes, rows, entities, findings, skipped, warning_count, suppressed_warning_count, warning_codes, max_rows, max_warnings, max_xml_elements |
 | DEBUG | `AI_CONTEXT_BUILT` | AI context assembly | run_id, session, variant, output_source, output_truncated, max_input_chars, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes, useful, omitted_sections, section_count, context_hash |
@@ -1861,6 +1940,7 @@ The current event inventory is:
 | INFO | `PROJECT_AUTO_PROMOTE_RULE_CREATED` / `UPDATED` / `DELETED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, enabled, apply_on_run, target_entity_kind, match_mode |
 | INFO | `PROJECT_AUTO_PROMOTE_RULE_APPLIED` | Project auto-promote apply route | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, matched/linked/promoted/skipped/quota/cap counts, limit, truncated |
 | INFO | `PROJECT_AUTO_PROMOTE_RUN_APPLIED` | run finalization | run_id, session, team_id, project_ids, rule_ids, bounded rule_results, aggregate match/link/promote/quota/cap counts |
+| INFO | `ATLAS_ENTITIES_CAPTURED` | run finalization | run_id, session, team_id, count, entity_type_counts, port_entity_count, scan_observation_count |
 | INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, status, fired_at, run_id, last_error |
 | INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
@@ -1886,12 +1966,15 @@ The current event inventory is:
 | INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
 | INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
+| INFO | `AI_WORKER_DEPENDENCIES_LOADED` | AI worker startup | variants, metrics_initialized |
 | INFO | `AI_WORKER_STARTED` | AI worker startup | — |
 | INFO | `AI_ASSIST_PROVIDER_REQUEST` | AI provider call start | assist_id, run_id, variant, model, connect_timeout_seconds, read_timeout_seconds |
 | INFO | `AI_ASSIST_COMPLETED` | AI worker completion | assist_id, run_id, variant, duration_ms, context_hash, input_chars, output_chars, estimated_input_tokens, redacted_bytes, suggestion_count, rejected_count, provider timing fields |
 | INFO | `AI_ASSIST_SUMMARY_FALLBACK` | AI summary orchestration | assist_id, run_id, variant, reason |
 | INFO | `AI_ASSIST_NEXT_COMMANDS_FALLBACK` | AI next-command orchestration | assist_id, run_id, variant, reason |
 | INFO | `AI_WORKER_STOPPED` | AI worker shutdown | — |
+| INFO | `NOTIFICATION_WORKER_STARTED` | notification worker | pid, poll_seconds, limit |
+| INFO | `NOTIFICATION_WORKER_STOPPED` | notification worker | pid |
 | INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
@@ -1955,6 +2038,8 @@ The current event inventory is:
 | WARN | `ATLAS_IMPORT_WARNINGS_TRUNCATED` | Atlas import parser | format_id, skipped, warning_count, suppressed_warning_count, max_warnings, warning_codes |
 | WARN | `ATLAS_IMPORT_APPLY_STALE_CLEANED` | Atlas import draft cleanup | previewed_count, applying_count, cutoff |
 | WARN | `ATLAS_IMPORT_CONFIG_LIMIT_INVALID` | Atlas import config readers | key, default, configured_type, configured_value |
+| WARN | `SCAN_TARGET_OBSERVATIONS_DROPPED` | Atlas entity materializer | session, team_id, run_id, command_root, deleted_count, reason |
+| WARN | `ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED` | Atlas entity materializer | session, team_id, entity_id, entity_type, value_type, reason |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
 | WARN | `DIAG_REDIS_SCAN_INCOMPLETE` | `/diag` Redis probes | stage, error |
 | WARN | `INTEL_PROVIDERS_DISABLED` | Atlas intel refresh | session, entity_id, entity_type |
@@ -1966,7 +2051,8 @@ The current event inventory is:
 | WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
-| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit, scope |
+| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, request_id, path, limit, scope |
+| WARN | `RATE_LIMIT_STORAGE_FALLBACK` | rate-limit storage setup | reason, fallback, redis_configured |
 | WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
 | WARN | `CMD_TIMEOUT_TERMINATE_FAILED` | brokered run timeout cleanup | ip, run_id, session, cmd (+ traceback) |
 | WARN | `CLIENT_RUN_OUTPUT_INVALID` | client-side run persistence | ip, session, cmd, payload_type |
@@ -1975,9 +2061,13 @@ The current event inventory is:
 | WARN | `RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK` | full-output artifact loading | rel_path, row_index, reason, error |
 | WARN | `COMMAND_REGISTRY_LOCAL_OVERLAY_INVALID` | command registry loading | path, error |
 | WARN | `BODY_STORE_LOAD_FALLBACK` | large body storage | rel_path, kind, error |
-| WARN | `CONFIG_LOCAL_LOAD_FAILED` | config loading | path, error |
+| WARN | `CONFIG_UNKNOWN_KEY_IGNORED` | config loading | key, source |
+| WARN | `CONFIG_VALUE_DROPPED` | config loading | key, source, reason, cidr/suffix |
+| WARN | `CONFIG_VALUE_DEFAULTED` | config loading | key, source, reason, fallback |
+| WARN | `CONFIG_VALUE_CLAMPED` | config loading | key, source, reason, minimum/maximum |
 | WARN | `POSTGRES_READ_RETRY` | Postgres backend read retry | sqlstate, operation, retry_delay_ms |
 | WARN | `REDIS_UNAVAILABLE` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db, redis_configured, fallback |
+| WARN | `WORKSPACE_ROOT_MISMATCH` | runtime bootstrap | workspace_root_env, workspace_root_config |
 | WARN | `AI_SECRET_LOOKUP_FAILED` | AI provider credentials | secret_name (+ traceback) |
 | WARN | `AI_CONTEXT_SECRET_METADATA_LOAD_FAILED` | AI context redaction | session (+ traceback) |
 | WARN | `AI_CONTEXT_FULL_OUTPUT_LOAD_FAILED` | AI context assembly | run_id, rel_path, error |
@@ -1994,6 +2084,7 @@ The current event inventory is:
 | WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message |
 | WARN | `AI_WORKER_DATABASE_INTERRUPTED` | AI worker database loop | error_type |
 | WARN | `ACTIVE_RUN_METADATA_DECODE_FAILED` | process tracking metadata | key, error |
+| WARN | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED` | active-run startup cleanup | reason, fallback, pid |
 | WARN | `REDIS_SESSION_SET_READ_FAILED` | process tracking metadata | key (+ traceback) |
 | WARN | `REDIS_SCAN_FAILED` | process tracking metadata | pattern (+ traceback) |
 | WARN | `METRICS_DB_COLLECT_FAILED` | Prometheus runtime collector | database_backend (+ traceback) |
@@ -2010,6 +2101,12 @@ The current event inventory is:
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `CONFIG_LOAD_FAILED` | config loading | phase, source, key, error (+ traceback when available) |
+| ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
+| ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
+| ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
+| ERROR | `METRICS_ENVIRONMENT_SETUP_FAILED` | metrics startup | prometheus_multiproc_dir, source (+ traceback) |
+| ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |
 | ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |
 | ERROR | `WATCHER_FINALIZE_ERROR` | run finalization watcher hook | run_id, session (+ traceback) |
 | ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
@@ -2021,21 +2118,26 @@ The current event inventory is:
 | ERROR | `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` | Project auto-promote run-finalization service | session, team_id, run_id, project_id, rule_id, target_entity_kind, match_mode, limit (+ traceback) |
 | ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
 | ERROR | `NOTIFICATION_CHANNEL_SEND_EXCEPTION` | notification dispatcher | event_id, channel_id, kind, trigger (+ traceback) |
+| ERROR | `NOTIFICATION_WORKER_BOOTSTRAP_FAILED` | notification worker | phase (+ traceback) |
 | ERROR | `NOTIFICATION_WORKER_CRASHED` | notification worker | phase, limit, poll_seconds (+ traceback) |
 | ERROR | `POSTGRES_POOL_OPEN_FAILED` | Postgres backend pool | pool_min, pool_max, jit_enabled (+ traceback) |
 | ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, consecutive_failures, error, command_root (+ traceback) |
 | ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
+| ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
+| ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
-| ERROR | `MIGRATION_FAILED` | Postgres migration runner | version, migration_name, error (+ traceback) |
+| ERROR | `MIGRATION_FAILED` | Schema migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
-| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, method, path, status (+ traceback) |
+| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, request_id, method, path, status (+ traceback) |
+| CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ### Logging Shape Notes
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
 - run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
+- web bootstrap runs active-run metadata cleanup through a Redis-backed ownership guard; no-Redis deployments keep the previous per-worker cleanup fallback, while multi-worker startup without Redis fails closed with `REDIS_REQUIRED_FOR_MULTI_WORKER`
 - diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the command-execution path
 - proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
 
@@ -2112,6 +2214,8 @@ The Flask index route embeds the same normalized browser config payload that `/c
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence and storage controls such as `persist_full_run_output`, `full_output_max_mb`, and the `workspace_*` settings stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB values are converted to bytes internally before artifact or workspace quota logic runs.
 
+Backend config is loaded into one validated, pydantic-backed `AppConfig` object at startup. `config.yaml`, `config.local.yaml`, and supported environment variables feed that object in precedence order; known nested sections merge by field; unknown keys are warned and ignored; malformed YAML or invalid structural types stop startup before Flask or worker loops proceed. The public object remains mapping-compatible for older callers, attribute access exposes typed nested sections for new code, and `model_json_schema()` exposes the schema for tooling and tests.
+
 This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob. The full theme contract lives in its own top-level section below.
 
 ---
@@ -2132,12 +2236,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,860
-- docs/inventory meta-tests: 48
-- `pytest`: 2181 (2146 behavior + 35 meta)
-- `vitest`: 1460 (1447 behavior + 13 meta)
+- behavior tests: 3,994
+- docs/inventory meta-tests: 63
+- `pytest`: 2314 (2264 behavior + 50 meta)
+- `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 3,910
+- total: 4,057
 
 ### Testing Architecture
 

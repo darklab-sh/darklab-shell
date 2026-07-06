@@ -14,8 +14,10 @@ Run with: pytest tests/ (from the repo root)
 
 import errno
 import base64
+import csv
 import gzip
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -35,7 +37,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import IO, cast
 
 import pytest
@@ -52,7 +54,10 @@ import services.projects.package_presets as package_presets
 import services.projects.provenance as project_provenance
 import services.reports.storage as report_storage
 import services.reports.templates as report_templates
-import app as shell_app
+import runtime_bootstrap
+import app as shell_app_module
+from conftest import build_test_config
+from conftest import make_test_app as _test_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.registry_loader as registry_loader_module
@@ -298,7 +303,10 @@ class TestAIAssistProviderClient:
         def unavailable_request(self, method, path, payload=None):
             raise AIClientError("ai_unavailable", "AI provider request failed: timed out")
 
-        monkeypatch.setattr("services.ai.client.app_metrics.record_ai_request", record_ai_request)
+        monkeypatch.setattr(
+            "services.ai.client._app_metrics",
+            lambda: SimpleNamespace(record_ai_request=record_ai_request),
+        )
         monkeypatch.setattr(OpenAICompatibleClient, "_request_json", unavailable_request)
         client = OpenAICompatibleClient({
             "ai_enabled": True,
@@ -1044,7 +1052,24 @@ class TestAIAssistContextAndStorage:
             "AI_ASSIST_STALE_RECLAIMED",
             extra={"count": 2, "stale_after_seconds": 300},
         )
-        debug.assert_called_once_with("AI_WORKER_BUSY", extra={"max_concurrent": 1})
+        debug.assert_any_call("AI_WORKER_DEPENDENCIES_LOADING")
+        debug.assert_any_call("AI_WORKER_BUSY", extra={"max_concurrent": 1})
+
+    def test_ai_worker_dependency_load_is_idempotent_after_bootstrap(self, monkeypatch):
+        from services.ai import worker
+
+        for name in worker._RUNTIME_DEPENDENCY_NAMES:
+            monkeypatch.setattr(worker, name, object())
+        monkeypatch.setattr(worker, "_VARIANT_RUNNERS", {"summary": object(), "next_commands": object()})
+
+        with mock.patch.object(worker, "setup_metrics_environment") as setup_metrics, \
+                mock.patch.object(worker.log, "debug") as debug, \
+                mock.patch.object(worker.log, "info") as info:
+            worker._load_runtime_dependencies()
+
+        setup_metrics.assert_not_called()
+        info.assert_not_called()
+        debug.assert_called_once_with("AI_WORKER_DEPENDENCIES_SKIPPED", extra={"reason": "already_loaded"})
 
     def test_ai_assist_storage_reuses_completed_cache_and_active_rows(self, monkeypatch, tmp_path):
         from services.ai.context import build_run_context
@@ -1252,7 +1277,7 @@ class TestAIAssistContextAndStorage:
             "ai_rate_limit_global_per_minute": 20,
             "diagnostics_allowed_cidrs": [],
         }
-        with shell_app.app.test_request_context("/", environ_base={"REMOTE_ADDR": "198.51.100.10"}):
+        with _test_app().test_request_context("/", environ_base={"REMOTE_ADDR": "198.51.100.10"}):
             with mock.patch.object(process, "redis_client", route_limited_redis), \
                  mock.patch.object(ai_assists.log, "warning") as warning:
                 ai_assists._enforce_ai_write_rate_limit(
@@ -1320,7 +1345,7 @@ class TestAIAssistContextAndStorage:
                 def __exit__(self, exc_type, exc, traceback):
                     return False
 
-            monkeypatch.setattr(ai_storage, "db_connect", lambda: CompatContext())
+            monkeypatch.setattr(database, "db_connect", lambda: CompatContext())
             context = SimpleNamespace(
                 context_hash="ctx-context-manager",
                 input_chars=120,
@@ -2355,10 +2380,21 @@ class TestLoadConfig:
         assert cfg["workspace_root"] == "/env/workspaces"
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
-        warning.assert_called_once_with(
-            "AI_BASE_URL_ALLOWED_CIDR_INVALID",
-            extra={"cidr": "not-a-cidr"},
-        )
+        warning.assert_has_calls([
+            mock.call(
+                "AI_BASE_URL_ALLOWED_CIDR_INVALID",
+                extra={"cidr": "not-a-cidr"},
+            ),
+            mock.call(
+                "CONFIG_VALUE_DROPPED",
+                extra={
+                    "key": "ai_base_url_allowed_cidrs",
+                    "source": "AI_BASE_URL_ALLOWED_CIDRS",
+                    "reason": "invalid_cidr",
+                    "cidr": "not-a-cidr",
+                },
+            ),
+        ])
 
     def test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
@@ -2370,10 +2406,54 @@ class TestLoadConfig:
                 cfg = app_config.load_config(tmp)
 
         assert cfg["restricted_command_input_cidrs"] == ["10.0.0.0/8", "169.254.169.254/32"]
-        warning.assert_called_once_with(
-            "RESTRICTED_COMMAND_INPUT_CIDR_INVALID",
-            extra={"cidr": "not-a-cidr"},
-        )
+        warning.assert_has_calls([
+            mock.call(
+                "RESTRICTED_COMMAND_INPUT_CIDR_INVALID",
+                extra={"cidr": "not-a-cidr"},
+            ),
+            mock.call(
+                "CONFIG_VALUE_DROPPED",
+                extra={
+                    "key": "restricted_command_input_cidrs",
+                    "source": "RESTRICTED_COMMAND_INPUT_CIDRS",
+                    "reason": "invalid_cidr",
+                    "cidr": "not-a-cidr",
+                },
+            ),
+        ])
+
+    def test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    output_entity_extra_domain_suffixes:
+                      - .LOCAL
+                      - corp
+                      - local
+                      - café
+                      - bad_suffix
+                    """
+                ))
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert cfg["output_entity_extra_domain_suffixes"] == ["local", "corp", "xn--caf-dma"]
+        warning.assert_has_calls([
+            mock.call(
+                "OUTPUT_ENTITY_EXTRA_DOMAIN_SUFFIX_INVALID",
+                extra={"suffix": "bad_suffix"},
+            ),
+            mock.call(
+                "CONFIG_VALUE_DROPPED",
+                extra={
+                    "key": "output_entity_extra_domain_suffixes",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "invalid_domain_suffix",
+                    "suffix": "bad_suffix",
+                },
+            ),
+        ])
 
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2387,8 +2467,11 @@ class TestLoadConfig:
                     prompt_domain: local
                     default_theme: base-theme.yaml
                     output_preview_max_mb: 2MB
-                    full_output_max_mb: 7MB
+                    full_output_max_bytes: 7340032
                     rate_limit_per_minute: 30
+                    ai_enabled: yes
+                    ai_max_concurrent: "3"
+                    audit_export_max_rows: 999999
                     """
                 ))
             with open(local_path, "w") as f:
@@ -2399,7 +2482,8 @@ class TestLoadConfig:
                     rate_limit_per_minute: 99
                     """
                 ))
-            cfg = app_config.load_config(tmp)
+            with mock.patch.object(app_config.log, "warning"):
+                cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "abcdefghijklmnopqrst"
         assert cfg["prompt_username"] == "local"
@@ -2417,9 +2501,12 @@ class TestLoadConfig:
         assert cfg["database_pool_min"] == 1
         assert cfg["database_pool_max"] == 5
         assert cfg["database_postgres_jit"] is False
+        assert cfg["ai_enabled"] is True
         assert cfg["ai_timeout_seconds"] == 120
+        assert cfg["ai_max_concurrent"] == 3
         assert cfg["ai_max_output_tokens"] == 120
         assert cfg["ai_next_commands_max_output_tokens"] == 180
+        assert cfg["audit_export_max_rows"] == 200000
         assert cfg["workspace_enabled"] is False
         assert cfg["workspace_backend"] == "tmpfs"
         assert cfg["workspace_quota_mb"] == 50
@@ -2489,6 +2576,334 @@ class TestLoadConfig:
         assert cfg["intel_negative_cache_threatfox_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_securitytrails_quota_seconds"] == 21600
 
+    def test_unknown_yaml_keys_warn_and_are_ignored(self):
+        app_config.CONFIG_LOAD_WARNINGS.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "config.yaml")
+            with open(config_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    unknown_top_level: ignored
+                    notifications:
+                      smtp:
+                        unknown_nested: ignored
+                    """
+                ))
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert "unknown_top_level" not in cfg
+        assert "unknown_nested" not in cfg["notifications"]["smtp"]
+        assert app_config.CONFIG_LOAD_WARNINGS[-2:] == [
+            {"key": "unknown_top_level", "source": config_path},
+            {"key": "notifications.smtp.unknown_nested", "source": config_path},
+        ]
+        warning.assert_has_calls([
+            mock.call(
+                "CONFIG_UNKNOWN_KEY_IGNORED",
+                extra={"key": "unknown_top_level", "source": config_path},
+            ),
+            mock.call(
+                "CONFIG_UNKNOWN_KEY_IGNORED",
+                extra={"key": "notifications.smtp.unknown_nested", "source": config_path},
+            ),
+        ])
+
+    def test_forgiving_config_fields_coerce_human_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    full_output_max_mb: 25mb
+                    output_preview_max_mb: 2MB
+                    ai_enabled: yes
+                    database_postgres_jit: "true"
+                    ai_max_concurrent: "4"
+                    audit_export_max_rows: 999999
+                    """
+                ))
+
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert cfg["full_output_max_mb"] == 25
+        assert cfg["full_output_max_bytes"] == 25 * 1024 * 1024
+        assert cfg["output_preview_max_mb"] == 2
+        assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
+        assert cfg["ai_enabled"] is True
+        assert cfg["database_postgres_jit"] is True
+        assert cfg["ai_max_concurrent"] == 4
+        assert cfg["audit_export_max_rows"] == 200000
+        warning.assert_called_once_with(
+            "CONFIG_VALUE_CLAMPED",
+            extra={
+                "key": "audit_export_max_rows",
+                "source": os.path.join(tmp, "config.yaml"),
+                "reason": "above_maximum",
+                "maximum": 200000,
+            },
+        )
+
+    def test_config_yaml_non_mapping_root_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write("- not-a-mapping\n")
+
+            with mock.patch.object(app_config.log, "error") as error:
+                with pytest.raises(app_config.ConfigLoadError, match="expected a mapping"):
+                    app_config.load_config(tmp)
+
+        error.assert_called_once_with(
+            "CONFIG_LOAD_FAILED",
+            exc_info=False,
+            extra={
+                "phase": "root_shape",
+                "source": os.path.join(tmp, "config.yaml"),
+                "key": "",
+                "error": "expected a mapping",
+            },
+        )
+
+    def test_malformed_local_config_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.local.yaml"), "w") as f:
+                f.write("app_name: [\n")
+
+            with mock.patch.object(app_config.log, "error") as error:
+                with pytest.raises(app_config.ConfigLoadError, match="Invalid YAML"):
+                    app_config.load_config(tmp)
+
+        error.assert_called_once()
+        assert error.call_args.args == ("CONFIG_LOAD_FAILED",)
+        assert error.call_args.kwargs["exc_info"] is True
+        assert error.call_args.kwargs["extra"]["phase"] == "yaml_parse"
+        assert error.call_args.kwargs["extra"]["source"] == os.path.join(tmp, "config.local.yaml")
+
+    def test_nested_overlay_deep_merges_section_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    notifications:
+                      smtp:
+                        host: smtp.example.test
+                    scheduler:
+                      default_timezone: America/Chicago
+                    watchers:
+                      max_per_session: 7
+                    project_digests:
+                      default_cadence_preset: weekly
+                    """
+                ))
+
+            cfg = app_config.load_config(tmp)
+
+        assert cfg.get("notifications", {}).get("smtp", {}).get("host") == "smtp.example.test"
+        assert cfg["notifications"]["smtp"]["host"] == "smtp.example.test"
+        assert cfg["notifications"]["smtp"]["port"] == 587
+        assert cfg["notifications"]["retry"]["max_attempts"] == 6
+        assert cfg["notifications"]["events"]["retention_days"] == 30
+        assert cfg.notifications.smtp.host == "smtp.example.test"
+        assert cfg.notifications.retry.max_attempts == 6
+        assert cfg.notifications.events.retention_days == 30
+        assert cfg.get("scheduler", {}).get("default_timezone") == "America/Chicago"
+        assert cfg["scheduler"]["max_per_session"] == 32
+        assert cfg.scheduler.default_timezone == "America/Chicago"
+        assert cfg.get("watchers", {}).get("max_per_session") == 7
+        assert cfg.watchers.max_per_session == 7
+        assert cfg.get("project_digests", {}).get("default_cadence_preset") == "weekly"
+        assert cfg["project_digests"]["first_send_lookback_hours"] == 24
+        assert cfg.project_digests.default_cadence_preset == "weekly"
+
+    def test_validation_error_reports_source_and_redacts_secret_values(self):
+        cases = [
+            (
+                "ai_api_key",
+                "super-secret-value",
+                """
+                ai_api_key:
+                  - super-secret-value
+                """,
+            ),
+            (
+                "ai_api_key_secret_name",
+                "ai-key-secret-ref",
+                """
+                ai_api_key_secret_name:
+                  - ai-key-secret-ref
+                """,
+            ),
+            (
+                "notifications.smtp.password_secret_id",
+                "smtp-password-secret-ref",
+                """
+                notifications:
+                  smtp:
+                    password_secret_id:
+                      - smtp-password-secret-ref
+                """,
+            ),
+        ]
+        for key, raw_secret, yaml_text in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                config_path = os.path.join(tmp, "config.yaml")
+                with open(config_path, "w") as f:
+                    f.write(textwrap.dedent(yaml_text))
+
+                with mock.patch.object(app_config.log, "error") as error:
+                    with pytest.raises(app_config.ConfigLoadError) as exc_info:
+                        app_config.load_config(tmp)
+
+            message = str(exc_info.value)
+            assert f"{key} from {config_path}" in message
+            assert "value=<redacted>" in message
+            assert raw_secret not in message
+            error.assert_called_once()
+            assert error.call_args.args == ("CONFIG_LOAD_FAILED",)
+            assert error.call_args.kwargs["extra"]["phase"] == "schema_validation"
+            assert error.call_args.kwargs["extra"]["key"] == key
+
+        cases = [
+            ("notifications", "notifications: []\n"),
+            ("notifications.smtp.port", "notifications:\n  smtp:\n    port: '587'\n"),
+            ("scheduler", "scheduler: false\n"),
+        ]
+        for key, yaml_text in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                config_path = os.path.join(tmp, "config.yaml")
+                with open(config_path, "w") as f:
+                    f.write(yaml_text)
+
+                with pytest.raises(app_config.ConfigLoadError) as exc_info:
+                    app_config.load_config(tmp)
+
+            message = str(exc_info.value)
+            assert f"{key} from {config_path}" in message
+            assert "Invalid app config" in message
+
+    def test_validation_error_redacts_only_sensitive_url_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "config.yaml")
+            with open(config_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    database_url:
+                      - postgresql://darklab:secret@postgres:5432/darklab_shell
+                    intel_rate_limit_urlscan_bucket:
+                      - not-a-secret
+                    """
+                ))
+
+            with pytest.raises(app_config.ConfigLoadError) as exc_info:
+                app_config.load_config(tmp)
+
+        message = str(exc_info.value)
+        assert f"database_url from {config_path}" in message
+        assert f"intel_rate_limit_urlscan_bucket from {config_path}" in message
+        assert "database_url from " in message and "value=<redacted>" in message
+        assert "postgresql://darklab:secret@postgres:5432/darklab_shell" not in message
+        assert "intel_rate_limit_urlscan_bucket" in message
+        assert "value=['not-a-secret']" in message
+
+    def test_app_config_supports_patch_dict_mapping_compatibility(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = app_config.load_config(tmp)
+        original = dict(cfg)
+        redacted_cfg = cfg.with_overrides({
+            "ai_api_key": "secret-from-test",
+            "database_url": "postgresql://user:password@db/darklab",
+        })
+        assert "secret-from-test" not in repr(redacted_cfg)
+        assert "postgresql://user:password@db/darklab" not in repr(redacted_cfg)
+        assert "'ai_api_key': '<redacted>'" in repr(redacted_cfg)
+
+        with mock.patch.dict(cfg, {"app_name": "patched-shell"}):
+            assert cfg["app_name"] == "patched-shell"
+
+        assert dict(cfg) == original
+
+    def test_app_config_mutations_are_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = app_config.load_config(tmp)
+
+        cfg["max_tabs"] = 9
+        assert cfg["max_tabs"] == 9
+
+        with pytest.raises(app_config.ConfigLoadError, match="max_tabs") as exc_info:
+            cfg["max_tabs"] = "garbage"
+        assert "value='garbage'" in str(exc_info.value)
+        assert cfg["max_tabs"] == 9
+
+        with pytest.raises(app_config.ConfigLoadError, match="notifications") as exc_info:
+            cfg["notifications"] = "bad"
+        assert "value='bad'" in str(exc_info.value)
+        assert cfg["notifications"]["smtp"]["port"] == 587
+
+        with pytest.raises(app_config.ConfigLoadError, match="scheduler") as exc_info:
+            cfg.scheduler = []
+        assert "value=[]" in str(exc_info.value)
+        assert getattr(cfg.scheduler, "tick_seconds") == 5
+
+        long_value = "x" * 200
+        with pytest.raises(app_config.ConfigLoadError, match="max_tabs") as exc_info:
+            cfg["max_tabs"] = long_value
+        assert long_value not in str(exc_info.value)
+        assert "..." in str(exc_info.value)
+        assert cfg["max_tabs"] == 9
+
+    def test_app_config_clear_resets_to_valid_schema_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = app_config.load_config(tmp)
+
+        cfg.clear()
+
+        assert cfg["app_name"] == "darklab_shell"
+        assert cfg["notifications"]["smtp"]["port"] == 587
+
+    def test_app_config_overrides_rerun_derived_normalization(self):
+        cfg = build_test_config({
+            "full_output_max_mb": 1,
+            "output_preview_max_mb": 2,
+            "database_pool_min": 10,
+            "database_pool_max": 1,
+        })
+
+        assert cfg["full_output_max_mb"] == 1
+        assert cfg["full_output_max_bytes"] == 1 * 1024 * 1024
+        assert cfg["output_preview_max_mb"] == 2
+        assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
+        assert cfg["database_pool_min"] == 10
+        assert cfg["database_pool_max"] == 10
+
+    def test_config_section_helpers_accept_mapping_instances(self, monkeypatch):
+        from services import notifications as notifications_service
+        from services import scheduler as scheduler_service
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.channels import email as email_channel
+
+        notifications_cfg = MappingProxyType({
+            "delivery_rate_per_minute": 17,
+            "http_timeout_seconds": "21",
+            "test_timeout_seconds": "3",
+            "retry": MappingProxyType({"max_attempts": 5}),
+            "events": MappingProxyType({"retention_days": 8}),
+            "smtp": MappingProxyType({"host": "smtp.example.invalid"}),
+        })
+        root_cfg = MappingProxyType({
+            "scheduler": MappingProxyType({"tick_seconds": 11}),
+            "notifications": notifications_cfg,
+        })
+        monkeypatch.setattr(scheduler_service, "resolve_effective_cfg", lambda: root_cfg)
+        monkeypatch.setattr(notifications_service, "resolve_effective_cfg", lambda: root_cfg)
+
+        assert scheduler_service.scheduler_cfg().get("tick_seconds") == 11
+        assert notifications_service.notification_cfg().get("delivery_rate_per_minute") == 17
+        assert notification_dispatcher._retry_cfg().get("max_attempts") == 5
+        assert notification_dispatcher._events_cfg().get("retention_days") == 8
+        assert email_channel._smtp_cfg(notifications_cfg).get("host") == "smtp.example.invalid"
+        assert email_channel._timeout_seconds({}, cfg=notifications_cfg) == 21.0
+        assert email_channel._timeout_seconds({}, cfg=notifications_cfg, test_send=True) == 3.0
+
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:
             with open(os.path.join(tmp, "config.yaml"), "w") as f:
@@ -2545,15 +2960,15 @@ class TestLoadConfig:
                     assert "data_dir is not writable: /not-writable" in str(exc)
 
     def test_workspace_root_env_warning_only_logs_on_mismatch(self):
-        with mock.patch.object(shell_app.log, "warning") as warning:
-            shell_app._warn_workspace_root_config_drift(
+        with mock.patch.object(runtime_bootstrap.log, "warning") as warning:
+            runtime_bootstrap.warn_workspace_root_config_drift(
                 {"workspace_root": "/tmp/workspaces"},
                 {"WORKSPACE_ROOT": "/tmp/workspaces"},
             )
             warning.assert_not_called()
 
-        with mock.patch.object(shell_app.log, "warning") as warning:
-            shell_app._warn_workspace_root_config_drift(
+        with mock.patch.object(runtime_bootstrap.log, "warning") as warning:
+            runtime_bootstrap.warn_workspace_root_config_drift(
                 {"workspace_root": "/tmp/app-workspaces"},
                 {"WORKSPACE_ROOT": "/tmp/env-workspaces"},
             )
@@ -2563,6 +2978,82 @@ class TestLoadConfig:
         assert args == ("WORKSPACE_ROOT_MISMATCH",)
         assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
+    def test_log_loaded_config_does_not_replay_unknown_keys_as_local_load_failures(self):
+        app_config.CONFIG_LOAD_WARNINGS[:] = [{"key": "unknown_key", "source": "/tmp/config.yaml"}]
+        try:
+            with mock.patch.object(runtime_bootstrap.log, "warning") as warning, \
+                 mock.patch.object(runtime_bootstrap.log, "info") as info:
+                runtime_bootstrap.log_loaded_config(build_test_config({"workspace_enabled": True}))
+        finally:
+            app_config.CONFIG_LOAD_WARNINGS.clear()
+
+        warning.assert_not_called()
+        info.assert_called_once()
+        assert info.call_args.args == ("CONFIG_LOADED",)
+        assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
+        assert "warning_count" in info.call_args.kwargs["extra"]
+        assert "schema_field_count" in info.call_args.kwargs["extra"]
+        assert "env_key_count" in info.call_args.kwargs["extra"]
+
+    def test_startup_active_run_cleanup_uses_redis_lock(self, monkeypatch):
+        class FalseyRedis(process._FakeRedisClient):
+            def __bool__(self):
+                return False
+
+        fake_redis = FalseyRedis()
+        calls = []
+
+        monkeypatch.setattr(process, "redis_client", fake_redis)
+        monkeypatch.setattr(
+            process,
+            "cleanup_stale_active_run_metadata",
+            lambda: calls.append(True) or {
+                "metadata_removed": 0,
+                "session_members_removed": 0,
+                "team_members_removed": 0,
+            },
+        )
+
+        with mock.patch.object(runtime_bootstrap.log, "debug") as debug:
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+
+        assert len(calls) == 1
+        assert fake_redis.get(runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY) is not None
+        events = [call.args[0] for call in debug.call_args_list]
+        assert "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_LOCK_ACQUIRED" in events
+        assert "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_LOCK_HELD" in events
+
+    def test_startup_active_run_cleanup_runs_without_redis_lock(self, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(process, "redis_client", None)
+        monkeypatch.setattr(
+            process,
+            "cleanup_stale_active_run_metadata",
+            lambda: calls.append(True) or {
+                "metadata_removed": 0,
+                "session_members_removed": 0,
+                "team_members_removed": 0,
+            },
+        )
+
+        with mock.patch.object(runtime_bootstrap.log, "warning") as warning:
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+
+        assert len(calls) == 2
+        call = next(
+            call
+            for call in warning.call_args_list
+            if call.args[0] == "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED"
+        )
+        extra = call.kwargs["extra"]
+        assert extra["redis_client_present"] is False
+        assert extra["redis_client_type"] == ""
+        assert extra["lock_key"] == runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY
+        assert extra["lock_ttl_seconds"] == runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS
 
 
 class TestPackagePresetCatalog:
@@ -2813,9 +3304,48 @@ class TestProjectOverviewContract:
                     "low": 0,
                     "info": 0,
                 },
+                "open_port_count": 0,
+                "service_count": 0,
+                "provider_count": 0,
+                "app_port_count": 0,
+                "port_divergence_target_count": 0,
+                "app_scan_target_count": 0,
+                "app_port_target_count": 0,
+                "scanned_no_ports_seen_count": 0,
+                "unscanned_target_count": 0,
+                "awaiting_verification_target_count": 0,
+                "needs_followup_target_count": 0,
                 "recent_change_state": "not-monitored",
             },
             "recent_changes": [],
+            "operational_tempo": {
+                "last_run_at": "",
+                "last_run_id": "",
+                "runs_last_7d": 0,
+                "last_finding_triaged_at": "",
+                "last_finding_triaged_id": "",
+                "last_artifact_at": "",
+                "last_artifact_id": "",
+            },
+            "recent_activity": [],
+            "coverage_gaps": {
+                "untouched_targets": [],
+                "awaiting_verification": [],
+                "needs_followup": [],
+            },
+            "deliverables_status": {
+                "last_package_at": "",
+                "last_package_id": "",
+                "last_package_name": "",
+                "last_package_build_at": "",
+                "last_package_build_job_id": "",
+                "last_report_saved_at": "",
+                "last_report_id": "",
+                "last_report_exported_at": "",
+                "last_report_export_job_id": "",
+                "latest_finding_activity_at": "",
+                "report_freshness": "not_started",
+            },
         }
         assert project_workspace.classify_certificate_status(-1) == "expired"
         assert project_workspace.classify_certificate_status(14) == "expiring_14d"
@@ -2859,18 +3389,31 @@ class TestProjectOverviewContract:
         project = project_workspace.create_project("tok_overview_contract", {"name": "Overview Contract"})
         assert project is not None
 
-        host_ip = project_workspace.add_project_target(
-            "tok_overview_contract",
-            project["id"],
-            {"type": "host", "value": "192.0.2.25"},
-        )
-        assert host_ip is not None
-        host_domain = project_workspace.add_project_target(
-            "tok_overview_contract",
-            project["id"],
-            {"type": "host", "value": "Api.Example.COM"},
-        )
+        with mock.patch("services.projects.targets.log.debug") as debug_log, \
+                mock.patch("services.projects.targets.log.warning") as warning_log:
+            host_ip = project_workspace.add_project_target(
+                "tok_overview_contract",
+                project["id"],
+                {"type": "host", "value": "192.0.2.25"},
+            )
+            assert host_ip is not None
+            host_domain = project_workspace.add_project_target(
+                "tok_overview_contract",
+                project["id"],
+                {"type": "host", "value": "Api.Example.COM"},
+            )
         assert host_domain is not None
+        assert [call.args[0] for call in debug_log.call_args_list] == [
+            "PROJECT_TARGET_TYPE_CANONICALIZED",
+            "PROJECT_TARGET_TYPE_CANONICALIZED",
+        ]
+        assert [call.args[0] for call in warning_log.call_args_list] == [
+            "PROJECT_TARGET_LEGACY_TYPE_ALIAS_USED",
+            "PROJECT_TARGET_LEGACY_TYPE_ALIAS_USED",
+        ]
+        assert [call.kwargs["extra"]["resolved_type"] for call in warning_log.call_args_list] == ["ip", "domain"]
+        assert all(call.kwargs["extra"]["input_type"] == "host" for call in warning_log.call_args_list)
+        assert all(call.kwargs["extra"]["value_hash"] for call in warning_log.call_args_list)
         duplicate_domain = project_workspace.add_project_target(
             "tok_overview_contract",
             project["id"],
@@ -2927,12 +3470,178 @@ class TestProjectOverviewContract:
             "canonical_value": "api.example.com",
             "display_label": "domain:api.example.com",
         }
-        with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, host, or ip"):
+        with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, or ip"):
             project_workspace.add_project_target(
                 "tok_overview_contract",
                 project["id"],
                 {"type": "cidr", "value": "192.0.2.0/24"},
             )
+
+    def test_legacy_host_value_type_auto_discovery_records_bare_domains(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_host_value_type", {"name": "Host Value Type"})
+        assert project is not None
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run_host_value_type",
+                    "tok_host_value_type",
+                    "ping localhost",
+                    "2026-06-30T00:00:00Z",
+                    "2026-06-30T00:00:01Z",
+                ),
+            )
+            import services.projects.targets as project_targets
+
+            monkeypatch.setattr(
+                project_targets,
+                "read_workspace_text_file",
+                lambda *_args, **_kwargs: "intranet\nedge.example.com.\n192.0.2.11\nbad/path\n# skipped\n",
+            )
+            with mock.patch("services.projects.targets.log.warning") as warning_log:
+                recorded = project_workspace.record_project_target_discoveries(
+                    conn,
+                    "tok_host_value_type",
+                    project["id"],
+                    "run_host_value_type",
+                    [
+                        {
+                            "value": "localhost",
+                            "value_type": "host",
+                            "source_kind": "positional",
+                            "source_name": "argument_1",
+                        },
+                        {
+                            "value": "api.example.com.",
+                            "value_type": "host",
+                            "source_kind": "positional",
+                            "source_name": "argument_2",
+                        },
+                        {
+                            "value": "192.0.2.10",
+                            "value_type": "host",
+                            "source_kind": "positional",
+                            "source_name": "argument_3",
+                        },
+                        {
+                            "value": "hosts.txt",
+                            "value_type": "host",
+                            "source_kind": "flag",
+                            "source_name": "--hosts",
+                            "target_list_file": "1",
+                        },
+                    ],
+                )
+            assert "PROJECT_TARGET_DISCOVERY_FILE_READ_FAILED" not in [
+                call.args[0] for call in warning_log.call_args_list
+            ]
+            monkeypatch.setattr(
+                project_targets,
+                "read_workspace_text_file",
+                mock.Mock(side_effect=project_targets.WorkspaceError("permission denied")),
+            )
+            with mock.patch("services.projects.targets.log.warning") as warning_log:
+                skipped = project_workspace.record_project_target_discoveries(
+                    conn,
+                    "tok_host_value_type",
+                    project["id"],
+                    "run_host_value_type_read_fail",
+                    [
+                        {
+                            "value": "missing-hosts.txt",
+                            "value_type": "host",
+                            "source_kind": "flag",
+                            "source_name": "--hosts",
+                            "target_list_file": "1",
+                        },
+                    ],
+                )
+            assert skipped == []
+            warning_log.assert_called_once()
+            assert warning_log.call_args.args == ("PROJECT_TARGET_DISCOVERY_FILE_READ_FAILED",)
+            assert warning_log.call_args.kwargs["extra"]["value_type"] == "host"
+            assert warning_log.call_args.kwargs["extra"]["error_type"] == "WorkspaceError"
+            conn.commit()
+
+        assert {item["value"] for item in recorded} == {
+            "localhost",
+            "api.example.com",
+            "192.0.2.10",
+            "intranet",
+            "edge.example.com",
+            "192.0.2.11",
+        }
+        target_page = project_workspace.list_project_targets("tok_host_value_type", project["id"], limit=10)
+        assert target_page is not None
+        targets = {item["value"]: item for item in target_page["targets"]}
+        assert targets["localhost"]["type"] == "domain"
+        assert targets["localhost"]["source"] == "auto_command"
+        assert targets["localhost"]["source_detail"]["value_type"] == "host"
+        assert targets["api.example.com"]["type"] == "domain"
+        assert targets["api.example.com"]["source"] == "auto_command"
+        assert targets["api.example.com"]["source_detail"]["value_type"] == "host"
+        assert targets["192.0.2.10"]["type"] == "ip"
+        assert targets["192.0.2.10"]["source"] == "auto_command"
+        assert targets["192.0.2.10"]["source_detail"]["value_type"] == "host"
+        assert targets["intranet"]["type"] == "domain"
+        assert targets["intranet"]["source"] == "auto_input_file"
+        assert targets["intranet"]["source_detail"]["value_type"] == "host"
+        assert targets["edge.example.com"]["type"] == "domain"
+        assert targets["edge.example.com"]["source"] == "auto_input_file"
+        assert targets["edge.example.com"]["source_detail"]["value_type"] == "host"
+        assert targets["192.0.2.11"]["type"] == "ip"
+        assert targets["192.0.2.11"]["source"] == "auto_input_file"
+        assert targets["192.0.2.11"]["source_detail"]["value_type"] == "host"
+        assert "bad/path" not in targets
+        assert {item["type"] for item in targets.values()} == {"domain", "ip"}
+
+    def test_url_project_target_discovery_creates_atlas_url_and_host_link(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_url_target_discovery", {"name": "URL Target Discovery"})
+        assert project is not None
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run_url_target_discovery",
+                    "tok_url_target_discovery",
+                    "curl https://ip.darklab.sh",
+                    "2026-06-30T00:00:00Z",
+                    "2026-06-30T00:00:01Z",
+                ),
+            )
+            recorded = project_workspace.record_project_target_discoveries(
+                conn,
+                "tok_url_target_discovery",
+                project["id"],
+                "run_url_target_discovery",
+                commands.command_project_target_inputs("curl https://ip.darklab.sh"),
+            )
+            conn.commit()
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id FROM entities ORDER BY type, canonical_value"
+                ).fetchall()
+            }
+            run_links = {
+                row["entity_id"]
+                for row in conn.execute(
+                    "SELECT entity_id FROM entity_run_links WHERE run_id = ?",
+                    ("run_url_target_discovery",),
+                ).fetchall()
+            }
+
+        url_row = rows[("url", "https://ip.darklab.sh")]
+        host_row = rows[("domain", "ip.darklab.sh")]
+        assert [item["type"] for item in recorded] == ["url"]
+        assert recorded[0]["id"] == url_row["id"]
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert url_row["id"] in run_links
+        assert host_row["id"] in run_links
 
     def test_recent_change_state_and_deep_link_hints_do_not_invent_filter_dialects(self):
         assert project_workspace.classify_recent_change_state({
@@ -2990,6 +3699,8 @@ class TestProjectOverviewContract:
         assert quiet_target is not None
         future_expiry = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat()
         now = datetime.now(timezone.utc).isoformat()
+        earlier = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        from services.teams.storage import token_hash
         with database.db_connect() as conn:
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
@@ -3060,6 +3771,149 @@ class TestProjectOverviewContract:
                     now,
                 ),
             )
+            materialize_run_entities(
+                conn,
+                "tok_overview_rollup",
+                "run-overview-port",
+                [
+                    {
+                        "entities": [
+                            {"type": "domain", "value": "api.example.com"},
+                            {
+                                "type": "port",
+                                "value": "api.example.com:443/tcp",
+                                "attributes": {"service": "https", "version": "nginx"},
+                            },
+                            {
+                                "type": "port",
+                                "value": "api.example.com:8443/tcp",
+                                "attributes": {
+                                    "service": "https-alt",
+                                    "banner": "x" * 220,
+                                },
+                            },
+                        ],
+                    }
+                ],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_rollup",
+                "run-overview-no-port",
+                [],
+                seen_at=now,
+                command="nmap 192.0.2.44",
+            )
+            for run_id, command, started in (
+                ("run-overview-port", "nmap api.example.com", now),
+                ("run-overview-no-port", "nmap 192.0.2.44", now),
+                ("run-overview-old", "curl https://api.example.com", earlier),
+            ):
+                conn.execute(
+                    "INSERT OR IGNORE INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                    (run_id, "tok_overview_rollup", command, started, started),
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO project_links "
+                    "(id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', ?)",
+                    (f"plink-{run_id}", project["id"], run_id, now),
+                )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, content_type, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "artifact-overview-new",
+                    "tok_overview_rollup",
+                    "run-overview-port",
+                    "/tmp/overview.txt",
+                    "overview.txt",
+                    "output",
+                    42,
+                    "text/plain",
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO audit_events "
+                "(id, owner_session_hash, event_type, target_type, target_id, project_id, details, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "audit-overview-finding",
+                    token_hash("tok_overview_rollup"),
+                    "finding.triage.updated",
+                    "finding",
+                    "finding-overview-high",
+                    project["id"],
+                    json.dumps({"review_state": "new", "label": "High finding triaged"}),
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO evidence_packages "
+                "(id, session_id, project_id, name, description, redaction_mode, include_artifacts, "
+                "manifest, status, created, updated) "
+                "VALUES (?, ?, ?, ?, '', 'redacted', 1, ?, 'draft', ?, ?)",
+                (
+                    "pkg-overview-latest",
+                    "tok_overview_rollup",
+                    project["id"],
+                    "Executive handoff",
+                    json.dumps({"package_format_version": 2}),
+                    earlier,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO project_reports "
+                "(id, session_id, project_id, draft, report_format_version, created, updated) "
+                "VALUES (?, ?, ?, ?, 1, ?, ?)",
+                (
+                    "rpt-overview-latest",
+                    "tok_overview_rollup",
+                    project["id"],
+                    json.dumps({"title": "Client edge report"}),
+                    earlier,
+                    now,
+                ),
+            )
+            for audit_id, event_type, target_type, target_id, job_id in (
+                (
+                    "audit-overview-package-build",
+                    "package.build",
+                    "package",
+                    "pkg-overview-latest",
+                    "pkg-job-overview",
+                ),
+                (
+                    "audit-overview-report-build",
+                    "report.build",
+                    "report",
+                    "rpt-overview-latest",
+                    "rpt-job-overview",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO audit_events "
+                    "(id, owner_session_hash, event_type, target_type, target_id, project_id, job_id, details, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        audit_id,
+                        token_hash("tok_overview_rollup"),
+                        event_type,
+                        target_type,
+                        target_id,
+                        project["id"],
+                        job_id,
+                        json.dumps({"status": "complete", "job_id": job_id}),
+                        now,
+                    ),
+                )
             conn.commit()
 
         overview = project_workspace.get_project_intel_overview("tok_overview_rollup", project["id"])
@@ -3070,11 +3924,104 @@ class TestProjectOverviewContract:
         assert overview["rollups"]["certificate_statuses"]["healthy"] == 1
         assert overview["rollups"]["certificate_statuses"]["unknown"] == 1
         assert overview["rollups"]["finding_severities"]["high"] == 1
+        assert overview["rollups"]["app_scan_target_count"] == 2
+        assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["app_port_count"] == 2
+        assert overview["rollups"]["port_divergence_target_count"] == 1
+        assert overview["rollups"]["scanned_no_ports_seen_count"] == 1
+        assert overview["rollups"]["unscanned_target_count"] == 0
+        assert overview["rollups"]["awaiting_verification_target_count"] == 1
+        assert overview["rollups"]["needs_followup_target_count"] == 1
+        assert overview["coverage_gaps"]["untouched_targets"] == []
+        assert overview["coverage_gaps"]["awaiting_verification"] == [{
+            "entity_id": target["id"],
+            "display_label": "domain:api.example.com",
+            "reason": "awaiting_verification",
+            "detail": "2 findings awaiting verification.",
+            "deep_link": {
+                "tab": "findings",
+                "hints": {
+                    "target_id": target["id"],
+                    "orphan_filter": "all",
+                    "severity": "high",
+                },
+            },
+        }]
+        assert overview["coverage_gaps"]["needs_followup"] == [{
+            "entity_id": target["id"],
+            "display_label": "domain:api.example.com",
+            "reason": "needs_followup",
+            "detail": "1 finding needs review or follow-up.",
+            "deep_link": {
+                "tab": "findings",
+                "hints": {
+                    "target_id": target["id"],
+                    "orphan_filter": "all",
+                    "severity": "high",
+                },
+            },
+        }]
+        assert overview["deliverables_status"] == {
+            "last_package_at": now,
+            "last_package_id": "pkg-overview-latest",
+            "last_package_name": "Executive handoff",
+            "last_package_build_at": now,
+            "last_package_build_job_id": "pkg-job-overview",
+            "last_report_saved_at": now,
+            "last_report_id": "rpt-overview-latest",
+            "last_report_exported_at": now,
+            "last_report_export_job_id": "rpt-job-overview",
+            "latest_finding_activity_at": now,
+            "report_freshness": "fresh",
+        }
+        assert overview["operational_tempo"] == {
+            "last_run_at": now,
+            "last_run_id": "run-overview-port",
+            "runs_last_7d": 3,
+            "last_finding_triaged_at": now,
+            "last_finding_triaged_id": "finding-overview-suppressed",
+            "last_artifact_at": now,
+            "last_artifact_id": "artifact-overview-new",
+        }
+        recent_activity_by_id = {item["id"]: item for item in overview["recent_activity"]}
+        assert recent_activity_by_id["audit-overview-finding"] == {
+            "id": "audit-overview-finding",
+            "created": now,
+            "event_type": "finding.triage.updated",
+            "target_type": "finding",
+            "target_id": "finding-overview-high",
+            "summary": "label: High finding triaged · review state: new",
+            "deep_link": {
+                "tab": "findings",
+                "target_type": "finding",
+                "target_id": "finding-overview-high",
+            },
+        }
+        assert recent_activity_by_id["audit-overview-report-build"]["deep_link"]["tab"] == "report"
+        assert recent_activity_by_id["audit-overview-package-build"]["deep_link"]["tab"] == "packages"
         rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
         target_row = rows_by_id[target["id"]]
         quiet_row = rows_by_id[quiet_target["id"]]
         assert target_row["open_ports"] == [80, 443]
         assert target_row["services"] == ["http", "https"]
+        assert target_row["app_ports"] == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": "nginx"},
+            {
+                "port": 8443,
+                "proto": "tcp",
+                "service": "https-alt",
+                "version": "",
+                "banner": "x" * 157 + "...",
+            },
+        ]
+        assert target_row["app_port_count"] == 2
+        assert target_row["app_services"] == ["https (nginx)", "https-alt"]
+        assert target_row["source_flags"]["has_app_ports"] is True
+        assert target_row["port_provenance"]["divergence"] == {
+            "app_only": [8443],
+            "provider_only": [80],
+            "has_drift": True,
+        }
         assert target_row["certificate"]["status"] == "healthy"
         assert target_row["top_finding_severity"] == "high"
         assert target_row["finding_counts"]["by_review_state"]["new"] == 1
@@ -3085,8 +4032,785 @@ class TestProjectOverviewContract:
         assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 1
         assert target_row["intel_summary"]["providers_with_data"] == ["censys"]
         assert target_row["deep_link_hints"]["findings"]["target_id"] == target["id"]
+        assert target_row["source_flags"]["has_app_scan_evidence"] is True
+        assert target_row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert target_row["app_evidence"]["scan_run_count"] == 1
+        assert target_row["app_evidence"]["port_entity_count"] == 2
+        assert target_row["app_evidence"]["command_roots"] == ["nmap"]
         assert quiet_row["certificate"]["status"] == "unknown"
         assert quiet_row["source_flags"]["has_intel"] is False
+        assert quiet_row["source_flags"]["has_app_scan_evidence"] is True
+        assert quiet_row["source_flags"]["has_app_ports"] is False
+        assert quiet_row["app_ports"] == []
+        assert quiet_row["app_port_count"] == 0
+        assert quiet_row["app_services"] == []
+        assert quiet_row["port_provenance"]["divergence"]["has_drift"] is False
+        assert quiet_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert quiet_row["app_evidence"]["scan_run_count"] == 1
+        assert quiet_row["app_evidence"]["port_entity_count"] == 0
+        assert "does not prove no ports exist" in quiet_row["app_evidence"]["coverage_caveat"]
+
+    def test_project_intel_overview_does_not_mark_app_ports_as_drift_without_provider_intel(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_app_only", {"name": "App Only Ports"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_app_only",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-app-only",
+                    "tok_overview_app_only",
+                    "nmap api.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_app_only",
+                "run-overview-app-only",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_app_only", project["id"])
+
+        assert overview is not None
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["rollups"]["port_divergence_target_count"] == 0
+        row = overview["targets"][0]
+        assert row["source_flags"]["has_intel"] is False
+        assert row["source_flags"]["has_app_ports"] is True
+        assert row["open_ports"] == []
+        assert row["port_provenance"]["divergence"] == {
+            "app_only": [443],
+            "provider_only": [],
+            "has_drift": False,
+        }
+
+    def test_project_intel_overview_omits_ports_deep_link_for_unlinked_port_entities(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_unlinked_ports", {"name": "Unlinked Ports"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_unlinked_ports",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, 'censys', 'ok', '', ?, ?, ?)",
+                (
+                    "snap-overview-unlinked-provider",
+                    "tok_overview_unlinked_ports",
+                    target["id"],
+                    json.dumps({
+                        "providers": {"censys": {"ports": [80]}},
+                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                    }),
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-unlinked-port",
+                    "tok_overview_unlinked_ports",
+                    "nmap api.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_unlinked_ports",
+                "run-overview-unlinked-port",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_unlinked_ports", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert row["port_provenance"]["divergence"] == {
+            "app_only": [443],
+            "provider_only": [80],
+            "has_drift": True,
+        }
+        assert row["app_evidence"]["project_entity_port_count"] == 0
+        assert "ports" not in row["deep_link_hints"]
+
+    def test_project_intel_overview_separates_curl_port_evidence_from_scan_coverage(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_curl_port", {"name": "Curl Port"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_curl_port",
+            project["id"],
+            {"type": "ip", "value": "93.184.216.34"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-curl-port",
+                    "tok_overview_curl_port",
+                    "curl -v https://example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_curl_port",
+                "run-overview-curl-port",
+                [{
+                    "entities": [
+                        {"type": "ip", "value": "93.184.216.34"},
+                        {
+                            "type": "port",
+                            "value": "93.184.216.34:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="curl -v https://example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_curl_port", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert row["source_flags"]["has_app_scan_evidence"] is False
+        assert row["source_flags"]["has_app_ports"] is True
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["scan_run_count"] == 0
+        assert row["app_evidence"]["app_port_run_count"] == 1
+        assert row["app_evidence"]["port_entity_count"] == 0
+        assert overview["rollups"]["app_scan_target_count"] == 0
+        assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["rollups"]["unscanned_target_count"] == 1
+        assert overview["coverage_gaps"]["untouched_targets"][0]["entity_id"] == target["id"]
+
+    def test_project_intel_overview_defensively_filters_unusable_app_port_rows(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_port_edges", {"name": "Port Edges"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_port_edges",
+            project["id"],
+            {"type": "domain", "value": "edge.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-port-edges",
+                    "tok_overview_port_edges",
+                    "nmap edge.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_port_edges",
+                "run-overview-port-edges",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "edge.example.com"},
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:444/tcp",
+                            "attributes": {"service": "will-be-invalid-json"},
+                        },
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:445/tcp",
+                            "attributes": {"service": "suppressed"},
+                        },
+                        {
+                            "type": "port",
+                            "value": "edge.example.com:446/tcp",
+                            "attributes": {"service": "malformed"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap edge.example.com",
+            )
+            conn.execute(
+                "UPDATE entities SET attributes_json = ? WHERE canonical_value = ?",
+                ("not-json", "edge.example.com:444/tcp"),
+            )
+            conn.execute(
+                "UPDATE entities SET suppressed = 1, suppressed_reason = ?, suppressed_at = ? "
+                "WHERE canonical_value = ?",
+                ("reviewed", now, "edge.example.com:445/tcp"),
+            )
+            conn.execute(
+                "UPDATE entities SET canonical_value = ? WHERE canonical_value = ?",
+                ("not-a-canonical-port", "edge.example.com:446/tcp"),
+            )
+            for entity_id, session_id, team_id, canonical_value, run_id in (
+                (
+                    "ent-overview-foreign-port",
+                    "tok_overview_port_edges_foreign",
+                    "",
+                    "edge.example.com:447/tcp",
+                    "run-overview-foreign-port",
+                ),
+                (
+                    "ent-overview-team-port",
+                    "tok_overview_port_edges",
+                    "team-overview-port-edges",
+                    "edge.example.com:448/tcp",
+                    "run-overview-team-port",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                    "occurrence_count, host_entity_id, attributes_json, created) "
+                    "VALUES (?, ?, ?, 'port', ?, ?, ?, ?, 1, ?, ?, ?)",
+                    (
+                        entity_id,
+                        session_id,
+                        team_id,
+                        canonical_value,
+                        f"sig-{entity_id}",
+                        now,
+                        now,
+                        target["id"],
+                        json.dumps({"service": "foreign"}),
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, now, now),
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_port_edges", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert row["app_ports"] == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""},
+            {"port": 444, "proto": "tcp", "service": "", "version": ""},
+        ]
+        assert row["app_port_count"] == 2
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["scan_run_count"] == 1
+        assert row["app_evidence"]["port_entity_count"] == 4
+        assert overview["rollups"]["app_port_count"] == 2
+        assert overview["rollups"]["app_port_target_count"] == 1
+
+    def test_project_intel_overview_counts_app_ports_beyond_visible_limit(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.projects import overview as overview_service
+
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_port_limit", {"name": "Port Limit"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_port_limit",
+            project["id"],
+            {"type": "domain", "value": "busy.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        total_port_count = overview_service._APP_PORT_LIST_LIMIT + 1
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-port-limit",
+                    "tok_overview_port_limit",
+                    "nmap busy.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_port_limit",
+                "run-overview-port-limit",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "busy.example.com"},
+                        *[
+                            {
+                                "type": "port",
+                                "value": f"busy.example.com:{8000 + index}/tcp",
+                                "attributes": {"service": f"svc-{index}"},
+                            }
+                            for index in range(total_port_count)
+                        ],
+                    ],
+                }],
+                seen_at=now,
+                command="nmap busy.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_port_limit", project["id"])
+
+        assert overview is not None
+        row = overview["targets"][0]
+        assert len(row["app_ports"]) == overview_service._APP_PORT_LIST_LIMIT
+        assert [item["port"] for item in row["app_ports"]] == [
+            8000 + index for index in range(overview_service._APP_PORT_LIST_LIMIT)
+        ]
+        assert row["app_port_count"] == total_port_count
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["port_entity_count"] == total_port_count
+        assert overview["rollups"]["app_port_count"] == total_port_count
+        assert overview["rollups"]["app_port_target_count"] == 1
+
+    def test_project_intel_overview_drops_deleted_run_scan_observations(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_deleted_scan", {"name": "Deleted Scan"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_deleted_scan",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-deleted-scan",
+                    "tok_overview_deleted_scan",
+                    "nmap api.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_deleted_scan",
+                "run-overview-deleted-scan",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_deleted_scan", project["id"])
+        assert overview is not None
+        assert overview["rollups"]["app_scan_target_count"] == 1
+        assert overview["rollups"]["app_port_target_count"] == 1
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["rollups"]["unscanned_target_count"] == 0
+        assert overview["targets"][0]["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert overview["targets"][0]["app_ports"] == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""}
+        ]
+
+        with database.db_connect() as conn:
+            database.delete_run_artifacts(conn, ["run-overview-deleted-scan"])
+            conn.commit()
+
+        refreshed = project_workspace.get_project_intel_overview("tok_overview_deleted_scan", project["id"])
+        assert refreshed is not None
+        assert refreshed["rollups"]["app_scan_target_count"] == 0
+        assert refreshed["rollups"]["app_port_target_count"] == 0
+        assert refreshed["rollups"]["app_port_count"] == 0
+        assert refreshed["rollups"]["unscanned_target_count"] == 1
+        assert refreshed["targets"][0]["source_flags"]["has_app_scan_evidence"] is False
+        assert refreshed["targets"][0]["source_flags"]["has_app_ports"] is False
+        assert refreshed["targets"][0]["app_ports"] == []
+        assert refreshed["targets"][0]["app_evidence"]["coverage_state"] == "not_scanned"
+        assert refreshed["targets"][0]["app_evidence"]["scan_run_count"] == 0
+        assert refreshed["targets"][0]["app_evidence"]["port_entity_count"] == 0
+        with database.db_connect() as conn:
+            stale_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM scan_target_observations WHERE run_id = ?",
+                ("run-overview-deleted-scan",),
+            ).fetchone()["count"]
+        assert stale_count == 0
+
+    def test_project_intel_overview_uses_latest_app_port_service_attributes(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_service_update", {"name": "Service Update"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_service_update",
+            project["id"],
+            {"type": "ip", "value": "192.0.2.10"},
+        )
+        assert target is not None
+        first_seen = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        second_seen = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            for run_id, command, seen_at, attributes in (
+                ("run-overview-service-plain", "nmap 192.0.2.10", first_seen, {}),
+                (
+                    "run-overview-service-version",
+                    "nmap -sV -p 22 192.0.2.10",
+                    second_seen,
+                    {"service": "ssh", "version": "OpenSSH 10.0 (protocol 2.0)"},
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                    (run_id, "tok_overview_service_update", command, seen_at, seen_at),
+                )
+                materialize_run_entities(
+                    conn,
+                    "tok_overview_service_update",
+                    run_id,
+                    [{
+                        "entities": [
+                            {"type": "ip", "value": "192.0.2.10"},
+                            {"type": "port", "value": "192.0.2.10:22/tcp", "attributes": attributes},
+                        ],
+                    }],
+                    seen_at=seen_at,
+                    command=command,
+                )
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_service_update", project["id"])
+
+        assert overview is not None
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["targets"][0]["app_ports"] == [{
+            "port": 22,
+            "proto": "tcp",
+            "service": "ssh",
+            "version": "OpenSSH 10.0 (protocol 2.0)",
+        }]
+        assert overview["targets"][0]["app_services"] == ["ssh (OpenSSH 10.0 (protocol 2.0))"]
+        assert overview["targets"][0]["app_evidence"]["port_entity_count"] == 2
+
+    def test_project_intel_overview_uses_url_host_app_port_evidence(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_url_ports", {"name": "URL Ports"})
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_overview_url_ports",
+            project["id"],
+            {"type": "url", "value": "https://api.example.com/login"},
+        )
+        assert target is not None
+        second_url_target = project_workspace.add_project_target(
+            "tok_overview_url_ports",
+            project["id"],
+            {"type": "url", "value": "https://api.example.com/admin"},
+        )
+        assert second_url_target is not None
+        host_target = project_workspace.add_project_target(
+            "tok_overview_url_ports",
+            project["id"],
+            {"type": "domain", "value": "api.example.com"},
+        )
+        assert host_target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                ("run-overview-url-host", "tok_overview_url_ports", "nmap api.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_url_ports",
+                "run-overview-url-host",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "api.example.com"},
+                        {
+                            "type": "port",
+                            "value": "api.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap api.example.com",
+            )
+            host_id = conn.execute(
+                "SELECT id FROM entities WHERE type = 'domain' AND canonical_value = ?",
+                ("api.example.com",),
+            ).fetchone()["id"]
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_url_ports", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        row = rows_by_id[target["id"]]
+        second_url_row = rows_by_id[second_url_target["id"]]
+        host_row = rows_by_id[host_target["id"]]
+        assert row["type"] == "url"
+        assert row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert row["app_evidence"]["host_entity_id"] == host_id
+        assert row["app_evidence"]["scope_note"] == "App ports are tracked on the URL host entity, not the URL itself."
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert second_url_row["type"] == "url"
+        assert second_url_row["app_evidence"]["host_entity_id"] == host_id
+        assert second_url_row["app_ports"] == row["app_ports"]
+        assert host_row["type"] == "domain"
+        assert host_row["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert host_row["app_ports"] == row["app_ports"]
+        assert overview["rollups"]["app_port_count"] == 1
+        assert overview["coverage_gaps"]["untouched_targets"] == []
+
+    def test_project_intel_overview_keeps_url_host_evidence_in_team_scope(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        team_id = "team-overview-url-scope"
+        project = project_workspace.create_project(
+            "tok_team_url_owner",
+            {"name": "Team URL Scope"},
+            team_id=team_id,
+        )
+        assert project is not None
+        target = project_workspace.add_project_target(
+            "tok_team_url_owner",
+            project["id"],
+            {"type": "url", "value": "https://shared.example.com/login"},
+            team_id=team_id,
+        )
+        assert target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, team_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, '', ?, ?, ?, 0, '', '')",
+                ("run-overview-url-personal", "tok_personal_url_scope", "nmap shared.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_personal_url_scope",
+                "run-overview-url-personal",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "shared.example.com"},
+                        {
+                            "type": "port",
+                            "value": "shared.example.com:8443/tcp",
+                            "attributes": {"service": "personal"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap shared.example.com",
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, team_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0, '', '')",
+                ("run-overview-url-team", "tok_team_url_member", team_id, "nmap shared.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_team_url_member",
+                "run-overview-url-team",
+                [{
+                    "entities": [
+                        {"type": "url", "value": "https://shared.example.com/login"},
+                        {"type": "domain", "value": "shared.example.com"},
+                        {
+                            "type": "port",
+                            "value": "shared.example.com:443/tcp",
+                            "attributes": {"service": "https"},
+                        },
+                    ],
+                }],
+                team_id=team_id,
+                seen_at=now,
+                command="nmap shared.example.com",
+            )
+            rows = {
+                (row["team_id"], row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, session_id, team_id, type, canonical_value, host_entity_id "
+                    "FROM entities WHERE canonical_value IN (?, ?)",
+                    ("shared.example.com", "https://shared.example.com/login"),
+                ).fetchall()
+            }
+            conn.commit()
+
+        personal_host = rows[("", "domain", "shared.example.com")]
+        team_host = rows[(team_id, "domain", "shared.example.com")]
+        team_url = rows[(team_id, "url", "https://shared.example.com/login")]
+        assert personal_host["id"] != team_host["id"]
+        assert team_url["host_entity_id"] == team_host["id"]
+        assert team_url["host_entity_id"] != personal_host["id"]
+
+        overview = project_workspace.get_project_intel_overview(
+            "tok_team_url_owner",
+            project["id"],
+            team_id=team_id,
+        )
+
+        assert overview is not None
+        row = {item["entity_id"]: item for item in overview["targets"]}[target["id"]]
+        assert row["type"] == "url"
+        assert row["app_evidence"]["host_entity_id"] == team_host["id"]
+        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert row["app_services"] == ["https"]
+        assert overview["rollups"]["app_port_count"] == 1
+
+    def test_project_intel_overview_keeps_url_host_scan_states_honest(self, monkeypatch, tmp_path):
+        self._project_db(monkeypatch, tmp_path)
+        project = project_workspace.create_project("tok_overview_url_scan_states", {"name": "URL Scan States"})
+        assert project is not None
+        scanned_url = project_workspace.add_project_target(
+            "tok_overview_url_scan_states",
+            project["id"],
+            {"type": "url", "value": "https://scanned.example.com/login"},
+        )
+        assert scanned_url is not None
+        unresolved_url = project_workspace.add_project_target(
+            "tok_overview_url_scan_states",
+            project["id"],
+            {"type": "url", "value": "https://unresolved.example.com/login"},
+        )
+        assert unresolved_url is not None
+        host_target = project_workspace.add_project_target(
+            "tok_overview_url_scan_states",
+            project["id"],
+            {"type": "domain", "value": "scanned.example.com"},
+        )
+        assert host_target is not None
+        now = datetime.now(timezone.utc).isoformat()
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                ("run-overview-url-no-ports", "tok_overview_url_scan_states", "nmap scanned.example.com", now, now),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_url_scan_states",
+                "run-overview-url-no-ports",
+                [{"entities": [{"type": "domain", "value": "scanned.example.com"}]}],
+                seen_at=now,
+                command="nmap scanned.example.com",
+            )
+            host_id = conn.execute(
+                "SELECT id FROM entities WHERE type = 'domain' AND canonical_value = ?",
+                ("scanned.example.com",),
+            ).fetchone()["id"]
+            conn.commit()
+
+        overview = project_workspace.get_project_intel_overview("tok_overview_url_scan_states", project["id"])
+
+        assert overview is not None
+        rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
+        scanned_row = rows_by_id[scanned_url["id"]]
+        unresolved_row = rows_by_id[unresolved_url["id"]]
+        host_row = rows_by_id[host_target["id"]]
+        assert scanned_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert scanned_row["app_evidence"]["host_entity_id"] == host_id
+        assert scanned_row["app_evidence"]["scope_note"] == "App ports are tracked on the URL host entity, not the URL itself."
+        assert scanned_row["app_evidence"]["scan_run_count"] == 1
+        assert scanned_row["app_evidence"]["port_entity_count"] == 0
+        assert scanned_row["app_ports"] == []
+        assert scanned_row["app_port_count"] == 0
+        assert unresolved_row["app_evidence"]["coverage_state"] == "not_scanned"
+        assert unresolved_row["app_evidence"]["host_entity_id"]
+        assert unresolved_row["app_evidence"]["scope_note"] == "App ports are tracked on the URL host entity, not the URL itself."
+        assert unresolved_row["app_ports"] == []
+        assert unresolved_row["app_port_count"] == 0
+        assert host_row["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert host_row["app_ports"] == []
+        assert overview["rollups"]["app_scan_target_count"] == 2
+        assert overview["rollups"]["app_port_target_count"] == 0
+        assert overview["rollups"]["app_port_count"] == 0
+        assert {item["entity_id"] for item in overview["coverage_gaps"]["untouched_targets"]} == {unresolved_url["id"]}
 
     def test_get_project_intel_overview_marks_stale_provider_data(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -3252,6 +4976,8 @@ class TestProjectOverviewContract:
             "target_count": overview_service.OVERVIEW_TARGET_LIMIT,
             "snapshot_entity_count": 0,
             "finding_entity_count": 0,
+            "app_port_host_count": 0,
+            "url_host_entity_count": 0,
             "recent_change_state": "not-monitored",
             "recent_change_count": 0,
             "payload_target_count": overview_service.OVERVIEW_TARGET_LIMIT,
@@ -3271,6 +4997,12 @@ class TestProjectOverviewContract:
             {"type": "domain", "value": "degraded.example.com"},
         )
         assert target is not None
+        url_target = project_workspace.add_project_target(
+            "tok_overview_degraded",
+            project["id"],
+            {"type": "url", "value": "https://url-target.example.com/path?secret=hidden"},
+        )
+        assert url_target is not None
         now = datetime.now(timezone.utc).isoformat()
         with database.db_connect() as conn:
             conn.execute(
@@ -3308,6 +5040,42 @@ class TestProjectOverviewContract:
                     now,
                     now,
                 ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run-overview-degraded-port",
+                    "tok_overview_degraded",
+                    "nmap degraded.example.com",
+                    now,
+                    now,
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "tok_overview_degraded",
+                "run-overview-degraded-port",
+                [{
+                    "entities": [
+                        {"type": "domain", "value": "degraded.example.com"},
+                        {
+                            "type": "port",
+                            "value": "degraded.example.com:443/tcp",
+                            "attributes": {"service": "https", "banner": "do-not-log-this-banner"},
+                        },
+                    ],
+                }],
+                seen_at=now,
+                command="nmap degraded.example.com",
+            )
+            conn.execute(
+                "UPDATE entities SET canonical_value = ? WHERE type = 'port' AND host_entity_id = ?",
+                ("not-a-canonical-port", target["id"]),
+            )
+            conn.execute(
+                "UPDATE entities SET canonical_value = ?, host_entity_id = '' WHERE id = ?",
+                ("https://bad host/path?secret=hidden", url_target["id"]),
             )
             conn.commit()
 
@@ -3378,19 +5146,81 @@ class TestProjectOverviewContract:
             "status": "error",
             "shape": "str",
         }]
+        app_port_skips = [
+            call.kwargs["extra"] for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_APP_PORT_ROW_SKIPPED",)
+        ]
+        assert app_port_skips == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "port_entity_id": mock.ANY,
+            "host_entity_id": target["id"],
+            "reason": "invalid_canonical_port",
+        }]
+        assert "do-not-log-this-banner" not in str(app_port_skips)
+        url_host_skips = [
+            call.kwargs["extra"] for call in warning_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SKIPPED",)
+        ]
+        assert url_host_skips == [{
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "target_id": url_target["id"],
+            "reason": "invalid_host",
+            "derived_host_type": "",
+        }]
+        assert "secret=hidden" not in str(url_host_skips)
+        app_port_summary = next(
+            call.kwargs["extra"]
+            for call in debug_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_APP_PORT_SCAN_SUMMARY",)
+        )
+        assert app_port_summary == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "lookup_host_count": 2,
+            "raw_port_row_count": 1,
+            "parsed_port_count": 0,
+            "host_count": 0,
+            "skipped_missing_host_count": 0,
+            "skipped_malformed_count": 1,
+            "duplicate_port_count": 0,
+            "truncated_host_count": 0,
+        }
+        url_summary = next(
+            call.kwargs["extra"]
+            for call in debug_log.call_args_list
+            if call.args == ("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY",)
+        )
+        assert url_summary == {
+            "session": get_log_session_id("tok_overview_degraded"),
+            "team_id": "",
+            "project_id": project["id"],
+            "url_target_count": 1,
+            "stored_host_link_count": 0,
+            "fallback_candidate_count": 0,
+            "fallback_resolved_count": 0,
+            "fallback_missing_host_entity_count": 0,
+            "resolved_host_count": 0,
+            "missing_host_entity_count": 0,
+            "invalid_url_host_count": 1,
+        }
 
     def test_get_project_intel_overview_marks_recent_changes_from_monitoring_targets(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
 
         db_path = self._project_db(monkeypatch, tmp_path)
-        monkeypatch.setattr(database, "CFG", {
+        monkeypatch.setattr(database, "CFG", build_test_config({
             "scheduler": {
                 "default_timezone": "UTC",
                 "max_catchup_window_seconds": 3600,
                 "tick_seconds": 5,
             },
             "watchers": {"max_per_session": 32},
-        })
+        }))
         project = project_workspace.create_project("tok_overview_recent", {"name": "Overview Recent"})
         assert project is not None
         target = project_workspace.add_project_target(
@@ -4219,6 +6049,7 @@ class TestPostgresMigrations:
         "project_digest_settings",
         "entities",
         "entity_run_links",
+        "scan_target_observations",
         "entity_intel_snapshots",
         "run_file_artifacts",
         "findings",
@@ -4316,6 +6147,10 @@ class TestPostgresMigrations:
             "0033",
             "0034",
             "0035",
+            "0036",
+            "0037",
+            "0038",
+            "0039",
         ]
         for table_name in (
             "runs",
@@ -4348,6 +6183,7 @@ class TestPostgresMigrations:
             "project_digest_settings",
             "entities",
             "entity_run_links",
+            "scan_target_observations",
             "entity_intel_snapshots",
             "run_file_artifacts",
             "findings",
@@ -4385,6 +6221,14 @@ class TestPostgresMigrations:
         assert "'baseline_created'" in sql
         assert "'baseline_accepted'" in sql
 
+    def test_url_host_entity_link_migration_defers_to_startup_backfill(self):
+        from core.migrations import MIGRATIONS
+
+        migration = next(item for item in MIGRATIONS if item.version == "0038")
+
+        assert migration.name == "url_host_entity_links"
+        assert migration.statements == ()
+
     def test_sqlite_schema_matches_postgres_migration_core_shape(self):
         from core.migrations import MIGRATIONS
 
@@ -4399,7 +6243,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-parity.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             sqlite_columns = {
@@ -4444,6 +6288,326 @@ class TestPostgresMigrations:
         assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in postgres_sql
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in postgres_sql
+
+    def test_schema_inventory_captures_sqlite_head_objects(self):
+        from core.schema_manifest import SQLITE_BACKEND_ARTIFACTS, SHARED_APP_TABLES, sqlite_head_schema_inventory
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-inventory.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        assert inventory.missing_shared_tables() == ()
+        assert tuple(sorted(SHARED_APP_TABLES)) == tuple(sorted(inventory.tables[name].name for name in SHARED_APP_TABLES))
+        assert {"id", "session_id", "team_id", "command", "preview_truncated", "output_search_text"}.issubset(
+            inventory.tables["runs"].columns
+        )
+        assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert "idx_runs_session_started" in inventory.indexes
+        assert "idx_entities_host_entity" in inventory.indexes
+        assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
+        assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
+        assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
+
+    def test_schema_inventory_captures_postgres_migration_head_objects(self):
+        from core.schema_manifest import POSTGRES_BACKEND_ARTIFACTS, current_postgres_migration_schema_inventory
+
+        inventory = current_postgres_migration_schema_inventory()
+
+        assert inventory.missing_shared_tables() == ()
+        assert {"id", "session_id", "team_id", "command", "preview_truncated", "output_search_text"}.issubset(
+            inventory.tables["runs"].columns
+        )
+        assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert "idx_runs_session_started" in inventory.indexes
+        assert "idx_entities_host_entity" in inventory.indexes
+        assert "idx_runs_command_trgm" in inventory.indexes
+        assert "idx_entities_canonical_value_trgm" in inventory.indexes
+        assert {"findings_legacy_ai", "findings_ad"}.issubset(inventory.triggers)
+        assert {"findings_legacy_ai_fn", "findings_ad_fn"}.issubset(inventory.functions)
+        assert set(POSTGRES_BACKEND_ARTIFACTS).issubset({"schema_migrations", *inventory.extensions})
+        assert any(
+            "CHECK (ack_state IN" in constraint
+            for constraint in inventory.tables["watcher_fires"].constraints
+        )
+
+    def test_schema_manifest_validates_sqlite_against_baseline_source(self):
+        from core.schema_manifest import (
+            SHARED_APP_TABLES,
+            current_head_schema_manifest,
+            sqlite_head_schema_inventory,
+            verify_sqlite_head_schema,
+        )
+
+        manifest = current_head_schema_manifest()
+
+        assert set(SHARED_APP_TABLES).issubset(manifest.tables)
+        assert "idx_runs_session_started" in manifest.indexes
+        assert "idx_runs_command_trgm" not in manifest.indexes
+        assert "findings_ad" in manifest.triggers
+        assert "CHECK (status IN ('complete', 'empty', 'failed'))" in manifest.constraints["run_output_summary_status"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-manifest.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+                sqlite_drifts = verify_sqlite_head_schema(conn)
+            finally:
+                conn.close()
+
+        assert sqlite_inventory.missing_shared_tables() == ()
+        assert sqlite_drifts == ()
+
+    def test_normalized_schema_drift_guard_keeps_backend_heads_aligned(self):
+        from core.schema_manifest import (
+            compare_inventory_to_manifest,
+            current_head_schema_manifest,
+            current_postgres_migration_schema_inventory,
+            sqlite_head_schema_inventory,
+            strict_head_drift,
+        )
+
+        manifest = current_head_schema_manifest()
+        postgres_inventory = current_postgres_migration_schema_inventory()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-drift-guard.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        # Conservative (missing-only) comparison used by the runtime stamping guard.
+        assert compare_inventory_to_manifest(postgres_inventory, manifest) == ()
+        assert compare_inventory_to_manifest(sqlite_inventory, manifest) == ()
+        # Strict, shape-aware, bidirectional guard: the two authored heads must match
+        # exactly — same tables and columns (no missing, no extra) and matching column
+        # shape (type family, nullability, canonicalized default).
+        assert strict_head_drift(postgres_inventory) == ()
+        assert strict_head_drift(sqlite_inventory) == ()
+
+    def test_strict_drift_guard_catches_shape_and_extra_drift(self):
+        from core.schema_manifest import (
+            SchemaInventory,
+            SchemaTableInventory,
+            sqlite_head_schema_inventory,
+            strict_head_drift,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-strict-drift.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        runs = sqlite_inventory.tables["runs"]
+        mutated = dict(runs.columns)
+        mutated["exit_code"] = "TEXT"                       # integer -> text (type family)
+        mutated["command"] = "TEXT"                         # NOT NULL -> nullable
+        mutated["preview_truncated"] = "INTEGER NOT NULL DEFAULT 1"  # default 0 -> 1
+        mutated["bogus_extra"] = "TEXT NOT NULL"            # extra column
+        del mutated["started"]                              # missing column
+        drifted = SchemaInventory(
+            backend=sqlite_inventory.backend,
+            tables={
+                **sqlite_inventory.tables,
+                "runs": SchemaTableInventory(
+                    name="runs",
+                    columns=mutated,
+                    constraints=runs.constraints,
+                    create_sql=runs.create_sql,
+                ),
+            },
+            indexes=sqlite_inventory.indexes,
+            triggers=sqlite_inventory.triggers,
+            fts_artifacts=sqlite_inventory.fts_artifacts,
+        )
+
+        caught = {(drift.kind, drift.name) for drift in strict_head_drift(drifted)}
+        assert ("column_shape", "runs.exit_code") in caught
+        assert ("column_shape", "runs.command") in caught
+        assert ("column_shape", "runs.preview_truncated") in caught
+        assert ("extra_column", "runs.bogus_extra") in caught
+        assert ("missing_column", "runs.started") in caught
+
+    def test_generated_postgres_baseline_matches_legacy_migration_head(self):
+        """The generated Postgres baseline must reproduce the authoritative v0001-v0038 head.
+
+        Fresh Postgres installs build from the generated ``postgres_baseline_statements()``
+        (rendered from the single SQLite baseline), while existing deployments were built by
+        the numbered v0001-v0038 migrations. The two must produce an identical schema — same
+        column definitions at *exact* type (so BIGINT/JSONB/BYTEA are preserved, not coarse
+        type family), constraints, and indexes — or fresh and existing Postgres databases
+        silently diverge.
+
+        The normalized drift guard cannot catch this: its manifest is now derived from the
+        generated baseline (so the SQLite-vs-manifest comparison is circular) and it compares
+        coarse type families. This container-free, parse-level check is the real safeguard for
+        the ``_POSTGRES_COLUMN_OVERRIDES`` table and the SQLite->Postgres translator, and it
+        also fails if the frozen baseline (``_create_schema``) is edited instead of adding a
+        post-0039 delta.
+        """
+        from core.database_backend import DatabaseBackend
+        from core.migrations import MIGRATIONS
+        from core.migrations.baseline import postgres_baseline_statements
+        from core.schema_manifest import SHARED_APP_TABLES, postgres_migration_schema_inventory
+
+        # Everything before the 0039 squash boundary is the authoritative pre-squash head.
+        legacy_statements = [
+            statement
+            for migration in MIGRATIONS
+            if migration.version < "0039"
+            for statement in migration.statements_for(DatabaseBackend.POSTGRES)
+        ]
+        legacy = postgres_migration_schema_inventory(legacy_statements)
+        generated = postgres_migration_schema_inventory(postgres_baseline_statements())
+
+        def _norm(text):
+            return " ".join(str(text or "").split()).upper()
+
+        column_diffs: list[str] = []
+        constraint_diffs: list[str] = []
+        for table_name in sorted(SHARED_APP_TABLES):
+            legacy_table = legacy.tables.get(table_name)
+            generated_table = generated.tables.get(table_name)
+            assert legacy_table is not None, f"legacy v0001-v0038 head is missing shared table {table_name}"
+            assert generated_table is not None, f"generated baseline is missing shared table {table_name}"
+            legacy_cols = {name: _norm(defn) for name, defn in legacy_table.columns.items()}
+            generated_cols = {name: _norm(defn) for name, defn in generated_table.columns.items()}
+            for column_name in sorted(set(legacy_cols) | set(generated_cols)):
+                if legacy_cols.get(column_name) != generated_cols.get(column_name):
+                    column_diffs.append(
+                        f"{table_name}.{column_name}: legacy={legacy_cols.get(column_name)!r} "
+                        f"generated={generated_cols.get(column_name)!r}"
+                    )
+            if {_norm(c) for c in legacy_table.constraints} != {_norm(c) for c in generated_table.constraints}:
+                constraint_diffs.append(
+                    f"{table_name}: legacy={sorted(legacy_table.constraints)} "
+                    f"generated={sorted(generated_table.constraints)}"
+                )
+
+        shared = set(SHARED_APP_TABLES)
+        legacy_indexes = {name for name, index in legacy.indexes.items() if index.table_name in shared}
+        generated_indexes = {name for name, index in generated.indexes.items() if index.table_name in shared}
+
+        assert not column_diffs, (
+            "Generated Postgres baseline diverges from the v0001-v0038 head. A shared column's "
+            "type/default/nullability differs — most likely a BIGINT/JSONB/BYTEA column added to "
+            "the SQLite baseline without a matching _POSTGRES_COLUMN_OVERRIDES entry, or an edit "
+            "to the frozen _create_schema baseline instead of a post-0039 delta:\n  "
+            + "\n  ".join(column_diffs)
+        )
+        assert not constraint_diffs, (
+            "Generated Postgres baseline constraints diverge from the v0001-v0038 head:\n  "
+            + "\n  ".join(constraint_diffs)
+        )
+        assert legacy_indexes == generated_indexes, (
+            "Generated Postgres baseline shared-table indexes diverge from the v0001-v0038 head. "
+            f"legacy-only={sorted(legacy_indexes - generated_indexes)} "
+            f"generated-only={sorted(generated_indexes - legacy_indexes)}"
+        )
+
+    def test_schema_manifest_reports_actionable_drift(self):
+        from core.schema_manifest import (
+            SchemaInventory,
+            SchemaTableInventory,
+            compare_inventory_to_manifest,
+            current_head_schema_manifest,
+            sqlite_head_schema_inventory,
+        )
+
+        manifest = current_head_schema_manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-drift.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                sqlite_inventory = sqlite_head_schema_inventory(conn)
+            finally:
+                conn.close()
+
+        runs_table = sqlite_inventory.tables["runs"]
+        broken_runs_table = SchemaTableInventory(
+            name=runs_table.name,
+            columns={
+                name: definition
+                for name, definition in runs_table.columns.items()
+                if name != "output_search_text"
+            },
+            constraints=runs_table.constraints,
+            create_sql=runs_table.create_sql,
+        )
+        run_output_summary_status = sqlite_inventory.tables["run_output_summary_status"]
+        broken_status_table = SchemaTableInventory(
+            name=run_output_summary_status.name,
+            columns=run_output_summary_status.columns,
+            constraints=(),
+            create_sql=run_output_summary_status.create_sql,
+        )
+        broken_inventory = SchemaInventory(
+            backend=sqlite_inventory.backend,
+            tables={
+                name: table
+                for name, table in sqlite_inventory.tables.items()
+                if name != "project_reports"
+            } | {
+                "runs": broken_runs_table,
+                "run_output_summary_status": broken_status_table,
+            },
+            indexes={
+                name: index
+                for name, index in sqlite_inventory.indexes.items()
+                if name != "idx_runs_session_started"
+            },
+            triggers={
+                name: trigger
+                for name, trigger in sqlite_inventory.triggers.items()
+                if name != "findings_ad"
+            },
+            fts_artifacts=(),
+        )
+
+        assert {
+            (drift.kind, drift.name, drift.detail)
+            for drift in compare_inventory_to_manifest(broken_inventory, manifest)
+        } >= {
+            ("missing_table", "project_reports", "expected shared app table is absent"),
+            ("missing_column", "runs.output_search_text", "expected shared app column is absent"),
+            (
+                "missing_constraint",
+                "run_output_summary_status:CHECK (status IN ('complete', 'empty', 'failed'))",
+                "expected shared app constraint is absent",
+            ),
+            ("missing_index", "idx_runs_session_started", "expected shared app index is absent"),
+            ("missing_trigger", "findings_ad", "expected shared app trigger is absent"),
+            ("missing_backend_artifact", "runs_fts", "expected sqlite schema artifact is absent"),
+        }
 
     def test_postgres_search_migration_adds_trigram_indexes(self):
         from core.migrations import MIGRATIONS
@@ -4493,6 +6657,7 @@ class TestPostgresMigrations:
         class FakeConnection:
             def __init__(self):
                 self.applied_versions = set()
+                self.commit_count = 0
                 self.calls = []
 
             def execute(self, sql, params=()):
@@ -4507,6 +6672,9 @@ class TestPostgresMigrations:
             def fetchall(self):
                 return [{"version": version} for version in sorted(self.applied_versions)]
 
+            def commit(self):
+                self.commit_count += 1
+
         conn = FakeConnection()
         migrations = (
             Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
@@ -4519,10 +6687,1011 @@ class TestPostgresMigrations:
         assert applied == ["0001", "0002"]
         assert applied_again == []
         lock_calls = [call for call in conn.calls if call[0] == "SELECT pg_advisory_xact_lock(%s)"]
-        assert len(lock_calls) == 2
+        assert len(lock_calls) == 4
+        assert conn.commit_count == 2
         assert conn.applied_versions == {"0001", "0002"}
 
-    def test_database_init_runs_postgres_migrations_without_sqlite_bootstrap(self, monkeypatch):
+    def test_migration_runner_refreshes_ledger_after_reacquiring_advisory_lock(self):
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = {"0001"}
+                self.lock_count = 0
+                self.calls = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT pg_advisory_xact_lock(%s)":
+                    self.lock_count += 1
+                    if self.lock_count == 2:
+                        self.applied_versions.update({"0002", "0003"})
+                    return self
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                pass
+
+        conn = FakeConnection()
+        migrations = (
+            Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
+            Migration("0002", "second", ("CREATE TABLE two (id TEXT)",)),
+            Migration("0003", "third", ("CREATE TABLE three (id TEXT)",)),
+        )
+
+        applied = run_migrations_with_advisory_lock(conn, migrations)
+
+        assert applied == []
+        assert conn.applied_versions == {"0001", "0002", "0003"}
+        executed_sql = [call[0] for call in conn.calls]
+        assert "CREATE TABLE two (id TEXT)" not in executed_sql
+        assert "CREATE TABLE three (id TEXT)" not in executed_sql
+        assert conn.lock_count == 2
+
+    def test_fresh_postgres_baseline_stamps_legacy_without_executing_legacy_ddl(self):
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        def apply_baseline(conn, backend):
+            assert backend == database_backend.DatabaseBackend.POSTGRES
+            conn.execute("CREATE BASELINE HEAD")
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+                self.commit_count = 0
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized in {"CREATE LEGACY ONE", "CREATE LEGACY TWO"}:
+                    raise AssertionError(f"legacy DDL should not execute on fresh Postgres: {normalized}")
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+            def rollback(self):
+                raise AssertionError("fresh baseline path should not roll back")
+
+        migrations = (
+            Migration("0001", "legacy_one", ("CREATE LEGACY ONE",)),
+            Migration("0002", "legacy_two", ("CREATE LEGACY TWO",)),
+            Migration("0039", "unified_schema_baseline", (), baseline_apply=apply_baseline),
+        )
+        conn = FakeConnection()
+
+        applied = run_migrations_with_advisory_lock(conn, migrations)
+
+        assert applied == ["0001", "0002", "0039"]
+        assert conn.applied_versions == {"0001", "0002", "0039"}
+        assert conn.commit_count == 1
+        executed_sql = [call[0] for call in conn.calls]
+        assert "CREATE BASELINE HEAD" in executed_sql
+        assert "CREATE LEGACY ONE" not in executed_sql
+        assert "CREATE LEGACY TWO" not in executed_sql
+
+    def test_migration_runner_uses_sqlite_ledger_and_dialect_statements(self):
+        from core.migrations.runner import Migration, run_migrations
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        migrations = (
+            Migration(
+                "0001",
+                "local_first",
+                ("CREATE TABLE postgres_only (id TEXT)",),
+                sqlite_statements=("CREATE TABLE local_first (id TEXT PRIMARY KEY)",),
+            ),
+            Migration("0002", "empty_marker", ()),
+        )
+        try:
+            applied = run_migrations(conn, migrations, backend=database_backend.DatabaseBackend.SQLITE)
+            applied_again = run_migrations(conn, migrations, backend=database_backend.DatabaseBackend.SQLITE)
+            ledger_rows = conn.execute(
+                "SELECT version, name, applied_at FROM schema_migrations ORDER BY version"
+            ).fetchall()
+            sqlite_table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'local_first'"
+            ).fetchone()
+            postgres_only_table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'postgres_only'"
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert applied == ["0001", "0002"]
+        assert applied_again == []
+        assert [(row["version"], row["name"]) for row in ledger_rows] == [
+            ("0001", "local_first"),
+            ("0002", "empty_marker"),
+        ]
+        assert all(row["applied_at"] for row in ledger_rows)
+        assert sqlite_table is not None
+        assert postgres_only_table is None
+
+    def test_migration_runner_commits_each_migration_and_rolls_back_failed_version(self):
+        from core.migrations.runner import Migration, run_migrations
+
+        class FailingConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.commit_count = 0
+                self.rollback_count = 0
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized == "FAIL MIGRATION":
+                    raise RuntimeError("migration statement failed")
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+            def rollback(self):
+                self.rollback_count += 1
+
+        conn = FailingConnection()
+        migrations = (
+            Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
+            Migration("0002", "broken", ("FAIL MIGRATION",)),
+        )
+
+        with pytest.raises(RuntimeError, match="migration statement failed"):
+            run_migrations(conn, migrations, backend=database_backend.DatabaseBackend.SQLITE)
+
+        assert conn.applied_versions == {"0001"}
+        assert conn.commit_count == 1
+        assert conn.rollback_count == 1
+
+    def test_unified_baseline_migration_marks_reconciliation_boundary(self):
+        from core.migrations import MIGRATIONS
+
+        unified = MIGRATIONS[-1]
+
+        assert unified.version == "0039"
+        assert unified.name == "unified_schema_baseline"
+        assert unified.statements == ()
+        assert unified.sqlite_statements == ()
+        assert unified.postgres_statements == ()
+        assert unified.baseline_apply is not None
+
+    def test_unified_baseline_module_replaces_direct_legacy_imports(self):
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[2]
+        source = (repo_root / "app/core/migrations/v0039_unified_schema_baseline.py").read_text(encoding="utf-8")
+
+        assert "from .baseline import apply_unified_baseline" in source
+        assert "from core import database" not in source
+        assert "from core.migrations import MIGRATIONS" not in source
+
+    def test_current_manifest_derives_from_sqlite_head_source(self, monkeypatch):
+        from core import schema_manifest
+        from core.migrations import baseline
+
+        monkeypatch.setattr(
+            baseline,
+            "postgres_baseline_statements",
+            mock.Mock(side_effect=AssertionError("Postgres renderer must not define the shared manifest")),
+        )
+
+        manifest = schema_manifest.current_head_schema_manifest()
+
+        assert "runs" in manifest.tables
+        assert "command" in manifest.tables["runs"]
+        assert "idx_runs_session_started" in manifest.indexes
+
+    def test_dialect_specific_post_baseline_migrations_are_visible_to_drift_guard(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import Migration
+        from core.schema_manifest import (
+            current_head_schema_manifest,
+            current_postgres_baseline_schema_inventory,
+            current_postgres_migration_schema_inventory,
+            strict_head_drift,
+        )
+
+        future_delta = Migration(
+            "0040",
+            "dialect_specific_guard_fixture",
+            statements=(),
+            sqlite_statements=(
+                "ALTER TABLE runs ADD COLUMN dialect_guard_note TEXT",
+                "CREATE INDEX idx_runs_dialect_guard_note ON runs (dialect_guard_note)",
+            ),
+            postgres_statements=(
+                "ALTER TABLE runs ADD COLUMN dialect_guard_note TEXT",
+                "CREATE INDEX idx_runs_dialect_guard_note ON runs (dialect_guard_note)",
+            ),
+        )
+        migrations = (*MIGRATIONS, future_delta)
+
+        manifest = current_head_schema_manifest(migrations=migrations)
+        postgres_inventory = current_postgres_migration_schema_inventory(migrations=migrations)
+        stale_postgres_inventory = current_postgres_baseline_schema_inventory()
+
+        assert "dialect_guard_note" in manifest.tables["runs"]
+        assert "dialect_guard_note" in postgres_inventory.tables["runs"].columns
+        assert "idx_runs_dialect_guard_note" in postgres_inventory.indexes
+        assert strict_head_drift(postgres_inventory, migrations=migrations) == ()
+        stale_drift = {
+            (drift.kind, drift.name)
+            for drift in strict_head_drift(stale_postgres_inventory, migrations=migrations)
+        }
+        assert ("missing_column", "runs.dialect_guard_note") in stale_drift
+        assert ("missing_index", "idx_runs_dialect_guard_note") in stale_drift
+
+    def test_sqlite_head_stamping_records_legacy_and_unified_versions(self):
+        from core.migrations import MIGRATIONS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-unified-stamp.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    "SELECT version, name FROM schema_migrations ORDER BY version"
+                ).fetchall()
+                run_count = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+            finally:
+                conn.close()
+
+        assert [(row["version"], row["name"]) for row in rows] == [
+            (migration.version, migration.name)
+            for migration in MIGRATIONS
+        ]
+        assert rows[-1]["version"] == "0039"
+        assert run_count == 0
+
+    def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import run_migrations
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            applied = run_migrations(conn, MIGRATIONS, backend=database_backend.DatabaseBackend.SQLITE)
+            tables = {
+                str(row["name"])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+        finally:
+            conn.close()
+
+        assert applied == [migration.version for migration in MIGRATIONS]
+        assert {"runs", "runs_fts", "schema_migrations"}.issubset(tables)
+        assert not hasattr(database, "_migrate_schema")
+
+    def test_sqlite_fresh_unified_baseline_does_not_call_database_schema_wrappers(self, monkeypatch):
+        monkeypatch.setattr(
+            database,
+            "_create_schema",
+            mock.Mock(side_effect=AssertionError("legacy schema wrapper called")),
+        )
+        monkeypatch.setattr(
+            database,
+            "_create_indexes",
+            mock.Mock(side_effect=AssertionError("legacy index wrapper called")),
+        )
+        monkeypatch.setattr(
+            database,
+            "_create_fts_schema",
+            mock.Mock(side_effect=AssertionError("legacy fts wrapper called")),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-baseline-source.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            try:
+                tables = {
+                    str(row[0])
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+                }
+            finally:
+                conn.close()
+
+        assert {"runs", "runs_fts", "schema_migrations"}.issubset(tables)
+
+    def test_sqlite_partial_fresh_baseline_reruns_and_rebuilds_fts(self, monkeypatch):
+        from core.migrations import MIGRATIONS
+        from core.migrations import baseline
+
+        original_create_fts = baseline.create_sqlite_fts_schema
+        crash_injected = False
+
+        def crash_after_partial_baseline(conn):
+            nonlocal crash_injected
+            if not crash_injected:
+                crash_injected = True
+                conn.commit()
+                raise RuntimeError("simulated crash before ledger stamping")
+            original_create_fts(conn)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-partial-baseline.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    monkeypatch.setattr(baseline, "create_sqlite_fts_schema", crash_after_partial_baseline)
+                    with pytest.raises(RuntimeError, match="simulated crash"):
+                        database.db_init()
+
+                    conn = sqlite3.connect(db_path)
+                    conn.row_factory = sqlite3.Row
+                    try:
+                        partial_tables = {
+                            str(row["name"])
+                            for row in conn.execute(
+                                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                            ).fetchall()
+                        }
+                        ledger_versions = conn.execute(
+                            "SELECT version FROM schema_migrations ORDER BY version"
+                        ).fetchall()
+                        conn.execute(
+                            "INSERT INTO runs ("
+                            "id, session_id, command, started, output_preview, output_search_text"
+                            ") VALUES (?, ?, ?, ?, ?, ?)",
+                            (
+                                "run-partial-baseline",
+                                "session-partial",
+                                "cat partial.txt",
+                                "2026-07-01T00:00:00",
+                                json.dumps([{"text": "partialcrashneedle"}]),
+                                None,
+                            ),
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+
+                    monkeypatch.setattr(baseline, "create_sqlite_fts_schema", original_create_fts)
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                final_tables = {
+                    str(row["name"])
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+                }
+                final_versions = [
+                    str(row["version"])
+                    for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+                ]
+                triggers = {
+                    str(row["name"])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                    ).fetchall()
+                }
+                run_row = conn.execute(
+                    "SELECT output_search_text FROM runs WHERE id = ?",
+                    ("run-partial-baseline",),
+                ).fetchone()
+                fts_row = conn.execute(
+                    "SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?",
+                    ("partialcrashneedle",),
+                ).fetchone()
+            finally:
+                conn.close()
+
+        assert "runs" in partial_tables
+        assert "runs_fts" not in partial_tables
+        assert ledger_versions == []
+        assert {"runs", "runs_fts", "schema_migrations"}.issubset(final_tables)
+        assert {"runs_ai", "runs_ad"}.issubset(triggers)
+        assert final_versions == [migration.version for migration in MIGRATIONS]
+        assert run_row["output_search_text"] == "partialcrashneedle"
+        assert fts_row is not None
+
+    def test_sqlite_ledgered_init_skips_legacy_ladder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-ledgered-no-ladder.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                versions = {
+                    str(row["version"])
+                    for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+                }
+            finally:
+                conn.close()
+
+        assert "0039" in versions
+        assert not hasattr(database, "_migrate_schema")
+
+    def test_database_init_runs_sqlite_migrations_through_unified_helper(self, monkeypatch):
+        original_runner = database._run_schema_migrations
+        calls = []
+
+        def migration_runner(conn, backend):
+            calls.append(backend)
+            return original_runner(conn, backend)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-unified-db-init.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    monkeypatch.setattr(database, "_run_schema_migrations", migration_runner)
+                    database.db_init()
+                    database.db_init()
+
+        assert calls == [
+            database_backend.DatabaseBackend.SQLITE,
+            database_backend.DatabaseBackend.SQLITE,
+        ]
+
+    def test_database_schema_migration_helper_uses_sqlite_runner_commit_boundary(self, monkeypatch):
+        from core.migrations import runner
+
+        calls = []
+
+        def run_migrations(conn, migrations, *, backend, **kwargs):
+            calls.append({
+                "conn": conn,
+                "migrations": migrations,
+                "backend": backend,
+                "kwargs": kwargs,
+            })
+            return ["0040"]
+
+        conn = object()
+        monkeypatch.setattr(runner, "run_migrations", run_migrations)
+
+        applied = database._run_schema_migrations(conn, database_backend.DatabaseBackend.SQLITE)
+
+        assert applied == ["0040"]
+        assert calls[0]["conn"] is conn
+        assert calls[0]["backend"] == database_backend.DatabaseBackend.SQLITE
+        assert "commit_each" not in calls[0]["kwargs"]
+
+    def test_sqlite_preledger_unknown_schema_fails_closed_before_mutation(self):
+        from core.migrations.reconciliation import SchemaReconciliationError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-legacy-unsupported.db")
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+                conn.commit()
+            finally:
+                conn.close()
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    with pytest.raises(SchemaReconciliationError, match="darklab_shell 2\\.3\\.1"):
+                        database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                columns = {
+                    str(row[1])
+                    for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+                }
+                ledger_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+                ).fetchone()
+            finally:
+                conn.close()
+
+        assert columns == {"id", "command"}
+        assert ledger_exists is None
+
+    def test_sqlite_preledger_current_head_tolerates_legacy_watcher_fire_checks(self):
+        from core.migrations import MIGRATIONS
+        from core.schema_manifest import verify_sqlite_head_schema
+
+        fire_kind_check = (
+            ",\n            CHECK (fire_kind IN (\n"
+            "                'changed', 'recovered', 'failed', 'no_change',\n"
+            "                'baseline_created', 'baseline_accepted', 'paused', 'unclassified'\n"
+            "            ))"
+        )
+        ack_state_check = (
+            ",\n            CHECK (ack_state IN "
+            "('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-legacy-watcher-fires-checks.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                create_sql = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watcher_fires'"
+                ).fetchone()[0]
+                legacy_create_sql = create_sql.replace(fire_kind_check, "").replace(ack_state_check, "")
+                conn.execute("PRAGMA writable_schema=ON")
+                conn.execute(
+                    "UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'watcher_fires'",
+                    (legacy_create_sql,),
+                )
+                conn.execute("PRAGMA writable_schema=OFF")
+                conn.execute("DROP TABLE schema_migrations")
+                conn.commit()
+            finally:
+                conn.close()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                missing_constraints = {
+                    drift.name
+                    for drift in verify_sqlite_head_schema(conn)
+                    if drift.kind == "missing_constraint"
+                }
+            finally:
+                conn.close()
+
+            assert missing_constraints == {
+                "watcher_fires:CHECK (ack_state IN ('new', 'acknowledged', 'expected', 'needs_action', 'resolved'))",
+                "watcher_fires:CHECK (fire_kind IN ('changed', 'recovered', 'failed', 'no_change', "
+                "'baseline_created', 'baseline_accepted', 'paused', 'unclassified'))",
+            }
+
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    with mock.patch("core.migrations.reconciliation.log.warning") as warning:
+                        database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                versions = [
+                    str(row["version"])
+                    for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+                ]
+            finally:
+                conn.close()
+
+        assert versions == [migration.version for migration in MIGRATIONS]
+        warning.assert_called_once()
+        assert warning.call_args.args == ("SQLITE_SCHEMA_RECONCILIATION_TOLERATED_LEGACY_CONSTRAINT_GAP",)
+        assert warning.call_args.kwargs["extra"]["drift_count"] == 2
+
+    def test_sqlite_preledger_stamping_verifies_head_once(self, monkeypatch):
+        from core.migrations import reconciliation
+
+        verify_count = 0
+        original_verify = reconciliation.verify_sqlite_head_or_raise
+
+        def counted_verify(conn, **kwargs):
+            nonlocal verify_count
+            verify_count += 1
+            return original_verify(conn, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "sqlite-preledger-verify-once.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("DROP TABLE schema_migrations")
+                conn.commit()
+            finally:
+                conn.close()
+
+            monkeypatch.setattr(reconciliation, "verify_sqlite_head_or_raise", counted_verify)
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+
+        assert verify_count == 1
+
+    def test_postgres_legacy_0038_ledger_applies_unified_baseline_marker(self, monkeypatch):
+        from core.migrations import MIGRATIONS
+        from core.migrations import reconciliation
+        from core.migrations.runner import run_migrations_with_advisory_lock
+
+        verify_calls = 0
+
+        def verify_postgres_head(_conn):
+            nonlocal verify_calls
+            verify_calls += 1
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version != "0039"}
+                self.calls = []
+                self.commit_count = 0
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+        monkeypatch.setattr(reconciliation, "verify_postgres_head_or_raise", verify_postgres_head)
+        conn = FakeConnection()
+
+        applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+        applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+        assert applied == ["0039"]
+        assert applied_again == []
+        assert "0039" in conn.applied_versions
+        assert conn.commit_count == 1
+        assert verify_calls == 1
+        assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
+
+    def test_postgres_legacy_0038_ledger_verifies_head_before_unified_marker(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.reconciliation import SchemaReconciliationError
+        from core.migrations.runner import run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version != "0039"}
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                    return self
+                if "FROM information_schema.tables" in normalized:
+                    return _Rows([{"table_name": "schema_migrations"}])
+                if "FROM information_schema.columns" in normalized:
+                    return _Rows([
+                        {
+                            "table_name": "schema_migrations",
+                            "column_name": "version",
+                            "data_type": "text",
+                            "is_nullable": "NO",
+                            "column_default": None,
+                        },
+                    ])
+                if "FROM pg_indexes" in normalized:
+                    return _Rows([])
+                if "FROM information_schema.triggers" in normalized:
+                    return _Rows([])
+                if "FROM pg_extension" in normalized:
+                    return _Rows([{"extname": "pg_trgm"}])
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def rollback(self):
+                pass
+
+        class _Rows:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        conn = FakeConnection()
+
+        with pytest.raises(SchemaReconciliationError, match="Postgres database schema is older"):
+            run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+        assert "0039" not in conn.applied_versions
+        assert not any(
+            str(call[0]).startswith("INSERT INTO schema_migrations") and call[1][0] == "0039"
+            for call in conn.calls
+        )
+
+    def test_postgres_fresh_empty_schema_uses_unified_baseline_and_stamps_legacy_versions(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+                self.commit_count = 0
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                self.commit_count += 1
+
+        conn = FakeConnection()
+
+        applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+        applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+        assert applied == [migration.version for migration in MIGRATIONS]
+        assert applied_again == []
+        assert conn.applied_versions == {migration.version for migration in MIGRATIONS}
+        assert conn.commit_count == 1
+        assert any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
+
+    def test_postgres_fresh_unified_baseline_does_not_execute_legacy_migration_ddl(self, monkeypatch):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        original_statements_for = Migration.statements_for
+
+        def fail_if_legacy_statement_stream_is_replayed(self, backend):
+            if self.version != "0039":
+                raise AssertionError(f"legacy migration {self.version} DDL was replayed")
+            return original_statements_for(self, backend)
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions: set[str] = set()
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql, params=()):
+                params_tuple = tuple(params)
+                self.calls.append((sql, params_tuple))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(str(params_tuple[0]))
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+            def commit(self):
+                pass
+
+            def rollback(self):
+                pass
+
+        monkeypatch.setattr(Migration, "statements_for", fail_if_legacy_statement_stream_is_replayed)
+
+        applied = run_migrations_with_advisory_lock(FakeConnection(), MIGRATIONS)
+
+        assert applied == [migration.version for migration in MIGRATIONS]
+
+    def test_post_0039_delta_applies_after_fresh_unified_baseline(self):
+        from core.migrations import MIGRATIONS
+        from core.migrations.runner import Migration, run_migrations
+
+        future_delta = Migration(
+            "0040",
+            "post_baseline_delta",
+            statements=(),
+            sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
+            postgres_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
+        )
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            applied = run_migrations(
+                conn,
+                (*MIGRATIONS, future_delta),
+                backend=database_backend.DatabaseBackend.SQLITE,
+            )
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_baseline_delta'"
+            ).fetchone()
+            versions = {
+                str(row["version"])
+                for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+        finally:
+            conn.close()
+
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0040"]
+        assert table_exists is not None
+        assert "0040" in versions
+
+    def test_migration_failure_logs_statement_context(self):
+        from core.migrations.runner import Migration, apply_migration
+
+        class FailingConnection:
+            def __init__(self):
+                self.rolled_back = False
+
+            def execute(self, sql, params=()):
+                if "broken_table" in str(sql):
+                    raise RuntimeError("boom")
+                return self
+
+            def rollback(self):
+                self.rolled_back = True
+
+        migration = Migration(
+            "9999",
+            "broken_test_migration",
+            statements=(
+                "CREATE TABLE ok_table (id TEXT PRIMARY KEY)",
+                "CREATE TABLE broken_table (id TEXT PRIMARY KEY)",
+            ),
+        )
+        conn = FailingConnection()
+
+        with mock.patch("core.migrations.runner.log.error") as log_error:
+            with pytest.raises(RuntimeError, match="boom"):
+                apply_migration(conn, migration, backend=database_backend.DatabaseBackend.SQLITE)
+
+        assert conn.rolled_back is True
+        event, = log_error.call_args.args
+        extra = log_error.call_args.kwargs["extra"]
+        assert event == "MIGRATION_FAILED"
+        assert extra["version"] == "9999"
+        assert extra["statement_index"] == 2
+        assert extra["statement_count"] == 2
+        assert len(extra["statement_hash"]) == 16
+        assert extra["statement_preview"] == "CREATE TABLE broken_table (id TEXT PRIMARY KEY)"
+
+    def test_postgres_advisory_lock_logs_wait_and_elapsed_time(self):
+        from core.migrations.runner import acquire_postgres_migration_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                return self
+
+        conn = FakeConnection()
+
+        with mock.patch("core.migrations.runner.log.debug") as log_debug:
+            lock_id = acquire_postgres_migration_lock(conn, namespace="darklab_shell_migrations")
+
+        events = [call.args[0] for call in log_debug.call_args_list]
+        assert events == ["ADVISORY_LOCK_WAITING", "ADVISORY_LOCK_ACQUIRED"]
+        assert conn.calls == [("SELECT pg_advisory_xact_lock(%s)", (lock_id,))]
+        acquired_extra = log_debug.call_args_list[1].kwargs["extra"]
+        assert acquired_extra["lock_id"] == lock_id
+        assert isinstance(acquired_extra["wait_ms"], int)
+
+    def test_unified_baseline_logs_backend_branch(self):
+        from core.migrations.baseline import apply_unified_baseline
+
+        class RecordingConnection:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, sql, params=()):
+                self.statements.append(str(sql))
+                return self
+
+        conn = RecordingConnection()
+
+        with mock.patch("core.migrations.baseline.log.debug") as log_debug, \
+             mock.patch("core.migrations.baseline.log.info") as log_info:
+            apply_unified_baseline(conn, database_backend.DatabaseBackend.SQLITE)
+
+        branch_extra = log_debug.call_args_list[0].kwargs["extra"]
+        built_extra = log_info.call_args_list[-1].kwargs["extra"]
+        assert log_debug.call_args_list[0].args[0] == "UNIFIED_SCHEMA_BASELINE_BRANCH_SELECTED"
+        assert branch_extra["backend"] == "sqlite"
+        assert branch_extra["sqlite_steps"] == "create_schema,create_indexes,create_fts_schema"
+        assert built_extra == {"backend": "sqlite", "baseline_version": "0039"}
+        assert any("CREATE TABLE IF NOT EXISTS runs" in statement for statement in conn.statements)
+
+    def test_sqlite_reconciliation_failure_logs_refused_stamping(self):
+        from core.migrations.reconciliation import SchemaReconciliationError, verify_sqlite_head_or_raise
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+            with mock.patch("core.migrations.reconciliation.log.error") as log_error:
+                with pytest.raises(SchemaReconciliationError):
+                    verify_sqlite_head_or_raise(conn)
+        finally:
+            conn.close()
+
+        events = [call.args[0] for call in log_error.call_args_list]
+        assert "SCHEMA_VERIFICATION_FAILED" in events
+        assert "SQLITE_SCHEMA_RECONCILIATION_FAILED" in events
+        reconciliation_call = next(
+            call for call in log_error.call_args_list
+            if call.args[0] == "SQLITE_SCHEMA_RECONCILIATION_FAILED"
+        )
+        extra = reconciliation_call.kwargs["extra"]
+        assert extra["backend"] == "sqlite"
+        assert extra["drift_count"] > 0
+        assert extra["action"] == "stamping_refused"
+
+    def test_post_schema_maintenance_logs_lifecycle_and_steps(self, monkeypatch):
+        import services.audit.retention as audit_retention
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "_populate_output_search_text", mock.Mock(return_value=0))
+        monkeypatch.setattr(database, "_rebuild_runs_fts", mock.Mock(side_effect=AssertionError("no rebuild expected")))
+        monkeypatch.setattr(database, "_backfill_watcher_monitoring_fields", mock.Mock())
+        monkeypatch.setattr(database, "_populate_run_output_summary", mock.Mock())
+        monkeypatch.setattr(database, "_prune_retention", mock.Mock())
+        monkeypatch.setattr(audit_retention, "warn_if_disabled", mock.Mock())
+        monkeypatch.setattr(audit_retention, "prune_events", mock.Mock())
+        monkeypatch.setattr(database, "_audit_project_target_host_type_collapse", mock.Mock())
+        monkeypatch.setattr(database, "_backfill_url_host_entity_links", mock.Mock())
+
+        with mock.patch.object(database.log, "info") as log_info, \
+             mock.patch.object(database.log, "debug") as log_debug:
+            database._run_post_schema_maintenance(object())
+
+        info_events = [call.args[0] for call in log_info.call_args_list]
+        step_events = [
+            call.kwargs["extra"]["step"]
+            for call in log_debug.call_args_list
+            if call.args[0] == "POST_SCHEMA_MAINTENANCE_STEP_STARTED"
+        ]
+        assert info_events[0] == "POST_SCHEMA_MAINTENANCE_STARTED"
+        assert info_events[-1] == "POST_SCHEMA_MAINTENANCE_COMPLETED"
+        assert step_events == [
+            "sqlite_output_search_text_backfill",
+            "sqlite_watcher_monitoring_backfill",
+            "run_output_summary_backfill",
+            "retention_prune",
+            "audit_retention_prune",
+            "project_target_audit",
+            "url_host_entity_link_backfill",
+        ]
+        assert log_info.call_args_list[-1].kwargs["extra"]["steps"] == ",".join(step_events)
+
+    def test_database_init_runs_postgres_migrations_through_unified_helper(self, monkeypatch):
         class FakePostgresConnection:
             def __init__(self):
                 self.committed = False
@@ -4545,22 +7714,20 @@ class TestPostgresMigrations:
         fake_app_conn = FakePostgresConnection()
         migration_runner = mock.Mock(return_value=["0001"])
         prune_retention = mock.Mock()
-        import core.migrations as migrations
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
         monkeypatch.setattr(database, "connect_postgres", mock.Mock(return_value=fake_conn))
         monkeypatch.setattr(database, "db_connect", mock.Mock(return_value=fake_app_conn))
         monkeypatch.setattr(database, "_prune_retention", prune_retention)
         monkeypatch.setattr(database, "ensure_run_output_dir", mock.Mock())
-        monkeypatch.setattr(migrations, "MIGRATIONS", ())
-        monkeypatch.setattr("core.migrations.runner.run_migrations_with_advisory_lock", migration_runner)
+        monkeypatch.setattr(database, "_run_schema_migrations", migration_runner)
         monkeypatch.setattr(database, "_db_init_lock", mock.Mock(side_effect=AssertionError("sqlite lock used")))
 
         database.db_init()
 
         assert fake_conn.committed is True
         assert fake_app_conn.committed is True
-        migration_runner.assert_called_once()
+        migration_runner.assert_called_once_with(fake_conn, database_backend.DatabaseBackend.POSTGRES)
         assert any(call[0] == "SELECT pg_advisory_xact_lock(?)" for call in fake_app_conn.calls)
         prune_retention.assert_called_once_with(fake_app_conn)
 
@@ -4660,8 +7827,8 @@ class TestTeamModeFoundation:
             team = storage.create_team(conn, name="Scoped Operators", creator_session_token="tok_scope_owner")
             conn.commit()
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context("/history"):
+            with _test_app().test_request_context("/history"), \
+                 mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
                     scope = request_scope.current_request_scope("tok_scope_owner", request)
             assert scope.is_team is False
@@ -4671,12 +7838,11 @@ class TestTeamModeFoundation:
             assert personal_extra["source"] == "none"
             assert personal_extra["session"].startswith("tok_sco")
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context(
+            with _test_app().test_request_context(
                 f"/api/v1/history?team_id={team['id']}",
                 method="GET",
                 environ_base={"REMOTE_ADDR": "198.51.100.10"},
-            ):
+            ), mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
                     team_scope = request_scope.current_request_scope("tok_scope_owner", request)
             assert team_scope.is_team is True
@@ -4690,11 +7856,10 @@ class TestTeamModeFoundation:
             assert team_extra["method"] == "GET"
             assert team_extra["session"] != "tok_scope_owner"
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context(
+            with _test_app().test_request_context(
                 "/api/v1/history",
                 headers={"X-Team-ID": team["id"]},
-            ):
+            ), mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "warning") as mock_warning:
                     with pytest.raises(request_scope.RequestScopeError):
                         request_scope.current_request_scope("tok_scope_other", request)
@@ -4717,14 +7882,14 @@ class TestTeamModeFoundation:
             storage.update_team_status(conn, team["id"], status="archived")
             conn.commit()
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+            with _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}), \
+                 mock.patch.object(database, "db_connect", return_value=conn):
                 with pytest.raises(request_scope.RequestScopeError) as blocked:
                     request_scope.current_request_scope("tok_archived_owner", request)
             assert blocked.value.code == "team_archived"
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 shell_app.app.test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+            with _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}), \
+                 mock.patch.object(database, "db_connect", return_value=conn):
                 scope = request_scope.current_request_scope("tok_archived_owner", request, allow_archived=True)
 
             assert scope.is_team is True
@@ -4821,14 +7986,14 @@ class TestSchedulerFoundation:
         db_path = os.path.join(tmp_path, "scheduler.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(database, "CFG", {
+        monkeypatch.setattr(database, "CFG", build_test_config({
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",
                 "max_catchup_window_seconds": 3600,
                 "tick_seconds": 5,
             },
-        })
+        }))
         database.db_init()
         return database.db_connect()
 
@@ -5471,8 +8636,7 @@ class TestSchedulerFoundation:
     def test_scheduler_worker_run_once_runs_daily_retention(self, monkeypatch, tmp_path):
         from services.scheduler import worker
 
-        cfg = {
-            **app_config.CFG,
+        cfg = build_test_config({
             "permalink_retention_days": 30,
             "audit_retention_days": 30,
             "scheduler": {
@@ -5480,7 +8644,7 @@ class TestSchedulerFoundation:
                 "max_catchup_window_seconds": 3600,
                 "tick_seconds": 5,
             },
-        }
+        })
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started) "
@@ -5493,7 +8657,7 @@ class TestSchedulerFoundation:
             )
             conn.commit()
 
-        monkeypatch.setattr(worker, "CFG", cfg)
+        monkeypatch.setattr(app_config, "CFG", cfg)
         monkeypatch.setattr(worker, "_last_retention_check_monotonic", None)
 
         assert worker.run_once(limit=5) == 0
@@ -5574,9 +8738,7 @@ class TestSchedulerFoundation:
 class TestWatchersFoundation:
     def _watcher_db(self, monkeypatch, tmp_path, *, max_per_session=32):
         db_path = os.path.join(tmp_path, "watchers.db")
-        monkeypatch.setattr(database, "DB_PATH", db_path)
-        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(database, "CFG", {
+        cfg = build_test_config({
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",
@@ -5587,6 +8749,10 @@ class TestWatchersFoundation:
                 "max_per_session": max_per_session,
             },
         })
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "CFG", cfg)
+        monkeypatch.setattr(app_config, "CFG", cfg)
         database.db_init()
         return database.db_connect()
 
@@ -5815,9 +8981,14 @@ class TestWatchersFoundation:
         assert sent["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
         assert sent["last_sent_at"] == "2026-05-20T11:01:00+00:00"
         digests._CONFIG_WARNED_KEYS.clear()
-        with mock.patch.dict(
-            app_config.CFG,
-            {"project_digests": {"default_cadence_preset": "quarterly", "first_send_lookback_hours": "later"}},
+        with mock.patch(
+            "services.projects.digests.resolve_effective_cfg",
+            return_value={
+                "project_digests": {
+                    "default_cadence_preset": "quarterly",
+                    "first_send_lookback_hours": "later",
+                }
+            },
         ), mock.patch.object(digests.log, "warning") as warning_log:
             assert digests._configured_default_cadence() == "daily"
             assert digests._configured_first_send_lookback_hours("daily") == 24
@@ -7290,7 +10461,7 @@ class TestWatchersFoundation:
             insert_fire(conn, "fire_baseline", "ok", {"classifier": "baseline", "baseline_created": True})
             conn.commit()
 
-            database._migrate_schema(conn)
+            database._backfill_watcher_monitoring_fields(conn)
             conn.commit()
 
             watcher_rows = conn.execute(
@@ -8081,9 +11252,11 @@ class TestWatchersFoundation:
 class TestNotificationsPhase0:
     def _notification_db(self, monkeypatch, tmp_path):
         db_path = tmp_path / "notifications.db"
+        cfg = build_test_config({"permalink_retention_days": 0})
         monkeypatch.setattr(database, "DB_PATH", str(db_path))
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(database, "CFG", {"permalink_retention_days": 0})
+        monkeypatch.setattr(database, "CFG", cfg)
+        monkeypatch.setattr(app_config, "CFG", cfg)
         database.db_init()
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -8195,7 +11368,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"do_not_disturb": True, "retry": {"base_delay_seconds": 1}}
+        app_config.CFG["notifications"] = {"do_not_disturb": True, "retry": {"base_delay_seconds": 1}}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_dnd")
@@ -8251,7 +11424,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"delivery_rate_per_minute": 1}
+        app_config.CFG["notifications"] = {"delivery_rate_per_minute": 1}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_rate")
@@ -8311,7 +11484,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"delivery_rate_per_minute": 1}
+        app_config.CFG["notifications"] = {"delivery_rate_per_minute": 1}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_retry_rate")
@@ -8358,7 +11531,7 @@ class TestNotificationsPhase0:
         from services.notifications import dispatcher
 
         self._notification_db(monkeypatch, tmp_path).close()
-        database.CFG["notifications"] = {"retry": {"base_delay_seconds": 30}}
+        app_config.CFG["notifications"] = {"retry": {"base_delay_seconds": 30}}
 
         assert dispatcher._retry_delay_seconds(1) == 60
         assert dispatcher._retry_delay_seconds(2) == 120
@@ -8375,7 +11548,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"retry": {"max_age_hours": 24, "max_attempts": 6}}
+        app_config.CFG["notifications"] = {"retry": {"max_age_hours": 24, "max_attempts": 6}}
         now = datetime.now(timezone.utc)
         old_created = (now - timedelta(hours=25)).isoformat()
         try:
@@ -8433,7 +11606,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"retry": {"base_delay_seconds": 1, "max_attempts": 6, "max_age_hours": 24}}
+        app_config.CFG["notifications"] = {"retry": {"base_delay_seconds": 1, "max_attempts": 6, "max_age_hours": 24}}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_failure_modes")
@@ -8495,7 +11668,7 @@ class TestNotificationsPhase0:
         from services.notifications.models import STATUS_DEAD, STATUS_SENT, TRIGGER_TEST
 
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"events": {"retention_days": 30}}
+        app_config.CFG["notifications"] = {"events": {"retention_days": 30}}
         now = datetime(2026, 5, 20, tzinfo=timezone.utc).isoformat()
         old_created = (datetime(2026, 5, 20, tzinfo=timezone.utc) - timedelta(days=31)).isoformat()
         fresh_created = (datetime(2026, 5, 20, tzinfo=timezone.utc) - timedelta(days=1)).isoformat()
@@ -9322,6 +12495,12 @@ class TestIntelServices:
         assert canonical.canonical_entity("url", "https://Example.com/path/?q=1") == (
             "https://example.com/path/?q=1"
         )
+        assert canonical.canonical_entity("url", "HTTP://[2001:0DB8::0001]:8080/path/") == (
+            "http://[2001:db8::1]:8080/path"
+        )
+        assert canonical.canonical_entity("port", "Example.com:443") == "example.com:443/tcp"
+        assert canonical.canonical_entity("port", "192.0.2.10:53/UDP") == "192.0.2.10:53/udp"
+        assert canonical.canonical_entity("port", "[2001:db8::1]:8443/tcp") == "[2001:db8::1]:8443/tcp"
 
     def test_canonical_entity_rejects_invalid_values(self):
         from services.intel import canonical
@@ -9333,6 +12512,10 @@ class TestIntelServices:
             ("cve", "2024-1234"),
             ("url", "ftp://example.test/file"),
             ("url", "https://example.test/" + ("a" * 2050)),
+            ("port", "example.test:0/tcp"),
+            ("port", "example.test:65536/tcp"),
+            ("port", "2001:db8::1:443/tcp"),
+            ("port", "example.test:443/sctp"),
         ]:
             with pytest.raises(canonical.CanonicalizationError):
                 canonical.canonical_entity(entity_type, value)
@@ -10921,6 +14104,346 @@ class TestIntelServices:
         assert "intel: Hash must be hex MD5/SHA1/SHA256" in text
 
 
+class TestDataAccessLayerServiceCoverage:
+    def _service_db(self, monkeypatch, tmp_path, name="data-access-layer.db"):
+        db_path = os.path.join(tmp_path, name)
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        database.db_init()
+        return db_path
+
+    def test_history_list_items_preserve_enriched_run_and_snapshot_shape(self, monkeypatch, tmp_path):
+        from services.history.queries import list_history_items
+        from services.runs.structured_filters import StructuredOutputFilters
+        from services.teams.request_scope import RequestScope
+        from services.teams.scope import personal_owner_context
+
+        self._service_db(monkeypatch, tmp_path, "history-service.db")
+        session_id = "tok_history_service"
+        now = "2026-06-02T12:00:00+00:00"
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 1)",
+                ("run-history-service", session_id, "nmap darklab.sh", now, now, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                ("snap-history-service", session_id, "saved context", "2026-06-02T12:00:01+00:00", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+                "VALUES (?, ?, ?, ?, '', 'active', ?, ?)",
+                ("prj_history_service", session_id, "History Project", "history-project", now, now),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', 1.0, 'confirmed', ?)",
+                ("pl_history_service", "prj_history_service", "run-history-service", now),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, ?, ?, 'text', 42, 'test', ?)",
+                ("rfa_history_service", session_id, "run-history-service", "reports/scan.txt", "scan.txt", now),
+            )
+            for entity_type, entity_id, label in (
+                ("run", "run-history-service", "Run label"),
+                ("snapshot", "snap-history-service", "Snapshot label"),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                    "VALUES (?, ?, ?, ?, ?, 'manual', ?)",
+                    (f"lbl_{entity_id}", session_id, entity_type, entity_id, label, now),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (f"note_{entity_id}", session_id, entity_type, entity_id, f"{label} note", now, now),
+                )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', ?, ?, ?, ?)",
+                ("ent_history_service", session_id, "sig_history_service", now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links "
+                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) VALUES (?, ?, ?, ?, 1)",
+                ("ent_history_service", "run-history-service", now, now),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, severity, kind, title, raw_line, line_number, status, created) "
+                "VALUES (?, ?, ?, ?, 'medium', 'service', 'Open service', '443/tcp open https', 1, 'new', ?)",
+                ("fnd_history_service", session_id, "run-history-service", "ent_history_service", now),
+            )
+            conn.commit()
+
+        result = list_history_items(
+            session_id=session_id,
+            owner_scope=RequestScope(personal_owner_context(session_id)),
+            query="",
+            structured_filters=StructuredOutputFilters(),
+            command_root="",
+            exit_code_filter="all",
+            date_range="all",
+            type_filter="all",
+            project_id="",
+            starred_only=False,
+            include_total=True,
+            page=1,
+            page_size=10,
+            scope="all",
+        )
+
+        assert result.total_count == 2
+        assert result.page_count == 1
+        assert result.roots == ["nmap"]
+        run_item = next(item for item in result.items if item["type"] == "run")
+        snapshot_item = next(item for item in result.items if item["type"] == "snapshot")
+        assert run_item["artifact_count"] == 1
+        assert run_item["project_link_count"] == 1
+        assert run_item["labels"][0]["label"] == "Run label"
+        assert run_item["note"]["body"] == "Run label note"
+        assert run_item["finding_count"] == 1
+        assert run_item["atlas_entity_count"] == 1
+        assert run_item["atlas_finding_count"] == 1
+        assert snapshot_item["label_count"] == 1
+        assert snapshot_item["note"]["body"] == "Snapshot label note"
+
+    def test_workspace_metadata_lookup_move_and_delete_stay_owner_scoped(self, monkeypatch, tmp_path):
+        from services.teams.request_scope import RequestScope
+        from services.teams.scope import team_owner_context
+        from services.workspace.files import (
+            delete_workspace_file_metadata,
+            move_workspace_file_metadata,
+            workspace_file_metadata_by_path,
+        )
+
+        self._service_db(monkeypatch, tmp_path, "workspace-metadata-service.db")
+        session_id = "tok_workspace_service"
+        team_id = "team_workspace_service"
+        now = "2026-06-02T12:00:00+00:00"
+        scope = RequestScope(
+            team_owner_context(team_id, actor_session_id=session_id, actor_member_id="tmem_workspace_service"),
+            team_id=team_id,
+        )
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, team_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0, '[]')",
+                ("run-workspace-service", session_id, team_id, "cat reports/source.txt", now, now),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, team_id, name, slug, description, status, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, '', 'active', ?, ?)",
+                ("prj_workspace_service", session_id, team_id, "Workspace Project", "workspace-project", now, now),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', 1.0, 'confirmed', ?)",
+                ("pl_workspace_service", "prj_workspace_service", "run-workspace-service", now),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, ?, ?, 'text', 7, 'test', ?)",
+                ("rfa_workspace_service", session_id, "run-workspace-service", "reports/source.txt", "source.txt", now),
+            )
+            for path, label in (
+                ("reports/source.txt", "Keep"),
+                ("reports/destination.txt", "Overwrite me"),
+            ):
+                row_id = label.lower().replace(" ", "_")
+                conn.execute(
+                    "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, source, created) "
+                    "VALUES (?, ?, ?, 'workspace_file', ?, ?, 'manual', ?)",
+                    (f"lbl_{row_id}", session_id, team_id, path, label, now),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, ?, 'workspace_file', ?, ?, ?, ?)",
+                    (f"note_{row_id}", session_id, team_id, path, f"{label} note", now, now),
+                )
+            conn.commit()
+
+        before = workspace_file_metadata_by_path(scope, ["reports/source.txt"])
+        assert before["reports/source.txt"]["artifact_count"] == 1
+        assert before["reports/source.txt"]["project_names"] == ["Workspace Project"]
+        assert before["reports/source.txt"]["labels"][0]["label"] == "Keep"
+
+        move_workspace_file_metadata(scope, {"reports/source.txt": "reports/destination.txt"})
+        moved = workspace_file_metadata_by_path(scope, ["reports/source.txt", "reports/destination.txt"])
+
+        assert moved["reports/source.txt"]["artifact_count"] == 1
+        assert "labels" not in moved["reports/source.txt"]
+        assert moved["reports/destination.txt"]["labels"][0]["label"] == "Keep"
+        assert moved["reports/destination.txt"]["note"]["body"] == "Keep note"
+
+        delete_workspace_file_metadata(scope, ["reports/destination.txt"])
+        assert workspace_file_metadata_by_path(scope, ["reports/destination.txt"]) == {}
+
+    def test_diag_database_stats_keeps_ping_when_optional_sqlite_probes_fail(self, monkeypatch, tmp_path):
+        import services.assets.diagnostics as assets_diagnostics
+
+        db_path = self._service_db(monkeypatch, tmp_path, "diag-service.db")
+        monkeypatch.setattr(assets_diagnostics, "_database_backend", lambda: database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(assets_diagnostics, "_database_path", lambda: Path(db_path))
+        monkeypatch.setattr(
+            assets_diagnostics,
+            "sqlite_journal_mode",
+            mock.Mock(side_effect=RuntimeError("journal unavailable")),
+        )
+        monkeypatch.setattr(
+            assets_diagnostics,
+            "sqlite_page_stats",
+            mock.Mock(side_effect=RuntimeError("page stats unavailable")),
+        )
+        monkeypatch.setattr(
+            assets_diagnostics,
+            "storage_snapshot",
+            mock.Mock(side_effect=RuntimeError("dbstat unavailable")),
+        )
+
+        with mock.patch.object(assets_diagnostics.log, "warning") as warning_log, \
+             mock.patch.object(assets_diagnostics.log, "debug") as debug_log:
+            stats = assets_diagnostics.diag_database_stats()
+
+        assert stats["backend"] == "sqlite"
+        assert stats["ping_ms"] >= 0
+        assert "journal_mode" not in stats
+        assert "storage" not in stats
+        assert any(call.args == ("DIAG_DATABASE_STATS_PARTIAL",) for call in warning_log.call_args_list)
+        debug_probes = {
+            call.kwargs["extra"]["probe"]
+            for call in debug_log.call_args_list
+            if call.args == ("DIAG_DATABASE_OPTIONAL_PROBE_FAILED",)
+        }
+        assert {"journal_mode", "page_stats"}.issubset(debug_probes)
+
+    def test_session_migration_service_moves_counts_and_cleans_source_rows(self, monkeypatch, tmp_path):
+        from services.session import storage as session_storage
+
+        self._service_db(monkeypatch, tmp_path, "session-migration-service.db")
+        monkeypatch.setenv("SECRETS_MASTER_KEY", base64.b64encode(b"s" * 32).decode("ascii"))
+        secrets_vault.reset_master_key_cache_for_tests()
+        source_session = "tok_source_service"
+        destination_session = "tok_destination_service"
+        now = "2026-06-02T12:00:00+00:00"
+        secrets_storage.upsert_secret(source_session, "vt_api_key", "secret-value")
+        with database.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, 'host darklab.sh', ?, ?, 0, '[]')",
+                ("run-session-service", source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, '[]')",
+                ("snap-session-service", source_session, "session snapshot", now),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, 'host darklab.sh')",
+                (source_session,),
+            )
+            conn.execute(
+                "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?)",
+                (source_session, json.dumps({"pref_theme_name": "darklab_obsidian.yaml"}), now),
+            )
+            conn.execute(
+                "INSERT INTO session_variables (session_id, name, value, updated) VALUES (?, 'HOST', 'darklab.sh', ?)",
+                (source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO user_workflows "
+                "(id, session_id, title, description, inputs, steps, created, updated) "
+                "VALUES (?, ?, 'Workflow', '', '[]', '[]', ?, ?)",
+                ("wf-session-service", source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
+                "VALUES (?, 'domain', 'darklab.sh', ?, 2)",
+                (source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+                "VALUES (?, ?, 'Migrated Project', 'migrated-project', '', 'active', ?, ?)",
+                ("prj_session_service", source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
+                ("ntc_session_service", source_session, now, now),
+            )
+            conn.commit()
+
+        counts = session_storage.migrate_session_records(
+            source_session,
+            destination_session,
+            audit_fields={"session_id": source_session, "actor_session_id": source_session, "team_id": ""},
+            audit_details={"source": "test"},
+            audit_target_id=destination_session,
+        )
+
+        assert counts["migrated_runs"] == 1
+        assert counts["migrated_snapshots"] == 1
+        assert counts["migrated_stars"] == 1
+        assert counts["migrated_preferences"] == 1
+        assert counts["migrated_variables"] == 1
+        assert counts["migrated_workflows"] == 1
+        assert counts["migrated_projects"] == 1
+        assert counts["migrated_notification_channels"] == 1
+        assert counts["migrated_recent_values"] == 1
+        assert counts["migrated_secrets"] == 1
+        with database.db_connect() as conn:
+            source_counts = {
+                "runs": conn.execute(
+                    "SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (source_session,)
+                ).fetchone()["count"],
+                "snapshots": conn.execute(
+                    "SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "stars": conn.execute(
+                    "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "preferences": conn.execute(
+                    "SELECT COUNT(*) AS count FROM session_preferences WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "variables": conn.execute(
+                    "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "workflows": conn.execute(
+                    "SELECT COUNT(*) AS count FROM user_workflows WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "recent": conn.execute(
+                    "SELECT COUNT(*) AS count FROM recent_values WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+            }
+            destination_project = conn.execute(
+                "SELECT session_id FROM projects WHERE id = 'prj_session_service'",
+            ).fetchone()
+            audit_row = conn.execute(
+                "SELECT details FROM audit_events WHERE target_id = ?",
+                (destination_session,),
+            ).fetchone()
+
+        assert set(source_counts.values()) == {0}
+        assert destination_project["session_id"] == destination_session
+        assert secrets_storage.get_secret_value_for_env(destination_session, "VT_API_KEY") == "secret-value"
+        assert audit_row is not None
+        assert json.loads(audit_row["details"])["migration_counts"]["migrated_recent_values"] == 1
+
+
 class TestSessionWorkspace:
     def _cfg(self, root, **overrides):
         cfg = {
@@ -11044,13 +14567,29 @@ class TestSessionWorkspace:
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
 
-    def test_prepare_workspace_file_for_command_falls_back_for_scanner_owned_outputs(self):
+    def test_prepare_workspace_file_for_command_prefers_scanner_owned_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
             write_workspace_text_file("session-1", "output.txt", "", cfg)
             path = resolve_workspace_path("session-1", "output.txt", cfg)
 
-            with mock.patch("services.workspace.files._appuser_gid", return_value=996), \
+            with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
+                    mock.patch("services.workspace.files._appuser_gid", return_value=996), \
+                    mock.patch("services.workspace.files.os.chown") as chown, \
+                    mock.patch("services.workspace.files.os.chmod") as chmod:
+                prepare_workspace_file_for_command(path, mode="write")
+
+            chown.assert_called_once_with(path, 995, 996)
+            chmod.assert_called_once_with(path, WORKSPACE_COMMAND_WRITE_FILE_MODE)
+
+    def test_prepare_workspace_file_for_command_recreates_app_owned_outputs_as_scanner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "output.txt", "", cfg)
+            path = resolve_workspace_path("session-1", "output.txt", cfg)
+
+            with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
+                    mock.patch("services.workspace.files._appuser_gid", return_value=996), \
                     mock.patch("services.workspace.files.os.chown", side_effect=PermissionError), \
                     mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
                     mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
@@ -11059,7 +14598,7 @@ class TestSessionWorkspace:
 
             commands = [call.args[0] for call in run.call_args_list]
             assert commands == [
-                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "touch", str(path)],
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "660", str(path)],
             ]
 
@@ -11402,6 +14941,54 @@ class TestSessionWorkspace:
             assert removed == 1
             assert not root.exists()
 
+    def test_cleanup_repairs_after_scanner_rm_fallback_fails(self, monkeypatch, caplog):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("scanner-rm-fallback-session", cfg)
+            scanner_child = root / "tools" / "cdncheck"
+            scanner_child.parent.mkdir()
+            scanner_child.write_text("scanner-owned output\n", encoding="utf-8")
+            os.utime(root, (1000, 1000))
+            original_rmtree = workspace_module.shutil.rmtree
+            rmtree_attempts = 0
+
+            def fake_rmtree(path, *args, **kwargs):
+                nonlocal rmtree_attempts
+                if Path(path) == root:
+                    rmtree_attempts += 1
+                    if rmtree_attempts == 1:
+                        raise PermissionError("permission denied")
+                return original_rmtree(path, *args, **kwargs)
+
+            def fake_scanner_rm(command, **kwargs):
+                assert command == [
+                    "/usr/bin/sudo",
+                    "-u",
+                    "scanner",
+                    "-g",
+                    "appuser",
+                    "rm",
+                    "-rf",
+                    "--",
+                    str(root),
+                ]
+                assert kwargs["stderr"] == subprocess.PIPE
+                assert kwargs["text"] is True
+                raise subprocess.CalledProcessError(1, command, stderr="rm: operation not permitted: cdncheck")
+
+            monkeypatch.setattr(workspace_module.shutil, "rmtree", fake_rmtree)
+            monkeypatch.setattr(workspace_module, "_sudo_bin", lambda: "/usr/bin/sudo")
+            monkeypatch.setattr(workspace_module, "_scanner_user_exists", lambda: True)
+            monkeypatch.setattr(workspace_module.subprocess, "run", fake_scanner_rm)
+            caplog.set_level("WARNING", logger=workspace_module.log.name)
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert rmtree_attempts == 2
+            assert not root.exists()
+            assert "WORKSPACE_CLEANUP_SKIP" not in caplog.text
+
     def test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
@@ -11480,6 +15067,241 @@ class TestSessionWorkspace:
 
 
 class TestEntrypointWorkspaceRepair:
+    def test_app_import_and_factory_are_side_effect_free_until_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            conf_dir = root / "conf"
+            metrics_dir = root / "metrics"
+            data_dir.mkdir()
+            conf_dir.mkdir()
+            (conf_dir / "config.yaml").write_text(
+                "\n".join([
+                    "database_backend: sqlite",
+                    f"data_dir: {data_dir}",
+                    f"prometheus_multiproc_dir: {metrics_dir}",
+                    "workspace_enabled: false",
+                    "rate_limit_enabled: false",
+                    "run_broker_require_redis: true",
+                ]),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update({
+                "APP_CONF_DIR": str(conf_dir),
+                "APP_DATA_DIR": str(data_dir),
+                "PROMETHEUS_MULTIPROC_DIR": str(metrics_dir),
+                "REDIS_URL": "redis://redis.example.invalid:6379/0",
+                "WEB_CONCURRENCY": "4",
+                "PYTHONPATH": str(REPO_ROOT / "app"),
+            })
+            env.pop("APP_FAKE_REDIS", None)
+            env.pop("DARKLAB_APP_START_TIME_SECONDS", None)
+            code = textwrap.dedent(
+                """
+                import json
+                import hashlib
+                import logging
+                import os
+                from pathlib import Path
+                import sys
+                import tempfile
+                import types
+
+                redis_calls = []
+
+                class FakeRedisClient:
+                    def ping(self):
+                        redis_calls.append({"method": "ping"})
+                        return True
+
+                    def scan_iter(self, *args, **kwargs):
+                        redis_calls.append({"method": "scan_iter", "kwargs": dict(kwargs)})
+                        return []
+
+                    def get(self, key):
+                        redis_calls.append({"method": "get", "key": str(key)})
+                        return None
+
+                    def srem(self, *args, **kwargs):
+                        redis_calls.append({"method": "srem"})
+                        return 0
+
+                    def delete(self, *args, **kwargs):
+                        redis_calls.append({"method": "delete"})
+                        return 0
+
+                fake_redis = types.ModuleType("redis")
+                fake_redis_exceptions = types.ModuleType("redis.exceptions")
+
+                class RedisConnectionError(Exception):
+                    pass
+
+                class RedisTimeoutError(Exception):
+                    pass
+
+                def from_url(url, **kwargs):
+                    redis_calls.append({"method": "from_url", "url": str(url), "kwargs": dict(kwargs)})
+                    return FakeRedisClient()
+
+                fake_redis.from_url = from_url
+                fake_redis_exceptions.ConnectionError = RedisConnectionError
+                fake_redis_exceptions.TimeoutError = RedisTimeoutError
+                fake_redis.exceptions = fake_redis_exceptions
+                sys.modules["redis"] = fake_redis
+                sys.modules["redis.exceptions"] = fake_redis_exceptions
+
+                data_dir = Path(os.environ["APP_DATA_DIR"])
+                db_path = data_dir / "history.db"
+                metrics_dir = Path(os.environ["PROMETHEUS_MULTIPROC_DIR"])
+
+                def snapshot():
+                    process_module = sys.modules.get("core.process")
+                    return {
+                        "db_exists": db_path.exists(),
+                        "metrics_dir_exists": metrics_dir.exists(),
+                        "shell_handler_count": len(logging.getLogger("shell").handlers),
+                        "redis_calls": list(redis_calls),
+                        "redis_client_initialized": bool(
+                            process_module is not None and getattr(process_module, "redis_client", None) is not None
+                        ),
+                        "process_initialized": bool(
+                            process_module is not None and getattr(process_module, "_process_initialized", False)
+                        ),
+                        "app_start_env_set": bool(os.environ.get("DARKLAB_APP_START_TIME_SECONDS")),
+                        "metrics_module_loaded": "services.metrics" in sys.modules,
+                    }
+
+                import app
+                import app_factory
+                import blueprints.assets
+                import extensions
+                import services.ai.worker
+                import services.commands.builtins_runtime
+                import services.pty.service
+
+                import_state = snapshot()
+                first_app = app.create_app({
+                    "rate_limit_enabled": False,
+                    "TESTING": True,
+                    "SERVER_NAME": "first.example.test",
+                })
+                second_app = app.create_app({
+                    "rate_limit_enabled": True,
+                    "TESTING": False,
+                    "SERVER_NAME": "second.example.test",
+                })
+                first_static_dir = Path(tempfile.mkdtemp())
+                second_static_dir = Path(tempfile.mkdtemp())
+                (first_static_dir / "marker.txt").write_text("first", encoding="utf-8")
+                (second_static_dir / "marker.txt").write_text("second", encoding="utf-8")
+                first_app.static_folder = str(first_static_dir)
+                second_app.static_folder = str(second_static_dir)
+                with first_app.app_context():
+                    first_asset_version = app._asset_version("/static/marker.txt")
+                with second_app.app_context():
+                    second_asset_version = app._asset_version("/static/marker.txt")
+                factory_state = snapshot()
+
+                from runtime_bootstrap import bootstrap
+
+                boot_app = bootstrap()
+                bootstrap_state = snapshot()
+
+                print(json.dumps({
+                    "import": import_state,
+                    "factory": factory_state,
+                    "factory_distinct": first_app is not second_app,
+                    "factory_blueprint_count": len(first_app.blueprints),
+                    "factory_override_false": first_app.config["RATELIMIT_ENABLED"],
+                    "factory_override_true": second_app.config["RATELIMIT_ENABLED"],
+                    "factory_testing_override": first_app.config["TESTING"],
+                    "factory_server_name_override": first_app.config["SERVER_NAME"],
+                    "factory_before_count": sum(len(handlers) for handlers in first_app.before_request_funcs.values()),
+                    "factory_after_count": sum(len(handlers) for handlers in first_app.after_request_funcs.values()),
+                    "factory_error_handler_codes": sorted(int(code) for code in first_app.error_handler_spec[None]),
+                    "factory_limiter_configs_independent": (
+                        first_app.config["RATELIMIT_ENABLED"] is False
+                        and second_app.config["RATELIMIT_ENABLED"] is True
+                    ),
+                    "factory_asset_versions_distinct": first_asset_version != second_asset_version,
+                    "factory_first_asset_version_expected": (
+                        first_asset_version == hashlib.sha256(b"first").hexdigest()[:12]
+                    ),
+                    "factory_second_asset_version_expected": (
+                        second_asset_version == hashlib.sha256(b"second").hexdigest()[:12]
+                    ),
+                    "factory_has_jinja_globals": all(
+                        name in first_app.jinja_env.globals
+                        for name in ("static_asset", "asset_bundle", "asset_bundle_script_type")
+                    ),
+                    "bootstrap": bootstrap_state,
+                    "bootstrap_app_name": boot_app.name,
+                    "app_factory_module": app_factory.__name__,
+                    "app_redis_dynamic": app.process_state.redis_client is sys.modules["core.process"].redis_client,
+                    "assets_redis_dynamic": bool(blueprints.assets.redis_client),
+                    "pty_redis_dynamic": bool(services.pty.service.redis_client),
+                    "builtin_runtime_default_redis_dynamic": bool(
+                        services.commands.builtins_runtime.run_builtin_status.__defaults__[1]
+                    ),
+                }))
+                """
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=REPO_ROOT / "app",
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, result.stderr + result.stdout
+
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+        import_state = payload["import"]
+        factory_state = payload["factory"]
+        bootstrap_state = payload["bootstrap"]
+
+        for state in (import_state, factory_state):
+            assert state["db_exists"] is False
+            assert state["metrics_dir_exists"] is False
+            assert state["shell_handler_count"] == 0
+            assert state["redis_calls"] == []
+            assert state["redis_client_initialized"] is False
+            assert state["process_initialized"] is False
+            assert state["app_start_env_set"] is False
+            assert state["metrics_module_loaded"] is False
+
+        assert payload["factory_distinct"] is True
+        assert payload["factory_blueprint_count"] == 14
+        assert payload["factory_override_false"] is False
+        assert payload["factory_override_true"] is True
+        assert payload["factory_testing_override"] is True
+        assert payload["factory_server_name_override"] == "first.example.test"
+        assert payload["factory_before_count"] >= 3
+        assert payload["factory_after_count"] >= 1
+        assert payload["factory_error_handler_codes"] == [429, 500]
+        assert payload["factory_limiter_configs_independent"] is True
+        assert payload["factory_asset_versions_distinct"] is True
+        assert payload["factory_first_asset_version_expected"] is True
+        assert payload["factory_second_asset_version_expected"] is True
+        assert payload["factory_has_jinja_globals"] is True
+        assert payload["app_factory_module"] == "app_factory"
+
+        assert bootstrap_state["db_exists"] is True
+        assert bootstrap_state["metrics_dir_exists"] is True
+        assert bootstrap_state["shell_handler_count"] == 1
+        assert {call["method"] for call in bootstrap_state["redis_calls"]} >= {"from_url", "ping"}
+        assert bootstrap_state["redis_client_initialized"] is True
+        assert bootstrap_state["process_initialized"] is True
+        assert bootstrap_state["app_start_env_set"] is True
+        assert payload["bootstrap_app_name"] == "app"
+        assert payload["app_redis_dynamic"] is True
+        assert payload["assets_redis_dynamic"] is True
+        assert payload["pty_redis_dynamic"] is True
+        assert payload["builtin_runtime_default_redis_dynamic"] is True
+
     def test_workspace_repair_targets_children_inside_session_directories(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
 
@@ -11531,10 +15353,19 @@ class TestEntrypointWorkspaceRepair:
         gunicorn_conf = (REPO_ROOT / "app" / "gunicorn_conf.py").read_text()
 
         assert "--config /app/gunicorn_conf.py" in entrypoint
+        assert "wsgi:application" in entrypoint
+        assert "app:app" not in entrypoint
         assert "def child_exit(" in gunicorn_conf
         assert "multiprocess.mark_process_dead(worker.pid)" in gunicorn_conf
         assert "def worker_exit(" in gunicorn_conf
         assert "close_postgres_pool()" in gunicorn_conf
+
+    def test_playwright_server_uses_wsgi_application_entrypoint(self):
+        server_helper = (REPO_ROOT / "scripts" / "playwright" / "run_e2e_server.sh").read_text()
+
+        assert "FLASK_APP=wsgi.py" in server_helper
+        assert "wsgi:application" in server_helper
+        assert "app:app" not in server_helper
 
 
 class TestAIRuntimeWiring:
@@ -12295,6 +16126,123 @@ class TestDerivedCommandRegistry:
                 subcommand, trigger = trigger.split(":", 1)
                 spec = spec["subcommands"][subcommand]
             assert spec["arg_hints"][trigger][0]["value_type"] == value_type
+
+        assert context["mv"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
+        assert context["file"]["arg_hints"]["move"][0]["value_type"] == "workspace_path"
+
+    def test_workspace_path_value_type_does_not_feed_project_target_discovery(self):
+        cfg = {"workspace_enabled": True}
+
+        assert commands.command_project_target_inputs("mv notes.txt archive/notes.txt", cfg=cfg) == []
+        assert commands.command_project_target_inputs("file move notes.txt archive/notes.txt", cfg=cfg) == []
+
+    def test_workspace_path_value_type_does_not_trigger_restricted_inline_input(self):
+        cfg = {
+            "workspace_enabled": True,
+            "restricted_command_input_cidrs": ["10.0.0.0/8"],
+        }
+
+        assert commands._restricted_inline_input_reason("mv 10.0.0.5 archive/", cfg=cfg) == ""
+        assert commands._restricted_inline_input_reason("file move 10.0.0.5 archive/", cfg=cfg) == ""
+
+    def test_workspace_required_specs_do_not_overload_target_value_type(self):
+        paths = [
+            REPO_ROOT / "app/services/commands/builtin_autocomplete.yaml",
+            REPO_ROOT / "app/conf/commands.yaml",
+        ]
+        issues = []
+
+        def _workspace_required(spec):
+            if not isinstance(spec, dict):
+                return False
+            feature = spec.get("feature_required") or spec.get("requires_feature") or spec.get("feature")
+            features = feature if isinstance(feature, list) else [feature]
+            return any(str(item or "").strip().lower() == "workspace" for item in features)
+
+        def _value_type(data):
+            return str(data.get("value_type") or "").strip().lower() if isinstance(data, dict) else ""
+
+        def _target_list_file_flags(command):
+            flags_by_subcommand: dict[str, set[str]] = {"": set()}
+            for item in command.get("workspace_flags") or []:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("mode") == "read" and item.get("kind") != "directory" and item.get("flag"):
+                    flag = str(item["flag"])
+                    subcommands = item.get("subcommands")
+                    if isinstance(subcommands, list) and subcommands:
+                        for subcommand in subcommands:
+                            flags_by_subcommand.setdefault(str(subcommand), set()).add(flag)
+                    else:
+                        flags_by_subcommand[""].add(flag)
+            return flags_by_subcommand
+
+        def _target_list_file_flag_allowed(flags_by_subcommand, flag, subcommand):
+            return flag in flags_by_subcommand.get("", set()) or flag in flags_by_subcommand.get(subcommand, set())
+
+        def _scan_autocomplete(path, root, autocomplete, flags_by_subcommand, *, workspace_required=False, subcommand=""):
+            if not isinstance(autocomplete, dict):
+                return
+            active_workspace_required = workspace_required or _workspace_required(autocomplete)
+            for index, argument in enumerate(autocomplete.get("arguments") or []):
+                if (active_workspace_required or _workspace_required(argument)) and _value_type(argument) == "target":
+                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:{subcommand}:arguments[{index}]")
+            for flag in autocomplete.get("flags") or []:
+                if not isinstance(flag, dict):
+                    continue
+                if not (active_workspace_required or _workspace_required(flag)):
+                    continue
+                flag_value = str(flag.get("value") or "")
+                flag_value_type = _value_type(flag)
+                value_hint_type = _value_type(flag.get("value_hint") or {})
+                if "target" in {flag_value_type, value_hint_type} and not _target_list_file_flag_allowed(
+                    flags_by_subcommand,
+                    flag_value,
+                    subcommand,
+                ):
+                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:{subcommand}:flag:{flag_value}")
+            subcommands = autocomplete.get("subcommands") or []
+            if isinstance(subcommands, dict):
+                iterable_subcommands = [
+                    {"value": key, **value} if isinstance(value, dict) else {"value": key}
+                    for key, value in subcommands.items()
+                ]
+            else:
+                iterable_subcommands = subcommands
+            for sub in iterable_subcommands:
+                if not isinstance(sub, dict):
+                    continue
+                sub_name = str(sub.get("value") or "")
+                sub_workspace_required = active_workspace_required or _workspace_required(sub)
+                value_hint = sub.get("value_hint") or {}
+                if sub_workspace_required and _value_type(value_hint) == "target":
+                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:subcommand:{sub_name}")
+                _scan_autocomplete(
+                    path,
+                    root,
+                    sub,
+                    flags_by_subcommand,
+                    workspace_required=sub_workspace_required,
+                    subcommand=sub_name or subcommand,
+                )
+
+        for path in paths:
+            data = yaml.safe_load(path.read_text()) or {}
+            commands_data = data if isinstance(data, list) else data.get("commands") or []
+            for command in commands_data:
+                if not isinstance(command, dict):
+                    continue
+                root = str(command.get("root") or "<unknown>")
+                autocomplete = command.get("autocomplete") or {}
+                _scan_autocomplete(
+                    path,
+                    root,
+                    autocomplete,
+                    _target_list_file_flags(command),
+                    workspace_required=_workspace_required(command),
+                )
+
+        assert issues == []
 
     def test_real_registry_positional_argument_order_covers_known_host_port_slots(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
@@ -13536,7 +17484,7 @@ class TestLoadFaq:
         finally:
             os.unlink(path)
         assert len(result) == 1
-        html = result[0]["answer_html"]
+        html = cast(str, result[0]["answer_html"])
         assert "<strong>bold</strong>" in html
         assert "<em>italic</em>" in html
         assert "<u>underline</u>" in html
@@ -14005,8 +17953,8 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/README.md" in result[0]["answer"]
-        assert "https://example.invalid/README.md" in result[0]["answer_html"]
+        assert "https://example.invalid/README.md" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/README.md" in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_uses_config_project_readme_by_default(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -14020,8 +17968,8 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/config-readme" in result[0]["answer"]
-        assert "https://example.invalid/config-readme" in result[0]["answer_html"]
+        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_promotes_workspace_builtin_entry_when_enabled(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -14065,10 +18013,10 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
-        by_question = {item["question"]: item for item in result}
-        share_html = by_question["How do I save or share my results?"]["answer_html"]
-        tabs_html = by_question["How do tabs and permalinks work?"]["answer_html"]
-        shortcuts_html = by_question["Are there keyboard shortcuts?"]["answer_html"]
+        by_question = {cast(str, item["question"]): item for item in result}
+        share_html = cast(str, by_question["How do I save or share my results?"]["answer_html"])
+        tabs_html = cast(str, by_question["How do tabs and permalinks work?"]["answer_html"])
+        shortcuts_html = cast(str, by_question["Are there keyboard shortcuts?"]["answer_html"])
         assert "share snapshot" in share_html
         assert "run permalink" in share_html
         assert "/share" in share_html
@@ -14089,8 +18037,8 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
-        by_question = {item["question"]: item for item in result}
-        built_in_html = by_question["What built-in shell features are supported?"]["answer_html"]
+        by_question = {cast(str, item["question"]): item for item in result}
+        built_in_html = cast(str, by_question["What built-in shell features are supported?"]["answer_html"])
         assert "Built-in commands" in built_in_html
         assert "commands --built-in</code>" in built_in_html
         assert "history</code>" in built_in_html
@@ -14259,7 +18207,7 @@ class TestRunBrokerMemoryStore:
 
     def test_memory_store_marks_trimmed_replay_with_notice(self):
         store = run_broker._MemoryRunBrokerStore()
-        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+        with mock.patch.dict(app_config.CFG, {"run_broker_max_replay_bytes": 160}):
             store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
             store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
             events = store.events_after("run-1", after_id="0-0", limit=10)
@@ -14271,7 +18219,7 @@ class TestRunBrokerMemoryStore:
 
     def test_memory_store_uses_max_output_lines_as_replay_event_bound(self):
         store = run_broker._MemoryRunBrokerStore()
-        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
+        with mock.patch.dict(app_config.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
             store.publish("run-1", "started", {"run_id": "run-1"})
             store.publish("run-1", "output_batch", {
                 "lines": [{"text": "line 1"}],
@@ -14306,7 +18254,7 @@ class TestRunBrokerMemoryStore:
 
     def test_memory_store_does_not_replay_trim_notice_after_real_cursor(self):
         store = run_broker._MemoryRunBrokerStore()
-        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+        with mock.patch.dict(app_config.CFG, {"run_broker_max_replay_bytes": 160}):
             store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
             tail = store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
 
@@ -14322,7 +18270,7 @@ class TestRunBrokerMemoryStore:
             run_broker.BrokerEvent("6-0", {"type": "exit", "code": 0}),
         ]
 
-        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2}):
+        with mock.patch.dict(app_config.CFG, {"max_output_lines": 2}):
             bounded = run_broker._bounded_replay_events(events)
 
         visible_text = [str(event.payload.get("text", "")) for event in bounded]
@@ -14441,7 +18389,7 @@ class TestRunBrokerMemoryStore:
             (b"2-0", {b"payload": b'{"type":"output","text":"hello"}'}),
         ]
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis):
+        with mock.patch.object(process, "redis_client", fake_redis):
             events = run_broker._RedisRunBrokerStore().events_after("run-1", after_id="1-0", limit=10)
 
         assert [(event.event_id, event.payload) for event in events] == [
@@ -14452,7 +18400,7 @@ class TestRunBrokerMemoryStore:
         fake_redis = mock.Mock()
         fake_redis.xrange.return_value = []
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis):
+        with mock.patch.object(process, "redis_client", fake_redis):
             run_broker._RedisRunBrokerStore().events_after("run-1", after_id="123-trim", limit=10)
 
         fake_redis.xrange.assert_called_once_with("runstream:run-1", min="0-0", count=10)
@@ -14465,7 +18413,7 @@ class TestRunBrokerMemoryStore:
         ]
         fake_redis.xlen.return_value = 3
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+        with mock.patch.object(process, "redis_client", fake_redis), \
              mock.patch.object(run_broker, "_replay_fetch_count", return_value=2):
             events = run_broker._RedisRunBrokerStore().replay("run-1")
 
@@ -14480,7 +18428,7 @@ class TestRunBrokerMemoryStore:
         fake_redis = mock.Mock()
         fake_redis.xadd.return_value = b"1-0"
 
-        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+        with mock.patch.object(process, "redis_client", fake_redis), \
              mock.patch.object(run_broker, "_redis_stream_maxlen", return_value=1234):
             event = run_broker._RedisRunBrokerStore().publish("run-1", "output", {"text": "hello"})
 
@@ -14492,8 +18440,8 @@ class TestRunBrokerMemoryStore:
         )
 
     def test_broker_requires_redis_when_configured(self):
-        with mock.patch.object(run_broker, "redis_client", None), \
-             mock.patch.dict(run_broker.CFG, {
+        with mock.patch.object(process, "redis_client", None), \
+             mock.patch.dict(app_config.CFG, {
                  "run_broker_enabled": True,
                  "run_broker_require_redis": True,
              }):
@@ -14503,8 +18451,8 @@ class TestRunBrokerMemoryStore:
             )
 
     def test_broker_allows_memory_store_when_redis_is_optional(self):
-        with mock.patch.object(run_broker, "redis_client", None), \
-             mock.patch.dict(run_broker.CFG, {
+        with mock.patch.object(process, "redis_client", None), \
+             mock.patch.dict(app_config.CFG, {
                  "run_broker_enabled": True,
                  "run_broker_require_redis": False,
              }):
@@ -14514,6 +18462,54 @@ class TestRunBrokerMemoryStore:
 
 
 class TestProcessRedisWorkerConfiguration:
+    def test_redis_client_proxy_reads_process_state_at_call_time(self, monkeypatch):
+        from blueprints import assets as assets_blueprint
+        from services.pty import state as pty_state
+        from services.pty import wire as pty_wire
+
+        proxy = process.RedisClientProxy()
+
+        def default_arg_status(client=proxy):
+            return bool(client), client.ping()
+
+        monkeypatch.setattr(process, "redis_client", None)
+        assert bool(proxy) is False
+        with pytest.raises(AttributeError):
+            proxy.ping()
+
+        first = process._FakeRedisClient()
+        monkeypatch.setattr(process, "redis_client", first)
+        assert bool(proxy) is True
+        assert proxy.ping() is True
+        assert default_arg_status() == (True, True)
+
+        second = mock.Mock()
+        second.ping.return_value = "pong"
+        monkeypatch.setattr(process, "redis_client", second)
+        assert proxy.ping() == "pong"
+        assert default_arg_status() == (True, "pong")
+
+        runtime_client = process._FakeRedisClient()
+        monkeypatch.setattr(process, "redis_client", runtime_client)
+        assert assets_blueprint._redis_client().ping() is True
+        with mock.patch.dict(app_config.CFG, {"run_broker_enabled": True, "run_broker_require_redis": True}):
+            assert run_broker.broker_available() is True
+            assert run_broker.broker_unavailable_reason() == ""
+        cleanup_owner, lock_type = runtime_bootstrap._acquire_active_run_startup_cleanup_lock()
+        assert (cleanup_owner, lock_type) == (True, "redis")
+
+        run = SimpleNamespace(
+            run_id="pty-late-redis",
+            session_id="sess-late-redis",
+            team_id="",
+            command="bash",
+            started="2026-05-20T12:00:00+00:00",
+            rows=24,
+            cols=80,
+        )
+        pty_state.store_pty_meta(run)
+        assert runtime_client.get(pty_wire.meta_key(run.run_id)) is not None
+
     def test_multi_worker_requires_redis(self):
         with mock.patch.object(process.log, "critical") as critical:
             with pytest.raises(RuntimeError, match="Redis is required when WEB_CONCURRENCY=4"):
@@ -16418,6 +20414,8 @@ class TestOutputSignals:
     def test_classifies_common_findings(self):
         assert classify_line("443/tcp open https", command="nmap ip.darklab.sh") == ["findings"]
         assert classify_line("ip.darklab.sh [107.178.109.44] 80 (http) open", command="nc -zv ip.darklab.sh 80") == ["findings"]
+        assert classify_line("192.0.2.10:443", command="naabu -host 192.0.2.10") == ["findings"]
+        assert classify_line("[2001:db8::10]:8443", command="naabu -host 2001:db8::10") == ["findings"]
         assert classify_line("darklab.sh has address 104.21.4.35", command="host darklab.sh") == ["findings"]
         assert classify_line("104.21.4.35", command="dig darklab.sh +short") == ["findings"]
         assert classify_line("1 aspmx.l.google.com.", command="dig MX darklab.sh +short") == ["findings"]
@@ -16468,6 +20466,128 @@ class TestOutputSignals:
         ]
         assert classify_line("104.21.4.35", command="cat ips.txt") == []
         assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
+
+    def test_scan_output_emits_port_entities_with_hosts(self):
+        cases: list[tuple[str, list[str], str, dict[str, str]]] = [
+            (
+                "nmap example.com",
+                ["Nmap scan report for example.com", "443/tcp open https nginx"],
+                "example.com:443/tcp",
+                {"service": "https", "version": "nginx"},
+            ),
+            (
+                "nmap 192.168.1.5",
+                ["Nmap scan report for 192.168.1.5", "80/tcp open http nginx"],
+                "192.168.1.5:80/tcp",
+                {"service": "http", "version": "nginx"},
+            ),
+            (
+                "masscan 8.8.8.8",
+                ["Discovered open port 53/udp on 8.8.8.8"],
+                "8.8.8.8:53/udp",
+                {},
+            ),
+            (
+                "masscan 198.51.100.7",
+                ["Discovered open port 443/tcp on 198.51.100.7"],
+                "198.51.100.7:443/tcp",
+                {},
+            ),
+            (
+                "rustscan -a 198.51.100.7",
+                ["Open 198.51.100.7:443"],
+                "198.51.100.7:443/tcp",
+                {},
+            ),
+            (
+                "rustscan -a 10.0.0.5",
+                ["Open 10.0.0.5:443"],
+                "10.0.0.5:443/tcp",
+                {},
+            ),
+            (
+                "rustscan -a 127.0.0.1",
+                ["Open 127.0.0.1:8080"],
+                "127.0.0.1:8080/tcp",
+                {},
+            ),
+            (
+                "naabu -host example.com",
+                ["example.com:443"],
+                "example.com:443/tcp",
+                {},
+            ),
+            (
+                "naabu -host 172.16.1.8",
+                ["172.16.1.8:8443"],
+                "172.16.1.8:8443/tcp",
+                {},
+            ),
+            (
+                "naabu -host 192.0.2.10",
+                ["192.0.2.10:443"],
+                "192.0.2.10:443/tcp",
+                {},
+            ),
+            (
+                "naabu -host 2001:db8::10",
+                ["[2001:db8::10]:8443"],
+                "[2001:db8::10]:8443/tcp",
+                {},
+            ),
+            (
+                "nc -zv fw-vx2-vp4.darklab.sh 80",
+                ["fw-vx2-vp4.darklab.sh [107.167.93.162] 80 (http) open"],
+                "fw-vx2-vp4.darklab.sh:80/tcp",
+                {"service": "http"},
+            ),
+            (
+                "nc -zv 192.168.1.20 80",
+                ["192.168.1.20 [192.168.1.20] 80 (http) open"],
+                "192.168.1.20:80/tcp",
+                {"service": "http"},
+            ),
+            (
+                "nc -zv 192.168.1.3 80",
+                [
+                    "192.168.1.3: inverse host lookup failed: No address associated with name",
+                    "(UNKNOWN) [192.168.1.3] 80 (http) open",
+                ],
+                "192.168.1.3:80/tcp",
+                {"service": "http"},
+            ),
+            (
+                "nc -zv example.com 443",
+                ["Connection to example.com 443 port [tcp/https] succeeded!"],
+                "example.com:443/tcp",
+                {},
+            ),
+            (
+                "curl -v https://example.com",
+                ["* Connected to example.com (93.184.216.34) port 443 (#0)"],
+                "93.184.216.34:443/tcp",
+                {},
+            ),
+        ]
+        for command, lines, port_value, attributes in cases:
+            classifier = OutputSignalClassifier(command)
+            entities: list[dict[str, object]] = []
+            for line in lines:
+                classified_entities = cast(
+                    list[dict[str, object]] | None,
+                    classifier.classify_line(line).get("entities"),
+                )
+                entities = classified_entities or entities
+            expected_host = port_value.rsplit(":", 1)[0].strip("[]")
+            expected_host_type = "ip" if ":" in expected_host or expected_host.replace(".", "").isdigit() else "domain"
+            assert any(
+                entity["type"] == expected_host_type and entity["canonical_value"] == expected_host
+                for entity in entities
+            ), command
+            port_entities = [entity for entity in entities if entity["type"] == "port"]
+            assert [entity["canonical_value"] for entity in port_entities] == [port_value]
+            if attributes:
+                assert port_entities[0]["attributes"] == attributes
 
     def test_help_output_does_not_feed_signals_or_entities(self):
         assert classify_line("443/tcp open https", command="nmap -h") == []
@@ -16824,6 +20944,8 @@ class TestOutputSignals:
         ]
 
     def test_classifies_projectdiscovery_and_port_scanner_findings(self):
+        import core.output_signals as output_signals
+
         dnsx_classifier = OutputSignalClassifier("dnsx -d darklab.sh -w dns.txt")
         current_dnsx = dnsx_classifier.classify_line("[INF] Current dnsx version 1.2.3 (latest)")
         assert current_dnsx["noise_kind"] == "status"
@@ -16840,6 +20962,23 @@ class TestOutputSignals:
         assert classify_line("Open 107.178.109.44:443", command="rustscan -a ip.darklab.sh -p 80,443") == [
             "findings",
         ]
+        with mock.patch.object(output_signals.log, "debug") as debug:
+            rejected_port_candidate = OutputSignalClassifier("masscan -p 70000 192.168.1.3").classify_line(
+                "Discovered open port 70000/tcp on 192.168.1.3"
+            )
+        assert "entities" not in rejected_port_candidate
+        debug.assert_called_once()
+        assert debug.call_args.args == ("OUTPUT_SIGNAL_PORT_ENTITY_SKIPPED",)
+        debug_extra = debug.call_args.kwargs["extra"]
+        assert debug_extra["command_root"] == "masscan"
+        assert debug_extra["line_index"] == 0
+        assert debug_extra["reason"] == "invalid_port"
+        assert debug_extra["port"] == "70000"
+        assert debug_extra["proto"] == "tcp"
+        assert debug_extra["host_kind"] == "ip_literal"
+        assert isinstance(debug_extra["host_hash"], str)
+        assert len(debug_extra["host_hash"]) == 12
+        assert "192.168.1.3" not in json.dumps(debug_extra)
         assert classify_line(
             "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
             command="nuclei -u https://ip.darklab.sh",
@@ -17031,6 +21170,7 @@ class TestOutputSignals:
         assert "custom/nuclei/http.yaml" not in json.dumps(debug_extra)
 
     def test_classifies_scanner_progress_lines_as_progress_role(self):
+        import blueprints.run as run_blueprint
         from blueprints.run import _capture_event_with_signals
 
         masscan_classifier = OutputSignalClassifier("masscan -p 1-1000 192.168.1.3")
@@ -17114,6 +21254,26 @@ class TestOutputSignals:
 
         assert capture.preview_lines[0]["cls"] == LineRole.progress.value
         assert capture.preview_lines[0]["noise_kind"] == "progress"
+
+        with mock.patch.object(run_blueprint.log, "info") as info_log:
+            run_blueprint._log_atlas_entities_captured(
+                "session-1",
+                "team-1",
+                "run-port-log",
+                [{"type": "ip"}, {"type": "port"}, {"type": "port"}],
+                1,
+            )
+        info_log.assert_called_once()
+        assert info_log.call_args.args == ("ATLAS_ENTITIES_CAPTURED",)
+        assert info_log.call_args.kwargs["extra"] == {
+            "run_id": "run-port-log",
+            "session": "session-1",
+            "team_id": "team-1",
+            "count": 3,
+            "entity_type_counts": {"ip": 1, "port": 2},
+            "port_entity_count": 2,
+            "scan_observation_count": 1,
+        }
 
     def test_live_output_batcher_coalesces_progress_without_dropping_saved_lines(self):
         import blueprints.run as run_blueprint
@@ -17306,6 +21466,7 @@ class TestOutputSignals:
         )
 
         by_type = {(item["type"], item["canonical_value"]): item for item in entities}
+        assert ("url", "https://xn--bcher-kva.example/path") in by_type
         assert ("domain", "xn--bcher-kva.example") in by_type
         assert ("cve", "CVE-2024-12345") in by_type
         assert ("hash", f"sha256:{sha256}") in by_type
@@ -17315,27 +21476,123 @@ class TestOutputSignals:
         assert all(item["source_line"] == 7 for item in entities)
         assert all(isinstance(item["start"], int) and isinstance(item["end"], int) for item in entities)
         assert by_type[("domain", "xn--bcher-kva.example")]["value"] == "bücher.example"
+        assert by_type[("url", "https://xn--bcher-kva.example/path")]["value"] == "https://Bücher.Example/path"
 
     def test_extract_entities_ignores_file_names_inside_url_paths(self):
         entities = extract_entities(
             "loaded https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css "
-            r"and https://example.test/assets/icons/awesome.svg admin-ajax.php http://www\.w3\.org/TR/xhtml1",
+            r"and https://example.test/assets/icons/awesome.svg admin-ajax.php http://www\.w3\.org/TR/xhtml1 "
+            "http://127.0.0.1/private/admin.php",
         )
         values = {(item["type"], item["canonical_value"]) for item in entities}
 
         assert ("domain", "cdnjs.cloudflare.com") in values
         assert ("domain", "example.test") in values
+        assert ("url", "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css") in values
+        assert ("url", "https://example.test/assets/icons/awesome.svg") in values
+        assert ("url", "http://127.0.0.1/private/admin.php") not in values
         assert ("domain", "all.min.css") not in values
         assert ("domain", "awesome.svg") not in values
         assert ("domain", "admin-ajax.php") not in values
+        assert ("domain", "admin.php") not in values
         assert ("domain", r"www\.w3\.org") not in values
 
+    def test_extract_entities_uses_public_suffix_gate_for_generic_hostnames(self):
+        entities = extract_entities(
+            "darklab.sh example.co.uk pages.github.io co.uk github.io "
+            "classlist.add document.queryselector document.queryselectorall "
+            "event.touches images.length slider.addeventlistener os.path Array.prototype config.default"
+        )
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "darklab.sh") in values
+        assert ("domain", "example.co.uk") in values
+        assert ("domain", "pages.github.io") in values
+        assert ("domain", "co.uk") not in values
+        assert ("domain", "github.io") not in values
+        assert ("domain", "classlist.add") not in values
+        assert ("domain", "document.queryselector") not in values
+        assert ("domain", "document.queryselectorall") not in values
+        assert ("domain", "event.touches") not in values
+        assert ("domain", "images.length") not in values
+        assert ("domain", "slider.addeventlistener") not in values
+        assert ("domain", "os.path") not in values
+        assert ("domain", "array.prototype") not in values
+        assert ("domain", "config.default") not in values
+
+    def test_extract_entities_keeps_psl_gate_as_validation_only(self):
+        entities = extract_entities("foo.github.io bar.github.io")
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "foo.github.io") in values
+        assert ("domain", "bar.github.io") in values
+        assert ("domain", "github.io") not in values
+
+    def test_extract_entities_rejects_file_context_without_dropping_real_domains(self):
+        entities = extract_entities("./main.sh /opt/app/lib.rs C:\\tools\\deploy.py darklab.sh")
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "darklab.sh") in values
+        assert ("domain", "main.sh") not in values
+        assert ("domain", "lib.rs") not in values
+        assert ("domain", "deploy.py") not in values
+
+    def test_extract_entities_keeps_scheme_less_domain_path_references(self):
+        entities = extract_entities(
+            "found example.com/admin during scan; redirect to example.net/login and /opt/app/lib.rs"
+        )
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "example.com") in values
+        assert ("domain", "example.net") in values
+        assert ("domain", "lib.rs") not in values
+
+    def test_extract_entities_extra_suffix_allowlist_is_per_call(self):
+        default_entities = extract_entities("host.local service.corp local corp")
+        allowed_entities = extract_entities("host.local service.corp local corp", extra_domain_suffixes=["local", ".corp"])
+        default_values = {(item["type"], item["canonical_value"]) for item in default_entities}
+        allowed_values = {(item["type"], item["canonical_value"]) for item in allowed_entities}
+
+        assert ("domain", "host.local") not in default_values
+        assert ("domain", "service.corp") not in default_values
+        assert ("domain", "host.local") in allowed_values
+        assert ("domain", "service.corp") in allowed_values
+        assert ("domain", "local") not in allowed_values
+        assert ("domain", "corp") not in allowed_values
+
+    def test_extract_entities_url_host_companion_is_not_psl_gated(self):
+        bare_entities = extract_entities("host.local")
+        url_entities = extract_entities("https://host.local/path")
+        bare_values = {(item["type"], item["canonical_value"]) for item in bare_entities}
+        url_values = {(item["type"], item["canonical_value"]) for item in url_entities}
+
+        assert ("domain", "host.local") not in bare_values
+        assert ("url", "https://host.local/path") in url_values
+        assert ("domain", "host.local") in url_values
+
+    def test_extract_entities_public_suffix_gate_does_not_fetch_network(self):
+        import tldextract.suffix_list as suffix_list
+
+        # tldextract routes live suffix-list refreshes through this helper in the
+        # pinned version. If the dependency changes this internals path, keep the
+        # assertion intent: normal extraction must not attempt a network refresh.
+        with mock.patch.object(suffix_list, "find_first_response", side_effect=AssertionError("network fetch attempted")):
+            entities = extract_entities("darklab.sh classlist.add")
+
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+        assert ("domain", "darklab.sh") in values
+        assert ("domain", "classlist.add") not in values
+
     def test_extract_entities_can_include_private_ips_when_requested(self):
-        entities = extract_entities("localhost-ish: 127.0.0.1 and fd00::1", include_private_ips=True)
+        entities = extract_entities(
+            "localhost-ish: 127.0.0.1 and fd00::1 http://127.0.0.1/private",
+            include_private_ips=True,
+        )
         values = {(item["type"], item["canonical_value"]) for item in entities}
 
         assert ("ip", "127.0.0.1") in values
         assert ("ip", "fd00::1") in values
+        assert ("url", "http://127.0.0.1/private") in values
 
     def test_classifier_adds_entity_metadata_to_real_output(self):
         classifier = OutputSignalClassifier("host darklab.sh")
@@ -17370,17 +21627,29 @@ class TestOutputSignals:
         assert "entities" not in nmap_classifier.classify_line(
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
-        assert "entities" not in nmap_classifier.classify_line(
+
+        nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )
-        assert "entities" not in nmap_classifier.classify_line(
+        nmap_afp = nmap_classifier.classify_line(
             "548/tcp   open  afp         syn-ack Netatalk 3.1.9.q3 (name: MAYHEW-NAS; protocol 3.4)"
         )
+        for metadata, port_value in (
+            (nmap_http, "darklab.sh:6080/tcp"),
+            (nmap_afp, "darklab.sh:548/tcp"),
+        ):
+            nmap_port_entities = metadata["entities"]
+            assert isinstance(nmap_port_entities, list)
+            nmap_port_values = {(item["type"], item["canonical_value"]) for item in nmap_port_entities}
+            assert ("domain", "darklab.sh") in nmap_port_values
+            assert ("port", port_value) in nmap_port_values
+            assert all(item["canonical_value"] not in {"http.server", "3.1.9.q3"} for item in nmap_port_entities)
+
         nmap_report = nmap_classifier.classify_line("Nmap scan report for web.darklab.sh (104.21.4.35)")
         nmap_report_entities = nmap_report["entities"]
         assert isinstance(nmap_report_entities, list)
         nmap_report_values = {(item["type"], item["canonical_value"]) for item in nmap_report_entities}
-        assert ("host", "web.darklab.sh") in nmap_report_values
+        assert ("domain", "web.darklab.sh") in nmap_report_values
         assert ("ip", "104.21.4.35") in nmap_report_values
         nmap_rdns = nmap_classifier.classify_line("rDNS record for 104.21.4.35: web.darklab.sh")
         nmap_rdns_entities = nmap_rdns["entities"]
@@ -17461,7 +21730,7 @@ class TestOutputSignals:
             (item["type"], item["canonical_value"])
             for item in first_entities
         } == {
-            ("host", "ip.darklab.sh"),
+            ("domain", "ip.darklab.sh"),
             ("ip", "192.168.20.5"),
         }
         assert first_port["target"] == "ip.darklab.sh"
@@ -17473,7 +21742,7 @@ class TestOutputSignals:
             (item["type"], item["canonical_value"])
             for item in second_entities
         } == {
-            ("host", "h.darklab.sh"),
+            ("domain", "h.darklab.sh"),
             ("ip", "108.79.194.246"),
         }
         assert second_port["target"] == "h.darklab.sh"
@@ -17631,13 +21900,14 @@ class TestRunOutputCapture:
             command_root="nmap",
             target="ip.darklab.sh",
             entities=RunOutputCapture._normalize_entities([{
-                "type": "domain",
-                "value": "ip.darklab.sh",
-                "canonical_value": "ip.darklab.sh",
-                "confidence": "medium",
+                "type": "port",
+                "value": "ip.darklab.sh:443/tcp",
+                "canonical_value": "ip.darklab.sh:443/tcp",
+                "confidence": "high",
                 "source_line": 0,
                 "start": 14,
                 "end": 27,
+                "attributes": {"service": "https", "version": "nginx"},
             }]),
         ))
         capture.finalize()
@@ -17652,13 +21922,14 @@ class TestRunOutputCapture:
             "command_root": "nmap",
             "target": "ip.darklab.sh",
             "entities": [{
-                "type": "domain",
-                "value": "ip.darklab.sh",
-                "canonical_value": "ip.darklab.sh",
-                "confidence": "medium",
+                "type": "port",
+                "value": "ip.darklab.sh:443/tcp",
+                "canonical_value": "ip.darklab.sh:443/tcp",
+                "confidence": "high",
                 "source_line": 0,
                 "start": 14,
                 "end": 27,
+                "attributes": {"service": "https", "version": "nginx"},
             }],
         }]
         assert list(capture.preview_lines) == expected
@@ -17671,7 +21942,8 @@ class TestRunOutputCapture:
         assert events[0].line_index == 0
         assert events[0].command_root == "nmap"
         assert events[0].target == "ip.darklab.sh"
-        assert events[0].entities[0].canonical_value == "ip.darklab.sh"
+        assert events[0].entities[0].canonical_value == "ip.darklab.sh:443/tcp"
+        assert events[0].entities[0].attributes == {"service": "https", "version": "nginx"}
 
     def test_nuclei_source_detail_round_trips_through_run_output_and_package_entries(self):
         import services.projects.package_rendering as package_rendering
@@ -18185,8 +22457,8 @@ class TestAutocompleteContextLoading:
 
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.2.40", "cdncheck -h"),
-            ("TRUFFLEHOG_VERSION", "v3.95.5", "trufflehog --help"),
+            ("CDNCHECK_VERSION", "v1.2.42", "cdncheck -h"),
+            ("TRUFFLEHOG_VERSION", "v3.95.7", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):
@@ -18536,7 +22808,8 @@ class TestWorkflowInputLoading:
 
         subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
         assert subdomain["feature_required"] == "workspace"
-        assert [step["cmd"] for step in subdomain["steps"]] == [
+        subdomain_steps = cast(list[dict[str, object]], subdomain["steps"])
+        assert [step["cmd"] for step in subdomain_steps] == [
             "subfinder -d {{domain}} -silent -o subdomains.txt",
             "httpx -l subdomains.txt -silent -o live-urls.txt",
             "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
@@ -18612,6 +22885,41 @@ class TestSeedHistoryFixtures:
 # ── rewrite_command idempotency ───────────────────────────────────────────────
 
 class TestRewriteIdempotent:
+    def test_injected_flags_without_position_default_to_prepend(self):
+        with mock.patch(
+            "services.commands.registry._runtime_adaptations_by_root",
+            return_value={"curl": {"inject_flags": [{"flags": ["--extra"]}]}},
+        ):
+            cmd, notice = rewrite_command("curl https://example.com --verbose")
+
+        assert cmd == "curl --extra https://example.com --verbose"
+        assert notice is None
+
+    def test_curl_progress_meter_is_suppressed_by_default(self):
+        cmd, notice = rewrite_command("curl https://ip.darklab.sh")
+        assert cmd == "curl --no-progress-meter https://ip.darklab.sh"
+        assert notice is None
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("curl -I https://ip.darklab.sh", "curl --no-progress-meter -I https://ip.darklab.sh"),
+            ("curl -sv https://ip.darklab.sh", "curl --no-progress-meter -sv https://ip.darklab.sh"),
+            ("curl -s https://ip.darklab.sh", "curl -s https://ip.darklab.sh"),
+            ("curl --silent https://ip.darklab.sh", "curl --silent https://ip.darklab.sh"),
+            ("curl -# https://ip.darklab.sh", "curl -# https://ip.darklab.sh"),
+            ("curl --progress-bar https://ip.darklab.sh", "curl --progress-bar https://ip.darklab.sh"),
+            ("curl --progress-meter https://ip.darklab.sh", "curl --progress-meter https://ip.darklab.sh"),
+            ("curl --no-progress-meter https://ip.darklab.sh", "curl --no-progress-meter https://ip.darklab.sh"),
+            ("curl -h", "curl -h"),
+            ("curl --help", "curl --help"),
+        ],
+    )
+    def test_curl_progress_rewrite_preserves_explicit_output_modes(self, command, expected):
+        cmd, notice = rewrite_command(command)
+        assert cmd == expected
+        assert notice is None
+
     def test_mtr_already_report_wide_unchanged(self):
         cmd, notice = rewrite_command("mtr --report-wide google.com")
         assert "--report-wide --report-wide" not in cmd
@@ -18634,14 +22942,14 @@ class TestRewriteIdempotent:
 
 class TestExpiryNote:
     def test_returns_empty_when_retention_zero(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0}, clear=False):
             result = _expiry_note("2024-01-01T00:00:00+00:00")
         assert result == ""
 
     def test_returns_expiry_text_when_not_expired(self):
         # Created 5 days ago, retention 30 days → ~25 days remaining
         created = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note(created)
         assert "expires in" in result
         assert "days" in result
@@ -18649,25 +22957,25 @@ class TestExpiryNote:
     def test_returns_expires_today_when_less_than_24h(self):
         # Created just under retention_days ago so < 24 h remains
         created = (datetime.now(timezone.utc) - timedelta(days=6, hours=23)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 7}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 7}, clear=False):
             result = _expiry_note(created)
         assert "expires today" in result
 
     def test_returns_empty_when_already_expired(self):
         # Created longer ago than retention
         created = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note(created)
         assert result == ""
 
     def test_returns_empty_on_invalid_date(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note("not-a-date")
         assert result == ""
 
     def test_includes_expiry_date(self):
         created = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note(created)
         # Should include a YYYY-MM-DD formatted date
         import re
@@ -18678,15 +22986,15 @@ class TestExpiryNote:
 
 class TestPromptEchoText:
     def test_uses_configured_prompt_identity(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             assert _prompt_echo_text("ls -la") == "ops@darklab:~ $ ls -la"
 
     def test_falls_back_to_default_identity_when_parts_are_missing(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "", "prompt_domain": ""}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "", "prompt_domain": ""}):
             assert _prompt_echo_text("ls -la") == "anon@darklab.sh:~ $ ls -la"
 
     def test_strips_trailing_space_when_label_empty(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
             assert _prompt_echo_text("") == "anon@darklab.sh:~ $"
 
 
@@ -18697,7 +23005,7 @@ class TestNormalizePermalinkLinesPromptEcho:
     same prompt identity as the live shell."""
 
     def test_unstructured_content_uses_configured_prefix(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -18707,7 +23015,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
             {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
         ]
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -18717,7 +23025,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
             {"text": "hello", "cls": ""},
         ]
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         # Existing echo survives; normalizer does not prepend a second one.
         echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]
@@ -18729,32 +23037,32 @@ class TestNormalizePermalinkLinesPromptEcho:
 
 class TestPermalinkErrorPage:
     def test_returns_404_status(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}, clear=False):
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert resp.status_code == 404
 
     def test_includes_noun_in_body(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}, clear=False):
+            with _test_app().app_context():
                 resp = _permalink_error_page("run")
         assert b"run" in resp.data
 
     def test_includes_app_name(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
-            with shell_app.app.app_context():
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}, clear=False):
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"my-shell" in resp.data
 
     def test_mentions_retention_when_configured(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}, clear=False):
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"30 days" in resp.data or b"1 month" in resp.data
 
     def test_no_retention_mention_when_unlimited(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            with shell_app.app.app_context():
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}, clear=False):
+            with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         # Unlimited mode should not mention an automatic deletion period
         assert b"retention" not in resp.data.lower()
@@ -18767,7 +23075,7 @@ class TestAuditEvents:
         tmp = tempfile.TemporaryDirectory()
         db_path = os.path.join(tmp.name, "audit.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0, "audit_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0, "audit_retention_days": 0})):
                 database.db_init()
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -19634,8 +23942,78 @@ class TestDatabaseInit:
 
     def _create_tables(self, db_path):
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
+
+    def test_atlas_lookup_split_modules_read_shared_backend_accessor(self, monkeypatch):
+        from services.atlas import lookup_metadata, lookup_search
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
+        postgres_dialect = database_backend.dialect_for_backend(database_backend.DatabaseBackend.POSTGRES)
+        postgres_label_order = postgres_dialect.case_insensitive_order("label")
+        assert lookup_metadata.label_order_sql() == postgres_label_order + ", created ASC"
+        assert lookup_search.atlas_search_clause(["entities.canonical_value"]) == (
+            "AND (? = '' OR " + postgres_dialect.text_search_expr("entities.canonical_value") + ") "
+        )
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        sqlite_dialect = database_backend.dialect_for_backend(database_backend.DatabaseBackend.SQLITE)
+        sqlite_label_order = sqlite_dialect.case_insensitive_order("label")
+        assert lookup_metadata.label_order_sql() == sqlite_label_order + ", created ASC"
+        assert lookup_search.atlas_search_clause(["entities.canonical_value"]) == (
+            "AND (? = '' OR " + sqlite_dialect.text_search_expr("entities.canonical_value") + ") "
+        )
+
+    def test_split_query_modules_read_shared_db_connect_accessor(self, monkeypatch):
+        from services.atlas import lookup as atlas_lookup
+        from services.history import mutations as history_mutations
+        from services.projects import artifact_queries, package_queries
+
+        opened = []
+
+        class EmptyCursor:
+            rowcount = 0
+
+            def fetchone(self):
+                return None
+
+            def fetchall(self):
+                return []
+
+        class FakeConn:
+            def __init__(self):
+                self.queries = []
+
+            def __enter__(self):
+                opened.append(self)
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def execute(self, sql, params=()):
+                self.queries.append((sql, tuple(params)))
+                return EmptyCursor()
+
+            def commit(self):
+                return None
+
+        def fake_connect():
+            return FakeConn()
+
+        owner_scope = SimpleNamespace(predicate=lambda *args, **kwargs: ("session_id = ?", ["session"]))
+        monkeypatch.setattr(database, "db_connect", fake_connect)
+
+        assert artifact_queries.list_project_artifacts("session", "project") is None
+        assert package_queries.list_evidence_packages("session", "project") is None
+        assert history_mutations.history_run_cleanup_preview("session", "run-1") is None
+        assert atlas_lookup.run_atlas_read(lambda conn: conn) is opened[-1]
+        assert len(opened) == 4
+        assert any("FROM projects" in query for query, _params in opened[0].queries)
+        assert any("FROM projects" in query for query, _params in opened[1].queries)
+        assert any("FROM runs" in query for query, _params in opened[2].queries)
+        assert history_mutations.bulk_export_rows(owner_scope, [], []) == ({}, {})
+        assert len(opened) == 5
 
     def test_creates_runs_and_snapshots_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -19698,7 +24076,7 @@ class TestDatabaseInit:
                     with mock.patch(
                         "core.database.load_full_output_entries",
                         side_effect=OSError("missing artifact"),
-                    ) as load_entries:
+                    ) as load_entries, mock.patch.object(database.log, "warning") as log_warning:
                         database._populate_run_output_summary(conn)
                         database._populate_run_output_summary(conn)
                     conn.commit()
@@ -19713,6 +24091,16 @@ class TestDatabaseInit:
                     ).fetchone()["count"]
 
         assert load_entries.call_count == 1
+        degraded_call = next(
+            call for call in log_warning.call_args_list
+            if call.args[0] == "RUN_OUTPUT_SUMMARY_BACKFILL_DEGRADED"
+        )
+        assert degraded_call.kwargs["extra"] == {
+            "backend": database.DB_BACKEND.value,
+            "artifact_unreadable": 1,
+            "preview_unreadable": 1,
+            "failed": 1,
+        }
         assert summary_count == 0
         assert [dict(row) for row in rows] == [{
             "status": "failed",
@@ -20379,6 +24767,27 @@ class TestDatabaseInit:
         assert result.findings[0].affected_entity.canonical_value == "https://darklab.sh/login"
         assert result.findings[0].references == ["https://owasp.org"]
 
+    def test_atlas_import_parser_accepts_generic_port_entities(self):
+        csv_payload = "\n".join((
+            "row_type,entity_kind,entity_value",
+            "entity,port,Example.com:443/tcp",
+            "entity,port,[2001:db8::1]:53/udp",
+        ))
+        jsonl_payload = "\n".join((
+            json.dumps({"row_type": "entity", "entity_kind": "port", "entity_value": "Example.com:443/tcp"}),
+            json.dumps({"row_type": "entity", "entity_kind": "port", "entity_value": "[2001:db8::1]:53/udp"}),
+        ))
+
+        csv_result = parse_import_file(csv_payload.encode(), format_id="generic_csv")
+        jsonl_result = parse_import_file(jsonl_payload, format_id="generic_jsonl")
+
+        expected = [
+            ("port", "example.com:443/tcp"),
+            ("port", "[2001:db8::1]:53/udp"),
+        ]
+        assert [(entity.kind, entity.canonical_value) for entity in csv_result.entities] == expected
+        assert [(entity.kind, entity.canonical_value) for entity in jsonl_result.entities] == expected
+
     def test_atlas_import_parser_warns_on_malformed_generic_jsonl_rows(self):
         payload = "\n".join((
             '{"row_type":"entity","entity_kind":"ip","entity_value":"192.0.2.10"}',
@@ -20396,6 +24805,7 @@ class TestDatabaseInit:
     def test_atlas_import_parser_covers_generic_entity_schema_and_invalid_severity(self):
         payload = "\n".join((
             json.dumps({"row_type": "entity", "entity_kind": "url", "entity_value": "HTTPS://DarkLab.SH/Login"}),
+            json.dumps({"row_type": "entity", "entity_kind": "url", "entity_value": "HTTP://[2001:0DB8::0001]:8080/path/"}),
             json.dumps({"row_type": "entity", "entity_kind": "host", "entity_value": "192.0.2.10"}),
             json.dumps({"row_type": "entity", "entity_kind": "cve", "entity_value": "cve-2026-12345"}),
             json.dumps({"row_type": "entity", "entity_kind": "hash", "entity_value": "a" * 64}),
@@ -20412,6 +24822,7 @@ class TestDatabaseInit:
 
         assert [(entity.kind, entity.canonical_value) for entity in result.entities] == [
             ("url", "https://darklab.sh/Login"),
+            ("url", "http://[2001:db8::1]:8080/path"),
             ("ip", "192.0.2.10"),
             ("cve", "CVE-2026-12345"),
             ("hash", f"sha256:{'a' * 64}"),
@@ -20729,6 +25140,8 @@ SQL syntax error near q</response>
         assert source.read_sizes == [5]
 
     def test_materializes_run_entities_from_output_entries(self):
+        from core.helpers import get_log_session_id
+
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
@@ -20765,23 +25178,825 @@ SQL syntax error near q</response>
             )
             conn.commit()
             entity_rows = conn.execute(
-                "SELECT type, canonical_value, occurrence_count FROM entities ORDER BY type, canonical_value"
+                "SELECT id, type, canonical_value, occurrence_count, host_entity_id "
+                "FROM entities ORDER BY type, canonical_value"
             ).fetchall()
             link_rows = conn.execute(
                 "SELECT run_id, occurrence_count FROM entity_run_links ORDER BY run_id"
             ).fetchall()
+            domain_id = next(row["id"] for row in entity_rows if row["canonical_value"] == "darklab.sh")
+            conn.execute("UPDATE entities SET attributes_json = ? WHERE id = ?", ("{not-json", domain_id))
+            with mock.patch("services.atlas.materializer.log.warning") as warning_log:
+                materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    "run-atlas",
+                    [{"entities": [{"type": "domain", "value": "darklab.sh", "attributes": {"source": "manual"}}]}],
+                    seen_at="2026-05-14T00:00:02+00:00",
+                )
             conn.close()
 
         assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
             ("cve", "CVE-2025-49113", 1),
             ("domain", "darklab.sh", 2),
+            ("domain", "example.com", 1),
             ("domain", "www.darklab.sh", 1),
             ("hash", f"sha1:{'a' * 40}", 1),
             ("ip", "2001:db8::1", 1),
             ("url", "https://example.com/path", 1),
         }
-        assert len(recorded) == 6
-        assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 6
+        example_host_id = next(row["id"] for row in entity_rows if row["canonical_value"] == "example.com")
+        url_row = next(row for row in entity_rows if row["canonical_value"] == "https://example.com/path")
+        assert url_row["host_entity_id"] == example_host_id
+        assert len(recorded) == 7
+        assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 7
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED"] == {
+            "session": get_log_session_id("atlas-session"),
+            "entity_id": domain_id,
+            "entity_type": "domain",
+            "value_type": "str",
+            "reason": "invalid_json",
+        }
+
+    def test_url_entities_create_and_link_host_entities(self):
+        from services.atlas.materializer import upsert_entity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-url-atlas", "atlas-session", "curl https://api.example.com/login", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-url-atlas",
+                [{"entities": [{"type": "url", "value": "https://api.example.com/login"}]}],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="curl https://api.example.com/login",
+            )
+            ip_url_id = upsert_entity(
+                conn,
+                "atlas-session",
+                "url",
+                "https://192.0.2.10/status",
+                seen_at="2026-05-14T00:00:02+00:00",
+                occurrence_count=0,
+            )
+            ipv6_url_id = upsert_entity(
+                conn,
+                "atlas-session",
+                "url",
+                "http://[2001:db8::1]:8080/status",
+                seen_at="2026-05-14T00:00:03+00:00",
+                occurrence_count=0,
+            )
+            conn.commit()
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id, occurrence_count "
+                    "FROM entities ORDER BY type, canonical_value"
+                ).fetchall()
+            }
+            link_rows = conn.execute(
+                "SELECT entity_id, occurrence_count FROM entity_run_links WHERE run_id = ? ORDER BY entity_id",
+                ("run-url-atlas",),
+            ).fetchall()
+            conn.close()
+
+        host_row = rows[("domain", "api.example.com")]
+        url_row = rows[("url", "https://api.example.com/login")]
+        ip_host_row = rows[("ip", "192.0.2.10")]
+        ip_url_row = rows[("url", "https://192.0.2.10/status")]
+        ipv6_host_row = rows[("ip", "2001:db8::1")]
+        ipv6_url_row = rows[("url", "http://[2001:db8::1]:8080/status")]
+        assert [item["type"] for item in recorded] == ["domain", "url"]
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert host_row["occurrence_count"] == 1
+        assert ip_url_id == ip_url_row["id"]
+        assert ip_url_row["host_entity_id"] == ip_host_row["id"]
+        assert ipv6_url_id == ipv6_url_row["id"]
+        assert ipv6_url_row["host_entity_id"] == ipv6_host_row["id"]
+        assert ("domain", "2001") not in rows
+        assert {(row["entity_id"], row["occurrence_count"]) for row in link_rows} == {
+            (host_row["id"], 1),
+            (url_row["id"], 1),
+        }
+
+    def test_materialized_url_host_from_extracted_entities_is_not_double_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-url-extracted", "atlas-session", "curl https://api.example.com/login", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-url-extracted",
+                [{"entities": extract_entities("visit https://api.example.com/login now")}],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="curl https://api.example.com/login",
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "run-private-url-extracted",
+                    "atlas-session",
+                    "curl http://127.0.0.1/private",
+                    "2026-05-14T00:00:02+00:00",
+                    "[]"
+                ),
+            )
+            private_recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-private-url-extracted",
+                [{"entities": extract_entities("visit http://127.0.0.1/private now")}],
+                seen_at="2026-05-14T00:00:03+00:00",
+                command="curl http://127.0.0.1/private",
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "run-url-extracted-repeat",
+                    "atlas-session",
+                    "curl https://api.example.com/login",
+                    "2026-05-14T00:00:04+00:00",
+                    "[]",
+                ),
+            )
+            repeat_recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-url-extracted-repeat",
+                [
+                    {"entities": extract_entities("visit https://api.example.com/login now")},
+                    {"entities": extract_entities("visit https://api.example.com/login again")},
+                ],
+                seen_at="2026-05-14T00:00:05+00:00",
+                command="curl https://api.example.com/login",
+            )
+            conn.commit()
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id, occurrence_count "
+                    "FROM entities ORDER BY type, canonical_value"
+                ).fetchall()
+            }
+            link_rows = conn.execute(
+                "SELECT entity_id, occurrence_count FROM entity_run_links WHERE run_id = ? ORDER BY entity_id",
+                ("run-url-extracted",),
+            ).fetchall()
+            repeat_link_rows = conn.execute(
+                "SELECT entity_id, occurrence_count FROM entity_run_links WHERE run_id = ? ORDER BY entity_id",
+                ("run-url-extracted-repeat",),
+            ).fetchall()
+            conn.close()
+
+        host_row = rows[("domain", "api.example.com")]
+        url_row = rows[("url", "https://api.example.com/login")]
+        assert [item["type"] for item in recorded] == ["domain", "url"]
+        assert host_row["occurrence_count"] == 3
+        assert url_row["occurrence_count"] == 3
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert private_recorded == []
+        assert [
+            (item["type"], item["canonical_value"], item["occurrence_count"])
+            for item in repeat_recorded
+        ] == [
+            ("domain", "api.example.com", 2),
+            ("url", "https://api.example.com/login", 2),
+        ]
+        assert ("url", "http://127.0.0.1/private") not in rows
+        assert ("ip", "127.0.0.1") not in rows
+        assert {(row["entity_id"], row["occurrence_count"]) for row in link_rows} == {
+            (host_row["id"], 1),
+            (url_row["id"], 1),
+        }
+        assert {(row["entity_id"], row["occurrence_count"]) for row in repeat_link_rows} == {
+            (host_row["id"], 2),
+            (url_row["id"], 2),
+        }
+
+    def test_backfills_url_host_entity_links_for_existing_rows(self):
+        from core.helpers import get_log_session_id
+        from services.atlas.materializer import atlas_entity_id
+        from services.intel.canonical import entity_signature
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            url_id = atlas_entity_id("atlas-session", "url", "https://legacy.example.com/path")
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 3, '', ?, ?)",
+                (
+                    url_id,
+                    "atlas-session",
+                    "https://legacy.example.com/path",
+                    entity_signature("url", "https://legacy.example.com/path"),
+                    "2026-05-14T00:00:01+00:00",
+                    "2026-05-14T00:00:01+00:00",
+                    "{}",
+                    "2026-05-14T00:00:01+00:00",
+                ),
+            )
+            ipv6_url_id = atlas_entity_id("atlas-session", "url", "https://[2001:db8::1]:8443/status")
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 3, '', ?, ?)",
+                (
+                    ipv6_url_id,
+                    "atlas-session",
+                    "https://[2001:db8::1]:8443/status",
+                    entity_signature("url", "https://[2001:db8::1]:8443/status"),
+                    "2026-05-14T00:00:02+00:00",
+                    "2026-05-14T00:00:02+00:00",
+                    "{}",
+                    "2026-05-14T00:00:02+00:00",
+                ),
+            )
+            team_id = "team-url-host-backfill"
+            team_host_id = atlas_entity_id("team-member-b", "domain", "team.example.com", team_id=team_id)
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, ?, 'domain', ?, ?, ?, ?, 5, '', ?, ?)",
+                (
+                    team_host_id,
+                    "team-member-b",
+                    team_id,
+                    "team.example.com",
+                    entity_signature("domain", "team.example.com"),
+                    "2026-05-14T00:00:03+00:00",
+                    "2026-05-14T00:00:03+00:00",
+                    "{}",
+                    "2026-05-14T00:00:03+00:00",
+                ),
+            )
+            team_url_id = atlas_entity_id("team-member-a", "url", "https://team.example.com/path", team_id=team_id)
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, ?, 'url', ?, ?, ?, ?, 2, '', ?, ?)",
+                (
+                    team_url_id,
+                    "team-member-a",
+                    team_id,
+                    "https://team.example.com/path",
+                    entity_signature("url", "https://team.example.com/path"),
+                    "2026-05-14T00:00:04+00:00",
+                    "2026-05-14T00:00:04+00:00",
+                    "{}",
+                    "2026-05-14T00:00:04+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, '', ?, ?)",
+                (
+                    "ent-url-host-backfill-invalid",
+                    "atlas-session",
+                    "https://bad host/path?secret=hidden",
+                    entity_signature("url", "https://bad host/path?secret=hidden"),
+                    "2026-05-14T00:00:05+00:00",
+                    "2026-05-14T00:00:05+00:00",
+                    "{}",
+                    "2026-05-14T00:00:05+00:00",
+                ),
+            )
+            with mock.patch("core.database.log.info") as info_log, \
+                    mock.patch("core.database.log.warning") as warning_log:
+                database._backfill_url_host_entity_links(conn)
+            conn.commit()
+            rows = {
+                (row["type"], row["canonical_value"]): dict(row)
+                for row in conn.execute(
+                    "SELECT id, session_id, team_id, type, canonical_value, host_entity_id, occurrence_count FROM entities"
+                ).fetchall()
+            }
+            team_host_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM entities WHERE team_id = ? AND type = 'domain' "
+                "AND canonical_value = 'team.example.com'",
+                (team_id,),
+            ).fetchone()["count"]
+            conn.close()
+
+        host_row = rows[("domain", "legacy.example.com")]
+        url_row = rows[("url", "https://legacy.example.com/path")]
+        ipv6_host_row = rows[("ip", "2001:db8::1")]
+        ipv6_url_row = rows[("url", "https://[2001:db8::1]:8443/status")]
+        team_host_row = rows[("domain", "team.example.com")]
+        team_url_row = rows[("url", "https://team.example.com/path")]
+        assert url_row["host_entity_id"] == host_row["id"]
+        assert ipv6_url_row["host_entity_id"] == ipv6_host_row["id"]
+        assert team_url_row["host_entity_id"] == team_host_id
+        assert team_url_row["host_entity_id"] == team_host_row["id"]
+        assert team_host_row["session_id"] == "team-member-b"
+        assert team_host_count == 1
+        assert host_row["occurrence_count"] == 0
+        assert ipv6_host_row["occurrence_count"] == 0
+        assert team_host_row["occurrence_count"] == 5
+        completion_log = next(
+            call.kwargs["extra"]
+            for call in info_log.call_args_list
+            if call.args == ("ATLAS_URL_HOST_BACKFILL_COMPLETED",)
+        )
+        assert completion_log == {
+            "backend": database.DB_BACKEND.value,
+            "url_entity_count": 4,
+            "updated_count": 3,
+            "skipped_count": 1,
+        }
+        skipped_log = next(
+            call.kwargs["extra"]
+            for call in warning_log.call_args_list
+            if call.args == ("ATLAS_URL_HOST_BACKFILL_SKIPPED_ROWS",)
+        )
+        assert skipped_log == {
+            "backend": database.DB_BACKEND.value,
+            "url_entity_count": 4,
+            "invalid_url_count": 1,
+            "host_upsert_miss_count": 0,
+            "update_miss_count": 0,
+        }
+        assert "secret=hidden" not in str(skipped_log)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, host_entity_id, attributes_json, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, '', ?, ?)",
+                (
+                    "ent-url-host-backfill-error",
+                    "atlas-session",
+                    "https://error.example.com/path",
+                    entity_signature("url", "https://error.example.com/path"),
+                    "2026-05-14T00:00:06+00:00",
+                    "2026-05-14T00:00:06+00:00",
+                    "{}",
+                    "2026-05-14T00:00:06+00:00",
+                ),
+            )
+            with mock.patch("services.atlas.materializer.upsert_entity", side_effect=RuntimeError("boom")), \
+                    mock.patch("core.database.log.error") as error_log, \
+                    pytest.raises(RuntimeError):
+                database._backfill_url_host_entity_links(conn)
+            conn.close()
+        row_error_log = next(
+            call.kwargs["extra"]
+            for call in error_log.call_args_list
+            if call.args == ("ATLAS_URL_HOST_BACKFILL_ROW_FAILED",)
+        )
+        assert row_error_log == {
+            "stage": "upsert_host",
+            "backend": database.DB_BACKEND.value,
+            "url_entity_id": "ent-url-host-backfill-error",
+            "session": get_log_session_id("atlas-session"),
+            "team_id": "",
+            "host_entity_type": "domain",
+        }
+
+    def test_materializes_port_entities_with_host_relationship_and_attributes(self):
+        from core.helpers import get_log_session_id
+        from services.projects import queries as project_queries
+        from services.atlas.lookup import atlas_entities_export, atlas_entities_export_csv, atlas_entities_export_jsonl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-port-atlas", "atlas-session", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            with mock.patch("services.atlas.materializer.log.debug") as debug_log:
+                recorded = materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    "run-port-atlas",
+                    [
+                        {
+                            "entities": [
+                                {"type": "host", "value": "example.com"},
+                                {
+                                    "type": "port",
+                                    "value": "example.com:443/tcp",
+                                    "attributes": {"service": "https"},
+                                },
+                            ],
+                        },
+                        {
+                            "entities": [
+                                {
+                                    "type": "port",
+                                    "value": "example.com:443/tcp",
+                                    "attributes": {"version": "nginx"},
+                                },
+                            ],
+                        },
+                    ],
+                    seen_at="2026-05-14T00:00:01+00:00",
+                    command="nmap example.com",
+                )
+            conn.commit()
+            rows = {
+                row["type"]: dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id, attributes_json, occurrence_count "
+                    "FROM entities ORDER BY type"
+                ).fetchall()
+            }
+            observation = conn.execute(
+                "SELECT entity_id, command_root, port_entity_count FROM scan_target_observations "
+                "WHERE run_id = ?",
+                ("run-port-atlas",),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "prj-port-atlas",
+                    "atlas-session",
+                    "Port Atlas",
+                    "port-atlas",
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, ?)",
+                (
+                    "plink-port-atlas",
+                    "prj-port-atlas",
+                    rows["port"]["id"],
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-other-port-atlas",
+                [{
+                    "entities": [
+                        {"type": "host", "value": "other.example.com"},
+                        {"type": "port", "value": "other.example.com:8080/tcp"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:00+00:00",
+                command="nmap other.example.com",
+            )
+            other_port_id = conn.execute(
+                "SELECT id FROM entities WHERE type = 'port' AND canonical_value = ?",
+                ("other.example.com:8080/tcp",),
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, ?)",
+                (
+                    "plink-other-port-atlas",
+                    "prj-port-atlas",
+                    other_port_id,
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+            export_rows = atlas_entities_export(conn, "atlas-session", entity_type="port")
+            export_csv = atlas_entities_export_csv(export_rows)
+            export_jsonl = atlas_entities_export_jsonl(export_rows)
+            conn.close()
+            with mock.patch("core.database.DB_PATH", db_path):
+                project_entity_page = project_queries.list_project_entities(
+                    "atlas-session",
+                    "prj-port-atlas",
+                    entity_type="port",
+                )
+                project_host_filtered_page = project_queries.list_project_entities(
+                    "atlas-session",
+                    "prj-port-atlas",
+                    {"host_entity_id": [rows["domain"]["id"]]},
+                    entity_type="port",
+                )
+
+        assert [item["type"] for item in recorded] == ["domain", "port"]
+        summary = next(
+            call.kwargs["extra"]
+            for call in debug_log.call_args_list
+            if call.args == ("ATLAS_ENTITY_MATERIALIZATION_SUMMARY",)
+        )
+        assert summary == {
+            "session": get_log_session_id("atlas-session"),
+            "run_id": "run-port-atlas",
+            "command_root": "nmap",
+            "entity_count": 2,
+            "total_occurrence_count": 3,
+            "invalid_entity_count": 0,
+            "port_entity_count": 2,
+            "url_entity_count": 0,
+            "url_host_link_count": 0,
+            "url_host_unresolved_count": 0,
+            "url_host_domain_count": 0,
+            "url_host_ip_count": 0,
+            "attribute_entity_count": 1,
+            "scan_observation_count": 1,
+        }
+        assert rows["domain"]["canonical_value"] == "example.com"
+        assert rows["port"]["canonical_value"] == "example.com:443/tcp"
+        assert rows["port"]["host_entity_id"] == rows["domain"]["id"]
+        assert json.loads(rows["port"]["attributes_json"]) == {"service": "https", "version": "nginx"}
+        assert rows["port"]["occurrence_count"] == 2
+        assert export_rows[0]["host_entity_id"] == rows["domain"]["id"]
+        assert export_rows[0]["attributes"] == {"service": "https", "version": "nginx"}
+        assert "attributes_json" not in export_rows[0]
+        export_jsonl_row = json.loads(export_jsonl.strip())
+        assert export_jsonl_row["attributes"] == {"service": "https", "version": "nginx"}
+        assert "attributes_json" not in export_jsonl_row
+        export_csv_rows = list(csv.DictReader(io.StringIO(export_csv)))
+        assert json.loads(export_csv_rows[0]["attributes"]) == {"service": "https", "version": "nginx"}
+        assert "attributes_json" not in (export_csv.splitlines()[0] if export_csv else "")
+        assert observation is not None
+        assert observation["entity_id"] == rows["domain"]["id"]
+        assert observation["command_root"] == "nmap"
+        assert observation["port_entity_count"] == 2
+        assert project_entity_page is not None
+        assert len(project_entity_page["entities"]) == 2
+        assert project_host_filtered_page is not None
+        assert [item["canonical_value"] for item in project_host_filtered_page["entities"]] == ["example.com:443/tcp"]
+        assert project_host_filtered_page["entities"][0]["host_entity_id"] == rows["domain"]["id"]
+        assert project_host_filtered_page["entities"][0]["attributes"] == {"service": "https", "version": "nginx"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            import services.atlas.intel_bridge as intel_bridge
+
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-internal-port-atlas", "atlas-session", "rustscan -a 127.0.0.1", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-internal-port-atlas",
+                [
+                    {
+                        "entities": [
+                            {"type": "ip", "value": "127.0.0.1", "canonical_value": "127.0.0.1"},
+                            {"type": "port", "value": "127.0.0.1:8080/tcp"},
+                        ],
+                    },
+                    {
+                        "entities": [
+                            {"type": "ip", "value": "198.51.100.7", "canonical_value": "198.51.100.7"},
+                            {"type": "port", "value": "198.51.100.7:443/tcp"},
+                        ],
+                    },
+                ],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="rustscan -a 127.0.0.1",
+            )
+            conn.commit()
+            internal_rows = {
+                row["canonical_value"]: dict(row)
+                for row in conn.execute(
+                    "SELECT id, type, canonical_value, host_entity_id FROM entities ORDER BY canonical_value"
+                ).fetchall()
+            }
+            conn.close()
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch.object(intel_bridge, "lookup_entity") as lookup_entity:
+                    with mock.patch.object(intel_bridge.log, "debug") as intel_debug:
+                        refresh_result = intel_bridge.refresh_entity_intel(
+                            "atlas-session",
+                            internal_rows["127.0.0.1:8080/tcp"]["id"],
+                        )
+        assert internal_rows["127.0.0.1:8080/tcp"]["host_entity_id"] == internal_rows["127.0.0.1"]["id"]
+        assert internal_rows["198.51.100.7:443/tcp"]["host_entity_id"] == internal_rows["198.51.100.7"]["id"]
+        assert refresh_result is None
+        lookup_entity.assert_not_called()
+        unsupported_log = next(
+            call.kwargs["extra"]
+            for call in intel_debug.call_args_list
+            if call.args == ("INTEL_LOOKUP_SKIPPED_UNSUPPORTED_ENTITY_TYPE",)
+        )
+        assert unsupported_log["entity_id"] == internal_rows["127.0.0.1:8080/tcp"]["id"]
+        assert unsupported_log["entity_type"] == "port"
+
+    def test_materializes_command_target_scan_observation_without_port_entities(self):
+        from core.helpers import get_log_session_id
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-port-empty", "atlas-session", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-port-empty",
+                [],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="nmap example.com",
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT entity_type, canonical_value, command_root, port_entity_count "
+                "FROM scan_target_observations WHERE run_id = ?",
+                ("run-port-empty",),
+            ).fetchall()
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            with mock.patch("services.atlas.materializer.log.warning") as warning_log:
+                materialize_run_entities(
+                    conn,
+                    "atlas-session",
+                    "run-port-empty",
+                    [],
+                    seen_at="2026-05-14T00:00:02+00:00",
+                )
+            refreshed_observation_count = conn.execute(
+                "SELECT COUNT(*) FROM scan_target_observations WHERE run_id = ?",
+                ("run-port-empty",),
+            ).fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert [dict(row) for row in rows] == [{
+            "entity_type": "domain",
+            "canonical_value": "example.com",
+            "command_root": "nmap",
+            "port_entity_count": 0,
+        }]
+        warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
+        assert warning_events["SCAN_TARGET_OBSERVATIONS_DROPPED"] == {
+            "session": get_log_session_id("atlas-session"),
+            "run_id": "run-port-empty",
+            "command_root": "",
+            "deleted_count": 1,
+            "reason": "missing_command",
+        }
+        assert refreshed_observation_count == 0
+
+    @pytest.mark.parametrize(
+        ("run_id", "command", "expected_type", "expected_value", "expected_root"),
+        [
+            ("run-quiet-nmap", "nmap example.com", "domain", "example.com", "nmap"),
+            ("run-quiet-rustscan", "rustscan -a 198.51.100.8", "ip", "198.51.100.8", "rustscan"),
+            ("run-quiet-naabu", "naabu -host example.net", "domain", "example.net", "naabu"),
+            ("run-quiet-nc", "nc -zv example.org 443", "domain", "example.org", "nc"),
+        ],
+    )
+    def test_materializes_quiet_port_scan_target_observations_by_command_root(
+        self,
+        run_id,
+        command,
+        expected_type,
+        expected_value,
+        expected_root,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                run_id,
+                [],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command=command,
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT entity_type, canonical_value, command_root, port_entity_count "
+                "FROM scan_target_observations WHERE run_id = ?",
+                (run_id,),
+            ).fetchall()
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert [dict(row) for row in rows] == [{
+            "entity_type": expected_type,
+            "canonical_value": expected_value,
+            "command_root": expected_root,
+            "port_entity_count": 0,
+        }]
+
+    def test_materializes_no_scan_target_observation_when_command_target_is_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "run-quiet-masscan",
+                    "atlas-session",
+                    "masscan -p 80 198.51.100.7",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-quiet-masscan",
+                [],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="masscan -p 80 198.51.100.7",
+            )
+            conn.commit()
+            observation_count = conn.execute(
+                "SELECT COUNT(*) FROM scan_target_observations WHERE run_id = ?",
+                ("run-quiet-masscan",),
+            ).fetchone()[0]
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert observation_count == 0
+
+    def test_materializes_curl_port_entities_without_scan_target_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-curl-port", "atlas-session", "curl -v https://example.com", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-curl-port",
+                [{
+                    "entities": [
+                        {"type": "ip", "value": "93.184.216.34"},
+                        {"type": "port", "value": "93.184.216.34:443/tcp"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:01+00:00",
+                command="curl -v https://example.com",
+            )
+            conn.commit()
+            entities = conn.execute(
+                "SELECT type, canonical_value FROM entities ORDER BY type, canonical_value"
+            ).fetchall()
+            observation_count = conn.execute(
+                "SELECT COUNT(*) FROM scan_target_observations WHERE run_id = ?",
+                ("run-curl-port",),
+            ).fetchone()[0]
+            conn.close()
+
+        assert [item["type"] for item in recorded] == ["ip", "port"]
+        assert [(row["type"], row["canonical_value"]) for row in entities] == [
+            ("ip", "93.184.216.34"),
+            ("port", "93.184.216.34:443/tcp"),
+        ]
+        assert observation_count == 0
 
     def test_materializer_ignores_unclassified_raw_output_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -21216,7 +26431,9 @@ SQL syntax error near q</response>
             ("cve", "CVE-2025-49113", 1),
         ]
 
-    def test_project_workspace_migration_drops_legacy_target_and_finding_tables(self):
+    def test_project_workspace_legacy_target_tables_fail_closed_without_mutation(self):
+        from core.migrations.reconciliation import SchemaReconciliationError
+
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             conn = sqlite3.connect(db_path)
@@ -21279,7 +26496,8 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
 
-            self._create_tables(db_path)
+            with pytest.raises(SchemaReconciliationError, match="Back up this database"):
+                self._create_tables(db_path)
 
             conn = sqlite3.connect(db_path)
             tables = {
@@ -21291,13 +26509,17 @@ SQL syntax error near q</response>
                 row[1] for row in conn.execute("PRAGMA table_info('findings')").fetchall()
             }
             finding_count = conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
+            target_count = conn.execute("SELECT COUNT(*) FROM project_targets").fetchone()[0]
+            finding_target_count = conn.execute("SELECT COUNT(*) FROM finding_targets").fetchone()[0]
             conn.close()
 
-        assert "project_targets" not in tables
-        assert "finding_targets" not in tables
-        assert "findings_occurrences" in tables
-        assert {"signature_hash", "last_seen_at", "run_id"}.issubset(finding_columns)
-        assert finding_count == 0
+        assert "project_targets" in tables
+        assert "finding_targets" in tables
+        assert "findings_occurrences" not in tables
+        assert "signature_hash" not in finding_columns
+        assert finding_count == 1
+        assert target_count == 1
+        assert finding_target_count == 1
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
         assert database.validate_project_entity_type("run") == "run"
@@ -21517,7 +26739,7 @@ SQL syntax error near q</response>
                 "match_mode": "contains",
                 "pattern": "example",
             }
-            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
                 first = project_auto_promote.create_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
                 with pytest.raises(ProjectWorkspaceQuotaExceeded) as exc:
                     project_auto_promote.create_rule_on_conn(
@@ -21736,6 +26958,7 @@ SQL syntax error near q</response>
             conn = self._auto_promote_test_conn(tmp)
             self._insert_auto_promote_project(conn)
             self._insert_auto_promote_entity(conn, "ent-auto-domain", "domain", "alpha.example.com")
+            self._insert_auto_promote_entity(conn, "ent-auto-port", "port", "example.com:443/tcp")
             self._insert_auto_promote_entity(conn, "ent-auto-url", "url", "https://darklab.sh/admin")
             domain_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
@@ -21746,6 +26969,17 @@ SQL syntax error near q</response>
                     "target_entity_kind": "any",
                     "match_mode": "exact",
                     "pattern": "Alpha.Example.Com.",
+                },
+            )
+            port_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Any exact port",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
+                    "pattern": "example.com:443",
                 },
             )
             url_preview = project_auto_promote.preview_rule_on_conn(
@@ -21762,6 +26996,7 @@ SQL syntax error near q</response>
             conn.close()
 
         assert [item["id"] for item in domain_preview["matches"]] == ["ent-auto-domain"]
+        assert [item["id"] for item in port_preview["matches"]] == ["ent-auto-port"]
         assert [item["id"] for item in url_preview["matches"]] == ["ent-auto-url"]
 
     def test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs(self):
@@ -21945,7 +27180,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_project(conn)
             self._insert_auto_promote_entity(conn, "ent-auto-scan-one", "domain", "one.example.com")
             self._insert_auto_promote_entity(conn, "ent-auto-scan-two", "domain", "two.example.com")
-            with mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
                 preview = project_auto_promote.preview_rule_on_conn(
                     conn,
                     "auto-session",
@@ -22009,7 +27244,7 @@ SQL syntax error near q</response>
                 },
             )
             with (
-                mock.patch.dict(shell_app.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
+                mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
                 mock.patch.object(project_auto_promote.log, "warning") as warning_log,
             ):
                 summary = project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-cap")
@@ -22088,7 +27323,7 @@ SQL syntax error near q</response>
                     "pattern": "example",
                 },
             )
-            with mock.patch.dict(shell_app.CFG, {"max_project_entities_per_project": 1}, clear=False):
+            with mock.patch.dict(shell_app_module.CFG, {"max_project_entities_per_project": 1}, clear=False):
                 result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
             rows = conn.execute(
                 "SELECT entity_id, source, review_state FROM project_links "
@@ -22162,7 +27397,7 @@ SQL syntax error near q</response>
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
@@ -22198,6 +27433,9 @@ SQL syntax error near q</response>
             }
             entity_run_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('entity_run_links')").fetchall()
+            }
+            scan_observation_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('scan_target_observations')").fetchall()
             }
             import_draft_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('atlas_import_drafts')").fetchall()
@@ -22246,6 +27484,8 @@ SQL syntax error near q</response>
         assert "idx_findings_occurrences_finding_seen" in occurrence_indexes
         assert "idx_entity_run_links_run" in entity_run_indexes
         assert "idx_entity_run_links_entity_seen" in entity_run_indexes
+        assert "idx_scan_target_observations_entity_seen" in scan_observation_indexes
+        assert "idx_scan_target_observations_owner_run" in scan_observation_indexes
         assert "idx_atlas_import_drafts_scope_created" in import_draft_indexes
         assert "idx_atlas_import_drafts_expires" in import_draft_indexes
         assert "idx_atlas_import_batches_scope_applied" in import_batch_indexes
@@ -22276,270 +27516,19 @@ SQL syntax error near q</response>
         assert "idx_audit_events_target_created" in audit_indexes
         assert "idx_audit_events_correlation" in audit_indexes
 
-    def test_workspace_metadata_migration_separates_personal_and_team_scopes(self):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        conn.execute("""
-            CREATE TABLE entity_labels (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                label TEXT NOT NULL,
-                source TEXT NOT NULL DEFAULT 'manual',
-                created TEXT NOT NULL,
-                UNIQUE (session_id, entity_type, entity_id, label)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE entity_notes (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                body TEXT NOT NULL,
-                created TEXT NOT NULL,
-                updated TEXT NOT NULL,
-                UNIQUE (session_id, entity_type, entity_id)
-            )
-        """)
-        conn.execute(
-            "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, created) "
-            "VALUES ('lbl-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'important', 'now')"
-        )
-        conn.execute(
-            "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES ('note-personal', 'tok_owner', 'workspace_file', 'targets.txt', 'personal', 'now', 'now')"
-        )
-
-        database._migrate_workspace_metadata_team_scope(conn)
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_labels_personal_unique "
-            "ON entity_labels (session_id, entity_type, entity_id, label) "
-            "WHERE team_id IS NULL OR team_id = ''"
-        )
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_labels_team_unique "
-            "ON entity_labels (team_id, entity_type, entity_id, label) "
-            "WHERE team_id != ''"
-        )
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_notes_personal_unique "
-            "ON entity_notes (session_id, entity_type, entity_id) "
-            "WHERE team_id IS NULL OR team_id = ''"
-        )
-        conn.execute(
-            "CREATE UNIQUE INDEX idx_entity_notes_team_unique "
-            "ON entity_notes (team_id, entity_type, entity_id) "
-            "WHERE team_id != ''"
-        )
-        conn.execute(
-            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
-            "VALUES ('lbl-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'important', 'now')"
-        )
-        conn.execute(
-            "INSERT INTO entity_labels (id, session_id, team_id, entity_type, entity_id, label, created) "
-            "VALUES ('lbl-team-b', 'tok_owner', 'team_b', 'workspace_file', 'targets.txt', 'important', 'now')"
-        )
-        conn.execute(
-            "INSERT INTO entity_notes (id, session_id, team_id, entity_type, entity_id, body, created, updated) "
-            "VALUES ('note-team-a', 'tok_owner', 'team_a', 'workspace_file', 'targets.txt', 'team', 'now', 'now')"
-        )
-
-        labels = conn.execute(
-            "SELECT id, team_id FROM entity_labels ORDER BY id"
-        ).fetchall()
-        notes = conn.execute(
-            "SELECT id, team_id FROM entity_notes ORDER BY id"
-        ).fetchall()
-        conn.close()
-
-        assert {row["id"]: row["team_id"] for row in labels} == {
-            "lbl-personal": "",
-            "lbl-team-a": "team_a",
-            "lbl-team-b": "team_b",
-        }
-        assert {row["id"]: row["team_id"] for row in notes} == {
-            "note-personal": "",
-            "note-team-a": "team_a",
-        }
-
-    def test_project_slug_migration_separates_personal_and_team_scopes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute("""
-                CREATE TABLE projects (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    slug TEXT NOT NULL,
-                    description TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'active',
-                    color TEXT NOT NULL DEFAULT '',
-                    created TEXT NOT NULL,
-                    updated TEXT NOT NULL,
-                    UNIQUE (session_id, slug)
-                )
-            """)
-            conn.execute(
-                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
-                "VALUES ('prj-personal', 'tok_owner', 'Case', 'case', 'now', 'now')"
-            )
-            conn.execute("""
-                CREATE TABLE team_invites (
-                    id TEXT PRIMARY KEY,
-                    team_id TEXT NOT NULL,
-                    code_hash TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    label TEXT NOT NULL DEFAULT '',
-                    created_by_member_id TEXT NOT NULL,
-                    expires_at TEXT NOT NULL DEFAULT '',
-                    max_uses INTEGER NOT NULL DEFAULT 1,
-                    use_count INTEGER NOT NULL DEFAULT 0,
-                    revoked_at TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    UNIQUE (team_id, code_hash),
-                    CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE team_recovery_codes (
-                    id TEXT PRIMARY KEY,
-                    team_id TEXT NOT NULL,
-                    code_hash TEXT NOT NULL,
-                    created_by_member_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    rotated_at TEXT NOT NULL DEFAULT '',
-                    revoked_at TEXT NOT NULL DEFAULT '',
-                    used_at TEXT NOT NULL DEFAULT '',
-                    UNIQUE (team_id, code_hash)
-                )
-            """)
-            conn.execute(
-                "INSERT INTO team_invites "
-                "(id, team_id, code_hash, role, created_by_member_id, created_at) "
-                "VALUES ('invite-one', 'team_one', 'invite_hash', 'operator', 'member-one', 'now')"
-            )
-            conn.execute(
-                "INSERT INTO team_recovery_codes "
-                "(id, team_id, code_hash, created_by_member_id, created_at) "
-                "VALUES ('recovery-one', 'team_one', 'recovery_hash', 'member-one', 'now')"
-            )
-            conn.commit()
-            conn.close()
-
-            self._create_tables(db_path)
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
-                "VALUES ('prj-team', 'tok_owner', 'team_1', 'Case', 'case', 'now', 'now')"
-            )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
-                    "VALUES ('prj-personal-dupe', 'tok_owner', '', 'Case', 'case', 'now', 'now')"
-                )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
-                    "VALUES ('prj-team-dupe', 'tok_other', 'team_1', 'Case', 'case', 'now', 'now')"
-                )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO team_invites "
-                    "(id, team_id, code_hash, role, created_by_member_id, created_at) "
-                    "VALUES ('invite-two', 'team_two', 'invite_hash', 'operator', 'member-two', 'now')"
-                )
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO team_recovery_codes "
-                    "(id, team_id, code_hash, created_by_member_id, created_at) "
-                    "VALUES ('recovery-two', 'team_two', 'recovery_hash', 'member-two', 'now')"
-                )
-            conn.close()
-
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()  # second call
 
-    def test_init_upgrades_old_schedule_owner_kind_constraints_for_project_digests(self):
+    def test_current_schema_accepts_project_digest_schedule_and_notifications(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                """
-                CREATE TABLE schedules (
-                    id TEXT PRIMARY KEY,
-                    session_token TEXT NOT NULL,
-                    owner_kind TEXT NOT NULL DEFAULT 'user',
-                    owner_id TEXT NOT NULL DEFAULT '',
-                    kind TEXT NOT NULL DEFAULT 'command',
-                    command_text TEXT NOT NULL,
-                    cron_expr TEXT NOT NULL,
-                    cadence_preset TEXT,
-                    timezone TEXT NOT NULL DEFAULT 'UTC',
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    next_run_at TEXT NOT NULL DEFAULT '',
-                    last_run_at TEXT NOT NULL DEFAULT '',
-                    last_run_id TEXT NOT NULL DEFAULT '',
-                    overlap_policy TEXT NOT NULL DEFAULT 'skip',
-                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
-                    label TEXT NOT NULL DEFAULT '',
-                    paused_reason TEXT NOT NULL DEFAULT '',
-                    last_error TEXT NOT NULL DEFAULT '',
-                    created TEXT NOT NULL,
-                    updated TEXT NOT NULL,
-                    CHECK (owner_kind IN ('user', 'watcher')),
-                    CHECK (kind IN ('command')),
-                    CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
-                    CHECK (overlap_policy IN ('skip'))
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE schedule_fires (
-                    id TEXT PRIMARY KEY,
-                    schedule_id TEXT NOT NULL,
-                    owner_kind TEXT NOT NULL,
-                    owner_id TEXT NOT NULL DEFAULT '',
-                    fired_at TEXT NOT NULL,
-                    run_id TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL,
-                    reason TEXT NOT NULL DEFAULT '',
-                    CHECK (owner_kind IN ('user', 'watcher')),
-                    CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO schedules "
-                "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, "
-                "timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy, consecutive_failures, "
-                "label, paused_reason, last_error, created, updated) "
-                "VALUES ('sch_old', 'tok_old', 'watcher', 'wtr_old', 'command', 'echo ok', '0 * * * *', "
-                "'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, 'Old', '', '', "
-                "'2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
-            )
-            conn.execute(
-                "INSERT INTO schedule_fires "
-                "(id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
-                "VALUES ('sfire_old', 'sch_old', 'watcher', 'wtr_old', '2026-06-20T05:00:00+00:00', "
-                "'run_old', 'fired', '')"
-            )
-            conn.commit()
-            conn.close()
-
-            with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
-                    database.db_init()
-
+            self._create_tables(db_path)
             conn = sqlite3.connect(db_path)
             schedules_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
@@ -22556,69 +27545,6 @@ SQL syntax error near q</response>
                 "'0 * * * *', 'hourly', 'UTC', 1, '2026-06-20T06:00:00+00:00', '', '', 'skip', 0, "
                 "'Digest', '', '', '2026-06-20T05:00:00+00:00', '2026-06-20T05:00:00+00:00')"
             )
-            preserved = conn.execute(
-                "SELECT team_id, owner_kind FROM schedules WHERE id = 'sch_old'"
-            ).fetchone()
-            preserved_fire = conn.execute(
-                "SELECT team_id, owner_kind FROM schedule_fires WHERE id = 'sfire_old'"
-            ).fetchone()
-            conn.close()
-
-        assert "project_digest" in schedules_sql
-        assert "project_digest" in fires_sql
-        assert preserved == ("", "watcher")
-        assert preserved_fire == ("", "watcher")
-
-    def test_init_upgrades_old_notification_event_trigger_constraints_for_project_digests(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                """
-                CREATE TABLE notification_events (
-                    id TEXT PRIMARY KEY,
-                    session_token TEXT NOT NULL,
-                    channel_id TEXT NOT NULL,
-                    trigger TEXT NOT NULL,
-                    payload_json TEXT NOT NULL DEFAULT '{}',
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    next_attempt_at TEXT NOT NULL DEFAULT '',
-                    last_attempt_at TEXT NOT NULL DEFAULT '',
-                    last_error TEXT NOT NULL DEFAULT '',
-                    run_id TEXT NOT NULL DEFAULT '',
-                    created TEXT NOT NULL,
-                    dead_at TEXT NOT NULL DEFAULT '',
-                    CHECK (
-                        trigger IN (
-                            'run_complete',
-                            'pty_session_ended',
-                            'watcher_changed',
-                            'watcher_error',
-                            'watcher_recovered',
-                            'scheduled_run_failed',
-                            'test'
-                        )
-                    ),
-                    CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO notification_events "
-                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
-                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                "VALUES ('nte_old', 'tok_old', 'ntc_old', 'run_complete', '{}', 'sent', 1, '', "
-                "'2026-06-20T05:01:00+00:00', '', 'run_old', '2026-06-20T05:00:00+00:00', '')"
-            )
-            conn.commit()
-            conn.close()
-
-            with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
-                    database.db_init()
-
-            conn = sqlite3.connect(db_path)
             events_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_events'"
             ).fetchone()[0]
@@ -22629,16 +27555,14 @@ SQL syntax error near q</response>
                 "VALUES ('nte_digest', 'tok_old', '', 'ntc_old', 'project_digest', '{}', 'pending', 0, '', "
                 "'', '', '', '2026-06-20T06:00:00+00:00', '')"
             )
-            preserved = conn.execute(
-                "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_old'"
-            ).fetchone()
             digest_row = conn.execute(
                 "SELECT team_id, trigger, status FROM notification_events WHERE id = 'nte_digest'"
             ).fetchone()
             conn.close()
 
+        assert "project_digest" in schedules_sql
+        assert "project_digest" in fires_sql
         assert "project_digest" in events_sql
-        assert preserved == ("", "run_complete", "sent")
         assert digest_row == ("", "project_digest", "pending")
 
     def test_retention_prunes_old_runs(self):
@@ -22655,7 +27579,7 @@ SQL syntax error near q</response>
             conn.close()
             # Re-init with 30-day retention — old run should be pruned
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -22676,7 +27600,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -22707,7 +27631,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             label_count = conn.execute(
@@ -22759,7 +27683,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             rows = {
@@ -22803,7 +27727,7 @@ SQL syntax error near q</response>
             conn.close()
             # Re-init with retention=0 — nothing should be pruned
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -22824,7 +27748,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -22832,66 +27756,6 @@ SQL syntax error near q</response>
             ).fetchone()[0]
             conn.close()
         assert count == 1
-
-    def test_legacy_runs_table_gets_session_id_column_migrated(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = self._fresh_db(tmp)
-            conn = sqlite3.connect(db_path)
-            conn.execute("""
-                CREATE TABLE runs (
-                    id       TEXT PRIMARY KEY,
-                    command  TEXT NOT NULL,
-                    started  TEXT NOT NULL,
-                    finished TEXT,
-                    exit_code INTEGER,
-                    output   TEXT
-                )
-            """)
-            conn.execute(
-                "INSERT INTO runs (id, command, started) VALUES ('legacy-run', 'ping', datetime('now'))"
-            )
-            conn.execute(
-                "INSERT INTO runs (id, command, started) VALUES ('legacy-builtin', 'history', datetime('now'))"
-            )
-            conn.commit()
-            conn.close()
-
-            with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
-                    database.db_init()
-
-            conn = sqlite3.connect(db_path)
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
-            tables = {
-                row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            session_id = conn.execute(
-                "SELECT session_id FROM runs WHERE id='legacy-run'"
-            ).fetchone()[0]
-            run_kinds = dict(conn.execute(
-                "SELECT id, run_kind FROM runs WHERE id IN ('legacy-run', 'legacy-builtin')"
-            ).fetchall())
-            conn.close()
-
-        assert "session_id" in columns
-        assert "run_kind" in columns
-        assert "owner_tab_id" in columns
-        assert session_id == ""
-        assert run_kinds == {"legacy-run": "external", "legacy-builtin": "builtin"}
-        assert "projects" in tables
-        assert "project_links" in tables
-
-    def test_migrate_schema_ignores_existing_column_error(self):
-        conn = mock.MagicMock()
-        conn.execute.side_effect = sqlite3.OperationalError("duplicate column name: session_id")
-
-        database._migrate_schema(conn)
-
-        assert conn.execute.call_count >= 1
-        assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
-
 
 class TestBodyStore:
     def test_large_text_round_trips_through_pointer_and_deletes_file(self):
@@ -22930,7 +27794,7 @@ class TestSessionVariables:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                 session_variables.set_session_variable("sess-vars", "HOST", "ip.darklab.sh")
                 session_variables.set_session_variable("sess-vars", "PORT", "443")
@@ -22956,7 +27820,7 @@ class TestSessionVariables:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                 with pytest.raises(session_variables.InvalidSessionVariableName):
                     session_variables.set_session_variable("sess-vars", "host", "ip.darklab.sh")
@@ -22966,12 +27830,69 @@ class TestSessionVariables:
                     session_variables.expand_session_variables("curl https://${HOST:-darklab.sh}", "sess-vars")
 
 
+class TestBuiltinConfigAccess:
+    def test_split_builtin_modules_read_shared_config_without_cfg_sync(self, monkeypatch):
+        from services.commands import builtins_discovery, builtins_misc, builtins_runtime, builtins_system, builtins_workspace
+
+        active_cfg = build_test_config({
+            "app_name": "Phase Three Shell",
+            "command_timeout_seconds": 77,
+            "max_output_lines": 9,
+            "recent_commands_limit": 6,
+            "workspace_enabled": True,
+            "workspace_quota_mb": 12,
+        })
+
+        def fake_faq(app_name, _readme):
+            return [{"question": f"{app_name} question", "answer": "shared config answer"}]
+
+        seen_workspace_cfg = []
+
+        def fake_workspace_settings(cfg):
+            seen_workspace_cfg.append(cfg)
+            return SimpleNamespace(max_files=4, quota_bytes=1024)
+
+        monkeypatch.setattr(app_config, "CFG", active_cfg)
+        monkeypatch.setattr(builtin_commands, "load_all_faq", fake_faq)
+        monkeypatch.setattr(builtins_discovery, "CFG", {"app_name": "stale discovery"}, raising=False)
+        monkeypatch.setattr(builtins_misc, "CFG", {"app_name": "stale misc"}, raising=False)
+        monkeypatch.setattr(builtins_runtime, "CFG", {"recent_commands_limit": 1, "workspace_enabled": False}, raising=False)
+        monkeypatch.setattr(builtins_system, "CFG", {"app_name": "stale system", "workspace_enabled": False}, raising=False)
+        monkeypatch.setattr(builtins_workspace, "CFG", {"workspace_enabled": False}, raising=False)
+        monkeypatch.setattr(builtins_workspace, "workspace_settings", fake_workspace_settings)
+        monkeypatch.setattr(builtins_workspace, "list_owner_workspace_files", lambda *_args: [])
+        monkeypatch.setattr(builtins_workspace, "list_owner_workspace_directories", lambda *_args: [])
+        monkeypatch.setattr(
+            builtins_workspace,
+            "owner_workspace_usage",
+            lambda *_args: SimpleNamespace(file_count=0, bytes_used=0),
+        )
+
+        builtin_commands._sync_builtin_module_hooks()
+
+        faq_text = "\n".join(str(line["text"]) for line in builtins_discovery.run_builtin_faq())
+        limits_text = "\n".join(str(line["text"]) for line in builtins_runtime.run_builtin_limits())
+        assert "Phase Three Shell question" in faq_text
+        assert builtins_misc.run_builtin_banner(load_ascii_art_func=lambda: "") == [
+            {"type": "output", "text": "Phase Three Shell"}
+        ]
+        assert builtins_misc.run_builtin_groups() == [{"type": "output", "text": "Phase Three Shell operators"}]
+        assert builtins_system.run_builtin_env("sess-phase3")[1]["text"] == "APP_NAME=Phase Three Shell"
+        assert builtins_system.run_builtin_pwd() == [{"type": "output", "text": "/"}]
+        assert "77s (0 = unlimited)" in limits_text
+        assert "9" in limits_text
+        assert "12 MB" in limits_text
+        workspace_lines = builtins_workspace.run_builtin_workspace("file list", "sess-phase3")
+        assert any(str(line["text"]).startswith("Session files:") for line in workspace_lines)
+        assert seen_workspace_cfg == [active_cfg]
+
+
 class TestBuiltinStatus:
     def test_includes_session_summary_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "status.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -23000,7 +27921,7 @@ class TestBuiltinStatus:
 
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    with mock.patch("services.commands.builtins.redis_client", None):
+                    with mock.patch("services.commands.builtins.process_state.redis_client", None):
                         lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
@@ -23021,7 +27942,7 @@ class TestBuiltinStats:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -23136,7 +28057,7 @@ class TestBuiltinStats:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats-builtin-only.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -23237,7 +28158,7 @@ class TestSecretsVault:
     def test_database_init_creates_secrets_table_and_index_idempotently(self, tmp_path):
         db_path = os.path.join(tmp_path, "secrets-schema.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
                 database.db_init()
             conn = sqlite3.connect(db_path)
@@ -23258,7 +28179,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             metadata, created = secrets_storage.upsert_secret(
                 "old-session",
@@ -23281,7 +28202,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             secrets_storage.upsert_secret("old-session", "vt_api_key", "source-secret")
             secrets_storage.upsert_secret("new-session", "vt_api_key", "destination-secret")
@@ -23297,7 +28218,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             older_ciphertext, older_nonce = secrets_vault.encrypt_secret("older-secret")
             newer_ciphertext, newer_nonce = secrets_vault.encrypt_secret("newer-secret")
@@ -23338,7 +28259,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             secrets_storage.upsert_secret(
                 "secret-session",

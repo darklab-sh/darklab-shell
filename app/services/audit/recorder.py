@@ -10,8 +10,8 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from config import CFG
-from core import database
+from config import resolve_effective_cfg
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.teams.storage import token_hash
@@ -39,7 +39,7 @@ def _event_id() -> str:
 
 
 def _cfg(cfg: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
-    return cfg if cfg is not None else CFG
+    return resolve_effective_cfg(cfg)
 
 
 def audit_log_enabled(cfg: Mapping[str, Any] | None = None) -> bool:
@@ -112,7 +112,7 @@ def _sanitize_details(
 
 
 def _json_param(value: Mapping[str, Any]) -> Any:
-    return dialect_for_backend(database.DB_BACKEND).json_param(value)
+    return dialect_for_backend(get_db_backend()).json_param(value)
 
 
 @contextmanager
@@ -120,7 +120,7 @@ def _managed_connection(conn=None):
     if conn is not None:
         yield conn, False
         return
-    with database.db_connect() as opened:
+    with get_db_connect()() as opened:
         yield opened, True
 
 

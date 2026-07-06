@@ -40,13 +40,13 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Shodan InternetDB, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, RouteViews, FOFA, and ZoomEye, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
-- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
+- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, ports, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Port entities are app-captured evidence from scanner output, so they stay separate from provider-backed intel lookups while still linking back to their host; URL entities also keep a host link so URL evidence can roll up through the matching domain or IP. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run or project, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs and project scopes can be cleared from visible chips, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
 - **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. File writes, folder creation, moves, and deletes create audit-log rows with path/count/size metadata but not file contents. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
 - **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, packages, and reports without copying the source records.
-  - Active projects can auto-link completed runs and the Atlas entities those runs produce. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
+  - Active projects can auto-link completed runs and the Atlas entities those runs produce. URL targets discovered from command arguments create Atlas URL rows and host links alongside the target, so commands such as `curl https://ip.darklab.sh` can be reviewed from both the URL and host context. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
   - Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, evidence packages, and readable report exports.
-  - The Overview tab rolls up each target's ports, services, certificate status, cached provider highlights, high-risk target status, and recent-change state, with actions that jump into the existing Entities and Findings tabs using the target and high-signal filters that best match the selected row.
-  - Project views hide suppressed Atlas noise by default and expose paged finding review in list or board form, artifact review, cached entity intel context, metadata editing, project-scoped Atlas exports, and target/finding provenance context.
+  - The Overview tab rolls up each target's app-captured ports and services, cached-provider ports, services, certificate status, provider highlights, app-captured scan coverage, coverage gaps, finding review and verification progress, operational tempo, deliverables status, high-risk target status, recent project activity, and recent-change state, with actions that jump into the existing workspace tabs using the target and high-signal filters that best match the selected row. App-captured port evidence is shown first when available; very long port lists are summarized so the Overview stays readable, provider-backed rows are labeled as cached data with freshness details, and a worklist filter can hide unscanned targets that have no findings when you need a tighter triage view.
+  - Project views hide suppressed Atlas noise by default and expose paged finding review in list or board form, artifact review, cached entity intel context, metadata editing, project-scoped Atlas exports, and target/finding provenance context. Finding rows open the matching Atlas finding first, while **See in run** keeps the raw output line highlight close at hand.
   - The Monitoring tab shows project-linked watcher checks with status totals, grouped monitor cards, severity and top-signal summaries, filters, current triage state, Run Details and Compare links, safe missing-run states when older baseline or current runs have been deleted, digest notification settings, and a **New monitor** action that opens the watcher form already linked to the project.
   - Evidence packages preserve selected project evidence through operator-configured presets, provenance-aware manifests, import hints, raw transcript pages, cleaner manifest line indexes, polled archive builds, safe audit correlation, raw artifacts, or redacted text/JSON artifact derivatives.
   - The Activity tab shows safe project audit rows with filters, paging, collapsed details, and mobile rows, so project users can review what changed without opening operator diagnostics. Metadata edit sheets also show a small Recent activity panel for the item you're editing, with a jump into the filtered Activity tab.
@@ -478,16 +478,43 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── THEME.md                   # Theme authoring/reference guide and runtime token behavior
 ├── TODO.md                    # Internal task list, known issues, and product ideas
 ├── app/
-│   ├── app.py                  # Flask factory — logging setup, blueprint registration, before/after-request hooks
+│   ├── app.py                  # Local development entrypoint that boots the runtime and starts Flask
+│   ├── app_factory.py          # Generic Flask constructor used behind app.create_app()
 │   ├── blueprints/
-│   │   ├── api_v1.py           # /api/v1 headless REST, run streaming, artifact, and read-only project routes
-│   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
-│   │   ├── atlas.py           # /atlas* session entity summary, list, and detail routes
+│   │   ├── api_v1.py           # Shared /api/v1 blueprint, helpers, and route registration
+│   │   ├── api_v1_notifications.py # API notification channel and event routes
+│   │   ├── api_v1_read.py      # API health, OpenAPI, history, output, Atlas, and project read routes
+│   │   ├── api_v1_runs.py      # API run start, status, wait, stream, cancel, and AI routes
+│   │   ├── api_v1_schedules.py # API schedule list, create, update, delete, and fire routes
+│   │   ├── api_v1_streaming.py # API run SSE-to-NDJSON stream adapter helpers
+│   │   ├── api_v1_teams.py     # API team create, list, member, invite, and recovery routes
+│   │   ├── api_v1_watchers.py  # API watcher list, create, update, delete, and run-now routes
+│   │   ├── assets.py           # Shared assets blueprint, client logs, vendor files, health, and status routes
+│   │   ├── assets_audit.py     # IP-gated diagnostics audit log and export routes
+│   │   ├── assets_diag.py      # IP-gated diagnostics, classifier, AI-test, and metrics routes
+│   │   ├── atlas.py           # Shared Atlas blueprint, import, saved-view, and route registration
+│   │   ├── atlas_mutations.py # Atlas cleanup, suppression, delete, intel refresh, and project-link routes
+│   │   ├── atlas_read.py      # Atlas run, entity, finding, detail, and export read routes
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
 │   │   ├── notifications.py    # /session/notification-channels* browser notification-channel CRUD and test-send routes
-│   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
+│   │   ├── projects.py         # Shared project blueprint, helpers, and route registration
+│   │   ├── projects_artifacts.py # Project artifact list, preview, download, and download-ticket routes
+│   │   ├── projects_auto_promote.py # Project auto-promote rule preview, apply, and management routes
+│   │   ├── projects_core.py    # Project list, create, active-project, overview, activity, run, and entity routes
+│   │   ├── projects_findings.py # Project finding list, review, run finding, and triage routes
+│   │   ├── projects_links.py   # Project link and run-entity relationship routes
+│   │   ├── projects_metadata.py # Atlas/project entity label, note, and metadata routes
+│   │   ├── projects_monitoring.py # Project monitoring, alert acknowledgment, and digest settings routes
+│   │   ├── projects_packages.py # Project evidence package create, download, job, and delete routes
+│   │   ├── projects_report.py  # Project report draft, preview, export job, and download-ticket routes
+│   │   ├── projects_targets.py # Project target list, create, update, and delete routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
+│   │   ├── run_broker.py       # Brokered /runs start, replay, and SSE stream routes
+│   │   ├── run_client.py       # Browser-owned built-in run persistence route
+│   │   ├── run_kill.py         # /kill route for active command and PTY runs
+│   │   ├── run_pty.py          # Interactive PTY run start, stream, snapshot, input, and resize routes
+│   │   ├── run_support.py      # Shared run-route helpers for scope, ownership, limits, and capability checks
 │   │   ├── schedules.py        # /schedules* browser scheduled-run CRUD and manual fire routes
 │   │   ├── secrets.py          # /session/secrets* encrypted personal/team secret metadata and write routes
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
@@ -515,14 +542,17 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── core/
 │   │   ├── __init__.py         # Core helper package marker
 │   │   ├── database.py         # DB connection, schema init, retention pruning
+│   │   ├── database_access.py  # Lazy database backend/connect accessors for service modules
 │   │   ├── database_backend.py # Backend enum, dialect helpers, pool setup, and storage diagnostics boundary
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
 │   │   ├── http_rate_limit.py  # Baseline dynamic-route throttle for scanner-resistant request handling
 │   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
-│   │   ├── migrations/         # Postgres schema migration registry and runner
-│   │   │   ├── __init__.py     # Ordered Postgres migration list
-│   │   │   ├── runner.py       # Advisory-lock migration runner for Postgres startup
-│   │   │   ├── v0001_postgres_baseline.py # Current app schema baseline for Postgres
+│   │   ├── migrations/         # SQLite/Postgres schema migration registry and runner
+│   │   │   ├── __init__.py     # Ordered app migration list
+│   │   │   ├── baseline.py     # Frozen SQLite/Postgres fresh-install schema baseline
+│   │   │   ├── reconciliation.py # SQLite/Postgres migration reconciliation and stamping helpers
+│   │   │   ├── runner.py       # Backend-aware migration runner and ledger helper
+│   │   │   ├── v0001_postgres_baseline.py # Legacy Postgres baseline ledger entry
 │   │   │   ├── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
 │   │   │   ├── v0003_postgres_atlas_search.py # Trigram-backed Postgres Atlas search indexes
 │   │   │   ├── v0004_postgres_atlas_detail_indexes.py # Postgres Atlas detail lookup indexes
@@ -556,13 +586,25 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0032_watcher_monitoring_phase0.py # Postgres watcher monitoring project-link and fire-triage schema
 │   │   │   ├── v0033_watcher_monitoring_policy.py # Postgres watcher monitoring policy controls
 │   │   │   ├── v0034_project_digest_settings.py # Postgres Project digest settings table
-│   │   │   └── v0035_project_digest_schedule_dispatch.py # Postgres Project digest schedule and notification constraints
-│   │   ├── output_signals.py   # Server-side output signal and entity classifier
+│   │   │   ├── v0035_project_digest_schedule_dispatch.py # Postgres Project digest schedule and notification constraints
+│   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
+│   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
+│   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
+│   │   │   └── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
+│   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
+│   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
+│   │   ├── output_signals.py   # Server-side output signal classifier and scanner-specific entity shaping
+│   │   ├── output_structured_signals.py # JSON and structured scanner signal/entity helpers
+│   │   ├── output_targets.py   # Command root and target extraction helpers
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
-│   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
-│   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
+│   │   ├── process_redis.py    # Shared Redis client proxy for process-state consumers
+│   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
+│   │   └── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
+│   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to factory construction)
 │   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
 │   ├── requirements.txt        # Python runtime dependencies
+│   ├── runtime_bootstrap.py    # Explicit web/worker startup for logging, metrics, Redis, and DB init
 │   ├── services/
 │   │   ├── __init__.py         # Service package marker
 │   │   ├── ai/
@@ -584,16 +626,30 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── auth.py         # /api/v1 token authentication and JSON error helpers
 │   │   │   ├── openapi.py      # OpenAPI source-of-truth dictionary for /api/v1
 │   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
+│   │   ├── assets/
+│   │   │   ├── __init__.py     # Asset service package marker
+│   │   │   └── diagnostics.py  # Asset manifest and frontend bundle diagnostics helpers
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
 │   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
+│   │   │   ├── import_analysis.py # Atlas import option, duplicate, and apply-count analysis helpers
+│   │   │   ├── import_helpers.py # Safe Atlas import text, hash, count, and log helpers
+│   │   │   ├── import_limits.py # Atlas import limit configuration and safe workflow errors
 │   │   │   ├── import_parser.py # Atlas import file parsing and normalization helpers
 │   │   │   ├── import_sources.py # Atlas import draft, batch, and provenance storage helpers
 │   │   │   ├── import_workflow.py # Atlas import preview/apply workflow helpers
 │   │   │   ├── intel_bridge.py # Atlas entity intel refresh and snapshot persistence helpers
-│   │   │   ├── lookup.py       # Session entity list/detail queries and Atlas metadata shaping
+│   │   │   ├── intel_summary.py # Atlas intel snapshot shaping and highlights
+│   │   │   ├── lookup.py       # Session entity summary, list, and detail queries
+│   │   │   ├── lookup_export.py # Atlas entity export queries and CSV/JSONL rendering helpers
+│   │   │   ├── lookup_filters.py # Atlas list/search orphan, suppression, and run-filter SQL helpers
+│   │   │   ├── lookup_metadata.py # Atlas metadata and import-source shaping helpers
+│   │   │   ├── lookup_mutations.py # Atlas entity and finding suppression/review mutation helpers
+│   │   │   ├── lookup_runs.py # Atlas source-run list and count query helpers
+│   │   │   ├── lookup_search.py # Shared Atlas text and metadata search SQL helpers
 │   │   │   ├── materializer.py # Run-output entity materialization into the Atlas tables
 │   │   │   ├── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
+│   │   │   ├── schema.py       # Atlas entity type registry
 │   │   │   └── scope.py        # Shared Atlas owner and source-scope predicates
 │   │   ├── audit/
 │   │   │   ├── __init__.py     # Audit event service package exports
@@ -625,10 +681,19 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_wordlist.py # Wordlist built-in command handler backed by the SecLists catalog service
 │   │   │   ├── builtins_workspace.py # Session file built-in command family and workspace aliases
 │   │   │   ├── postfilters.py  # Synthetic pipe-helper post-filter parser for app-native pipelines
-│   │   │   ├── registry.py     # Command loading, validation, autocomplete derivation, and registry-driven rewrites
-│   │   │   ├── registry_content.py # Welcome, tour, ASCII art, and hint content loaders
+│   │   │   ├── registry.py     # Public command-registry surface for loading, autocomplete, validation, and rewrites
+│   │   │   ├── registry_autocomplete.py # Autocomplete context normalization, merging, and feature filtering
+│   │   │   ├── registry_cache.py # Read-only containers for cached command registry data
+│   │   │   ├── registry_catalog.py # Command catalog, secret-consumer, and interactive PTY registry shaping
+│   │   │   ├── registry_content.py # Workflow, welcome, tour, ASCII art, and hint content loaders
+│   │   │   ├── registry_faq.py # Built-in/custom FAQ entries and FAQ markup rendering helpers
 │   │   │   ├── registry_loader.py # Command registry YAML loading, normalization, and overlay merging
+│   │   │   ├── registry_runtime.py # Runtime command adaptation helpers for registry entries
+│   │   │   ├── registry_smoke.py # Command-registry driven smoke-test command corpus helpers
+│   │   │   ├── registry_targets.py # Typed command-input and restricted-target helpers
+│   │   │   ├── registry_validate.py # High-level command validation orchestration
 │   │   │   ├── registry_validation.py # Command tokenization, policy matching, deny checks, and runtime-command detection
+│   │   │   ├── registry_workspace.py # Workspace flag/path rewriting and file-target validation helpers
 │   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
 │   │   ├── diagnostics/
 │   │   │   ├── __init__.py     # Diagnostics service package marker
@@ -649,7 +714,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
+│   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
+│   │   │   ├── insights.py     # History activity, command-mix, and run-constellation insight helpers
+│   │   │   ├── mutations.py    # History delete, export, and snapshot persistence helpers
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
+│   │   │   ├── queries.py      # History list, search, run metadata, and compare query helpers
 │   │   │   ├── run_metadata.py # Shared run-history metadata, artifact, count, and table-introspection helpers
 │   │   │   └── search.py       # Backend-aware run-history search SQL helpers
 │   │   ├── intel/
@@ -687,6 +756,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── metrics/
 │   │   │   ├── __init__.py     # Prometheus metric definitions, label normalizers, and render helpers
 │   │   │   └── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
+│   │   ├── metrics_environment.py # Prometheus multiprocess environment setup helper
+│   │   ├── metrics_lazy.py     # Lazy Prometheus metrics proxy for import-pure modules
 │   │   ├── notifications/
 │   │   │   ├── __init__.py     # Outbound notification service package marker and config helper
 │   │   │   ├── base.py         # Registerable notification channel base class and registry
@@ -713,6 +784,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── active.py       # Active project preference and lookup helpers
+│   │   │   ├── actors.py       # Team actor display helpers for project payloads
+│   │   │   ├── artifact_queries.py # Project artifact page, detail, and target-filter query helpers
 │   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
 │   │   │   ├── auto_promote.py # Project Atlas auto-promote rule matching and apply helpers
 │   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
@@ -721,19 +794,24 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── digests.py      # Project attack-surface digest settings and delivery join-key helpers
 │   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
 │   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
+│   │   │   ├── list_metrics.py # Project list count and finding-summary query helpers
+│   │   │   ├── list_queries.py # Project list and switcher query helpers
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
 │   │   │   ├── monitoring.py   # Project Monitoring tab payload, watcher status cards, and fire timeline helpers
-│   │   │   ├── overview.py     # Project overview payload contract, target identity, and status helpers
+│   │   │   ├── overview.py     # Project overview payload assembly, target identity, and status helpers
+│   │   │   ├── overview_app.py # Project overview app-scan, app-port, URL-host, and provenance helpers
+│   │   │   ├── overview_intel.py # Project overview intel extraction and certificate status helpers
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
+│   │   │   ├── package_queries.py # Evidence package list/detail read helpers
 │   │   │   ├── package_rendering.py # Evidence package HTML, Markdown, JSON, and transcript export helpers
 │   │   │   ├── packages.py     # Evidence package payload, manifest, redaction, and archive-name helpers
 │   │   │   ├── preferences.py  # Project-related session preference helpers
 │   │   │   ├── provenance.py   # Safe project-link provenance shaping helpers
-│   │   │   ├── queries.py      # Project list, summary, run, entity, and artifact query helpers
+│   │   │   ├── queries.py      # Project summary, run, and entity query helpers
 │   │   │   ├── scope.py        # Project personal/team owner-scope SQL helpers
 │   │   │   ├── slugs.py        # Project slug normalization and allocation helpers
 │   │   │   ├── targets.py      # Project target validation, discovery, and mutation helpers
@@ -742,8 +820,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── pty/
 │   │   │   ├── __init__.py     # PTY service package marker
 │   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
+│   │   │   ├── runtime.py      # Low-level PTY process, sizing, environment, and termination helpers
 │   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
-│   │   │   └── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
+│   │   │   ├── settings.py     # Interactive PTY default limits and bounded config helpers
+│   │   │   ├── snapshots.py    # PTY snapshot payload shaping helpers
+│   │   │   ├── state.py        # Redis-backed PTY metadata, cleanup, scope, and snapshot reload helpers
+│   │   │   ├── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
+│   │   │   └── wire.py         # PTY Redis key, event-id, and payload decode helpers
 │   │   ├── reports/
 │   │   │   ├── __init__.py     # Public report helper exports
 │   │   │   ├── composition.py  # Report composition context helpers
@@ -757,10 +840,18 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── runs/
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
+│   │   │   ├── broker_worker.py # Brokered synthetic and subprocess worker output publishing
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
+│   │   │   ├── finalization.py # Completed-run capture, Atlas/finding/project hooks, and PTY persistence
 │   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
+│   │   │   ├── lifecycle.py    # Command preparation and process spawn helpers
 │   │   │   ├── output_model.py # Typed run-output line-event schema plus legacy wire compatibility helpers
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
+│   │   │   ├── persistence.py  # Completed-run save, artifact, Atlas, finding, and project-link persistence helpers
+│   │   │   ├── postfilters.py  # Synthetic jq/workspace/trufflehog output filters used by run streaming
+│   │   │   ├── process_control.py # Process-group signaling and scanner PID freshness helpers
+│   │   │   ├── project_notices.py # Project-related run notice formatting helpers
+│   │   │   ├── scope.py        # Run scope visibility and command-validation owner helpers
 │   │   │   ├── start.py        # Shared brokered run-start orchestration for browser and API routes
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   ├── structured_filters.py # Structured output filter parsing and summary-backed history clauses
@@ -768,6 +859,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
 │   │   ├── scheduler/
 │   │   │   ├── __init__.py     # Scheduled-run service package marker and config helper
+│   │   │   ├── api_operations.py # Headless API schedule create, update, delete, and run-now helpers
 │   │   │   ├── commands.py     # Shared scheduled-command validation helpers
 │   │   │   ├── cron.py         # Strict cron, cadence preset, timezone, and next-fire helpers
 │   │   │   ├── dispatch.py     # Schedule fire dispatch, broker launch, skip handling, and fire audit rows
@@ -784,12 +876,15 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── vault.py        # Master-key loading, HKDF derivation, and AES-GCM wrap/unwrap helpers
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
+│   │   │   ├── storage.py      # Session token, preference, recent-value, and migration storage helpers
 │   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
 │   │   ├── storage/
 │   │   │   ├── __init__.py     # Shared file-backed storage package marker
-│   │   │   └── body_store.py   # Compressed large-body offload helpers for DB text columns
+│   │   │   ├── body_store.py   # Compressed large-body offload helpers for DB text columns
+│   │   │   └── transactions.py # Shared service-layer read and transaction wrappers
 │   │   ├── teams/
 │   │   │   ├── __init__.py     # Team-mode service package exports
+│   │   │   ├── api_operations.py # Headless API team, invite, member, and recovery-code helpers
 │   │   │   ├── capabilities.py # Team role-to-capability matrix and enforcement helper
 │   │   │   ├── contracts.py    # Team-mode constants and exception classes
 │   │   │   ├── request_scope.py # Request-local personal/team active-scope resolver
@@ -797,6 +892,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── storage.py      # Team, member, invite, and recovery-code storage helpers
 │   │   ├── watchers/
 │   │   │   ├── __init__.py     # Watcher change-detection service package marker
+│   │   │   ├── api_operations.py # Headless API watcher create, update, fire, and baseline helpers
 │   │   │   ├── classifiers/
 │   │   │   │   ├── __init__.py # Compatibility exports for the shared diff classifier registry
 │   │   │   │   ├── common.py   # Compatibility exports for shared diff classifier helpers
@@ -817,7 +913,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── user_workflows.py # Personal/team workflow storage, validation, and serialization helpers
 │   │   └── workspace/
 │   │       ├── __init__.py     # Workspace service package marker
-│   │       └── files.py        # App-mediated personal/team workspace path, quota, and cleanup helpers
+│   │       ├── files.py        # App-mediated personal/team workspace quota, permission, and file helpers
+│   │       ├── maintenance.py  # Workspace migration and inactive-cleanup helpers
+│   │       ├── metadata.py     # Workspace file label, note, artifact, and project metadata queries
+│   │       ├── models.py       # Workspace exception, settings, usage, and operation-result models
+│   │       ├── modes.py        # Workspace filesystem mode constants
+│   │       ├── paths.py        # Workspace directory, validation, symlink, and path-resolution helpers
+│   │       └── settings.py     # Workspace settings and owner directory naming helpers
 │   ├── static/
 │   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/
@@ -938,7 +1040,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_monitoring.js # Lazy-loaded Project Monitoring filters, grouped cards, policy chips, timeline, run actions, and triage controls
 │   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
 │   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
-│   │       │   │   ├── project_overview.js # Lazy-loaded Project Overview target rollups, cert status, and deep-link actions
+│   │       │   │   ├── project_overview.js # Lazy-loaded Project Overview rollups, provider freshness, tempo, deliverables, activity, and deep-link actions
 │   │       │   │   ├── project_packages.js # Lazy-loaded evidence package rows, manifest preview, wizard, and download helpers
 │   │       │   │   ├── project_report.js # Lazy-loaded Project Report tab editor, preview, export, and print/PDF helpers
 │   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
@@ -1043,7 +1145,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
 │   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
 │   │       └── workspace_bridge.js # Files panel ESM bridge for lightweight shell close actions
-│   └── templates/
+│   ├── templates/
 │       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
 │       ├── diag_audit.html     # Operator audit-log viewer and export links (IP-gated)
@@ -1053,6 +1155,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       ├── permalink_error.html # Missing/expired permalink template
 │       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
 │       └── theme_vars_style.html # Injected CSS variable block for the active theme
+│   └── wsgi.py                 # Gunicorn WSGI entrypoint that calls bootstrap()
 ├── assets.config.json         # Frontend asset bundle membership/order for scripts/build_assets.mjs
 ├── assets/                     # README media assets (demo videos)
 ├── docker-compose.yml          # Local Compose stack with Redis, optional Postgres, optional local AI providers, and the shell app
@@ -1174,7 +1277,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
 │   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
 │   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
-│   │       ├── project_overview.test.js # Project Overview target rollups, cert badges, and deep-link action coverage
+│   │       ├── project_overview.test.js # Project Overview rollups, provider caveats, tempo, deliverables, activity, cert badges, and deep-link coverage
 │   │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
 │   │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
 │   │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage
@@ -1208,6 +1311,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
 │   │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
 │   │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
+│   │   ├── test_architecture.py # Architecture boundary guards for blueprint persistence access
 │   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
 │   │   ├── test_check_versions.py # Dependency version-check helper coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)

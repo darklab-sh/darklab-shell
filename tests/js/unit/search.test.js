@@ -511,6 +511,25 @@ describe('search helpers', () => {
     expect(document.querySelector('[data-search-scope="summaries"]').textContent).toBe('summaries (1)')
   })
 
+  it('keeps discoverability refresh safe when the Element global is unavailable', () => {
+    const originalWindowElement = window.Element
+    const originalGlobalElement = globalThis.Element
+    try {
+      Object.defineProperty(window, 'Element', { configurable: true, value: undefined })
+      Object.defineProperty(globalThis, 'Element', { configurable: true, value: undefined })
+
+      const { refreshSearchDiscoverabilityUi } = loadSearchFns()
+      document.getElementById('out').innerHTML =
+        '<span class="line" data-signals="findings">443/tcp open https</span>'
+
+      expect(() => refreshSearchDiscoverabilityUi()).not.toThrow()
+      expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (1)')
+    } finally {
+      Object.defineProperty(window, 'Element', { configurable: true, value: originalWindowElement })
+      Object.defineProperty(globalThis, 'Element', { configurable: true, value: originalGlobalElement })
+    }
+  })
+
   it('renders signal summary chips with DOM APIs instead of parsing markup', () => {
     const { _renderCompactSignalSummary } = loadSearchFns()
     const summary = document.getElementById('searchSignalSummary')

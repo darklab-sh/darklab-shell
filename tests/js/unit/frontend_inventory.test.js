@@ -1,39 +1,29 @@
-import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
+import {
+  buildFrontendInventoryReport,
+  formatFrontendInventoryCheckResult,
+} from '../../../scripts/inventory_frontend_modules.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const EXEC_OPTIONS = { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
 const INVENTORY_CHECK_TIMEOUT_MS = 60_000
 let inventoryReport = null
 
 function runInventoryJson() {
   if (inventoryReport) return inventoryReport
-  inventoryReport = JSON.parse(execFileSync(
-    'node',
-    ['scripts/inventory_frontend_modules.mjs', '--json', '--check'],
-    EXEC_OPTIONS,
-  ))
+  inventoryReport = buildFrontendInventoryReport({ root: REPO_ROOT })
   return inventoryReport
 }
 
-function runInventoryCheckWithOutput(env = {}) {
-  const result = spawnSync(
-    'node',
-    ['scripts/inventory_frontend_modules.mjs', '--check'],
-    {
-      ...EXEC_OPTIONS,
-      env: { ...process.env, ...env },
-    },
-  )
-  return {
-    ok: result.status === 0,
-    output: `${result.stdout || ''}${result.stderr || ''}`,
-  }
+function runInventoryCheckWithOutput({ allowlistPath = undefined } = {}) {
+  return formatFrontendInventoryCheckResult(buildFrontendInventoryReport({
+    root: REPO_ROOT,
+    ...(allowlistPath ? { allowlistPath } : {}),
+  }))
 }
 
 function moduleReport(report, source) {
@@ -79,13 +69,13 @@ describe('frontend browser global boundary inventory', () => {
     resolver_helper_calls_by_class: Object.freeze({
       bridge_dispatch: 76,
       global_only: 556,
-      import_first: 577,
+      import_first: 578,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
       allowlisted_global: 55,
       bridge_dispatch_report_only: 75,
       dynamic_or_non_literal: 22,
-      fallback_imported_binding: 368,
+      fallback_imported_binding: 369,
       fallback_local_binding: 11,
       global_publish: 77,
       guarded_compatibility_fallback: 515,
@@ -419,7 +409,7 @@ describe('frontend browser global boundary inventory', () => {
       })
       writeFileSync(fixtureAllowlist, `${JSON.stringify(allowlist, null, 2)}\n`)
 
-      const failure = runInventoryCheckWithOutput({ FRONTEND_GLOBALS_ALLOWLIST: fixtureAllowlist })
+      const failure = runInventoryCheckWithOutput({ allowlistPath: fixtureAllowlist })
 
       expect(failure.ok).toBe(false)
       expect(failure.output).toContain('unused frontend-globals.allowlist.json entries')

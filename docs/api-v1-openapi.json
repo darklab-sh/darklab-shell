@@ -269,10 +269,18 @@
       },
       "AtlasEntity": {
         "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "canonical_value": {
             "type": "string"
           },
           "first_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "host_entity_id": {
             "nullable": true,
             "type": "string"
           },
@@ -363,6 +371,12 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "related_urls": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntity"
+            },
+            "type": "array"
+          },
           "runs": {
             "items": {
               "additionalProperties": true,
@@ -374,6 +388,7 @@
         "required": [
           "entity",
           "runs",
+          "related_urls",
           "findings",
           "intel_snapshots",
           "intel_summary",
@@ -3541,7 +3556,7 @@
   },
   "info": {
     "title": "darklab_shell API",
-    "version": "2.3.1"
+    "version": "2.4"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -3675,7 +3690,8 @@
                 "ip",
                 "url",
                 "hash",
-                "cve"
+                "cve",
+                "port"
               ],
               "type": "string"
             }
@@ -5506,7 +5522,8 @@
                 "ip",
                 "url",
                 "hash",
-                "cve"
+                "cve",
+                "port"
               ],
               "type": "string"
             }

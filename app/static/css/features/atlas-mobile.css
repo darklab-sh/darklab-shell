@@ -331,9 +331,12 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
  * contract (`>` means "drill in"). */
 .atlas-mobile-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
+  height: auto;
+  min-height: 64px;
+  overflow: visible;
   text-align: left;
   padding: 12px 14px;
   background: transparent;
@@ -348,6 +351,7 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  padding-top: 2px;
 }
 
 .atlas-mobile-row-select input {
@@ -361,31 +365,36 @@ body.atlas-mobile-selecting .atlas-mobile-bulk-bar {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  overflow: visible;
 }
 
 .atlas-mobile-row .atlas-entity-value,
 .atlas-mobile-row .atlas-finding-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .atlas-mobile-row .atlas-muted {
   font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .atlas-mobile-row .atlas-entity-badges {
   flex: 0 0 auto;
   display: flex;
   gap: 4px;
-  align-items: center;
-  flex-wrap: nowrap;
+  align-items: flex-start;
+  flex-wrap: wrap;
   max-width: 38%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .atlas-mobile-row-chev {
   flex: 0 0 auto;
+  margin-top: 1px;
   color: var(--muted);
   font-size: 18px;
   line-height: 1;

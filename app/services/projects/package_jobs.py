@@ -14,9 +14,9 @@ import re
 import secrets
 import time
 
-from config import CFG, resolve_data_dir
+from config import resolve_data_dir, resolve_effective_cfg
 from core.helpers import get_log_session_id
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
@@ -367,6 +367,6 @@ def start_evidence_package_archive_job(session_id, project_id, package_id, *, cf
         "updated_at": created,
     }
     _write_job(job)
-    cfg_snapshot = dict(CFG if cfg is None else cfg)
+    cfg_snapshot = dict(resolve_effective_cfg(cfg))
     _EXECUTOR.submit(_run_job, job["id"], cfg_snapshot)
     return _public_job(job)

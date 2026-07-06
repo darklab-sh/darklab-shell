@@ -59,9 +59,9 @@ DEFAULT_NOTIFICATION_APP_NAME = "darklab_shell"
 
 def notification_app_name() -> str:
     try:
-        from config import CFG
+        from config import resolve_effective_cfg
 
-        configured = CFG.get("app_name")
+        configured = resolve_effective_cfg().get("app_name")
     except Exception:  # pragma: no cover - defensive fallback for import-time edge cases
         configured = ""
     name = str(configured or "").strip()

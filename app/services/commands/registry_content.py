@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+import logging
 from typing import TypedDict
 import yaml
 
 import config as app_config
+from services.workflows import catalog as workflow_catalog
+
+log = logging.getLogger("shell")
 
 
 class TourPayload(TypedDict):
@@ -28,7 +32,18 @@ def _load_yaml_list(path: str) -> list:
     try:
         with open(path) as f:
             loaded = yaml.safe_load(f) or []
-    except (FileNotFoundError, yaml.YAMLError):
+    except FileNotFoundError:
+        return []
+    except yaml.YAMLError as exc:
+        log.warning(
+            "COMMAND_REGISTRY_CONTENT_YAML_LOAD_FAILED",
+            extra={
+                "path": path,
+                "overlay": path.endswith(".local.yaml"),
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:240],
+            },
+        )
         return []
     return loaded if isinstance(loaded, list) else []
 
@@ -38,6 +53,364 @@ def _load_yaml_list_with_local(path: str) -> list:
     merged.extend(_load_yaml_list(path))
     merged.extend(_load_yaml_list(_local_overlay_path(path)))
     return merged
+
+
+def builtin_workflows() -> list[dict[str, object]]:
+    return [
+        {
+            "title": "DNS Troubleshooting",
+            "description": "Diagnose why a domain isn't resolving or returns unexpected results.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "dig {{domain}} A", "note": "Does it resolve? Check the ANSWER section."},
+                {"cmd": "dig {{domain}} NS", "note": "Which nameservers are authoritative?"},
+                {"cmd": "dig @8.8.8.8 {{domain}} A", "note": "Does a public resolver see it differently?"},
+                {"cmd": "dig {{domain}} +trace", "note": "Trace delegation step by step from the root."},
+                {"cmd": "dig {{domain}} MX", "note": "Check mail exchanger records."},
+            ],
+        },
+        {
+            "title": "TLS / HTTPS Check",
+            "description": "Verify a domain's certificate, chain, and TLS configuration.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "curl -Iv https://{{host}}", "note": "Check response headers and certificate details."},
+                {"cmd": "openssl s_client -connect {{host}}:443",
+                 "note": "Inspect the raw TLS handshake and certificate chain."},
+                {"cmd": "testssl {{host}}", "note": "Run a full TLS audit including ciphers and known vulnerabilities."},
+            ],
+        },
+        {
+            "title": "HTTP Triage",
+            "description": "Investigate what a web server is returning.",
+            "inputs": [
+                {
+                    "id": "url", "label": "URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "curl -sIL {{url}}", "note": "Follow redirects and inspect the final response headers."},
+                {"cmd": "curl -sv -o /dev/null {{url}}| head -60",
+                 "note": "Verbose output with timing, TLS detail, and headers."},
+                {"cmd": "wget -S --spider {{url}}", "note": "Spider check with full server response headers."},
+            ],
+        },
+        {
+            "title": "Quick Reachability Check",
+            "description": "Confirm a host is up and identify which ports are open.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "ping -c 4 {{host}}", "note": "Is the host reachable? Check latency and packet loss."},
+                {"cmd": "nc -zv {{host}} 443", "note": "Is HTTPS open and accepting connections?"},
+                {"cmd": "nmap -F {{host}}", "note": "Fast scan of the 100 most common ports."},
+            ],
+        },
+        {
+            "title": "Email Server Check",
+            "description": "Verify mail delivery configuration for a domain.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "dig {{domain}} MX", "note": "Which mail servers handle email for this domain?"},
+                {"cmd": "dig {{domain}} TXT", "note": "Check SPF, DKIM policy, and other TXT records."},
+                {"cmd": "dig _dmarc.{{domain}} TXT",
+                 "note": "Check the DMARC policy published for the domain."},
+                {"cmd": "dig @8.8.8.8 {{domain}} MX",
+                 "note": (
+                     "Confirm a public resolver sees the same MX records. If you want to test "
+                     "SMTP ports with nc, target one of the MX hosts returned above rather than "
+                     "the apex domain."
+                 )},
+            ],
+        },
+        {
+            "title": "Domain OSINT / Passive Recon",
+            "description": "Gather ownership, delegation, and passive subdomain context before active probing.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "whois {{domain}}", "note": "Review registration, registrar, and allocation context."},
+                {"cmd": "dig {{domain}} NS", "note": "Identify authoritative nameservers for the domain."},
+                {"cmd": "subfinder -d {{domain}} -silent", "note": "Find passively observed subdomains."},
+                {"cmd": "dnsrecon -d {{domain}}", "note": "Enumerate common DNS records and transfer hints."},
+            ],
+        },
+        {
+            "title": "Subdomain Enumeration & Validation",
+            "description": "Discover candidate subdomains, resolve them, and probe likely web services.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+                {
+                    "id": "url", "label": "Probe URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "subfinder -d {{domain}} -silent", "note": "Collect passive subdomain candidates."},
+                {
+                    "cmd": (
+                        "dnsx -d {{domain}} "
+                        "-w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp"
+                    ),
+                    "note": "Resolve common subdomains and keep the DNS response context.",
+                },
+                {
+                    "cmd": "httpx -u {{url}} -title -status-code -tech-detect",
+                    "note": "Probe HTTPS and collect status, title, and technology hints.",
+                },
+            ],
+        },
+        {
+            "title": "Subdomain HTTP Triage",
+            "description": (
+                "Write discovered subdomains to Files, probe them for live HTTP services, "
+                "then save a compact HTTP summary for review."
+            ),
+            "feature_required": "workspace",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                    "help": "The root domain to enumerate and triage.",
+                },
+            ],
+            "steps": [
+                {
+                    "cmd": "subfinder -d {{domain}} -silent -o subdomains.txt",
+                    "note": "Discover subdomains and save one hostname per line to Files.",
+                },
+                {
+                    "cmd": "httpx -l subdomains.txt -silent -o live-urls.txt",
+                    "note": "Read the generated subdomain file and save live HTTP(S) URLs.",
+                },
+                {
+                    "cmd": "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+                    "note": "Read live URLs and save status, title, and technology hints.",
+                },
+            ],
+        },
+        {
+            "title": "Crawl And Scan",
+            "description": (
+                "Crawl a starting URL into Files, summarize discovered URLs, then run a focused "
+                "high/critical nuclei pass against the crawl output."
+            ),
+            "feature_required": "workspace",
+            "inputs": [
+                {
+                    "id": "url", "label": "URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                    "help": "The HTTP or HTTPS URL to crawl and scan.",
+                },
+            ],
+            "steps": [
+                {
+                    "cmd": "katana -u {{url}} -d 1 -silent -o crawled-urls.txt",
+                    "note": "Crawl one level from the seed URL and save discovered URLs.",
+                },
+                {
+                    "cmd": "httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
+                    "note": "Read crawled URLs and save HTTP status/title context.",
+                },
+                {
+                    "cmd": "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt",
+                    "note": "Run focused high/critical templates against the crawl output.",
+                },
+            ],
+        },
+        {
+            "title": "Web Directory Discovery",
+            "description": "Look for common web paths and follow up on interesting responses.",
+            "inputs": [
+                {
+                    "id": "url", "label": "URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://tor-stats.darklab.sh",
+                },
+            ],
+            "steps": [
+                {
+                    "cmd": (
+                        "ffuf -u {{url}}/FUZZ "
+                        "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+                    ),
+                    "note": "Fuzz common paths and watch for non-baseline status codes or sizes.",
+                },
+                {
+                    "cmd": (
+                        "gobuster dir -u {{url}} "
+                        "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+                    ),
+                    "note": "Run a second directory check with a different scanner.",
+                },
+                {"cmd": "curl -sIL {{url}}/admin",
+                 "note": "Inspect redirects and headers for a candidate path."},
+            ],
+        },
+        {
+            "title": "SSL / TLS Deep Dive",
+            "description": "Inspect certificates, protocol support, cipher exposure, and known TLS weaknesses.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "sslscan {{host}}", "note": "Enumerate protocols, ciphers, and certificate metadata."},
+                {"cmd": "sslyze --certinfo {{host}}", "note": "Validate certificate chain details."},
+                {
+                    "cmd": "openssl s_client -connect {{host}}:443 -servername {{host}}",
+                    "note": "Inspect the raw handshake and served certificate chain.",
+                },
+                {"cmd": "testssl {{host}}", "note": "Run the broader TLS configuration audit."},
+            ],
+        },
+        {
+            "title": "CDN / Edge Behavior Check",
+            "description": "Compare DNS, ownership, redirects, headers, and WAF/CDN edge signals.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+                {
+                    "id": "url", "label": "Web URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "dig {{domain}} A", "note": "Check the current address records."},
+                {"cmd": "whois {{domain}}", "note": "Review ownership and provider hints."},
+                {"cmd": "curl -sIL {{url}}", "note": "Inspect redirects, cache headers, and edge headers."},
+                {"cmd": "wafw00f https://{{domain}}", "note": "Look for WAF or CDN fingerprints."},
+            ],
+        },
+        {
+            "title": "API Recon",
+            "description": "Triage API-style endpoints with headers, methods, JSON negotiation, and path fuzzing.",
+            "inputs": [
+                {
+                    "id": "url", "label": "Base URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "curl -sI {{url}}/api", "note": "Check whether the API path responds and how."},
+                {
+                    "cmd": "curl -sX OPTIONS -I {{url}}/api",
+                    "note": "Inspect allowed methods and CORS-style headers.",
+                },
+                {
+                    "cmd": "curl -sH Accept:application/json {{url}}/api",
+                    "note": "Ask for JSON explicitly and inspect the response shape.",
+                },
+                {
+                    "cmd": (
+                        "ffuf -u {{url}}/FUZZ "
+                        "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+                    ),
+                    "note": "Fuzz common API-adjacent paths and versions.",
+                },
+            ],
+        },
+        {
+            "title": "Network Path Analysis",
+            "description": "Diagnose reachability, route shape, latency, and packet-loss symptoms.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "ping -c 10 {{host}}", "note": "Measure basic reachability, latency, and packet loss."},
+                {"cmd": "mtr {{host}}", "note": "Summarize path loss and latency in report mode."},
+                {"cmd": "traceroute {{host}}", "note": "Capture a static routed path to the target."},
+                {"cmd": "tcptraceroute {{host}} 443", "note": "Trace the TCP path toward HTTPS specifically."},
+            ],
+        },
+        {
+            "title": "Fast Port Discovery to Service Fingerprint",
+            "description": "Sweep for exposed ports quickly, then fingerprint and validate important services.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "rustscan -a {{host}} --range 1-1000", "note": "Quickly sweep the first thousand ports."},
+                {"cmd": "naabu -host {{host}} -silent", "note": "Run a second fast TCP discovery pass."},
+                {"cmd": "nmap -sV {{host}}", "note": "Fingerprint services once you know exposure is present."},
+                {"cmd": "nc -zv {{host}} 80", "note": "Validate a specific expected port manually."},
+            ],
+        },
+    ]
+
+
+def workflow_tokens(value: str) -> set[str]:
+    return workflow_catalog.workflow_tokens(value)
+
+
+def render_workflow_text(value: str, inputs: dict[str, str]) -> str:
+    return workflow_catalog.render_workflow_text(value, inputs)
+
+
+def normalize_workflow_entry(entry):
+    """Return a normalized workflow entry or None when the payload is invalid."""
+    return workflow_catalog.normalize_workflow_entry(entry)
+
+
+def load_workflows(path: str) -> list[dict[str, object]]:
+    """Read workflows.yaml and return a list of workflow dicts."""
+    return workflow_catalog.load_workflows(path)
+
+
+def load_all_workflows(
+    path: str,
+    cfg=None,
+    *,
+    suggestion_enabled_for_features,
+) -> list[dict[str, object]]:
+    """Return the built-in workflows followed by any custom workflow entries."""
+    builtins = []
+    for idx, entry in enumerate(builtin_workflows()):
+        normalized = normalize_workflow_entry(entry)
+        if normalized and suggestion_enabled_for_features(normalized, cfg):
+            builtins.append(workflow_catalog.workflow_with_catalog_metadata(normalized, "builtin", idx))
+    custom = [
+        workflow_catalog.workflow_with_catalog_metadata(workflow, "config", idx)
+        for idx, workflow in enumerate(load_workflows(path))
+        if suggestion_enabled_for_features(workflow, cfg)
+    ]
+    return [*builtins, *custom]
 
 
 def load_welcome(path: str) -> list[dict[str, object]]:

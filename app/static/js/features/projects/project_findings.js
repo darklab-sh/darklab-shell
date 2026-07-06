@@ -80,6 +80,7 @@ let exportedDarklabProjectFindings = null;
       const wrap = document.createElement('div');
       wrap.className = 'project-finding-row-actions';
       if (finding && finding.id) {
+        const lineIndex = Number(finding.line_number);
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'project-finding-row-button-group';
         const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
@@ -87,6 +88,14 @@ let exportedDarklabProjectFindings = null;
         const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
         edit.dataset.findingId = String(finding.id || '');
         buttonGroup.append(triage, edit);
+        if (finding.run_id) {
+          const seeRun = ctx.makeProjectButton('See in run', 'open-finding-run-details', projectId);
+          seeRun.dataset.findingId = String(finding.id || '');
+          seeRun.dataset.runId = String(finding.run_id || '');
+          seeRun.dataset.runCommand = String(finding.run_command || '');
+          seeRun.dataset.lineIndex = Number.isInteger(lineIndex) ? String(lineIndex) : '';
+          buttonGroup.appendChild(seeRun);
+        }
         wrap.appendChild(buttonGroup);
         wrap.appendChild(reviewControl(finding, projectId));
       }
@@ -213,7 +222,6 @@ let exportedDarklabProjectFindings = null;
     function renderFindingRow(projectId, summary, finding) {
       const selectedFindingIds = ctx.selectedFindingIds();
       const selectMode = ctx.findingSelectMode();
-      const lineIndex = Number(finding.line_number);
       const findingId = String(finding.id || '');
       const metaParts = [
         finding.run_command || finding.run_id,
@@ -229,13 +237,11 @@ let exportedDarklabProjectFindings = null;
         chips: ctx.entityMetadataChips(finding),
         accessory: selectMode ? null : rowAccessory(finding, projectId),
         forceArticle: selectMode,
-        action: finding.run_id ? {
-          action: selectMode ? 'toggle-project-finding-row' : 'open-finding',
+        action: findingId ? {
+          action: selectMode ? 'toggle-project-finding-row' : 'open-project-finding',
           dataset: {
+            projectId,
             findingId,
-            runId: String(finding.run_id || ''),
-            runCommand: String(finding.run_command || ''),
-            lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
           },
         } : null,
       });

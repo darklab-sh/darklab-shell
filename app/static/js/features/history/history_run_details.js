@@ -916,7 +916,7 @@ function _historyRunEntityTabs() {
   const atlasTabs = DarklabAtlasTabs && Array.isArray(DarklabAtlasTabs.tabs)
     ? DarklabAtlasTabs.tabs
     : [
-        { id: 'ip', label: 'Hosts/IPs', type: 'ip', countKey: 'ip' },
+        { id: 'ip', label: 'IPs', type: 'ip', countKey: 'ip' },
         { id: 'domain', label: 'Domains', type: 'domain', countKey: 'domain' },
         { id: 'hash', label: 'Hashes', type: 'hash', countKey: 'hash' },
         { id: 'cve', label: 'CVEs', type: 'cve', countKey: 'cve' },
@@ -928,7 +928,7 @@ function _historyRunEntityTabs() {
 function _historyRunActiveEntityTab() {
   const tabs = _historyRunEntityTabs();
   const activeId = String(_historyRunModalState.activeEntityTab || '');
-  return tabs.find(tab => tab.id === activeId) || tabs[0] || { id: 'ip', label: 'Hosts/IPs', type: 'ip', countKey: 'ip' };
+  return tabs.find(tab => tab.id === activeId) || tabs[0] || { id: 'ip', label: 'IPs', type: 'ip', countKey: 'ip' };
 }
 
 function _historyRunEntityCount(type) {

@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from flask import g, request
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,7 @@ def authenticate_api_session() -> ApiSession:
     if not token.startswith("tok_"):
         raise ApiAuthError("invalid_token", "API v1 requires a durable tok_ session token.")
     last_seen_at = _now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT token, created FROM session_tokens WHERE token = ?",
             (token,),

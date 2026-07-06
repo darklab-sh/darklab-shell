@@ -1,0 +1,788 @@
+"""Architecture boundary tests for the Python application layers."""
+
+from __future__ import annotations
+
+import ast
+import hashlib
+import importlib
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BLUEPRINT_DIR = _REPO_ROOT / "app" / "blueprints"
+_API_V1_SERVICE_DIR = _REPO_ROOT / "app" / "services" / "api_v1"
+_API_V1_SERVICE_ALLOWED_FILES = {
+    "__init__.py",
+    "auth.py",
+    "openapi.py",
+    "serialization.py",
+}
+
+
+@dataclass(frozen=True)
+class BlueprintPersistenceMetrics:
+    connection_calls: int = 0
+    connection_symbols: int = 0
+    execute_calls: int = 0
+    core_database_symbols: int = 0
+    core_database_backend_symbols: int = 0
+    cleanup_helper_symbols: int = 0
+    sql_string_fragments: int = 0
+
+    def nonzero(self) -> bool:
+        return any(getattr(self, field) for field in self.__dataclass_fields__)
+
+
+_PERSISTENCE_CLEANUP_HELPERS = {
+    "delete_run_artifacts",
+    "delete_snapshot_metadata",
+}
+
+_PERSISTENCE_EXECUTE_METHODS = {
+    "execute",
+    "executemany",
+    "executescript",
+}
+
+_PERSISTENCE_CONNECTION_SYMBOLS = {
+    "db_connect",
+}
+
+_BLUEPRINT_PERSISTENCE_RATCHET = {}
+
+
+@dataclass(frozen=True)
+class ModuleSizeBudget:
+    path: str
+    max_lines: int
+    treatment: str
+
+
+_MODULE_SIZE_RATCHET = (
+    ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
+    ModuleSizeBudget("app/services/commands/registry_autocomplete.py", 564, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_cache.py", 104, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_catalog.py", 359, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_content.py", 580, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_faq.py", 505, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_loader.py", 744, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_runtime.py", 173, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_smoke.py", 194, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_targets.py", 345, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_validate.py", 178, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_validation.py", 239, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_workspace.py", 466, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run.py", 799, "split-target-phase2"),
+    ModuleSizeBudget("app/blueprints/run_broker.py", 149, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_client.py", 153, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_kill.py", 123, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects.py", 575, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/projects_artifacts.py", 155, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_auto_promote.py", 204, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_core.py", 412, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_findings.py", 272, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_links.py", 242, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_metadata.py", 158, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_monitoring.py", 238, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_packages.py", 386, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1.py", 794, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/api_v1_notifications.py", 159, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_read.py", 399, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_runs.py", 340, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_schedules.py", 211, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_watchers.py", 240, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/atlas.py", 680, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/atlas_mutations.py", 680, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/atlas_read.py", 155, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/database.py", 1005, "already-resolved-ratchet"),
+    ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi.py", 2597, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_shodan.py", 74, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_signals.py", 1167, "split-target-phase4"),
+    ModuleSizeBudget("app/core/output_structured_signals.py", 223, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_targets.py", 239, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/intel_summary.py", 370, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup.py", 949, "split-target-phase4"),
+    ModuleSizeBudget("app/services/atlas/lookup_export.py", 277, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_filters.py", 169, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_metadata.py", 210, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_mutations.py", 122, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_runs.py", 200, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_search.py", 73, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/actors.py", 39, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/artifact_queries.py", 249, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/overview.py", 1081, "split-target-phase4"),
+    ModuleSizeBudget("app/services/projects/overview_app.py", 452, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/overview_intel.py", 294, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/files.py", 1080, "split-target-phase4"),
+    ModuleSizeBudget("app/services/workspace/maintenance.py", 401, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/metadata.py", 172, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/modes.py", 6, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/models.py", 87, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/paths.py", 165, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/settings.py", 77, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/migrations/baseline.py", 1689, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/pty/runtime.py", 106, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/service.py", 1191, "split-target-phase4"),
+    ModuleSizeBudget("app/services/pty/settings.py", 95, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/snapshots.py", 64, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/state.py", 155, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/wire.py", 96, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/insights.py", 305, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/mutations.py", 291, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/queries.py", 904, "split-target-phase4"),
+    ModuleSizeBudget("app/services/projects/package_queries.py", 71, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/list_queries.py", 217, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/list_metrics.py", 200, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/queries.py", 777, "split-target-phase4"),
+    ModuleSizeBudget("app/services/atlas/import_analysis.py", 265, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_helpers.py", 131, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_limits.py", 150, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_workflow.py", 956, "split-target-phase4"),
+    ModuleSizeBudget("app/blueprints/assets.py", 371, "split-target-phase4"),
+    ModuleSizeBudget("app/blueprints/assets_audit.py", 391, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/assets_diag.py", 656, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/process.py", 1170, "ratchet-only"),
+    ModuleSizeBudget("app/services/metrics/__init__.py", 983, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker_worker.py", 495, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/finalization.py", 1006, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/schema_manifest.py", 899, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/database_backend.py", 845, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/commands/builtins_runtime.py", 830, "ratchet-only"),
+    ModuleSizeBudget("app/blueprints/teams.py", 796, "ratchet-only"),
+    ModuleSizeBudget("app/services/runs/postfilters.py", 368, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/process_control.py", 85, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_parser.py", 856, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/transcript.py", 73, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/__init__.py", 0, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker.py", 716, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/comparison.py", 1263, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/runs/kinds.py", 53, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/output_model.py", 534, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/output_store.py", 423, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/persistence.py", 161, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/start.py", 230, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/streaming.py", 156, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/structured_filters.py", 317, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/structured_summary.py", 59, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/workspace_artifacts.py", 92, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/__init__.py", 0, "split-package-ratchet"),
+)
+
+_MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
+    "app/blueprints/api_v1*.py",
+    "app/blueprints/projects*.py",
+    "app/blueprints/run*.py",
+    "app/blueprints/atlas*.py",
+    "app/blueprints/assets*.py",
+    "app/core/output*.py",
+    "app/services/commands/registry*.py",
+    "app/services/runs/*.py",
+    "app/services/pty/*.py",
+    "app/services/workspace/*.py",
+    "app/services/history/insights.py",
+    "app/services/history/mutations.py",
+    "app/services/history/queries.py",
+    "app/services/atlas/import*.py",
+    "app/services/atlas/intel_summary.py",
+    "app/services/atlas/lookup*.py",
+    "app/services/projects/actors.py",
+    "app/services/projects/artifact_queries.py",
+    "app/services/projects/list*.py",
+    "app/services/projects/overview*.py",
+    "app/services/projects/package_queries.py",
+    "app/services/projects/queries.py",
+)
+
+_DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 188
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "87bd8bd1306755a26a4b1871cb9057a07bbb0467cbd63e4f04101683eda3021e"
+
+_PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
+    ("blueprints.api_v1", "api_health", "callable"),
+    ("blueprints.api_v1", "api_runs_start", "callable"),
+    ("blueprints.api_v1", "_sse_after_id", "callable"),
+    ("blueprints.projects", "projects_list", "callable"),
+    ("blueprints.projects", "projects_create", "callable"),
+    ("blueprints.projects", "get_project_intel_overview", "callable"),
+    ("blueprints.run", "start_brokered_run", "callable"),
+    ("blueprints.run", "start_interactive_pty_run", "callable"),
+    ("blueprints.run", "_interactive_pty_input_limit", "callable"),
+    ("services.commands.registry", "load_commands_registry", "callable"),
+    ("services.commands.registry", "render_faq_markup", "callable"),
+    ("services.commands.registry", "rewrite_command", "callable"),
+    ("services.pty.service", "PtyTerminalCapture", "type"),
+    ("services.pty.service", "_pty_input_max_bytes", "callable"),
+    ("services.atlas.lookup", "list_entities", "callable"),
+    ("services.atlas.lookup", "entity_detail", "callable"),
+    ("services.atlas.lookup", "atlas_entities_export_csv", "callable"),
+    ("services.workspace.files", "workspace_settings", "callable"),
+    ("services.workspace.files", "ensure_session_workspace", "callable"),
+    ("services.workspace.files", "list_workspace_files", "callable"),
+)
+
+_SINGLETON_BINDING_SOURCE_OF_TRUTH_PATHS = {
+    "app/config.py",
+    "app/core/database_access.py",
+    "app/core/database.py",
+    "app/core/process.py",
+    "app/core/process_redis.py",
+    "app/extensions.py",
+}
+
+_SINGLETON_BINDING_GUARD_BASELINE = frozenset(
+    """
+app/app.py: from config import CFG
+app/blueprints/api_v1.py: from config import CFG
+app/blueprints/api_v1_read.py: from config import CFG
+app/blueprints/assets_audit.py: from config import CFG
+app/blueprints/assets_diag.py: from config import CFG
+app/blueprints/atlas.py: from config import CFG
+app/blueprints/history.py: CFG assignment
+app/blueprints/notifications.py: from config import CFG
+app/blueprints/projects.py: from config import CFG
+app/blueprints/projects_artifacts.py: from config import CFG
+app/blueprints/projects_core.py: from config import CFG
+app/blueprints/projects_packages.py: from config import CFG
+app/blueprints/projects_report.py: from config import CFG
+app/blueprints/run.py: from config import CFG
+app/blueprints/schedules.py: from config import CFG
+app/blueprints/secrets.py: from config import CFG
+app/blueprints/teams.py: from config import CFG
+app/blueprints/watchers.py: from config import CFG
+""".strip().splitlines()
+)
+
+_BARE_DICT_CFG_SENTINEL_ALLOWLIST = frozenset({
+    "tests/py/test_backend_modules.py: builtins_discovery.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_misc.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_runtime.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_system.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_workspace.CFG bare-dict stale-global sentinel",
+})
+
+
+def _wc_line_count(path: Path) -> int:
+    return path.read_bytes().count(b"\n")
+
+
+_SQL_STRING_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE | re.DOTALL)
+    for pattern in (
+        r"\bSELECT\b.+\bFROM\b",
+        r"\bINSERT\s+INTO\b",
+        r"\bUPDATE\b.+\bSET\b",
+        r"\bDELETE\s+FROM\b",
+        r"\bWHERE\b.+(?:=|\bIN\s*\(|\bLIKE\b|\bEXISTS\b|\bAND\b|\bOR\b)",
+        r"\bJOIN\b.+\bON\b",
+        r"\bORDER\s+BY\b",
+        r"\bGROUP\s+BY\b",
+        r"\b(?:session_id|team_id)\s*=\s*\?",
+    )
+)
+
+
+def _looks_like_sql_string(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _SQL_STRING_PATTERNS)
+
+
+class _BlueprintPersistenceVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.connection_calls = 0
+        self.connection_symbols = 0
+        self.connection_aliases = set(_PERSISTENCE_CONNECTION_SYMBOLS)
+        self.execute_calls = 0
+        self.core_database_symbols = 0
+        self.core_database_backend_symbols = 0
+        self.cleanup_helper_symbols = 0
+        self.sql_string_fragments = 0
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name) and node.func.id in self.connection_aliases:
+            self.connection_calls += 1
+        elif isinstance(node.func, ast.Attribute):
+            if node.func.attr == "db_connect":
+                self.connection_calls += 1
+            if node.func.attr in _PERSISTENCE_EXECUTE_METHODS:
+                self.execute_calls += 1
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name == "core.database" or alias.name.startswith("core.database."):
+                self.core_database_symbols += 1
+            if alias.name == "core.database_backend" or alias.name.startswith("core.database_backend."):
+                self.core_database_backend_symbols += 1
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name in _PERSISTENCE_CONNECTION_SYMBOLS:
+                self.connection_symbols += 1
+                self.connection_aliases.add(alias.asname or alias.name)
+        if node.module == "core.database":
+            self.core_database_symbols += len(node.names)
+            self.cleanup_helper_symbols += sum(
+                1 for alias in node.names if alias.name in _PERSISTENCE_CLEANUP_HELPERS
+            )
+        elif node.module == "core.database_backend":
+            self.core_database_backend_symbols += len(node.names)
+        elif node.module == "core":
+            self.core_database_symbols += sum(1 for alias in node.names if alias.name == "database")
+        self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, str) and _looks_like_sql_string(node.value):
+            self.sql_string_fragments += 1
+        self.generic_visit(node)
+
+    def metrics(self) -> BlueprintPersistenceMetrics:
+        return BlueprintPersistenceMetrics(
+            connection_calls=self.connection_calls,
+            connection_symbols=self.connection_symbols,
+            execute_calls=self.execute_calls,
+            core_database_symbols=self.core_database_symbols,
+            core_database_backend_symbols=self.core_database_backend_symbols,
+            cleanup_helper_symbols=self.cleanup_helper_symbols,
+            sql_string_fragments=self.sql_string_fragments,
+        )
+
+
+def _blueprint_persistence_metrics(path: Path) -> BlueprintPersistenceMetrics:
+    visitor = _BlueprintPersistenceVisitor()
+    visitor.visit(ast.parse(path.read_text(), filename=str(path)))
+    return visitor.metrics()
+
+
+def _blueprint_python_files(root: Path = _BLUEPRINT_DIR) -> list[Path]:
+    return sorted(root.rglob("*.py"))
+
+
+def _blueprint_ratcheted_path(path: Path, root: Path = _BLUEPRINT_DIR) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def _decomposed_route_contract_entries() -> list[tuple[str, str, str]]:
+    from app import create_app
+
+    app = create_app()
+    entries = []
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint.split(".", 1)[0] not in _DECOMPOSED_ROUTE_BLUEPRINTS:
+            continue
+        for method in sorted((rule.methods or set()) - {"HEAD", "OPTIONS"}):
+            entries.append((method, rule.rule, rule.endpoint))
+    return sorted(entries)
+
+
+def _route_contract_digest(entries: list[tuple[str, str, str]]) -> str:
+    canonical = "\n".join("\t".join(entry) for entry in entries)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _singleton_binding_guard_offenders(root: Path = _REPO_ROOT / "app") -> set[str]:
+    offenders: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        try:
+            relative_path = path.relative_to(_REPO_ROOT).as_posix()
+        except ValueError:
+            relative_path = path.relative_to(root).as_posix()
+        if relative_path in _SINGLETON_BINDING_SOURCE_OF_TRUTH_PATHS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        core_database_aliases = {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "core.database" and alias.asname
+        }
+        core_database_aliases.update(
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "core"
+            for alias in node.names
+            if alias.name == "database"
+        )
+        core_process_aliases = {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "core.process" and alias.asname
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    if module == "core.database" and alias.name in {"DB_BACKEND", "db_connect"}:
+                        offenders.add(f"{relative_path}: from core.database import {alias.name}")
+                    elif module == "core.process" and alias.name == "redis_client":
+                        offenders.add(f"{relative_path}: from core.process import redis_client")
+                    elif module == "config" and alias.name == "CFG":
+                        offenders.add(f"{relative_path}: from config import CFG")
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "CFG":
+                        offenders.add(f"{relative_path}: CFG assignment")
+                    elif (
+                        isinstance(target, ast.Name)
+                        and target.id in {"DB_BACKEND", "db_connect"}
+                        and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == target.id
+                        and isinstance(node.value.value, ast.Name)
+                        and node.value.value.id in core_database_aliases
+                    ):
+                        offenders.add(f"{relative_path}: {target.id} assignment from {node.value.value.id}")
+                    elif (
+                        isinstance(target, ast.Name)
+                        and target.id == "redis_client"
+                        and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "redis_client"
+                        and isinstance(node.value.value, ast.Name)
+                        and node.value.value.id in core_process_aliases
+                    ):
+                        offenders.add(f"{relative_path}: redis_client assignment from {node.value.value.id}")
+            elif isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.target.id == "CFG":
+                    offenders.add(f"{relative_path}: CFG assignment")
+            elif isinstance(node, ast.Attribute) and node.attr == "CFG":
+                if isinstance(node.value, ast.Name) and node.value.id in core_database_aliases:
+                    offenders.add(f"{relative_path}: {node.value.id}.CFG")
+                elif (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "database"
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "core"
+                ):
+                    offenders.add(f"{relative_path}: core.database.CFG")
+            elif isinstance(node, ast.ClassDef) and node.name in {"RedisClientProxy", "_RedisClientProxy"}:
+                offenders.add(f"{relative_path}: local Redis proxy class {node.name}")
+    return offenders
+
+
+def _name_for_ast_expr(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _name_for_ast_expr(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _bare_dict_cfg_monkeypatch_offenders(root: Path = _REPO_ROOT / "tests" / "py") -> set[str]:
+    offenders: set[str] = set()
+    for path in sorted(root.rglob("test_*.py")):
+        relative_path = path.relative_to(_REPO_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setattr"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "monkeypatch"
+            ):
+                continue
+            if len(node.args) < 3:
+                continue
+            if not (isinstance(node.args[1], ast.Constant) and node.args[1].value == "CFG"):
+                continue
+            if not isinstance(node.args[2], ast.Dict):
+                continue
+            target_name = _name_for_ast_expr(node.args[0]) or "<unknown>"
+            offenders.add(f"{relative_path}: {target_name}.CFG bare-dict stale-global sentinel")
+    return offenders
+
+
+def _required_module_size_ratchet_paths() -> set[str]:
+    required = set()
+    for pattern in _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS:
+        for path in _REPO_ROOT.glob(pattern):
+            if path.is_file():
+                required.add(path.relative_to(_REPO_ROOT).as_posix())
+    return required
+
+
+class TestBlueprintPersistenceBoundary:
+    def test_blueprint_connection_detection_catches_reexported_aliases(self):
+        source = """
+from services.example import db_connect as connect
+
+def route():
+    with connect() as conn:
+        return conn
+"""
+        visitor = _BlueprintPersistenceVisitor()
+        visitor.visit(ast.parse(source))
+
+        assert visitor.metrics().connection_symbols == 1
+        assert visitor.metrics().connection_calls == 1
+
+    def test_blueprint_execute_family_detection_covers_bulk_and_scripts(self):
+        source = """
+def route(conn):
+    conn.execute("SELECT 1")
+    conn.executemany("INSERT INTO x VALUES (?)", [(1,), (2,)])
+    conn.executescript("CREATE TABLE x (id INTEGER)")
+"""
+        visitor = _BlueprintPersistenceVisitor()
+        visitor.visit(ast.parse(source))
+
+        assert visitor.metrics().execute_calls == 3
+
+    def test_blueprint_execute_family_detection_is_conservative_by_design(self):
+        source = """
+def route(pipeline):
+    pipeline.execute()
+"""
+        visitor = _BlueprintPersistenceVisitor()
+        visitor.visit(ast.parse(source))
+
+        assert visitor.metrics().execute_calls == 1
+
+    def test_blueprint_sql_string_detection_catches_owned_fragments(self):
+        source = """
+def run_owner_clause(prefix, team_id):
+    if team_id:
+        return f"{prefix}team_id = ?", [team_id]
+    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')"
+
+def rows(conn):
+    return conn.fetch_all("SELECT * FROM runs WHERE session_id = ?")
+"""
+        visitor = _BlueprintPersistenceVisitor()
+        visitor.visit(ast.parse(source))
+
+        assert visitor.metrics().sql_string_fragments == 3
+
+    def test_blueprint_sql_string_detection_ignores_route_text(self):
+        source = """
+def route(bp):
+    bp.route("/history/bulk-delete", methods=["DELETE"])
+    return "Delete selected runs from history."
+"""
+        visitor = _BlueprintPersistenceVisitor()
+        visitor.visit(ast.parse(source))
+
+        assert visitor.metrics().sql_string_fragments == 0
+
+    def test_blueprint_scan_recurses_into_subpackages(self, tmp_path):
+        blueprint_root = tmp_path / "blueprints"
+        nested = blueprint_root / "history" / "queries.py"
+        nested.parent.mkdir(parents=True)
+        nested.write_text(
+            """
+def route(conn):
+    conn.execute("SELECT 1")
+""",
+            encoding="utf-8",
+        )
+
+        actual = {
+            _blueprint_ratcheted_path(path, blueprint_root): metrics
+            for path in _blueprint_python_files(blueprint_root)
+            if (metrics := _blueprint_persistence_metrics(path)).nonzero()
+        }
+
+        assert actual == {
+            "history/queries.py": BlueprintPersistenceMetrics(execute_calls=1),
+        }
+
+    def test_blueprint_direct_database_access_matches_ratchet(self):
+        actual = {
+            _blueprint_ratcheted_path(path): metrics
+            for path in _blueprint_python_files()
+            if (metrics := _blueprint_persistence_metrics(path)).nonzero()
+        }
+
+        assert actual == _BLUEPRINT_PERSISTENCE_RATCHET, (
+            "Blueprint persistence boundary drift detected. Move new database access "
+            "behind services, or lower the ratchet after removing blueprint access.\n"
+            f"actual={actual!r}"
+        )
+
+    def test_api_v1_service_package_stays_non_persistence(self):
+        actual = {path.name for path in _API_V1_SERVICE_DIR.glob("*.py")}
+
+        assert actual == _API_V1_SERVICE_ALLOWED_FILES, (
+            "services/api_v1 should stay limited to auth, serialization, and OpenAPI helpers. "
+            "Put persistence and database-backed operations in the owning domain service instead.\n"
+            f"actual={sorted(actual)!r}"
+        )
+
+
+class TestBlueprintImportOrder:
+    def test_split_route_modules_import_without_parent_order_cycle(self):
+        script = (
+            "import blueprints.run_broker, blueprints.run_client, blueprints.run_kill, "
+            "blueprints.run_pty, blueprints.assets_diag, blueprints.assets_audit"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=_REPO_ROOT,
+            env={**os.environ, "PYTHONPATH": str(_REPO_ROOT / "app")},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+
+class TestDecomposedRouteContract:
+    def test_decomposed_blueprint_route_contract_matches_pre_split_set(self):
+        entries = _decomposed_route_contract_entries()
+        actual_count = len(entries)
+        actual_digest = _route_contract_digest(entries)
+
+        assert actual_count == _DECOMPOSED_ROUTE_CONTRACT_COUNT, (
+            "Decomposed blueprint route count changed. Review the route contract "
+            "before updating the expected count.\n"
+            + "\n".join(repr(entry) for entry in entries)
+        )
+        assert actual_digest == _DECOMPOSED_ROUTE_CONTRACT_SHA256, (
+            "Decomposed blueprint route contract drifted. Keep method, path, and "
+            "endpoint names stable unless this is an intentional route change.\n"
+            + "\n".join(repr(entry) for entry in entries)
+        )
+
+
+class TestModuleSizeRatchet:
+    def test_tracked_modules_do_not_grow_past_baseline(self):
+        over_budget = []
+        for budget in _MODULE_SIZE_RATCHET:
+            path = _REPO_ROOT / budget.path
+            assert path.exists(), f"Tracked module size budget path is missing: {budget.path}"
+            actual = _wc_line_count(path)
+            if actual > budget.max_lines:
+                over_budget.append(
+                    f"{budget.path}: {actual} lines > {budget.max_lines} "
+                    f"({budget.treatment})"
+                )
+
+        assert not over_budget, (
+            "Module size ratchet drift detected. Keep the tracked file at or below "
+            "its current baseline, split it, or intentionally lower/replace the "
+            "budget after decomposition.\n"
+            + "\n".join(over_budget)
+        )
+
+    def test_decomposed_module_families_are_all_classified(self):
+        tracked = {budget.path for budget in _MODULE_SIZE_RATCHET}
+        missing = sorted(_required_module_size_ratchet_paths() - tracked)
+
+        assert not missing, (
+            "Module size ratchet coverage drift detected. Add a budget treatment "
+            "for each new file in the decomposed families.\n"
+            + "\n".join(missing)
+        )
+
+
+class TestSingletonDependencyGuard:
+    def test_singleton_binding_guard_flags_synthetic_offenders(self, tmp_path):
+        app_root = tmp_path / "app"
+        service_module = app_root / "services" / "example.py"
+        service_module.parent.mkdir(parents=True)
+        service_module.write_text(
+            """
+from config import CFG
+from core import database
+from core.database import DB_BACKEND, db_connect
+import core.database as database_owner
+import core.process as process_owner
+from core.process import redis_client
+
+
+DB_BACKEND = database.DB_BACKEND
+db_connect = database_owner.db_connect
+redis_client = process_owner.redis_client
+
+
+def uses_database_owner_module():
+    return database.db_connect, database.CFG, database_owner.CFG
+
+
+class RedisClientProxy:
+    pass
+""",
+            encoding="utf-8",
+        )
+        config_rebind_module = app_root / "services" / "config_rebind.py"
+        config_rebind_module.write_text("CFG = object()\n", encoding="utf-8")
+
+        offenders = _singleton_binding_guard_offenders(app_root)
+
+        assert offenders == {
+            "services/config_rebind.py: CFG assignment",
+            "services/example.py: from config import CFG",
+            "services/example.py: from core.database import DB_BACKEND",
+            "services/example.py: from core.database import db_connect",
+            "services/example.py: from core.process import redis_client",
+            "services/example.py: DB_BACKEND assignment from database",
+            "services/example.py: database.CFG",
+            "services/example.py: database_owner.CFG",
+            "services/example.py: db_connect assignment from database_owner",
+            "services/example.py: local Redis proxy class RedisClientProxy",
+            "services/example.py: redis_client assignment from process_owner",
+        }
+
+    def test_no_new_local_singleton_bindings_beyond_phase0_baseline(self):
+        offenders = _singleton_binding_guard_offenders()
+        new_offenders = sorted(offenders - _SINGLETON_BINDING_GUARD_BASELINE)
+        bare_dict_cfg_offenders = sorted(
+            _bare_dict_cfg_monkeypatch_offenders() - _BARE_DICT_CFG_SENTINEL_ALLOWLIST
+        )
+
+        assert not new_offenders, (
+            "New local singleton bindings detected. Use the shared accessor/helper/proxy "
+            "conventions or update the Phase 0 dependency-injection plan before expanding "
+            "the approved compatibility baseline:\n"
+            + "\n".join(f"  {offender}" for offender in new_offenders)
+        )
+        assert not bare_dict_cfg_offenders, (
+            "Bare-dict CFG monkeypatches detected. Use build_test_config(...) for CFG "
+            "replacement tests, or document an intentional stale-global sentinel in "
+            "_BARE_DICT_CFG_SENTINEL_ALLOWLIST:\n"
+            + "\n".join(f"  {offender}" for offender in bare_dict_cfg_offenders)
+        )
+
+
+class TestPublicImportCompatibility:
+    def test_moved_public_symbols_remain_available_from_parent_modules(self):
+        issues = []
+        for module_name, symbol, expected_kind in _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT:
+            module = importlib.import_module(module_name)
+            if not hasattr(module, symbol):
+                issues.append(f"{module_name}.{symbol}: missing")
+                continue
+            value = getattr(module, symbol)
+            if expected_kind == "callable" and not callable(value):
+                issues.append(f"{module_name}.{symbol}: expected callable, got {type(value).__name__}")
+            elif expected_kind == "type" and not isinstance(value, type):
+                issues.append(f"{module_name}.{symbol}: expected type, got {type(value).__name__}")
+
+        assert not issues, (
+            "Public import compatibility drift detected for moved decomposition symbols.\n"
+            + "\n".join(issues)
+        )

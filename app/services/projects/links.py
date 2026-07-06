@@ -6,11 +6,10 @@ from __future__ import annotations
 
 import config as _config
 from core.database import (
-    DB_BACKEND,
-    db_connect,
     validate_project_entity_type,
     validate_project_link_source,
 )
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import entity_exists_in_scope
 from services.projects.contracts import (
@@ -241,7 +240,7 @@ def _insert_project_link(
     entity_type = validate_project_entity_type(entity_type)
     source = validate_project_link_source(source)
     created = _now()
-    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail if isinstance(source_detail, dict) else {})
+    detail_json = dialect_for_backend(get_db_backend()).json_param(source_detail if isinstance(source_detail, dict) else {})
     for _ in range(10):
         link_id = _new_project_link_id()
         conn.execute(
@@ -450,7 +449,7 @@ def _attach_project_run_entity_unlink_finding_stats(conn, stats, session_id, pro
 
 def preview_project_run_entity_links(session_id, project_id, data, *, team_id=""):
     run_ids = _normalize_project_run_ids_payload(data)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -599,7 +598,7 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
 
 def preview_project_run_entity_unlinks(session_id, project_id, data, *, team_id=""):
     run_ids = _normalize_project_run_ids_payload(data)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -623,8 +622,8 @@ def unlink_project_run_entities(session_id, project_id, run_ids, *, include_cura
             continue
         seen.add(run_id)
         normalized_run_ids.append(run_id)
-    with db_connect() as conn:
-        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
+    with get_db_connect()() as conn:
+        conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -704,8 +703,8 @@ def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, so
 
 
 def link_project_run_entities(session_id, project_id, run_ids, source="manual", *, team_id=""):
-    with db_connect() as conn:
-        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
+    with get_db_connect()() as conn:
+        conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
         stats = _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, source=source, team_id=team_id)
         conn.commit()
     return stats
@@ -827,7 +826,7 @@ def _run_belongs_to_owner(conn, session_id, run_id, *, team_id=""):
 
 
 def list_project_links(session_id, project_id, *, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project = conn.execute(
@@ -850,7 +849,7 @@ def list_project_links(session_id, project_id, *, team_id=""):
 def link_project_entity(session_id, project_id, data, *, team_id=""):
     entity_type, entity_id, source = _normalize_link_payload(data)
     created = _now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -977,8 +976,8 @@ def link_project_entities(session_id, project_id, data, *, team_id=""):
         "rejected": 0,
     }
     results = []
-    with db_connect() as conn:
-        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
+    with get_db_connect()() as conn:
+        conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -1022,7 +1021,7 @@ def link_project_entities(session_id, project_id, data, *, team_id=""):
 def unlink_project_entity(session_id, project_id, data, *, team_id=""):
     raw = data if isinstance(data, dict) else {}
     entity_type, entity_id, _ = _normalize_link_payload({**raw, "source": "manual"})
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -1049,7 +1048,7 @@ def unlink_project_entities(session_id, project_id, data, *, team_id=""):
         "rejected": 0,
     }
     results = []
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec

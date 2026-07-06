@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 import os
-from pathlib import Path
 import platform
 import re
-import tempfile
 from typing import Any
 
-from config import APP_VERSION, CFG
+from config import APP_VERSION, resolve_effective_cfg
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE
+from services.metrics_environment import setup_prometheus_multiproc_dir as setup_prometheus_multiproc_dir
 from services.commands.registry_validation import command_root
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, normalize_run_kind
 
@@ -86,8 +85,6 @@ BROKER_PUBLISH_ERROR_CAUSES = frozenset({"redis_unavailable", "serialize", "unkn
 EVIDENCE_PACKAGE_SKIPPED_KINDS = frozenset({"artifact", "item"})
 
 _LABEL_VALUE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
-_DEFAULT_PROMETHEUS_MULTIPROC_DIR = Path(tempfile.gettempdir()) / "darklab_shell-prom"
-
 LABEL_CARDINALITY_POLICIES: dict[str, dict[str, dict[str, Any]]] = {
     "darklab_http_requests": {
         "method": {"kind": "enum", "values": HTTP_METHODS, "fallback": "GET"},
@@ -208,7 +205,7 @@ _LABEL_CARDINALITY_SEEN: dict[tuple[str, str], set[str]] = {}
 
 
 def _configured_buckets(key: str, defaults: tuple[float, ...]) -> tuple[float, ...]:
-    raw = CFG.get(key)
+    raw = resolve_effective_cfg().get(key)
     if not isinstance(raw, (list, tuple)):
         return defaults
     values = []
@@ -222,17 +219,6 @@ def _configured_buckets(key: str, defaults: tuple[float, ...]) -> tuple[float, .
     values = sorted(set(values))
     return tuple(values) or defaults
 
-
-def setup_prometheus_multiproc_dir(cfg: Mapping[str, Any] | None = None) -> str:
-    active_cfg = CFG if cfg is None else cfg
-    configured = str(active_cfg.get("prometheus_multiproc_dir") or "").strip()
-    path = Path(configured).expanduser() if configured else _DEFAULT_PROMETHEUS_MULTIPROC_DIR
-    path.mkdir(parents=True, exist_ok=True)
-    os.environ["PROMETHEUS_MULTIPROC_DIR"] = str(path)
-    return str(path)
-
-
-setup_prometheus_multiproc_dir()
 
 from prometheus_client import Counter, Gauge, Histogram, multiprocess  # noqa: E402
 from prometheus_client.core import CollectorRegistry  # noqa: E402

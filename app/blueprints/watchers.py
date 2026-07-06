@@ -8,7 +8,6 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from config import CFG
-from core import database
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
 from services.audit.automation import record_watcher_event, run_now_details
@@ -38,6 +37,8 @@ from services.watchers.service import (
     list_watcher_fires,
     pause_watcher,
     resume_watcher,
+    run_watcher_read,
+    run_watcher_transaction,
     update_watcher,
 )
 from services.teams.capabilities import Capability, require_capability
@@ -183,12 +184,15 @@ def watchers_list():
         return scope_response
     assert owner_scope is not None
     try:
-        with database.db_connect() as conn:
+        def _list(conn):
             watchers = list_for_owner(session_id, team_id=owner_scope.team_id, conn=conn)
             schedules = {
                 watcher.schedule_id: get_schedule(watcher.schedule_id, conn=conn)
                 for watcher in watchers
             }
+            return watchers, schedules
+
+        watchers, schedules = run_watcher_read(_list)
     except (WatcherError, ScheduleError, ValueError) as exc:
         response = _watcher_error_response(exc)
         _log_watcher_rejected("list", session_id, exc, response)
@@ -221,7 +225,7 @@ def watchers_create():
     if data is None:
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
-        with database.db_connect() as conn:
+        def _create(conn):
             payload = normalize_watcher_create_payload(
                 data,
                 session_id,
@@ -242,7 +246,9 @@ def watchers_create():
                 source="browser",
                 conn=conn,
             )
-            conn.commit()
+            return watcher, schedule
+
+        watcher, schedule = run_watcher_transaction(_create)
     except (
         RouteBaselineRunNotFound,
         RouteBaselineRunNotCompleted,
@@ -279,7 +285,7 @@ def watchers_update(watcher_id):
     if data is None:
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
-        with database.db_connect() as conn:
+        def _update(conn):
             watcher = _watcher_for_session_or_404(
                 watcher_id,
                 session_id,
@@ -311,7 +317,9 @@ def watchers_update(watcher_id):
                 },
                 conn=conn,
             )
-            conn.commit()
+            return updated, schedule
+
+        updated, schedule = run_watcher_transaction(_update)
     except (
         WatcherNotFound,
         WatcherError,
@@ -342,7 +350,7 @@ def watchers_delete(watcher_id):
     if capability_response:
         return capability_response
     try:
-        with database.db_connect() as conn:
+        def _delete(conn):
             watcher = _watcher_for_session_or_404(
                 watcher_id,
                 session_id,
@@ -358,7 +366,9 @@ def watchers_delete(watcher_id):
                 details={"deleted_count": 1 if removed else 0},
                 conn=conn,
             )
-            conn.commit()
+            return watcher, removed
+
+        watcher, removed = run_watcher_transaction(_delete)
     except (WatcherNotFound, WatcherError, ScheduleError, ValueError) as exc:
         response = _watcher_error_response(exc)
         _log_watcher_rejected("delete", session_id, exc, response, watcher_id)
@@ -379,7 +389,8 @@ def watchers_fires(watcher_id):
     try:
         limit = normalize_page_limit(request.args.get("limit"), default=20, maximum=100)
         offset = normalize_page_offset(request.args.get("offset"))
-        with database.db_connect() as conn:
+
+        def _fires(conn):
             watcher = _watcher_for_session_or_404(
                 watcher_id,
                 session_id,
@@ -387,6 +398,9 @@ def watchers_fires(watcher_id):
                 conn=conn,
             )
             fires, total = list_watcher_fires(watcher.id, limit=limit, offset=offset, conn=conn)
+            return watcher, fires, total
+
+        watcher, fires, total = run_watcher_read(_fires)
     except (WatcherNotFound, WatcherError, ValueError) as exc:
         response = _watcher_error_response(exc)
         _log_watcher_rejected("fires", session_id, exc, response, watcher_id)
@@ -420,7 +434,7 @@ def watchers_accept_baseline(watcher_id):
         return body_error
     data = data or {}
     try:
-        with database.db_connect() as conn:
+        def _accept_baseline(conn):
             watcher = _watcher_for_session_or_404(
                 watcher_id,
                 session_id,
@@ -439,7 +453,9 @@ def watchers_accept_baseline(watcher_id):
                 details={"baseline_run_id": accepted.baseline_run_id},
                 conn=conn,
             )
-            conn.commit()
+            return accepted, schedule
+
+        accepted, schedule = run_watcher_transaction(_accept_baseline)
     except (WatcherNotFound, WatcherError, ScheduleError, ValueError) as exc:
         response = _watcher_error_response(exc)
         _log_watcher_rejected("accept_baseline", session_id, exc, response, watcher_id)
@@ -462,7 +478,7 @@ def watchers_run_now(watcher_id):
     if capability_response:
         return capability_response
     try:
-        with database.db_connect() as conn:
+        def _run_now(conn):
             watcher = _watcher_for_session_or_404(
                 watcher_id,
                 session_id,
@@ -483,7 +499,9 @@ def watchers_run_now(watcher_id):
                 ),
                 conn=conn,
             )
-            conn.commit()
+            return status, refreshed, refreshed_schedule, fired_at
+
+        status, refreshed, refreshed_schedule, fired_at = run_watcher_transaction(_run_now)
     except (WatcherNotFound, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _watcher_error_response(exc)
         _log_watcher_rejected("run_now", session_id, exc, response, watcher_id)

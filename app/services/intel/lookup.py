@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from dataclasses import dataclass
 import logging
 import time
 from typing import Any, Callable
 
-from config import CFG
+from config import resolve_effective_cfg
 from core import process
 from core.helpers import get_log_session_id
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
 from services.intel import audit, cache
 from services.intel.base import (
     IntelProviderError,
@@ -161,11 +163,11 @@ def lookup_entity(
     session_id: str,
     run_id: str = "",
     provider_factories: list[ProviderFactory] | None = None,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client=None,
 ) -> IntelLookupResult:
     normalized_type = str(entity_type or "").strip().lower()
-    active_cfg = cfg or CFG
+    active_cfg = cfg if cfg is not None else resolve_effective_cfg()
     active_redis = process.redis_client if redis_client is None else redis_client
     canonical = canonical_entity(normalized_type, value)
     lookups: list[ProviderLookup] = []
@@ -195,7 +197,7 @@ def _lookup_provider(
     *,
     session_id: str,
     run_id: str,
-    cfg: dict[str, Any],
+    cfg: Mapping[str, Any],
     redis_client,
 ) -> ProviderLookup:
     started = time.perf_counter()

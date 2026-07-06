@@ -9,7 +9,7 @@ import time
 from typing import Any
 from urllib.parse import quote
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.diff.rollups import SEVERITY_NONE, SEVERITY_ORDER, build_fire_rollup
 from services.projects.queries import _project_entity_owner_clause
@@ -511,7 +511,7 @@ def get_project_monitoring(
         return None
     started = time.perf_counter()
     safe_fire_limit = max(1, min(int(fire_limit or 8), 25))
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project = _project_row(conn, session_id, normalized_project_id, team_id=team_id)
         if project is None:
             log.debug(
@@ -805,7 +805,7 @@ def update_project_monitoring_fire_ack(
             ),
         )
         return None
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(
             session_id,
             team_id=team_id,

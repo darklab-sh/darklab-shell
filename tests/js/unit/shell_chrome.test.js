@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { stripEsmExports } from './helpers/extract.js'
+import { TARGET_TYPES as PROJECT_TARGET_TYPES } from '../../../app/static/js/features/projects/project_target_validation.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -93,12 +94,14 @@ function loadShellChrome({
   preferences = {},
   openStatusMonitor = vi.fn(() => Promise.resolve(true)),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
+  openHistoryRunDetails = vi.fn(),
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   showToast = vi.fn(),
   logClientError = vi.fn(),
   appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
+  openAtlas = vi.fn(() => Promise.resolve()),
   bindDismissible = null,
   bindMobileSheet = null,
   bindOutsideClickClose = () => {},
@@ -203,7 +206,6 @@ function loadShellChrome({
             <select id="project-target-type">
               <option value="domain">domain</option>
               <option value="url">url</option>
-              <option value="host">host</option>
               <option value="ip">ip</option>
             </select>
             <input id="project-target-value">
@@ -294,11 +296,14 @@ function loadShellChrome({
     renderHudClock: null,
     toggleRailCollapsed: null,
     openStatusMonitor,
+    openAtlas,
+    openHistoryRunDetails,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
     showToast,
     fetchAndRenderHistoryComparison,
+    openAtlas,
     bindDismissible,
     bindMobileSheet,
     enhanceAppSelects,
@@ -588,6 +593,7 @@ function loadShellChrome({
     railSectionWorkflows: document.getElementById('rail-section-workflows'),
     preferences,
     openStatusMonitor,
+    openHistoryRunDetails,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
@@ -597,6 +603,7 @@ function loadShellChrome({
     bindMobileSheet,
     projectFindingsData: global.DarklabProjectFindingsData,
     openFindingsBoard: global.openFindingsBoard,
+    openAtlas,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
@@ -1343,6 +1350,7 @@ describe('shell chrome project workspace', () => {
     expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
     expect(field('source_command_roots').value).toBe('nmap')
     const optionValues = name => [...field(name).options].map(option => option.value)
+    expect(optionValues('target_entity_kind')).toEqual(['any', 'ip', 'domain', 'port', 'hash', 'cve', 'url'])
     expect(optionValues('match_mode')).toContain('domain_suffix')
     expect(optionValues('match_mode')).not.toContain('cidr')
     field('target_entity_kind').value = 'ip'
@@ -1783,7 +1791,8 @@ describe('shell chrome project workspace', () => {
       await tick()
       await tick()
       expect(document.getElementById('project-mobile-detail-body').textContent).toContain('darklab.sh')
-      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('Cert: Healthy')
+      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('Finding: High')
+      expect(document.getElementById('project-mobile-detail-body').textContent).not.toContain('Cert: Healthy')
       expect(document.getElementById('project-mobile-detail-body').querySelector('.project-overview-root.is-mobile')).not.toBeNull()
 
       document.querySelector('[data-project-mobile-detail-tab="packages"]').click()
@@ -2017,7 +2026,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(detailBody.textContent).toContain('443 open')
       expect(detailBody.textContent).toContain('443/tcp open https')
-      expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
+      expect(detailBody.querySelector('[data-project-action="open-project-finding"]')).not.toBeNull()
       expect(detailBody.querySelector('[data-project-action="open-findings-board"]')).toBeNull()
       expect(detailBody.querySelector('[data-project-finding-view-mode="board"]')).toBeNull()
       expect(detailBody.querySelector('.project-finding-board')).toBeNull()
@@ -2025,6 +2034,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
       expect(reviewSelect).not.toBeNull()
+      expect(actionSheet.querySelector('[data-project-action="open-finding-run-details"]')).not.toBeNull()
       const actionSheetItems = actionSheet.querySelector('.action-sheet-items')
       expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
       expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
@@ -2045,19 +2055,18 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.querySelector('[data-project-finding-group-toggle]')).toBeNull()
       expect(detailBody.textContent).toContain('nmap darklab.sh')
       shell.restoreHistoryRunIntoTab.mockClear()
-      detailBody.querySelector('[data-project-action="open-finding"]').click()
+      shell.openAtlas.mockClear()
+      detailBody.querySelector('[data-project-action="open-project-finding"]').click()
       await tick()
-      expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
-        {
-          id: 'run-1',
-          command: 'nmap darklab.sh',
-          full_output_available: true,
-        },
-        {
-          hidePanelOnSuccess: false,
-          highlightLineIndex: 4,
-        },
-      )
+      await tick()
+      expect(shell.openAtlas).toHaveBeenCalledWith({
+        source: 'project-workspace',
+        projectId: 'project-1',
+        projectName: 'darklab.sh',
+        tab: 'findings',
+        findingId: 'finding-1',
+      })
+      expect(shell.restoreHistoryRunIntoTab).not.toHaveBeenCalled()
       expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
 
       await shell.openProjectWorkspace()
@@ -2709,13 +2718,16 @@ describe('shell chrome project workspace', () => {
     const typeSelect = document.getElementById('project-target-type')
     const valueInput = document.getElementById('project-target-value')
     const valueHelp = document.getElementById('project-target-value-help')
+    const expectedTargetTypes = ['domain', 'url', 'ip']
+    expect(PROJECT_TARGET_TYPES.map(type => type.value)).toEqual(expectedTargetTypes)
+    expect(Array.from(typeSelect.options).map(option => option.value)).toEqual(expectedTargetTypes)
     expect(valueInput.placeholder).toBe('target.example.com')
     expect(valueHelp.textContent).toContain('darklab.sh')
-    typeSelect.value = 'host'
+    typeSelect.value = 'ip'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(valueInput.placeholder).toBe('host.example.com')
-    expect(valueHelp.textContent).toContain('Hostname or IP address')
-    valueInput.value = 'api.darklab.sh'
+    expect(valueInput.placeholder).toBe('192.0.2.10')
+    expect(valueHelp.textContent).toContain('Single IPv4 or IPv6 address')
+    valueInput.value = '192.0.2.10'
     document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     await tick()
@@ -2724,15 +2736,15 @@ describe('shell chrome project workspace', () => {
     document.querySelector('[data-project-action="new-target"]').click()
     await tick()
 
-    expect(typeSelect.value).toBe('host')
+    expect(typeSelect.value).toBe('ip')
     expect(syncAppSelect).toHaveBeenCalledWith(typeSelect)
-    expect(valueInput.placeholder).toBe('host.example.com')
+    expect(valueInput.placeholder).toBe('192.0.2.10')
     expect(valueHelp.textContent).toContain('192.0.2.10')
     typeSelect.value = 'url'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(valueInput.placeholder).toBe('https://target.example.com/path')
     expect(valueHelp.textContent).toContain('https://darklab.sh')
-    typeSelect.value = 'host'
+    typeSelect.value = 'domain'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     valueInput.value = 'www.darklab.sh'
     document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -2741,7 +2753,7 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
-        type: 'host',
+        type: 'domain',
         value: 'www.darklab.sh',
       }),
     }))
@@ -3250,8 +3262,9 @@ describe('shell chrome project workspace', () => {
       .toContain('Raw artifact files are unavailable because Files are disabled on this instance.')
   })
 
-  it('opens a finding source run at the recorded line', async () => {
+  it('opens project findings in Atlas and source runs in Run Details', async () => {
     const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored'))
+    const openHistoryRunDetails = vi.fn()
     const showConfirm = vi.fn((options = {}) => {
       const bodyText = typeof options.body === 'object' ? String(options.body.text || '') : String(options.body || '')
       return bodyText.startsWith('Delete package:')
@@ -3279,7 +3292,7 @@ describe('shell chrome project workspace', () => {
       },
       {
         id: 'target-2',
-        type: 'host',
+        type: 'domain',
         value: 'api.darklab.sh',
       },
       {
@@ -3614,7 +3627,7 @@ describe('shell chrome project workspace', () => {
             total: targetStates.length,
             limit: 50,
             offset: 0,
-            counts_by_type: { domain: 1, host: 1, ip: 1 },
+            counts_by_type: { domain: 2, ip: 1 },
           }),
         })
       }
@@ -4016,6 +4029,7 @@ describe('shell chrome project workspace', () => {
     const shell = loadShellChrome({
       apiFetch,
       restoreHistoryRunIntoTab,
+      openHistoryRunDetails,
       showWorkspaceViewer,
       showConfirm,
       fetchAndRenderHistoryComparison,
@@ -4090,7 +4104,7 @@ describe('shell chrome project workspace', () => {
 
     document.querySelector('[data-project-tab="entities"]').click()
     await tick()
-    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('Hosts/IPs')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('IPs')
     expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1')
     expect(document.getElementById('project-explorer-body').textContent).toContain('107.178.109.44')
     expect(document.getElementById('project-explorer-body').textContent).toContain('Shodan')
@@ -4438,7 +4452,7 @@ describe('shell chrome project workspace', () => {
     apiTargetFilter.checked = true
     apiTargetFilter.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('target: host: api.darklab.sh')
+    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('target: domain: api.darklab.sh')
     expect(document.getElementById('project-explorer-body').textContent).toContain('api host responded')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('missing security header')
 
@@ -5055,20 +5069,38 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-finding-bulk-review')).toBeNull()
     expect(document.querySelector('.project-finding-review')?.value).toBe('reviewed')
 
-    document.querySelector('[data-project-action="open-finding"]').click()
+    const explorerBody = document.getElementById('project-explorer-body')
+    const openFindingRow = explorerBody.querySelector(
+      '[data-project-action="open-project-finding"][data-project-id="project-1"][data-finding-id="finding-1"]',
+    )
+    expect(openFindingRow).not.toBeNull()
+    expect(explorerBody.querySelector('[data-project-action="open-finding-run-details"][data-run-id="run-1"]')).not.toBeNull()
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+    openFindingRow.click()
+    await tick()
+    await tick()
+    expect(shell.openAtlas).toHaveBeenCalledWith({
+      source: 'project-workspace',
+      projectId: 'project-1',
+      projectName: 'darklab.sh',
+      tab: 'findings',
+      findingId: 'finding-1',
+    })
+    expect(shell.showToast).not.toHaveBeenCalledWith('Finding is missing its project context', 'error')
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+    explorerBody.querySelector('[data-project-action="open-finding-run-details"]').click()
     await tick()
 
-    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
-      {
-        id: 'run-1',
-        command: 'nuclei https://darklab.sh',
-        full_output_available: true,
-      },
-      {
-        hidePanelOnSuccess: false,
-        highlightLineIndex: 42,
-      },
-    )
+    expect(openHistoryRunDetails).toHaveBeenCalledWith({
+      id: 'run-1',
+      command: 'nuclei https://darklab.sh',
+    })
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
     expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
 
     await shell.openProjectWorkspace()

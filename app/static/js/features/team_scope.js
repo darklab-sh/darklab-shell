@@ -613,13 +613,17 @@ let DarklabTeamScope = null;
       })
       .catch((err) => {
         logRefreshFailure('teams', err);
-        teams = [];
+        const hasCachedTeams = teams.length > 0;
         if (!activeTeamId) activeTeamId = normalizeTeamId(getStoredTeamId());
         teamScopesResolved = true;
-        scopeLoadError = !!activeTeamId;
+        scopeLoadError = !!activeTeamId && !teams.some(team => team.id === activeTeamId);
         render();
-        if (isModalOpen()) showStatus('Could not load teams.', 'error');
-        if (isScopeMenuOpen()) setScopeMenuNote('Could not load teams.');
+        if (hasCachedTeams) {
+          if (isScopeMenuOpen()) setScopeMenuNote('Showing last loaded teams.');
+        } else {
+          if (isModalOpen()) showStatus('Could not load teams.', 'error');
+          if (isScopeMenuOpen()) setScopeMenuNote('Could not load teams.');
+        }
         return teams;
       })
       .finally(() => { refreshing = null; });

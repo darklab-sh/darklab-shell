@@ -2,26 +2,34 @@
 Session token routes: session token generation and session history migration.
 """
 
-import json
 import logging
-import ipaddress
-import re
 import secrets
-from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit, urlunsplit
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
-from core.database import DB_BACKEND, db_connect
-from core.database_backend import dialect_for_backend
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
 from services.audit.context import request_audit_fields
-from services.audit.models import AuditEventType
-from services.audit.recorder import record_event
-from services.notifications.channels_store import migrate_notification_channels_session
-from services.projects.migration import migrate_project_workspace_session
-from services.secrets.storage import migrate_session_secrets
+from services.session.storage import (
+    RECENT_VALUE_KINDS,
+    add_starred_command,
+    create_session_token,
+    get_preferences,
+    list_recent_values,
+    list_starred_commands,
+    mark_tour_seen,
+    migrate_session_records,
+    normalize_recent_value,
+    normalize_recent_value_entries,
+    remove_starred_commands,
+    revoke_session_token,
+    save_preferences,
+    save_recent_values,
+    session_counts,
+    session_token_created,
+    session_token_exists,
+)
 from services.session.variables import list_session_variables
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
@@ -56,40 +64,6 @@ def _require_session_write_session():
         if not get_session_id():
             return jsonify({"error": "session_required"}), 401
     return None
-
-_SESSION_PREFERENCE_KEYS = {
-    "pref_active_project_id",
-    "pref_project_auto_link_external_runs",
-    "pref_project_auto_link_run_entities",
-    "pref_theme_name",
-    "pref_timestamps",
-    "pref_line_numbers",
-    "pref_welcome_intro",
-    "pref_share_redaction_default",
-    "pref_run_notify",
-    "pref_command_outcome_summaries",
-    "pref_hud_clock",
-    "pref_prompt_username",
-    "pref_compare_view_mode",
-    "pref_compare_context",
-    "pref_options_modal_last_tab",
-    "pref_tour_seen_version",
-    "pref_atlas_saved_views",
-    "pref_constellation_full_day",
-}
-
-_PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
-_COMPARE_VIEW_MODES = {"auto", "side_by_side", "unified", "changes_only", "findings_only"}
-_COMPARE_CONTEXT_MODES = {"3", "10", "all"}
-_OPTIONS_MODAL_TABS = {"preferences", "secrets", "teams", "notifications"}
-_ATLAS_SAVED_VIEW_TABS = {"findings", "ip", "domain", "hash", "cve", "url"}
-_ATLAS_SAVED_VIEW_FILTER_VALUES = {"hide", "all", "only"}
-_ATLAS_SAVED_VIEW_ID_RE = re.compile(r"^atv_[0-9a-f]{16,32}$")
-
-_RECENT_VALUE_LIMIT = 10
-_RECENT_VALUE_KINDS = ("domain", "ip", "url", "port_set")
-_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
-_IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 
 def _session_kind(session_id):
@@ -152,164 +126,6 @@ def _command_root(command):
     return str(command or "").strip().split(maxsplit=1)[0].lower()
 
 
-def _normalize_session_preferences(raw):
-    if not isinstance(raw, dict):
-        return {}
-    prefs = {}
-    for key, value in raw.items():
-        if key not in _SESSION_PREFERENCE_KEYS:
-            continue
-        if key == "pref_tour_seen_version":
-            try:
-                tour_seen_version = int(value)
-            except (TypeError, ValueError):
-                continue
-            if tour_seen_version < 1:
-                continue
-            prefs[key] = tour_seen_version
-            continue
-        if key == "pref_atlas_saved_views":
-            prefs[key] = _normalize_atlas_saved_views(value)
-            continue
-        if not isinstance(value, str):
-            value = str(value or "")
-        value = value.strip()
-        if not value:
-            continue
-        if key == "pref_active_project_id" and not re.fullmatch(r"prj_[0-9a-f]{16}", value):
-            continue
-        if key in {
-            "pref_project_auto_link_external_runs",
-            "pref_project_auto_link_run_entities",
-            "pref_command_outcome_summaries",
-        }:
-            value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
-        if key == "pref_constellation_full_day":
-            value = "on" if value.lower() in {"1", "true", "yes", "on"} else "off"
-        if key == "pref_prompt_username" and not _PROMPT_USERNAME_RE.fullmatch(value):
-            continue
-        if key == "pref_compare_view_mode":
-            value = value.lower()
-            if value not in _COMPARE_VIEW_MODES:
-                continue
-        if key == "pref_compare_context":
-            value = value.lower()
-            if value not in _COMPARE_CONTEXT_MODES:
-                continue
-        if key == "pref_options_modal_last_tab":
-            value = value.lower()
-            if value not in _OPTIONS_MODAL_TABS:
-                continue
-        prefs[key] = value
-    return prefs
-
-
-def _normalize_atlas_saved_views(value):
-    if not isinstance(value, list):
-        return []
-    views = []
-    seen_ids = set()
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        item_data: dict[str, object] = dict(item)
-        view_id = str(item_data.get("id") or "").strip().lower()
-        name = str(item_data.get("name") or "").strip()[:60]
-        tab = str(item_data.get("tab") or "findings").strip().lower()
-        raw_filters = item_data.get("filters")
-        filters: dict[str, object] = dict(raw_filters) if isinstance(raw_filters, dict) else {}
-        if not name or not _ATLAS_SAVED_VIEW_ID_RE.fullmatch(view_id) or view_id in seen_ids:
-            continue
-        if tab not in _ATLAS_SAVED_VIEW_TABS:
-            tab = "findings"
-        orphan_filter = str(filters.get("orphan_filter") or "hide").strip().lower()
-        suppression_filter = str(filters.get("suppression_filter") or "hide").strip().lower()
-        if orphan_filter not in _ATLAS_SAVED_VIEW_FILTER_VALUES:
-            orphan_filter = "hide"
-        if suppression_filter not in _ATLAS_SAVED_VIEW_FILTER_VALUES:
-            suppression_filter = "hide"
-        finding_status = str(filters.get("finding_status") or "").strip().lower()
-        if finding_status not in {"", "new", "reviewed", "important", "false_positive", "needs_followup"}:
-            finding_status = ""
-
-        def _saved_view_list(key):
-            raw_values = filters.get(key)
-            raw_items = raw_values if isinstance(raw_values, list) else [raw_values]
-            values = []
-            seen_values = set()
-            for raw_item in raw_items:
-                normalized = str(raw_item or "").strip().lower()
-                if not normalized or normalized in seen_values:
-                    continue
-                seen_values.add(normalized)
-                values.append(normalized[:120])
-                if len(values) >= 12:
-                    break
-            return values
-
-        views.append({
-            "id": view_id,
-            "name": name,
-            "tab": tab,
-            "filters": {
-                "query": str(filters.get("query") or "").strip()[:500],
-                "orphan_filter": orphan_filter,
-                "suppression_filter": suppression_filter,
-                "finding_status": finding_status,
-                "project_id": str(filters.get("project_id") or "").strip()[:80],
-                "project_name": str(filters.get("project_name") or "").strip()[:120],
-                "run_id": str(filters.get("run_id") or "").strip()[:120],
-                "run_label": str(filters.get("run_label") or "").strip()[:240],
-                "sort": str(filters.get("sort") or "").strip()[:80],
-                "signals": _saved_view_list("signals"),
-                "kinds": _saved_view_list("kinds"),
-                "exclude_kinds": _saved_view_list("exclude_kinds"),
-                "roles": _saved_view_list("roles"),
-                "entities": _saved_view_list("entities"),
-                "entity_types": _saved_view_list("entity_types"),
-            },
-            "updated_at": str(item_data.get("updated_at") or "")[:40],
-        })
-        seen_ids.add(view_id)
-        if len(views) >= 30:
-            break
-    return views
-
-
-def _load_session_preferences(conn, session_id):
-    row = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE session_id = ?",
-        (session_id,),
-    ).fetchone()
-    if not row:
-        return {}
-    return _normalize_session_preferences(_decode_preferences(row["preferences"], session_id=session_id))
-
-
-def _decode_preferences(value, *, session_id=""):
-    if isinstance(value, dict):
-        return value
-    try:
-        parsed = json.loads(value or "{}")
-    except json.JSONDecodeError as exc:
-        log.warning("SESSION_PREFERENCES_INVALID", extra={
-            "session": str(session_id or ""),
-            "error": str(exc),
-        })
-        return {}
-    except TypeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _save_session_preferences(conn, session_id, preferences, updated):
-    conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
-        "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-        (session_id, dialect_for_backend(DB_BACKEND).json_param(preferences), updated),
-    )
-
-
 def _current_tour_version():
     tour = load_tour()
     version = tour.get("version", 0)
@@ -319,209 +135,12 @@ def _current_tour_version():
         return 0
 
 
-def _normalize_recent_domain(value):
-    text = str(value or "").strip().lower().rstrip(".")
-    if not text or len(text) > 253:
-        return ""
-    if "/" in text or ":" in text or "@" in text:
-        return ""
-    if "." not in text:
-        return ""
-    if _IPV4_RE.fullmatch(text):
-        return ""
-    labels = text.split(".")
-    if len(labels) < 2:
-        return ""
-    if all(label.isdigit() for label in labels):
-        return ""
-    for label in labels:
-        if len(label) < 1 or len(label) > 63 or not _DOMAIN_LABEL_RE.fullmatch(label):
-            return ""
-    return text
-
-
-def _normalize_recent_ip(value):
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    try:
-        return str(ipaddress.ip_address(text)).lower()
-    except ValueError:
-        return ""
-
-
-def _normalize_recent_url(value):
-    text = str(value or "").strip()
-    if not text or re.search(r"\s", text):
-        return ""
-    try:
-        parsed = urlsplit(text)
-        if parsed.scheme.lower() not in {"http", "https"}:
-            return ""
-        if not parsed.hostname or parsed.username or parsed.password:
-            return ""
-        port = parsed.port
-    except ValueError:
-        return ""
-    host = parsed.hostname.lower().rstrip(".")
-    netloc = f"[{host}]" if ":" in host else host
-    if port is not None:
-        netloc = f"{netloc}:{port}"
-    path = parsed.path or ""
-    return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
-
-
-def _normalize_recent_port_set(value):
-    parts = str(value or "").strip().split(",")
-    if not parts:
-        return ""
-    normalized = []
-    for part in parts:
-        match = re.fullmatch(r"\s*(\d{1,5})(?:\s*-\s*(\d{1,5}))?\s*", part)
-        if not match:
-            return ""
-        start = int(match.group(1))
-        end = int(match.group(2) or match.group(1))
-        if start < 1 or start > 65535 or end < 1 or end > 65535 or start > end:
-            return ""
-        value_text = str(start) if start == end else f"{start}-{end}"
-        if value_text not in normalized:
-            normalized.append(value_text)
-    return ",".join(normalized)
-
-
 def _normalize_recent_value(kind, value):
-    normalized_kind = str(kind or "").strip().lower()
-    if normalized_kind == "domain":
-        return "domain", _normalize_recent_domain(value)
-    if normalized_kind == "ip":
-        return "ip", _normalize_recent_ip(value)
-    if normalized_kind == "url":
-        return "url", _normalize_recent_url(value)
-    if normalized_kind == "port_set":
-        return "port_set", _normalize_recent_port_set(value)
-    return "", ""
+    return normalize_recent_value(kind, value)
 
 
 def _normalize_recent_value_entries(values):
-    if not isinstance(values, list):
-        return []
-    entries = []
-    seen = set()
-    per_kind_counts = {kind: 0 for kind in _RECENT_VALUE_KINDS}
-    for item in values:
-        if not isinstance(item, dict):
-            continue
-        kind, value = _normalize_recent_value(item.get("kind"), item.get("value"))
-        if not kind or not value:
-            continue
-        key = (kind, value)
-        if key in seen or per_kind_counts[kind] >= _RECENT_VALUE_LIMIT:
-            continue
-        seen.add(key)
-        per_kind_counts[kind] += 1
-        entries.append({"kind": kind, "value": value})
-    return entries
-
-
-def _recent_values_response(rows):
-    values = {kind: [] for kind in _RECENT_VALUE_KINDS}
-    for row in rows:
-        kind = str(row["kind"] or "")
-        value = str(row["value"] or "")
-        if kind in values and value:
-            values[kind].append(value)
-    return values
-
-
-def _list_recent_values(conn, session_id, team_id="", kinds=None):
-    normalized_kinds = [kind for kind in (kinds or _RECENT_VALUE_KINDS) if kind in _RECENT_VALUE_KINDS]
-    if not normalized_kinds:
-        return {kind: [] for kind in _RECENT_VALUE_KINDS}
-    rows = conn.execute(
-        "SELECT kind, value FROM recent_values "
-        "WHERE session_id = ? AND team_id = ? "
-        "ORDER BY kind ASC, last_used DESC, value ASC",
-        (session_id, team_id),
-    ).fetchall()
-    kind_set = set(normalized_kinds)
-    values = _recent_values_response([row for row in rows if row["kind"] in kind_set])
-    return {
-        kind: values[kind][:_RECENT_VALUE_LIMIT]
-        for kind in _RECENT_VALUE_KINDS
-    }
-
-
-def _prune_recent_values(conn, session_id, team_id, kind):
-    conn.execute(
-        "DELETE FROM recent_values "
-        "WHERE session_id = ? AND team_id = ? "
-        "AND kind = ? "
-        "AND value NOT IN ("
-        "    SELECT value FROM recent_values "
-        "    WHERE session_id = ? AND team_id = ? AND kind = ? "
-        "    ORDER BY last_used DESC, value ASC "
-        "    LIMIT ?"
-        ")",
-        (session_id, team_id, kind, session_id, team_id, kind, _RECENT_VALUE_LIMIT),
-    )
-
-
-def _upsert_recent_values(conn, session_id, team_id, values):
-    entries = _normalize_recent_value_entries(values)
-    if not entries:
-        return 0
-    base_time = datetime.now(timezone.utc)
-    touched_kinds = set()
-    for index, entry in enumerate(entries):
-        last_used = (base_time - timedelta(microseconds=index)).strftime("%Y-%m-%d %H:%M:%S.%f")
-        conn.execute(
-            "INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count) "
-            "VALUES (?, ?, ?, ?, ?, 1) "
-            "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
-            "last_used = excluded.last_used, "
-            "use_count = recent_values.use_count + 1",
-            (session_id, team_id, entry["kind"], entry["value"], last_used),
-        )
-        touched_kinds.add(entry["kind"])
-    for kind in touched_kinds:
-        _prune_recent_values(conn, session_id, team_id, kind)
-    return len(entries)
-
-
-def _migrate_recent_values(conn, from_session_id, to_session_id):
-    rows = conn.execute(
-        "SELECT team_id, kind, value, last_used, use_count FROM recent_values "
-        "WHERE session_id = ? "
-        "ORDER BY team_id ASC, kind ASC, last_used DESC, value ASC",
-        (from_session_id,),
-    ).fetchall()
-    migrated = 0
-    touched_scopes = set()
-    for row in rows:
-        kind, value = _normalize_recent_value(row["kind"], row["value"])
-        if not kind or not value:
-            continue
-        conn.execute(
-            "INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
-            "last_used = CASE "
-            "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
-            "  ELSE recent_values.last_used "
-            "END, "
-            "use_count = recent_values.use_count + excluded.use_count",
-            (to_session_id, str(row["team_id"] or ""), kind, value, row["last_used"], int(row["use_count"] or 1)),
-        )
-        migrated += 1
-        touched_scopes.add((str(row["team_id"] or ""), kind))
-    conn.execute(
-        "DELETE FROM recent_values WHERE session_id = ?",
-        (from_session_id,),
-    )
-    for team_id, kind in touched_scopes:
-        _prune_recent_values(conn, to_session_id, team_id, kind)
-    return migrated
+    return normalize_recent_value_entries(values)
 
 
 @session_bp.route("/session/token/generate")
@@ -536,22 +155,16 @@ def session_token_generate():
     """
     session_token = "tok_" + secrets.token_hex(16)
     created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    with db_connect() as conn:
-        conn.execute(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?) ON CONFLICT(token) DO NOTHING",
-            (session_token, created),
-        )
-        record_event(
-            AuditEventType.SESSION_TOKEN_GENERATE,
-            target_id=_session_label(session_token),
-            details={
-                "source": "browser",
-                **_session_identity_details(session_token, prefix="session"),
-            },
-            conn=conn,
-            **_session_audit_fields(get_session_id()),
-        )
-        conn.commit()
+    create_session_token(
+        session_token,
+        created,
+        audit_target_id=_session_label(session_token),
+        audit_details={
+            "source": "browser",
+            **_session_identity_details(session_token, prefix="session"),
+        },
+        audit_fields=_session_audit_fields(get_session_id()),
+    )
     log.info("SESSION_TOKEN_GENERATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(get_session_id()),
@@ -572,15 +185,12 @@ def session_token_info():
     session_id = get_session_id()
     if not session_id.startswith("tok_"):
         return jsonify({"token": None, "created": None})
-    with db_connect() as conn:
-        row = conn.execute(
-            "SELECT created FROM session_tokens WHERE token = ?", (session_id,)
-        ).fetchone()
+    created = session_token_created(session_id)
     # get_session_id() already rejects revoked tokens; this row-absent check
     # guards the narrow TOCTOU window between that validation and this query.
-    if not row:
+    if created is None:
         return jsonify({"token": None, "created": None})
-    return jsonify({"token": session_id, "created": row["created"]})
+    return jsonify({"token": session_id, "created": created})
 
 
 @session_bp.route("/session/token/revoke", methods=["POST"])
@@ -616,24 +226,17 @@ def session_token_revoke():
             "reason": "not_tok_token",
         })
         return jsonify({"error": "only tok_ tokens can be revoked"}), 400
-    with db_connect() as conn:
-        result = conn.execute(
-            "DELETE FROM session_tokens WHERE token = ?", (token,)
-        )
-        if result.rowcount:
-            record_event(
-                AuditEventType.SESSION_TOKEN_REVOKE,
-                target_id=_session_label(token),
-                details={
-                    "source": "browser",
-                    "revoked_current": token == current_session_id,
-                    **_session_identity_details(token, prefix="session"),
-                },
-                conn=conn,
-                **_session_audit_fields(current_session_id),
-            )
-            conn.commit()
-    if result.rowcount == 0:
+    revoked_count = revoke_session_token(
+        token,
+        audit_target_id=_session_label(token),
+        audit_details={
+            "source": "browser",
+            "revoked_current": token == current_session_id,
+            **_session_identity_details(token, prefix="session"),
+        },
+        audit_fields=_session_audit_fields(current_session_id),
+    )
+    if revoked_count == 0:
         log.warning("SESSION_TOKEN_REVOKE_DENIED", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(current_session_id),
@@ -668,11 +271,7 @@ def session_token_verify():
             return jsonify({"error": "invalid anonymous session id"}), 400
         # Anonymous UUID sessions — no server-side issuance record needed.
         return jsonify({"ok": True, "exists": True})
-    with db_connect() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM session_tokens WHERE token = ?", (token,)
-        ).fetchone()
-    return jsonify({"ok": True, "exists": row is not None})
+    return jsonify({"ok": True, "exists": session_token_exists(token)})
 
 
 def _requested_recent_value_kinds():
@@ -680,17 +279,17 @@ def _requested_recent_value_kinds():
     for value in request.args.getlist("kind"):
         raw_kinds.extend(str(value or "").split(","))
     if not raw_kinds:
-        return list(_RECENT_VALUE_KINDS), ""
+        return list(RECENT_VALUE_KINDS), ""
     kinds = []
     for raw_kind in raw_kinds:
         kind = raw_kind.strip().lower()
         if not kind:
             continue
-        if kind not in _RECENT_VALUE_KINDS:
+        if kind not in RECENT_VALUE_KINDS:
             return [], f"unsupported recent value kind: {kind}"
         if kind not in kinds:
             kinds.append(kind)
-    return kinds or list(_RECENT_VALUE_KINDS), ""
+    return kinds or list(RECENT_VALUE_KINDS), ""
 
 
 @session_bp.route("/session/recent-values")
@@ -705,8 +304,7 @@ def session_recent_values_list():
     except RequestScopeError as exc:
         payload, status = scope_error_payload(exc)
         return jsonify(payload), status
-    with db_connect() as conn:
-        values = _list_recent_values(conn, session_id, owner_scope.team_id, kinds)
+    values = list_recent_values(session_id, owner_scope.team_id, kinds)
     return jsonify({"values": values})
 
 
@@ -723,10 +321,7 @@ def session_recent_values_save():
     except RequestScopeError as exc:
         payload, status = scope_error_payload(exc)
         return jsonify(payload), status
-    with db_connect() as conn:
-        saved = _upsert_recent_values(conn, session_id, owner_scope.team_id, raw_values)
-        values = _list_recent_values(conn, session_id, owner_scope.team_id)
-        conn.commit()
+    saved, values = save_recent_values(session_id, owner_scope.team_id, raw_values)
     total_count = sum(len(items) for items in values.values())
     log.debug("SESSION_RECENT_VALUES_SAVED", extra={
         "ip": get_client_ip(),
@@ -771,11 +366,7 @@ def session_migrate():
 
     # Reject migration to a tok_ token that was never issued by this server.
     if to_session_id.startswith("tok_"):
-        with db_connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM session_tokens WHERE token = ?", (to_session_id,)
-            ).fetchone()
-        if not row:
+        if not session_token_exists(to_session_id):
             log.warning("SESSION_MIGRATE_DENIED", extra={
                 "ip": get_client_ip(),
                 "session": get_log_session_id(current_session_id),
@@ -797,138 +388,38 @@ def session_migrate():
         })
         return jsonify({"error": str(exc)}), 400
 
-    with db_connect() as conn:
-        runs_result = conn.execute(
-            "UPDATE runs SET session_id = ? WHERE session_id = ?",
-            (to_session_id, from_session_id),
-        )
-        snaps_result = conn.execute(
-            "UPDATE snapshots SET session_id = ? WHERE session_id = ?",
-            (to_session_id, from_session_id),
-        )
-        dialect = dialect_for_backend(DB_BACKEND)
-        stars_insert = conn.execute(
-            "INSERT INTO starred_commands (session_id, command) "  # nosec B608
-            "SELECT ?, command FROM starred_commands WHERE session_id = ? "
-            + dialect.insert_or_ignore_clause(("session_id", "command")),
-            (to_session_id, from_session_id),
-        )
-        prefs_insert = conn.execute(
-            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec B608
-            "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ? "
-            + dialect.insert_or_ignore_clause(("session_id",)),
-            (to_session_id, from_session_id),
-        )
-        vars_insert = conn.execute(
-            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec B608
-            "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ? "
-            + dialect.insert_or_ignore_clause(("session_id", "name")),
-            (to_session_id, from_session_id),
-        )
-        workflows_result = conn.execute(
-            "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
-            (to_session_id, from_session_id),
-        )
-        project_migration = migrate_project_workspace_session(
-            conn,
-            from_session_id,
-            to_session_id,
-            migrated_workspace_file_paths=getattr(workspace_migration, "migrated_file_paths", ()),
-        )
-        migrated_secrets = migrate_session_secrets(conn, from_session_id, to_session_id)
-        notification_migration = migrate_notification_channels_session(conn, from_session_id, to_session_id)
-        migrated_recent_values = _migrate_recent_values(conn, from_session_id, to_session_id)
-        conn.execute(
-            "DELETE FROM starred_commands WHERE session_id = ?",
-            (from_session_id,),
-        )
-        conn.execute(
-            "DELETE FROM session_preferences WHERE session_id = ?",
-            (from_session_id,),
-        )
-        conn.execute(
-            "DELETE FROM session_variables WHERE session_id = ?",
-            (from_session_id,),
-        )
-        conn.execute(
-            "DELETE FROM user_workflows WHERE session_id = ?",
-            (from_session_id,),
-        )
-        migrated_runs = runs_result.rowcount
-        migrated_snapshots = snaps_result.rowcount
-        # Use the INSERT rowcount, not the DELETE rowcount; duplicate rows are ignored.
-        migrated_stars = stars_insert.rowcount
-        migrated_preferences = prefs_insert.rowcount
-        migrated_variables = vars_insert.rowcount
-        migrated_workflows = workflows_result.rowcount
-        migration_counts = {
-            "migrated_runs": migrated_runs,
-            "migrated_snapshots": migrated_snapshots,
-            "migrated_stars": migrated_stars,
-            "migrated_preferences": migrated_preferences,
-            "migrated_variables": migrated_variables,
-            "migrated_workflows": migrated_workflows,
-            **project_migration,
-            **notification_migration,
-            "migrated_recent_values": migrated_recent_values,
-            "migrated_secrets": migrated_secrets,
-            "migrated_workspace_files": workspace_migration.migrated_files,
-            "skipped_workspace_files": workspace_migration.skipped_files,
-            "migrated_workspace_directories": workspace_migration.migrated_directories,
-            "skipped_workspace_directories": workspace_migration.skipped_directories,
-        }
-        record_event(
-            AuditEventType.SESSION_MIGRATE,
-            target_id=_session_label(to_session_id),
-            details={
-                "source": "browser",
-                "from_state": _session_kind(from_session_id),
-                "to_state": _session_kind(to_session_id),
-                **_session_identity_details(from_session_id, prefix="source"),
-                **_session_identity_details(to_session_id, prefix="destination"),
-                "migration_counts": migration_counts,
-            },
-            conn=conn,
-            **_session_audit_fields(current_session_id),
-        )
-        conn.commit()
+    workspace_counts = {
+        "migrated_workspace_files": workspace_migration.migrated_files,
+        "skipped_workspace_files": workspace_migration.skipped_files,
+        "migrated_workspace_directories": workspace_migration.migrated_directories,
+        "skipped_workspace_directories": workspace_migration.skipped_directories,
+    }
+    migration_counts = migrate_session_records(
+        from_session_id,
+        to_session_id,
+        migrated_workspace_file_paths=getattr(workspace_migration, "migrated_file_paths", ()),
+        extra_counts=workspace_counts,
+        audit_target_id=_session_label(to_session_id),
+        audit_details={
+            "source": "browser",
+            "from_state": _session_kind(from_session_id),
+            "to_state": _session_kind(to_session_id),
+            **_session_identity_details(from_session_id, prefix="source"),
+            **_session_identity_details(to_session_id, prefix="destination"),
+        },
+        audit_fields=_session_audit_fields(current_session_id),
+    )
 
     log.info("SESSION_MIGRATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(current_session_id),
         "from_session_kind": _session_kind(from_session_id),
         "to_session_kind": _session_kind(to_session_id),
-        "migrated_runs": migrated_runs,
-        "migrated_snapshots": migrated_snapshots,
-        "migrated_stars": migrated_stars,
-        "migrated_preferences": migrated_preferences,
-        "migrated_variables": migrated_variables,
-        "migrated_workflows": migrated_workflows,
-        **project_migration,
-        **notification_migration,
-        "migrated_recent_values": migrated_recent_values,
-        "migrated_secrets": migrated_secrets,
-        "migrated_workspace_files": workspace_migration.migrated_files,
-        "skipped_workspace_files": workspace_migration.skipped_files,
-        "migrated_workspace_directories": workspace_migration.migrated_directories,
-        "skipped_workspace_directories": workspace_migration.skipped_directories,
+        **migration_counts,
     })
     return jsonify({
         "ok": True,
-        "migrated_runs": migrated_runs,
-        "migrated_snapshots": migrated_snapshots,
-        "migrated_stars": migrated_stars,
-        "migrated_preferences": migrated_preferences,
-        "migrated_variables": migrated_variables,
-        "migrated_workflows": migrated_workflows,
-        **project_migration,
-        **notification_migration,
-        "migrated_recent_values": migrated_recent_values,
-        "migrated_secrets": migrated_secrets,
-        "migrated_workspace_files": workspace_migration.migrated_files,
-        "skipped_workspace_files": workspace_migration.skipped_files,
-        "migrated_workspace_directories": workspace_migration.migrated_directories,
-        "skipped_workspace_directories": workspace_migration.skipped_directories,
+        **migration_counts,
     })
 
 
@@ -936,15 +427,7 @@ def session_migrate():
 def session_preferences_get():
     """Return the saved preference snapshot for the current session."""
     session_id = get_session_id()
-    with db_connect() as conn:
-        row = conn.execute(
-            "SELECT preferences, updated FROM session_preferences WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-    if not row:
-        return jsonify({"preferences": {}, "updated": None})
-    prefs = _normalize_session_preferences(_decode_preferences(row["preferences"], session_id=session_id))
-    return jsonify({"preferences": prefs, "updated": row["updated"]})
+    return jsonify(get_preferences(session_id))
 
 
 @session_bp.route("/session/preferences", methods=["POST"])
@@ -956,16 +439,9 @@ def session_preferences_save():
     raw_preferences: dict[str, object] = (
         dict(raw_preferences_value) if isinstance(raw_preferences_value, dict) else {}
     )
-    prefs = _normalize_session_preferences(raw_preferences)
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     session_id = get_session_id()
-    with db_connect() as conn:
-        if "pref_atlas_saved_views" not in raw_preferences:
-            existing_views = _load_session_preferences(conn, session_id).get("pref_atlas_saved_views")
-            if existing_views:
-                prefs["pref_atlas_saved_views"] = existing_views
-        _save_session_preferences(conn, session_id, prefs, updated)
-        conn.commit()
+    prefs = save_preferences(session_id, raw_preferences, updated)
     log.info("SESSION_PREFERENCES_SAVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -983,11 +459,7 @@ def session_tour_seen():
         return jsonify({"error": "tour is not available"}), 404
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     session_id = get_session_id()
-    with db_connect() as conn:
-        prefs = _load_session_preferences(conn, session_id)
-        prefs["pref_tour_seen_version"] = tour_version
-        _save_session_preferences(conn, session_id, prefs, updated)
-        conn.commit()
+    prefs = mark_tour_seen(session_id, tour_version, updated)
     log.info("SESSION_TOUR_SEEN", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1142,22 +614,10 @@ def session_run_count():
     uncapped; this endpoint just keeps the confirmation honest.
     """
     session_id = get_session_id()
-    with db_connect() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM runs WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        workflow_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM user_workflows WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        recent_value_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM recent_values WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-    count = int(row["n"] if row else 0)
-    workflow_count = int(workflow_row["n"] if workflow_row else 0)
-    recent_value_count = int(recent_value_row["n"] if recent_value_row else 0)
+    counts = session_counts(session_id)
+    count = counts["count"]
+    workflow_count = counts["workflow_count"]
+    recent_value_count = counts["recent_value_count"]
     workspace_files = 0
     try:
         workspace_files = workspace_usage(session_id).file_count
@@ -1190,18 +650,14 @@ def session_run_count():
 def session_starred_list():
     """Return the starred command list for the current session."""
     session_id = get_session_id()
-    with db_connect() as conn:
-        rows = conn.execute(
-            "SELECT command FROM starred_commands WHERE session_id = ? ORDER BY command",
-            (session_id,),
-        ).fetchall()
+    commands = list_starred_commands(session_id)
     log.debug("STARRED_COMMANDS_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
-        "count": len(rows),
+        "count": len(commands),
     })
-    return jsonify({"commands": [row["command"] for row in rows]})
+    return jsonify({"commands": commands})
 
 
 @session_bp.route("/session/starred", methods=["POST"])
@@ -1212,19 +668,13 @@ def session_starred_add():
     if not command:
         return jsonify({"error": "command is required"}), 400
     session_id = get_session_id()
-    with db_connect() as conn:
-        result = conn.execute(
-            "INSERT INTO starred_commands (session_id, command) VALUES (?, ?) "
-            "ON CONFLICT(session_id, command) DO NOTHING",
-            (session_id, command),
-        )
-        conn.commit()
+    changed = add_starred_command(session_id, command)
     log.info("STARRED_COMMAND_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
         "command_root": _command_root(command),
-        "changed": bool(result.rowcount),
+        "changed": bool(changed),
     })
     return jsonify({"ok": True})
 
@@ -1235,25 +685,13 @@ def session_starred_remove():
     data = request.get_json(silent=True) or {}
     command = str(data.get("command") or "").strip()
     session_id = get_session_id()
-    with db_connect() as conn:
-        if command:
-            result = conn.execute(
-                "DELETE FROM starred_commands WHERE session_id = ? AND command = ?",
-                (session_id, command),
-            )
-            event = "STARRED_COMMAND_REMOVED"
-        else:
-            result = conn.execute(
-                "DELETE FROM starred_commands WHERE session_id = ?",
-                (session_id,),
-            )
-            event = "STARRED_COMMANDS_CLEARED"
-        conn.commit()
+    count = remove_starred_commands(session_id, command)
+    event = "STARRED_COMMAND_REMOVED" if command else "STARRED_COMMANDS_CLEARED"
     extra = {
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
-        "count": result.rowcount,
+        "count": count,
     }
     if command:
         extra["command_root"] = _command_root(command)

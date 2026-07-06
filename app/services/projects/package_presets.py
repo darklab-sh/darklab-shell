@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from copy import deepcopy
 from dataclasses import dataclass
 import logging
 from pathlib import Path
 import os
 import re
+from typing import Any
 
 import config as _config
 from services.projects.contracts import (
@@ -59,7 +62,7 @@ def default_package_presets_path() -> Path:
     return _bundled_conf_dir() / "package_presets.yaml"
 
 
-def configured_package_presets_path(cfg: dict | None = None) -> Path:
+def configured_package_presets_path(cfg: Mapping[str, Any] | None = None) -> Path:
     active_cfg = cfg or _config.CFG
     raw_path = str(active_cfg.get("package_presets_file") or "package_presets.yaml").strip()
     path = Path(raw_path or "package_presets.yaml")
@@ -174,7 +177,7 @@ def clear_package_preset_catalog_cache() -> None:
     _CATALOG_CACHE["catalog"] = None
 
 
-def load_package_preset_catalog(cfg: dict | None = None) -> PackagePresetCatalog:
+def load_package_preset_catalog(cfg: Mapping[str, Any] | None = None) -> PackagePresetCatalog:
     path = configured_package_presets_path(cfg)
     default_path = default_package_presets_path()
     signature = (
@@ -203,9 +206,9 @@ def load_package_preset_catalog(cfg: dict | None = None) -> PackagePresetCatalog
     return catalog
 
 
-def list_package_presets(cfg: dict | None = None) -> list[dict[str, object]]:
+def list_package_presets(cfg: Mapping[str, Any] | None = None) -> list[dict[str, object]]:
     return [deepcopy(preset) for preset in load_package_preset_catalog(cfg).presets]
 
 
-def known_package_preset_ids(cfg: dict | None = None) -> set[str]:
+def known_package_preset_ids(cfg: Mapping[str, Any] | None = None) -> set[str]:
     return {str(preset["id"]) for preset in load_package_preset_catalog(cfg).presets}

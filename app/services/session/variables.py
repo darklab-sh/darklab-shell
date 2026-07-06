@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import re
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 
 VARIABLE_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
 VARIABLE_REFERENCE_RE = re.compile(r"(?<!\\)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
@@ -70,7 +70,7 @@ def validate_variable_value(value: str) -> str:
 
 
 def list_session_variables(session_id: str) -> dict[str, str]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT name, value FROM session_variables WHERE session_id = ? ORDER BY name",
             (session_id,),
@@ -82,7 +82,7 @@ def set_session_variable(session_id: str, name: str, value: str) -> None:
     normalized_name = normalize_variable_name(name)
     normalized_value = validate_variable_value(value)
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO session_variables (session_id, name, value, updated) VALUES (?, ?, ?, ?) "
             "ON CONFLICT(session_id, name) DO UPDATE SET value = excluded.value, updated = excluded.updated",
@@ -93,7 +93,7 @@ def set_session_variable(session_id: str, name: str, value: str) -> None:
 
 def unset_session_variable(session_id: str, name: str) -> bool:
     normalized_name = normalize_variable_name(name)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         result = conn.execute(
             "DELETE FROM session_variables WHERE session_id = ? AND name = ?",
             (session_id, normalized_name),

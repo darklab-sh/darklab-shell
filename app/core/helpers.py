@@ -15,7 +15,7 @@ from functools import lru_cache
 
 from flask import current_app, g, has_request_context, request
 
-from config import CFG, THEME_REGISTRY_MAP
+from config import THEME_REGISTRY_MAP, resolve_effective_cfg
 
 log = logging.getLogger("shell")
 
@@ -90,7 +90,7 @@ def _peer_ip_is_trusted(peer_ip):
         ip_obj = ipaddress.ip_address(peer_ip)
     except ValueError:
         return False
-    trusted_networks = _trusted_proxy_networks(tuple(CFG.get("trusted_proxy_cidrs", ())))
+    trusted_networks = _trusted_proxy_networks(tuple(resolve_effective_cfg().get("trusted_proxy_cidrs", ())))
     return any(ip_obj in network for network in trusted_networks)
 
 
@@ -99,7 +99,7 @@ def _resolve_forwarded_client_ip(peer_ip, forwarded_for):
     # is not itself another trusted proxy.
     if not forwarded_for:
         return peer_ip
-    trusted_networks = _trusted_proxy_networks(tuple(CFG.get("trusted_proxy_cidrs", ())))
+    trusted_networks = _trusted_proxy_networks(tuple(resolve_effective_cfg().get("trusted_proxy_cidrs", ())))
     forwarded_chain = [part.strip() for part in forwarded_for.split(",") if part.strip()]
     if not forwarded_chain:
         return peer_ip
@@ -177,8 +177,8 @@ def get_session_id():
             return session_id
         return ""
     # Local import avoids a circular dependency at module load time.
-    from core.database import db_connect  # noqa: PLC0415
-    with db_connect() as conn:
+    from core.database_access import get_db_connect  # noqa: PLC0415
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT 1 FROM session_tokens WHERE token = ?",
             [session_id],
@@ -223,7 +223,7 @@ def resolve_theme() -> tuple[str, str]:
     ``"pref_theme_name"``, ``"pref_theme"``, ``"default_theme"``, or
     ``"fallback"``.  Safe to call outside a request context.
     """
-    default = CFG.get("default_theme", "darklab_obsidian.yaml")
+    default = resolve_effective_cfg().get("default_theme", "darklab_obsidian.yaml")
     if not has_request_context():
         return default, "fallback"
     try:

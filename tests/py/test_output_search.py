@@ -3,12 +3,13 @@ import gzip
 import json
 import os
 import sqlite3
+import unittest.mock as mock
 import uuid
 from pathlib import Path
 
 import pytest
 
-import app as shell_app
+from conftest import make_test_app as _test_app
 import core.database as shell_db
 import services.runs.output_store as run_output_store
 from core.database import db_connect
@@ -17,9 +18,8 @@ SESSION_A = "test-session-fts-a"
 SESSION_B = "test-session-fts-b"
 
 
-def get_client(session_id=SESSION_A):
-    shell_app.app.config["TESTING"] = True
-    client = shell_app.app.test_client()
+def get_client(session_id=SESSION_A, *, init_db: bool = True):
+    client = _test_app(init_db=init_db).test_client()
     client.environ_base["HTTP_X_SESSION_ID"] = session_id
     return client
 
@@ -254,6 +254,90 @@ class TestOutputSearch:
         ids = [r["id"] for r in data["runs"]]
         assert run_id in ids, "FTS must find content from beyond the preview window"
 
+    def test_startup_backfill_rebuilds_fts_for_legacy_output_search_text(self):
+        """Startup backfill must refresh FTS rows after populating output_search_text."""
+        run_id = str(uuid.uuid4())
+        preview_lines = [
+            {"text": "plain startup line", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "legacyneedle appears only after backfill", "cls": "", "tsC": "", "tsE": ""},
+        ]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output, output_preview, preview_truncated, output_line_count, "
+                "full_output_available, full_output_truncated, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    SESSION_A,
+                    "cat legacy-output.txt",
+                    "2026-01-01T12:00:00",
+                    "2026-01-01T12:00:01",
+                    0,
+                    None,
+                    json.dumps(preview_lines),
+                    0,
+                    len(preview_lines),
+                    0,
+                    0,
+                    None,
+                ),
+            )
+            conn.commit()
+
+        shell_db.db_init()
+
+        with db_connect() as conn:
+            populated = conn.execute(
+                "SELECT output_search_text FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()["output_search_text"]
+        assert "legacyneedle" in populated
+
+        client = get_client(SESSION_A)
+        resp = client.get("/history?q=legacyneedle")
+        data = resp.get_json()
+        ids = [r["id"] for r in data["runs"]]
+        assert run_id in ids, "FTS rebuild must index output_search_text populated during startup"
+
+    def test_output_search_backfill_logs_artifact_fallback_summary(self, monkeypatch):
+        run_id = str(uuid.uuid4())
+        preview = json.dumps([{"text": "preview fallback text"}])
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs ("
+                "id, session_id, command, started, output_preview, full_output_available, output_search_text"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, SESSION_A, "cat missing-output", "2026-01-01T12:00:00", preview, 1, None),
+            )
+            conn.execute(
+                "INSERT INTO run_output_artifacts (run_id, rel_path, created) VALUES (?, ?, ?)",
+                (run_id, "missing-output.jsonl.gz", "2026-01-01T12:00:00"),
+            )
+            conn.commit()
+
+            monkeypatch.setattr(
+                shell_db,
+                "load_full_output_entries",
+                mock.Mock(side_effect=OSError("artifact missing")),
+            )
+            with mock.patch.object(shell_db.log, "debug") as log_debug, \
+                 mock.patch.object(shell_db.log, "warning") as log_warning:
+                updated = shell_db._populate_output_search_text(conn)
+
+            row = conn.execute(
+                "SELECT output_search_text FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+
+        assert updated == 1
+        assert row["output_search_text"] == "preview fallback text"
+        assert log_debug.call_args_list[0].args[0] == "OUTPUT_SEARCH_TEXT_BACKFILL_ARTIFACT_FALLBACK"
+        assert log_debug.call_args_list[0].kwargs["extra"]["error_type"] == "OSError"
+        degraded = log_warning.call_args_list[-1]
+        assert degraded.args[0] == "OUTPUT_SEARCH_TEXT_BACKFILL_DEGRADED"
+        assert degraded.kwargs["extra"] == {"artifact_fallbacks": 1, "failed_rows": 0}
+
     def test_fts_failure_falls_back_to_command_and_output_like(self, monkeypatch, tmp_path):
         """When runs_fts is absent, history search falls back to LIKE without 500.
 
@@ -282,7 +366,7 @@ class TestOutputSearch:
 
         run_id = _insert_run(SESSION_A, "dig example.com", ["93.184.216.34"])
 
-        client = get_client(SESSION_A)
+        client = get_client(SESSION_A, init_db=False)
         # Command-text queries must still work via LIKE fallback.
         resp = client.get("/history?q=dig")
         assert resp.status_code == 200

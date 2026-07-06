@@ -7,7 +7,7 @@ from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as package_version
 import sys
 
-from config import APP_VERSION, CFG, PROJECT_README
+from config import APP_VERSION, PROJECT_README, resolve_effective_cfg
 from services.commands.builtins_format import (
     ansi_underline as _ansi_underline,
     format_duration as _format_duration,
@@ -17,6 +17,10 @@ from services.commands.builtins_format import (
 
 
 _STARTED_AT = datetime.now(timezone.utc)
+
+
+def _app_name() -> str:
+    return str(resolve_effective_cfg()["app_name"])
 
 
 @lru_cache(maxsize=1)
@@ -35,7 +39,7 @@ def run_builtin_date() -> list[dict[str, object]]:
 def run_builtin_env(session_id: str) -> list[dict[str, object]]:
     lines = [
         _output_line("Environment:", "builtin-section"),
-        _output_line(f"APP_NAME={CFG['app_name']}", "builtin-plain"),
+        _output_line(f"APP_NAME={_app_name()}", "builtin-plain"),
         _output_line(f"SESSION_ID={session_id or 'anonymous'}", "builtin-plain"),
         _output_line("SHELL=/bin/bash", "builtin-plain"),
         _output_line("TERM=xterm-256color", "builtin-plain"),
@@ -46,7 +50,7 @@ def run_builtin_env(session_id: str) -> list[dict[str, object]]:
 def run_builtin_whoami() -> list[dict[str, object]]:
     return [
         _output_line("Shell identity:", "builtin-section"),
-        _output_line(CFG["app_name"], "builtin-identity"),
+        _output_line(_app_name(), "builtin-identity"),
         _output_line("A web terminal for remote diagnostics and security tooling against allowed commands.", "builtin-plain"),
         _output_line("", "builtin-spacer"),
         _output_line(f"README: see the project README at {PROJECT_README}", "builtin-note"),
@@ -54,11 +58,12 @@ def run_builtin_whoami() -> list[dict[str, object]]:
 
 
 def run_builtin_hostname() -> list[dict[str, object]]:
-    return [{"type": "output", "text": CFG["app_name"]}]
+    return [{"type": "output", "text": _app_name()}]
 
 
 def run_builtin_id() -> list[dict[str, object]]:
-    text = f"uid=1000({CFG['app_name']}) gid=1000({CFG['app_name']}) groups=1000({CFG['app_name']})"
+    app_name = _app_name()
+    text = f"uid=1000({app_name}) gid=1000({app_name}) groups=1000({app_name})"
     return [{"type": "output", "text": text}]
 
 
@@ -74,9 +79,10 @@ def run_builtin_ip_addr() -> list[dict[str, object]]:
 
 
 def run_builtin_pwd() -> list[dict[str, object]]:
-    if CFG.get("workspace_enabled"):
+    cfg = resolve_effective_cfg()
+    if cfg.get("workspace_enabled"):
         return [{"type": "output", "text": "/"}]
-    return [{"type": "output", "text": f"/app/{CFG['app_name']}/bin"}]
+    return [{"type": "output", "text": f"/app/{_app_name()}/bin"}]
 
 
 def run_builtin_route() -> list[dict[str, object]]:
@@ -104,7 +110,7 @@ def run_builtin_tty() -> list[dict[str, object]]:
 def run_builtin_uname(command: str, split_command) -> list[dict[str, object]]:
     parts = split_command(command)
     if "-a" in parts[1:]:
-        return [{"type": "output", "text": f"{CFG['app_name']} Linux web-terminal x86_64 app-runtime"}]
+        return [{"type": "output", "text": f"{_app_name()} Linux web-terminal x86_64 app-runtime"}]
     return [{"type": "output", "text": "Linux"}]
 
 
@@ -148,7 +154,7 @@ def run_builtin_free(command: str) -> list[dict[str, object]]:
 def run_builtin_version() -> list[dict[str, object]]:
     lines = [
         _output_line("Version info:", "builtin-section"),
-        _output_line(f"{CFG['app_name']} web shell", "builtin-plain"),
+        _output_line(f"{_app_name()} web shell", "builtin-plain"),
         _output_line(f"App {APP_VERSION}", "builtin-plain"),
         _output_line(f"Flask {_flask_version()}", "builtin-plain"),
         _output_line(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "builtin-plain"),
@@ -157,4 +163,4 @@ def run_builtin_version() -> list[dict[str, object]]:
 
 
 def run_builtin_who(session_id: str) -> list[dict[str, object]]:
-    return [{"type": "output", "text": f"{CFG['app_name']}  pts/web  {session_id or 'anonymous'}"}]
+    return [{"type": "output", "text": f"{_app_name()}  pts/web  {session_id or 'anonymous'}"}]

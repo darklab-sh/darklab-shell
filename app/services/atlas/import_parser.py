@@ -17,6 +17,7 @@ from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
 
 from services.atlas.materializer import canonicalize_entity_record
+from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.intel.canonical import entity_signature
 from services.projects.findings import _finding_signature, _normalize_finding_signal_key
 
@@ -32,7 +33,7 @@ SUPPORTED_FORMATS = frozenset({
     "nuclei_jsonl",
 })
 
-ENTITY_KINDS = frozenset({"domain", "ip", "url", "cve", "hash"})
+ENTITY_KINDS = ATLAS_ENTITY_TYPES
 SEVERITIES = frozenset({"info", "low", "medium", "high", "critical"})
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 DEFAULT_MAX_ROWS = 5000

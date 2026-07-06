@@ -31,6 +31,12 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [FTS5 Tokenizer: Trigram with Unicode61 Fallback](#fts5-tokenizer-trigram-with-unicode61-fallback)
 - [Observability Decisions](#observability-decisions)
   - [Structured Logging](#structured-logging)
+- [Atlas Decisions](#atlas-decisions)
+  - [Port Entity Identity and Evidence](#port-entity-identity-and-evidence)
+  - [URL Entity Host Links](#url-entity-host-links)
+- [Backend Architecture Decisions](#backend-architecture-decisions)
+  - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
+  - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
 - [Frontend Decisions](#frontend-decisions)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Export Rendering Centralization (ExportHtmlUtils)](#export-rendering-centralization-exporthtmlutils)
@@ -123,6 +129,60 @@ The private-base-URL guard is intentionally conservative. The default use case i
 Suggestion validation sits outside the model. The model may propose only JSON, but the app still checks the command root, command policy, trusted target presence, known open ports for port-scoped suggestions, redaction sentinels, and a small denylist of known hallucinated flags. Accepted suggestions can be copied, and optional Run buttons still submit through the normal composer path so command policy gets the final say. Rejected suggestions are stored and displayed as blocked drafts because they are useful debugging evidence without becoming executable UI.
 
 AI payloads are stored separately from transcripts, findings, Atlas source text, search text, and comparisons. This keeps assistant text additive and auditable while preserving the original command output as the source of truth.
+
+---
+
+## Atlas Decisions
+
+### Port Entity Identity and Evidence
+
+**Ports are first-class Atlas entities, but their identity stays separate from host ownership.**
+
+Port entities use canonical `host:port/proto` values, with IPv6 hosts bracketed as `[2001:db8::1]:443/tcp`. Keeping the host text in the canonical value makes imported and transcript-captured ports stable before any database lookup is available. The linked `host_entity_id` is stored separately when materialization can resolve it, so Atlas can join the port back to the host without making the canonical value depend on a mutable database id.
+
+TCP is the default protocol when a parser or import omits one, and TCP/UDP are the supported protocol values. Service, version, and banner details live in lightweight attributes because they describe the observation, not the entity identity.
+
+Ports do not offer provider intel refresh. They are app-captured scan evidence from command output, while provider-backed domains, IPs, URLs, hashes, and CVEs can ask external or configured providers for fresh data. Project Overview keeps that distinction visible: app-captured port evidence can show that a run saw a port, while scan target observations from supported scanners can show that a target was scanned even when no app-captured ports surfaced.
+
+### URL Entity Host Links
+
+**URL entities reuse the host relationship instead of introducing a URL-only link.**
+
+URL entities belong to a host in the same way port entities do, so they use the existing `host_entity_id` field. The relationship points at the scoped `domain` or `ip` entity derived from the canonical URL host. That keeps the URL canonical value stable and readable while letting Atlas and Project Overview roll URL evidence up through the host.
+
+---
+
+## Backend Architecture Decisions
+
+### Blueprint Parent Modules and Size Ratchets
+
+**Parent blueprint modules stay as stable registration surfaces while route groups live in focused sibling modules.**
+
+The app factory imports the parent blueprint modules, so those modules keep the public `Blueprint` object and define it before importing route-group siblings. The sibling modules register their routes by importing that parent blueprint. That import side effect is allowed only for route assembly: importing a route module should not start workers, open databases, spawn processes, or perform runtime maintenance.
+
+This pattern keeps Flask registration stable for `app.create_app()` while letting large route surfaces such as runs, projects, API v1, Atlas, and diagnostics split by resource group. It also preserves compatibility imports and monkeypatch seams during refactors, so tests and callers do not have to chase every internal move.
+
+Services split on real responsibility boundaries rather than line count alone. Query reads, payload shaping, lifecycle orchestration, settings/defaults, import/export helpers, and low-level process helpers can live in focused siblings when that makes ownership clearer. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay whole because splitting them would make review harder, not easier.
+
+The size ratchet in `tests/py/test_architecture.py` records that intent. Split files and cohesive ratchet-only files cannot quietly grow past their current baseline, and every file in the decomposed families must have an explicit budget entry. The route contract and import-compatibility tests make the same point from another angle: decomposition is allowed to move code, but it is not allowed to change user-visible routes or supported parent import surfaces by accident.
+
+### Mutable Runtime State Uses Source-Owner Accessors
+
+**Split services read mutable runtime state from the source owner instead of copying global objects at import time.**
+
+The core modules still own the process-wide state: `config.py` owns the loaded config, `core.database` owns database backend and connection setup, and `core.process` owns Redis/process state. The refactor does not remove those owners. It removes the unsafe pattern where split services copied `CFG`, `DB_BACKEND`, `db_connect`, or `redis_client` into their own module globals and then silently missed later app-factory, worker, or test replacement.
+
+The chosen shape is deliberately small:
+
+- database state goes through `core.database_access.get_db_backend()` and `core.database_access.get_db_connect()`
+- Redis state goes through the shared `core.process.RedisClientProxy` compatibility path
+- config reads use `config.resolve_effective_cfg(cfg=None)` or an explicit `cfg` argument when the caller already owns scoped config
+
+That design keeps the existing runtime owners intact while making reads late-bound. It also keeps tests honest: patches belong on `core.database.DB_BACKEND`, `core.database.db_connect`, `core.process.redis_client`, or `config.CFG`, not on child-module aliases that production code no longer reads.
+
+Removing the core owners outright would be a much larger settings/runtime-container rewrite and would not solve the immediate stale-binding problem by itself. Copying source globals down into child modules was simpler in the short term, but it made split modules fragile under Postgres route tests, worker bootstrap, app-factory replacement, and runtime Redis initialization. The accessor/proxy layer is the smallest durable boundary that fixes those seams without changing the app's public module surfaces.
+
+The architecture suite enforces this decision. It keeps an explicit compatibility baseline for older route-level `CFG` imports, blocks new local service-module singleton bindings, catches alias-style rebinding such as `db_connect = database.db_connect`, and flags module-qualified stale config reads such as `database.CFG`. If a future change needs to expand that baseline, the test failure should be treated as a design review prompt, not just a lint cleanup.
 
 ---
 
@@ -301,7 +361,17 @@ The app treats TruffleHog's `Redacted` field as untrusted display data. Finding 
 
 SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=NORMAL`. This allows concurrent reads during writes, which is important with 4 Gunicorn workers all reading/writing the same database simultaneously. The `db_connect()` function applies these pragmas on every connection.
 
-Startup bootstrap is still serialized explicitly. `database.py` calls `db_init()` at module import time, so all Gunicorn workers can reach schema creation, migration, and retention pruning concurrently during boot. `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so that import-time bootstrap work happens once at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
+Startup bootstrap is serialized explicitly. The web entrypoint calls `runtime_bootstrap.bootstrap()`, and worker processes call `runtime_bootstrap.bootstrap_runtime(...)` with the startup steps they need. `db_init()` runs from that explicit bootstrap path rather than from module import. For SQLite, `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so schema creation, migration, and retention pruning happen one process at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
+
+### Database Backend Support
+
+**SQLite remains the default backend; Postgres is the supported scaling backend.**
+
+SQLite is the local, single-user, and default deployment backend. It keeps the operational shape simple: one app-owned database file, WAL mode for concurrent readers, FTS5 for local search, and no separate database server requirement.
+
+Postgres is the supported backend for heavier multi-user deployments that need a server database, connection pooling, trigram-backed search, and production-style storage operations. It is selected explicitly with `database_backend: postgres` plus `database_url`; normal app database calls then route through the Postgres compatibility wrapper and backend-aware SQL helpers.
+
+SQLite-to-Postgres data movement is a separate offline cutover, not an automatic startup conversion. Operators use `scripts/migrate_sqlite_to_postgres.py` and the guide in `docs/postgres-migration.md` to copy data into a fresh Postgres schema, validate counts and artifacts, and only then switch backend settings. Schema management is shared by the app-owned migration runner; data migration remains an explicit maintenance workflow.
 
 ### FTS5 Tokenizer: Trigram with Unicode61 Fallback
 
@@ -318,10 +388,10 @@ The `runs_fts` virtual table uses the FTS5 **trigram** tokenizer when available 
 ### Structured Logging
 
 **Problem:** The original `logging.basicConfig(...)` in `app.py` had two issues:
-1. It was called after local imports, so `process.py`'s module-level Redis connection log fired before the formatter was installed, producing either no output (Python's lastResort suppresses INFO) or the wrong format.
+1. Logging setup lived in the app assembly module, which made startup order fragile and tied logging to importing the Flask app.
 2. All log records were plain strings, incompatible with GELF structured log aggregation.
 
-**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. In `app.py`, `configure_logging` is called immediately after `from config import CFG` and before all other local imports. This guarantees the logger is ready before `process.py` (or any other module) imports and logs at module scope.
+**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. Runtime startup calls it through `runtime_bootstrap.configure_runtime_logging(...)` before process setup, database initialization, or app construction. This keeps `import app` side-effect-free while still ensuring Redis, database, worker, and request lifecycle logs use the configured formatter.
 
 The `shell` logger is configured with `propagate = False` so records don't double-emit to the root logger. Werkzeug's own request lines are suppressed (`logging.getLogger("werkzeug").setLevel(ERROR)`) because request logging is handled by `before_request` / `after_request` hooks instead.
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from prometheus_client.core import GaugeMetricFamily
 
-from config import APP_VERSION, CFG
+from config import APP_VERSION, resolve_effective_cfg
 from core import database, process
 from core.database_backend import (
     DatabaseBackend,
@@ -86,7 +86,7 @@ def _ai_status_label(value: Any) -> str:
 
 
 def _workspace_usage() -> tuple[int, int]:
-    settings = workspace_settings(CFG)
+    settings = workspace_settings(resolve_effective_cfg())
     if not settings.enabled:
         return 0, 0
     root = workspace_root(settings)
@@ -228,7 +228,7 @@ class RuntimeStateCollector:
             labels=("state",),
         )
         try:
-            snapshot = postgres_pool_metrics_snapshot(CFG)
+            snapshot = postgres_pool_metrics_snapshot(resolve_effective_cfg())
         except Exception:
             log.debug("METRICS_POSTGRES_POOL_COLLECT_FAILED", exc_info=True)
             snapshot = {}
@@ -525,7 +525,7 @@ class RuntimeStateCollector:
 
     def _collect_workspace(self):
         bytes_used, file_count = _workspace_usage()
-        quota = _safe_int(CFG.get("workspace_quota_mb"), 50) * 1024 * 1024
+        quota = _safe_int(resolve_effective_cfg().get("workspace_quota_mb"), 50) * 1024 * 1024
         workspace_bytes = GaugeMetricFamily("darklab_workspace_bytes_used", "Workspace bytes used across sessions.")
         workspace_quota = GaugeMetricFamily("darklab_workspace_quota_bytes", "Configured per-session workspace quota in bytes.")
         workspace_files = GaugeMetricFamily("darklab_workspace_files", "Workspace file count across sessions.")

@@ -20,6 +20,53 @@ function entityLabelText(label, textFn) {
   return textFn(label && typeof label === 'object' ? label.label : label);
 }
 
+function _portProtocol(canonicalValue) {
+  const match = /\/([a-z0-9_-]+)$/i.exec(text(canonicalValue));
+  return match ? match[1].toLowerCase() : '';
+}
+
+function _portNumber(entity) {
+  const direct = Number(entity && entity.port || 0);
+  if (direct > 0) return direct;
+  const match = /:(\d+)\/[a-z0-9_-]+$/i.exec(text(entity && (entity.canonical_value || entity.value)));
+  return match ? Number(match[1] || 0) : 0;
+}
+
+function formatCompactPortLabel(entity) {
+  const attributes = entity && entity.attributes && typeof entity.attributes === 'object'
+    ? entity.attributes
+    : {};
+  const port = _portNumber(entity);
+  if (!port) return '';
+  const proto = text(entity && entity.proto || attributes.proto || attributes.protocol || _portProtocol(entity && (entity.canonical_value || entity.value)));
+  const base = `${port}${proto ? `/${proto}` : ''}`;
+  const service = text(entity && entity.service || attributes.service);
+  const version = text(entity && entity.version || attributes.version);
+  if (service && version) return `${base} ${service} (${version})`;
+  if (service) return `${base} ${service}`;
+  if (version) return `${base} (${version})`;
+  return base;
+}
+
+function formatPortEntityMetadata(entity, { includeHost = false } = {}) {
+  if (String(entity && entity.type || '').toLowerCase() !== 'port') return [];
+  const attributes = entity && entity.attributes && typeof entity.attributes === 'object'
+    ? entity.attributes
+    : {};
+  const proto = text(attributes.proto || attributes.protocol || _portProtocol(entity && (entity.canonical_value || entity.value)));
+  const service = text(attributes.service);
+  const version = text(attributes.version);
+  const banner = text(attributes.banner);
+  const hostEntityId = text(entity && entity.host_entity_id);
+  return [
+    proto ? `proto ${proto}` : '',
+    service ? `service ${service}` : '',
+    version ? `version ${version}` : '',
+    banner ? `banner ${banner}` : '',
+    includeHost && hostEntityId ? `host ${hostEntityId}` : '',
+  ].filter(Boolean);
+}
+
 function appendDataset(el, dataset = {}) {
   Object.entries(dataset || {}).forEach(([key, value]) => {
     el.dataset[key] = value;
@@ -27,7 +74,7 @@ function appendDataset(el, dataset = {}) {
 }
 
 function atlasBadges(entity, { badge = defaultBadge, text: textFn = text } = {}) {
-  const badges = document.createElement('span');
+  const badges = document.createElement('div');
   badges.className = 'atlas-entity-badges';
   if (entity.project_link_count) badges.appendChild(badge(`${entity.project_link_count} projects`, 'green'));
   const labels = Array.isArray(entity.labels) ? entity.labels : [];
@@ -66,16 +113,19 @@ function renderAtlasEntityRow({
     appendSelectionControl(row, entity);
   }
 
-  const main = document.createElement('span');
+  const main = document.createElement('div');
   main.className = 'atlas-entity-main';
-  const value = document.createElement('span');
+  const value = document.createElement('div');
   value.className = 'atlas-entity-value';
   value.textContent = valueText;
-  const meta = document.createElement('span');
+  const meta = document.createElement('div');
   meta.className = 'atlas-muted';
   const runCount = Number(entity && entity.run_count || 0);
   const occurrenceCount = Number(entity && entity.occurrence_count || 0);
-  meta.textContent = `${countLabel(occurrenceCount, 'hit', 'hits')} · ${countLabel(runCount, 'run', 'runs')}`;
+  meta.textContent = [
+    `${countLabel(occurrenceCount, 'hit', 'hits')} · ${countLabel(runCount, 'run', 'runs')}`,
+    ...formatPortEntityMetadata(entity),
+  ].join(' · ');
   main.append(value, meta);
 
   const badges = atlasBadges(entity || {}, { badge, text: textFn });
@@ -167,6 +217,8 @@ function renderProjectEntityRow({
 }
 
 const DarklabAtlasEntityRow = {
+  formatCompactPortLabel,
+  formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,
 };
@@ -174,6 +226,8 @@ const DarklabAtlasEntityRow = {
 
 export {
   DarklabAtlasEntityRow,
+  formatCompactPortLabel,
+  formatPortEntityMetadata,
   renderAtlasEntityRow,
   renderProjectEntityRow,
 };

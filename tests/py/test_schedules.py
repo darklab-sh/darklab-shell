@@ -8,15 +8,15 @@ import sqlite3
 import unittest.mock as mock
 from typing import Any
 
-import app as shell_app
+from conftest import build_test_config
+from conftest import make_test_app as _test_app
 from core.database import db_init, db_connect
 from services.commands.builtins import execute_builtin_command
 from services.teams import storage as team_storage
 
 
 def get_client():
-    shell_app.app.config["TESTING"] = True
-    return shell_app.app.test_client()
+    return _test_app().test_client()
 
 
 def _line_text(line: dict[str, object]) -> str:
@@ -26,9 +26,7 @@ def _line_text(line: dict[str, object]) -> str:
 def _schedule_client(monkeypatch, tmp_path):
     db_path = str(tmp_path / "schedules.db")
     lock_path = str(tmp_path / "schedules.lock")
-    monkeypatch.setattr("core.database.DB_PATH", db_path)
-    monkeypatch.setattr("core.database.DB_INIT_LOCK_PATH", lock_path)
-    monkeypatch.setattr("core.database.CFG", {
+    cfg = build_test_config({
         "permalink_retention_days": 0,
         "scheduler": {
             "default_timezone": "UTC",
@@ -37,6 +35,10 @@ def _schedule_client(monkeypatch, tmp_path):
             "tick_seconds": 5,
         },
     })
+    monkeypatch.setattr("core.database.DB_PATH", db_path)
+    monkeypatch.setattr("core.database.DB_INIT_LOCK_PATH", lock_path)
+    monkeypatch.setattr("core.database.CFG", cfg)
+    monkeypatch.setattr("config.CFG", cfg)
     db_init()
     return get_client(), db_path
 
@@ -466,7 +468,7 @@ class TestSchedulesRoutes:
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_cap"
         _register_token(token)
-        with mock.patch.dict("core.database.CFG", {
+        with mock.patch.dict("config.CFG", {
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",

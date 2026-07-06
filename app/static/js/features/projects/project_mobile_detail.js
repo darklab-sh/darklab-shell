@@ -475,19 +475,27 @@ let exportedDarklabProjectMobileDetail = null;
           detail: finding.raw_line || '',
           badge: finding.review_state || finding.severity || '',
           chips: ctx.entityMetadataChips(finding),
-          action: finding.run_id ? {
-            action: 'open-finding',
+          action: findingId ? {
+            action: 'open-project-finding',
             dataset: {
               projectId,
-              runId: String(finding.run_id || ''),
-              runCommand: String(finding.run_command || ''),
-              lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
+              findingId,
             },
           } : null,
           accessory: findingId ? actionMenu(projectId, `Finding actions for ${finding.title || findingId}`, [
             { node: findingReviewNode(finding, projectId) },
             { label: 'Edit triage', action: 'edit-finding-triage', dataset: { findingId } },
             { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
+            finding.run_id ? {
+              label: 'See in run',
+              action: 'open-finding-run-details',
+              dataset: {
+                findingId,
+                runId: String(finding.run_id || ''),
+                runCommand: String(finding.run_command || ''),
+                lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
+              },
+            } : null,
           ]) : null,
         }));
       };

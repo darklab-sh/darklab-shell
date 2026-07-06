@@ -26,7 +26,7 @@ from services.commands.builtins_catalog import (
     _WORKSPACE_ALIAS_ROOTS,
     _WORKSPACE_BUILTIN_ROOTS,
 )
-from services.commands import builtins_discovery, builtins_misc, builtins_system, builtins_wordlist
+from services.commands import builtins_discovery, builtins_misc, builtins_wordlist
 from services.commands.builtins_intel import run_builtin_intel as _run_builtin_intel
 from services.commands.builtins_misc import (
     run_builtin_banner as _run_builtin_banner,
@@ -91,8 +91,9 @@ from services.commands.builtins_workspace import (
 from services.commands.builtins_wordlist import run_builtin_wordlist as _run_builtin_wordlist
 from services.commands.wordlists import load_wordlist_catalog
 from services.teams.scope import OwnerContext, owner_context_for_scope
-from config import CFG
-from core.process import active_runs_for_session, redis_client
+from config import resolve_effective_cfg
+import core.process as process_state
+from core.process import active_runs_for_session
 
 
 _BACKSPACE_RE = re.compile(r".\x08")
@@ -100,23 +101,20 @@ _BACKSPACE_RE = re.compile(r".\x08")
 
 def _sync_builtin_module_hooks() -> None:
     """Keep the aggregate module as the patch point for split built-in handlers."""
-    builtins_discovery.CFG = CFG
     builtins_discovery.load_all_faq = load_all_faq
     builtins_discovery.resolve_runtime_command = resolve_runtime_command
     builtins_discovery.runtime_missing_command_name = runtime_missing_command_name
     builtins_discovery.subprocess = subprocess
-    builtins_misc.CFG = CFG
     builtins_misc.random = random
-    builtins_system.CFG = CFG
     builtins_wordlist.load_wordlist_catalog = load_wordlist_catalog
 
 
 def _workspace_feature_enabled() -> bool:
-    return bool(CFG.get("workspace_enabled", False))
+    return bool(resolve_effective_cfg().get("workspace_enabled", False))
 
 
 def _tour_feature_enabled() -> bool:
-    return bool(CFG.get("tour_enabled", True))
+    return bool(resolve_effective_cfg().get("tour_enabled", True))
 
 
 def _active_documented_builtin_commands() -> list[dict[str, object]]:
@@ -236,7 +234,7 @@ def _run_builtin_ps(session_id: str, command: str) -> list[dict[str, object]]:
 
 
 def _run_builtin_status(session_id: str) -> list[dict[str, object]]:
-    return _run_builtin_status_impl(session_id, active_runs_for_session, redis_client)
+    return _run_builtin_status_impl(session_id, active_runs_for_session, process_state.redis_client)
 
 
 def _run_builtin_stats(session_id: str) -> list[dict[str, object]]:

@@ -9,8 +9,6 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from core.database import DB_BACKEND, db_connect
-from core.database_backend import dialect_for_backend
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
@@ -35,11 +33,13 @@ from services.workspace.files import (
     WorkspacePermissionDenied,
     WorkspaceQuotaExceeded,
     create_owner_workspace_directory,
+    delete_workspace_file_metadata,
     delete_owner_workspace_path,
     list_workspace_directories,
     list_owner_workspace_directories,
     list_workspace_files,
     list_owner_workspace_files,
+    move_workspace_file_metadata,
     move_owner_workspace_path,
     open_owner_workspace_file_for_download,
     owner_workspace_path_info,
@@ -47,20 +47,13 @@ from services.workspace.files import (
     read_owner_workspace_text_file,
     workspace_usage,
     workspace_settings,
+    workspace_file_metadata_by_path,
     write_owner_workspace_text_file,
 )
 
 log = logging.getLogger("shell")
 
 workspace_bp = Blueprint("workspace", __name__)
-
-
-def _workspace_project_names_expr() -> str:
-    return dialect_for_backend(DB_BACKEND).string_agg_distinct("p.name")
-
-
-def _workspace_label_order_sql() -> str:
-    return dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC"
 
 
 def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:
@@ -157,7 +150,7 @@ def _workspace_payload(scope: RequestScope) -> dict[str, Any]:
         usage = workspace_usage(scope.owner_id)
         files = list_workspace_files(scope.owner_id)
         directories = list_workspace_directories(scope.owner_id)
-    metadata_by_path = _workspace_file_metadata_by_path(scope, [item.get("path") for item in files])
+    metadata_by_path = workspace_file_metadata_by_path(scope, [item.get("path") for item in files])
     for item in files:
         item.update(metadata_by_path.get(str(item.get("path") or ""), {}))
     return {
@@ -178,93 +171,6 @@ def _workspace_payload(scope: RequestScope) -> dict[str, Any]:
     }
 
 
-def _workspace_metadata_owner_where(scope: RequestScope, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
-    prefix = f"{table_alias}." if table_alias else ""
-    if scope.is_team:
-        return (
-            f"({prefix}team_id = ? OR "
-            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))",
-            (scope.team_id, scope.team_id),
-        )
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?", (scope.owner_id,)
-
-
-def _workspace_file_metadata_by_path(scope: RequestScope, paths: list[Any]) -> dict[str, dict[str, Any]]:
-    clean_paths = sorted({str(path) for path in paths if path})
-    if not clean_paths:
-        return {}
-    placeholders = ",".join("?" for _ in clean_paths)
-    project_names_expr = _workspace_project_names_expr()
-    label_order_sql = _workspace_label_order_sql()
-    run_owner_sql, run_owner_params = scope.predicate(table_alias="r")
-    project_owner_sql, project_owner_params = scope.predicate(table_alias="p")
-    metadata_owner_sql, metadata_owner_params = _workspace_metadata_owner_where(scope)
-    with db_connect() as conn:
-        rows = conn.execute(
-            "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "  # nosec
-            "COUNT(DISTINCT rfa.run_id) AS run_count, MAX(r.started) AS last_seen, "
-            f"{project_names_expr} AS project_names "
-            "FROM run_file_artifacts rfa "
-            "LEFT JOIN runs r ON r.id = rfa.run_id "
-            "LEFT JOIN project_links pl ON pl.entity_type = 'run' AND pl.entity_id = rfa.run_id "
-            "LEFT JOIN projects p ON p.id = pl.project_id AND " + project_owner_sql + " "
-            "WHERE " + run_owner_sql + " "
-            f"AND rfa.workspace_path IN ({placeholders}) "
-            "GROUP BY rfa.workspace_path",
-            [*project_owner_params, *run_owner_params, *clean_paths],
-        ).fetchall()
-        label_rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
-            "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders}) "
-            f"ORDER BY {label_order_sql}",
-            [*metadata_owner_params, *clean_paths],
-        ).fetchall()
-        note_rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, created, updated "  # nosec
-            "FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders})",
-            [*metadata_owner_params, *clean_paths],
-        ).fetchall()
-    metadata = {}
-    for row in rows:
-        project_names = [
-            name for name in str(row["project_names"] or "").split(",")
-            if name
-        ]
-        metadata[str(row["workspace_path"])] = {
-            "artifact_count": int(row["artifact_count"] or 0),
-            "artifact_run_count": int(row["run_count"] or 0),
-            "artifact_last_seen": row["last_seen"] or "",
-            "project_names": project_names,
-        }
-    for row in label_rows:
-        path = str(row["entity_id"])
-        item = metadata.setdefault(path, {})
-        item.setdefault("labels", []).append({
-            "id": row["id"],
-            "session_id": row["session_id"],
-            "entity_type": row["entity_type"],
-            "entity_id": row["entity_id"],
-            "label": row["label"],
-            "source": row["source"],
-            "created": row["created"],
-        })
-    for row in note_rows:
-        path = str(row["entity_id"])
-        item = metadata.setdefault(path, {})
-        item["note"] = {
-            "id": row["id"],
-            "session_id": row["session_id"],
-            "entity_type": row["entity_type"],
-            "entity_id": row["entity_id"],
-            "body": row["body"],
-            "created": row["created"],
-            "updated": row["updated"],
-        }
-    return metadata
-
-
 def _workspace_normalize_path(path: str) -> str:
     return "/".join(part for part in str(path or "").split("/") if part)
 
@@ -282,62 +188,6 @@ def _workspace_file_metadata_paths(scope: RequestScope, path: str) -> list[str]:
         or str(item.get("path") or "").startswith(prefix)
     ]
     return sorted({item for item in matches if item})
-
-
-def _delete_workspace_file_metadata(scope: RequestScope, paths: list[str]) -> None:
-    clean_paths = sorted({str(path) for path in paths if path})
-    if not clean_paths:
-        return
-    placeholders = ",".join("?" for _ in clean_paths)
-    metadata_owner_sql, metadata_owner_params = _workspace_metadata_owner_where(scope)
-    with db_connect() as conn:
-        conn.execute(
-            "DELETE FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "  # nosec
-            f"AND entity_id IN ({placeholders})",
-            [*metadata_owner_params, *clean_paths],
-        )
-        conn.execute(
-            "DELETE FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "  # nosec
-            f"AND entity_id IN ({placeholders})",
-            [*metadata_owner_params, *clean_paths],
-        )
-        conn.commit()
-
-
-def _move_workspace_file_metadata(scope: RequestScope, path_map: dict[str, str]) -> None:
-    clean_map = {
-        str(source): str(destination)
-        for source, destination in path_map.items()
-        if source and destination and str(source) != str(destination)
-    }
-    if not clean_map:
-        return
-    destinations = sorted(set(clean_map.values()))
-    placeholders = ",".join("?" for _ in destinations)
-    metadata_owner_sql, metadata_owner_params = _workspace_metadata_owner_where(scope)
-    with db_connect() as conn:
-        conn.execute(
-            "DELETE FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "  # nosec
-            f"AND entity_id IN ({placeholders})",
-            [*metadata_owner_params, *destinations],
-        )
-        conn.execute(
-            "DELETE FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "  # nosec
-            f"AND entity_id IN ({placeholders})",
-            [*metadata_owner_params, *destinations],
-        )
-        for source, destination in clean_map.items():
-            conn.execute(  # nosec
-                "UPDATE entity_labels SET entity_id = ? "  # nosec
-                "WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' AND entity_id = ?",
-                (destination, *metadata_owner_params, source),
-            )
-            conn.execute(  # nosec
-                "UPDATE entity_notes SET entity_id = ? "  # nosec
-                "WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' AND entity_id = ?",
-                (destination, *metadata_owner_params, source),
-            )
-        conn.commit()
 
 
 def _workspace_moved_metadata_path_map(source: str, destination: str, paths: list[str]) -> dict[str, str]:
@@ -513,7 +363,7 @@ def workspace_files_read():
         info = owner_workspace_path_info(scope.context, path)
         normalized_path = str(info.get("path") or path)
         payload = {"path": normalized_path, "text": text, "size": info.get("size")}
-        payload.update(_workspace_file_metadata_by_path(scope, [normalized_path]).get(normalized_path, {}))
+        payload.update(workspace_file_metadata_by_path(scope, [normalized_path]).get(normalized_path, {}))
         return jsonify(payload)
     except Exception as exc:
         return _workspace_error_response(exc)
@@ -555,7 +405,18 @@ def workspace_files_delete():
             **route_audit_fields(session_id, request, scope),
         )
         deleted = delete_owner_workspace_path(scope.context, path)
-        _delete_workspace_file_metadata(scope, metadata_paths)
+        try:
+            delete_workspace_file_metadata(scope, metadata_paths)
+        except Exception:
+            log.error("WORKSPACE_METADATA_DELETE_FAILED", exc_info=True, extra={
+                "session": get_log_session_id(session_id),
+                "team_id": scope.team_id,
+                "path": path,
+                "metadata_path_count": len(metadata_paths),
+                "deleted_kind": deleted.kind,
+                "deleted_file_count": deleted.file_count,
+            })
+            raise
         log.info("WORKSPACE_FILE_DELETE", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
@@ -592,10 +453,20 @@ def workspace_files_move():
     try:
         metadata_paths = _workspace_file_metadata_paths(scope, source)
         moved = move_owner_workspace_path(scope.context, source, destination)
-        _move_workspace_file_metadata(
-            scope,
-            _workspace_moved_metadata_path_map(moved.source, moved.destination, metadata_paths),
-        )
+        metadata_path_map = _workspace_moved_metadata_path_map(moved.source, moved.destination, metadata_paths)
+        try:
+            move_workspace_file_metadata(scope, metadata_path_map)
+        except Exception:
+            log.error("WORKSPACE_METADATA_MOVE_FAILED", exc_info=True, extra={
+                "session": get_log_session_id(session_id),
+                "team_id": scope.team_id,
+                "source": moved.source,
+                "destination": moved.destination,
+                "metadata_path_count": len(metadata_path_map),
+                "moved_kind": moved.kind,
+                "moved_file_count": moved.file_count,
+            })
+            raise
         _record_workspace_file_event(
             AuditEventType.FILE_MOVE,
             session_id=session_id,

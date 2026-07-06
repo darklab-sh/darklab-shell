@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.projects.models import normalize_project_payload
 from services.projects.preferences import clear_active_project_preference
@@ -29,7 +29,7 @@ log = logging.getLogger("shell")
 def create_project(session_id, data, *, team_id=""):
     payload = normalize_project_payload(data)
     created = now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         row = conn.execute(
             "SELECT COUNT(*) AS count FROM projects WHERE " + owner_sql,  # nosec
@@ -70,7 +70,7 @@ def update_project(session_id, project_id, data, *, team_id=""):
     if not payload:
         raise ProjectWorkspaceError("project update payload is empty")
     updated = now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         current = conn.execute(
             "SELECT id, name, slug, description, status, color "
@@ -107,7 +107,7 @@ def update_project(session_id, project_id, data, *, team_id=""):
 
 def delete_project(session_id, project_id, *, team_id="", conn=None):
     if conn is None:
-        with db_connect() as opened:
+        with get_db_connect()() as opened:
             deleted = delete_project(session_id, project_id, team_id=team_id, conn=opened)
             if deleted:
                 opened.commit()

@@ -8,8 +8,8 @@ import logging
 import time
 from typing import Any, Mapping
 
-from config import CFG
-from core import database
+from config import resolve_effective_cfg
+from core.database_access import get_db_connect
 
 log = logging.getLogger("shell")
 
@@ -21,7 +21,7 @@ _last_retention_check_monotonic = 0.0
 
 
 def _cfg(cfg: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
-    return cfg if cfg is not None else CFG
+    return resolve_effective_cfg(cfg)
 
 
 def audit_log_enabled(cfg: Mapping[str, Any] | None = None) -> bool:
@@ -58,7 +58,7 @@ def _managed_connection(conn=None):
     if conn is not None:
         yield conn, False
         return
-    with database.db_connect() as opened:
+    with get_db_connect()() as opened:
         yield opened, True
 
 

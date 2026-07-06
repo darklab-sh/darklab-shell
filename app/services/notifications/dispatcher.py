@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
@@ -35,14 +36,14 @@ MAX_ATTEMPTS = 6
 RETRY_MAX_AGE_HOURS = 24
 
 
-def _retry_cfg() -> dict[str, Any]:
+def _retry_cfg() -> Mapping[str, Any]:
     cfg = notification_cfg().get("retry", {})
-    return cfg if isinstance(cfg, dict) else {}
+    return cfg if isinstance(cfg, Mapping) else {}
 
 
-def _events_cfg() -> dict[str, Any]:
+def _events_cfg() -> Mapping[str, Any]:
     cfg = notification_cfg().get("events", {})
-    return cfg if isinstance(cfg, dict) else {}
+    return cfg if isinstance(cfg, Mapping) else {}
 
 
 def _delivery_rate_limit_per_minute() -> int:

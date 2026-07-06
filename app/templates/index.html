@@ -748,6 +748,8 @@
               <input id="atlas-run-filter-search" class="form-control form-control-compact atlas-run-filter-search" type="search" placeholder="search runs" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search runs for Atlas filter">
               <select id="atlas-run-filter-select" class="form-select form-control-compact atlas-run-filter-select" aria-label="Filter Atlas by source run"></select>
               <div id="atlas-run-filter-chip" class="atlas-run-filter-chip u-hidden"></div>
+              <select id="atlas-project-filter-select" class="form-select form-control-compact atlas-project-filter-select" aria-label="Filter Atlas by project"></select>
+              <div id="atlas-project-filter-chip" class="atlas-project-filter-chip u-hidden"></div>
               <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
               <select id="atlas-orphan-filter" class="form-select form-control-compact atlas-orphan-filter" aria-label="Filter Atlas rows by source run"></select>
               <select id="atlas-suppression-filter" class="form-select form-control-compact atlas-suppression-filter" aria-label="Filter Atlas rows by suppression state"></select>
@@ -1149,7 +1151,11 @@
     </div>
     <div class="command-registry-toolbar">
       <input id="command-registry-search" class="form-control form-control-compact" type="search" placeholder="Search commands" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="search" aria-label="Search commands">
-      <div id="command-registry-categories" class="command-registry-categories" role="list" aria-label="Command categories"></div>
+      <div class="command-registry-category-scroll">
+        <button id="command-registry-categories-scroll-left" type="button" class="command-registry-category-scroll-btn tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll command categories left" title="Scroll command categories left" aria-hidden="true">◀</button>
+        <div id="command-registry-categories" class="command-registry-categories" role="list" aria-label="Command categories"></div>
+        <button id="command-registry-categories-scroll-right" type="button" class="command-registry-category-scroll-btn tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll command categories right" title="Scroll command categories right" aria-hidden="true">▶</button>
+      </div>
     </div>
     <div id="command-registry-body" class="command-registry-body nice-scroll" aria-live="polite"></div>
   </div>
@@ -1255,7 +1261,6 @@
           <select id="project-target-type" class="form-select form-control-compact" aria-label="Project target type">
             <option value="domain">domain</option>
             <option value="url">url</option>
-            <option value="host">host</option>
             <option value="ip">ip</option>
           </select>
         </label>

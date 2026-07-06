@@ -13,6 +13,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
 - [Adding External Commands](#adding-external-commands)
+- [Changing the Database Schema](#changing-the-database-schema)
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
 - [Dependency Version Tracking](#dependency-version-tracking)
@@ -155,6 +156,10 @@ Before merging a version branch back to `main`:
 
 **Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
+**Python module layout** — keep blueprints as HTTP adapters. New persistence and business logic belongs in `services/` or shared `core/` helpers, while blueprint siblings should group routes by resource family and register onto the parent blueprint object. Split service files by a real responsibility boundary such as query reads, payload shaping, lifecycle orchestration, defaults/settings, or import/export helpers. If a file is a cohesive artifact, leave it together and let the architecture ratchet guard it from quiet growth.
+
+**Runtime singletons** — don't add local module-level copies of mutable runtime globals. Use `core.process.RedisClientProxy` for Redis state, `core.database_access.get_db_backend()` / `get_db_connect()` for database state, and `config.resolve_effective_cfg(cfg=None)` for service config. The effective config is a pydantic-backed typed mapping, so existing `.get(...)` and `[...]` reads are supported; new code should prefer attribute access such as `cfg.database_backend` when the key is known. Nested sections are typed when reached through attributes, such as `cfg.notifications.smtp`, while mapping reads keep returning plain Python data for existing callers. If a caller owns the transaction or config, accept that object explicitly instead of importing a local `DB_BACKEND`, `db_connect`, or `CFG` binding. Tests that replace config should use `build_test_config(...)` rather than a bare dict. The architecture suite blocks new local singleton bindings outside the approved source-of-truth and compatibility paths.
+
 **JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports intentional browser globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks an intentional browser-boundary publish path. Match the existing style of the file you are editing. ESLint checks app source, tests, tooling, and scripts, enforces syntax/global safety for browser code, and keeps the 2-space indentation, single quote, and no-semicolon rules scoped to config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
@@ -179,6 +184,27 @@ Keep command examples in sync across the registry, docs, autocomplete, smoke fix
 
 ---
 
+## Changing the Database Schema
+
+The app runs on SQLite (default) and Postgres (larger deployments) through one shared schema path. Fresh installs start from the frozen `0039` baseline in `app/core/migrations/baseline.py`; the Postgres baseline is generated from the SQLite baseline by translating the SQLite DDL. Changes after that baseline are versioned migrations, and you describe a table or column once so both backends stay in sync.
+
+To make a schema change:
+
+- **Add a new numbered migration** under `app/core/migrations/` (`v0040_*`, `v0041_*`, …) and register it in `app/core/migrations/__init__.py`. Express the change once against the dialect layer — use `dialect_for_backend(...)` helpers for the cases that differ per backend (JSON/boolean/timestamp column types, upsert clauses). Migrations run in order on both backends and are tracked in the `schema_migrations` ledger, so they need no `IF NOT EXISTS` guards; the ledger runs each version exactly once.
+- **Do not edit the frozen `0039` baseline** (`baseline.py::_create_schema` / `_create_indexes` / `_create_fts_schema`). It represents the schema as of the `v0001…v0038` history and must stay fixed — editing it only affects fresh installs and diverges them from existing databases. Every forward change is a new migration, never a baseline edit.
+- **Keep the SQLite bridge release honest.** Pre-ledger SQLite databases are stampable only when they already reached the `2.3.1` current-head schema. Older SQLite files fail closed and must be started once with `2.3.1` before moving to this schema-ledger path. That means any new schema change after `0039` must ship as a `0040+` migration; do not sneak it into the frozen baseline or the bridge promise becomes false.
+- **For a Postgres-specific column type** — `BIGINT`, `JSONB`, or `BYTEA`, which SQLite stores as plain `INTEGER`/`TEXT`/`BLOB` and cannot distinguish — add a `(table, column) -> definition` entry to `_POSTGRES_COLUMN_OVERRIDES` in `baseline.py` so the generated Postgres schema uses the richer type. Plain `TEXT`/`INTEGER` columns need no override.
+- **Backend-specific search infrastructure stays branched on purpose.** Postgres-only artifacts (`pg_trgm` trigram indexes, finding triggers) are explicit appended statements in `baseline.py`; SQLite's `runs_fts` FTS5 table lives in the SQLite baseline.
+
+Two CI checks keep the backends aligned. A red build in either is a schema mistake, not a flaky test:
+
+- The **drift guard** builds the frozen baseline plus every post-baseline migration through each backend's `statements_for(...)` path, then compares those heads — catching missing or extra tables/columns and coarse column-shape differences, including dialect-specific `0040+` deltas.
+- The **generated-vs-legacy equivalence test** (`test_generated_postgres_baseline_matches_legacy_migration_head`) asserts the generated Postgres baseline reproduces the `v0001…v0038` head at exact type. If it fails, you either forgot a `_POSTGRES_COLUMN_OVERRIDES` entry for a `BIGINT`/`JSONB`/`BYTEA` column, or edited the frozen baseline instead of adding a migration.
+
+Run `npm run test:postgres` to exercise the Postgres lane locally. This is unrelated to [docs/postgres-migration.md](docs/postgres-migration.md), which covers the separate offline SQLite→Postgres *data* cutover, not schema definition.
+
+---
+
 ## Running Tests
 
 Run the three suites directly:
@@ -190,8 +216,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2181 pytest + 1460 Vitest + 269 Playwright = 3,910 tests**.
-That total includes 3,860 behavior tests plus 48 docs/inventory meta-tests.
+Current totals: **2314 pytest + 1474 Vitest + 269 Playwright = 4,057 tests**.
+That total includes 3,994 behavior tests plus 63 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration

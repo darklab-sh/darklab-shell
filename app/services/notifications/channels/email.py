@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from email.message import EmailMessage
 import logging
 import os
@@ -42,12 +44,12 @@ EMAIL_HTML_TEMPLATE = EMAIL_HTML_ENV.from_string(
 )
 
 
-def _smtp_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-    cfg = (cfg if isinstance(cfg, dict) else notification_cfg()).get("smtp", {})
-    return cfg if isinstance(cfg, dict) else {}
+def _smtp_cfg(cfg: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    cfg = (cfg if isinstance(cfg, Mapping) else notification_cfg()).get("smtp", {})
+    return cfg if isinstance(cfg, Mapping) else {}
 
 
-def _recipients(config: dict[str, Any]) -> list[str]:
+def _recipients(config: Mapping[str, Any]) -> list[str]:
     return parse_email_recipients(config.get("recipients"))
 
 
@@ -59,8 +61,8 @@ def _port(value: Any) -> int | None:
     return port if 1 <= port <= 65535 else None
 
 
-def _timeout_seconds(config: dict[str, Any], *, cfg: dict[str, Any] | None = None, test_send: bool = False) -> float:
-    cfg = cfg if isinstance(cfg, dict) else notification_cfg()
+def _timeout_seconds(config: Mapping[str, Any], *, cfg: Mapping[str, Any] | None = None, test_send: bool = False) -> float:
+    cfg = cfg if isinstance(cfg, Mapping) else notification_cfg()
     if test_send:
         raw = cfg.get("test_timeout_seconds", DEFAULT_SMTP_TEST_TIMEOUT_SECONDS)
         default = DEFAULT_SMTP_TEST_TIMEOUT_SECONDS
@@ -88,7 +90,7 @@ def _tls_mode(value: Any) -> str:
     return "starttls"
 
 
-def _smtp_config_errors(config: dict[str, Any]) -> list[str]:
+def _smtp_config_errors(config: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     if not str(config.get("host") or "").strip():
         errors.append("SMTP host is required")

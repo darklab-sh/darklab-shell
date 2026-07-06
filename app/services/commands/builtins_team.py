@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -243,7 +243,7 @@ def _team_rows(teams: list[dict[str, Any]]) -> list[dict[str, object]]:
 
 
 def _status(session_id: str, team_id: str) -> list[dict[str, object]]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         teams = storage.list_teams_for_token(conn, session_id)
     active = _active_team(team_id, teams)
     width = 13
@@ -270,7 +270,7 @@ def _create(parts: list[str], session_id: str) -> list[dict[str, object]]:
         raise BuiltinTeamError("Usage: team create <name> [--slug SLUG] [--display-name NAME]")
     slug = _option_value(parts, "--slug")
     display_name = _option_value(parts, "--display-name")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         team, recovery = storage.create_team_with_recovery_code(
             conn,
             name=name,
@@ -308,7 +308,7 @@ def _members(parts: list[str], session_id: str, team_id: str) -> list[dict[str, 
     ref = _team_ref(parts, team_id)
     if not ref:
         raise BuiltinTeamError("Usage: team members [team-id]")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         _actor(conn, ref, session_id)
         detail = storage.team_detail(conn, ref, current_session_token=session_id)
     members = (detail or {}).get("members") or []
@@ -342,7 +342,7 @@ def _invite_create(parts: list[str], session_id: str, team_id: str) -> list[dict
         raise BuiltinTeamError("team invite create requires active team scope.")
     role = _option_value(parts, "--role") or "operator"
     label = _option_value(parts, "--label")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         actor = _actor(conn, team_id, session_id)
         require_capability(actor["role"], Capability.MANAGE_OWNERS if role == "owner" else Capability.MANAGE_INVITES)
         invite = storage.create_team_invite_with_code(
@@ -380,7 +380,7 @@ def _invite_revoke(parts: list[str], session_id: str, team_id: str) -> list[dict
     if len(parts) < 4:
         raise BuiltinTeamError("Usage: team invite revoke <invite-id>")
     invite_id = str(parts[3] or "").strip()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         actor = _actor(conn, team_id, session_id)
         require_capability(actor["role"], Capability.MANAGE_INVITES)
         invite = conn.execute("SELECT team_id FROM team_invites WHERE id = ?", (invite_id,)).fetchone()
@@ -412,7 +412,7 @@ def _join(parts: list[str], session_id: str) -> list[dict[str, object]]:
     if len(parts) < 3:
         raise BuiltinTeamError("Usage: team join <invite-code> [--display-name NAME]")
     display_name = _option_value(parts, "--display-name")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         member = storage.redeem_team_invite(
             conn,
             code=str(parts[2] or ""),
@@ -446,7 +446,7 @@ def _leave(parts: list[str], session_id: str, team_id: str) -> list[dict[str, ob
     ref = _team_ref(parts, team_id)
     if not ref:
         raise BuiltinTeamError("Usage: team leave [team-id]")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         actor = _actor(conn, ref, session_id)
         removed = storage.soft_remove_team_member(conn, actor["id"])
         if removed:
@@ -467,7 +467,7 @@ def _recovery_rotate(parts: list[str], session_id: str, team_id: str) -> list[di
     ref = _team_ref(parts, team_id, index=3)
     if not ref:
         raise BuiltinTeamError("Usage: team recovery rotate [team-id]")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         actor = _actor(conn, ref, session_id)
         require_capability(actor["role"], Capability.MANAGE_RECOVERY)
         recovery = storage.rotate_team_recovery_code(conn, team_id=ref, created_by_member_id=actor["id"])
@@ -505,7 +505,7 @@ def run_builtin_team(command: str, session_id: str, *, team_id: str = "", team_r
         if subcommand == "status":
             return _status(session_id, team_id)
         if subcommand in {"list", "ls"}:
-            with db_connect() as conn:
+            with get_db_connect()() as conn:
                 return _team_rows(storage.list_teams_for_token(conn, session_id))
         if subcommand == "create":
             return _create(parts, session_id)

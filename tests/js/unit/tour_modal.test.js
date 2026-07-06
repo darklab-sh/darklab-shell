@@ -249,7 +249,7 @@ describe('tour modal renderer', () => {
     expect(compareNode.querySelector('.tour-compare-findings-title')?.textContent).toContain('Added findings')
     const atlasNode = _renderTourIllustration('atlas_entities')
     expect(atlasNode.querySelectorAll('.tour-atlas-tab')).toHaveLength(3)
-    expect(atlasNode.querySelector('.tour-atlas-tab.is-active')?.textContent).toContain('Hosts/IPs')
+    expect(atlasNode.querySelector('.tour-atlas-tab.is-active')?.textContent).toContain('IPs')
     expect(atlasNode.querySelector('.tour-atlas-value')?.textContent).toBe('104.21.4.35')
     const teamNode = _renderTourIllustration('team_scope')
     expect(teamNode.querySelector('.tour-atlas-value')?.textContent).toBe('Red Team')

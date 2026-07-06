@@ -7,6 +7,8 @@ also bounded.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import math
 import threading
 import time
@@ -27,7 +29,7 @@ class HttpRateLimitResult:
     retry_after: int | None = None
 
 
-def dynamic_route_rate_limit_label(cfg: dict[str, Any]) -> str:
+def dynamic_route_rate_limit_label(cfg: Mapping[str, Any]) -> str:
     return (
         f"{_coerce_positive_int(cfg.get('http_rate_limit_per_minute'), 240)} per minute; "
         f"{_coerce_positive_int(cfg.get('http_rate_limit_per_second'), 60)} per second"
@@ -43,7 +45,7 @@ def check_dynamic_route_rate_limit(
     *,
     client_ip: str,
     path: str,
-    cfg: dict[str, Any],
+    cfg: Mapping[str, Any],
     redis_client: Any = None,
     now: float | None = None,
 ) -> HttpRateLimitResult:

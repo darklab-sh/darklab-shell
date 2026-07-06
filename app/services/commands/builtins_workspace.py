@@ -6,7 +6,7 @@ from datetime import datetime
 import re
 from typing import Sequence, cast
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.commands.builtins_format import (
     format_bytes,
     format_native_record,
@@ -248,6 +248,7 @@ def run_builtin_workspace(
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
     owner = _workspace_owner_context(session_id, owner_context)
+    cfg = resolve_effective_cfg()
 
     if subcommand in {"help", "--help", "-h"}:
         return [
@@ -279,10 +280,10 @@ def run_builtin_workspace(
         if usage_error:
             return [output_line(usage_error)]
         try:
-            settings = workspace_settings(CFG)
-            files = list_owner_workspace_files(owner, CFG)
-            directories = list_owner_workspace_directories(owner, CFG)
-            usage = owner_workspace_usage(owner, CFG)
+            settings = workspace_settings(cfg)
+            files = list_owner_workspace_files(owner, cfg)
+            directories = list_owner_workspace_directories(owner, cfg)
+            usage = owner_workspace_usage(owner, cfg)
         except Exception as exc:
             return _workspace_command_error(exc)
 
@@ -303,7 +304,7 @@ def run_builtin_workspace(
         if target and workspace_path_has_glob(target):
             try:
                 rows = _workspace_glob_list_rows(
-                    expand_owner_workspace_path_pattern(owner, target, CFG),
+                    expand_owner_workspace_path_pattern(owner, target, cfg),
                     files,
                 )
             except Exception as exc:
@@ -342,7 +343,7 @@ def run_builtin_workspace(
         if len(parts) != 3:
             return [output_line("Usage: file show <file>")]
         try:
-            text = read_owner_workspace_text_file(owner, parts[2], CFG)
+            text = read_owner_workspace_text_file(owner, parts[2], cfg)
         except Exception as exc:
             return _workspace_command_error(exc)
         file_lines = text.splitlines() or [""]
@@ -385,21 +386,21 @@ def run_builtin_workspace(
             return _workspace_write_denied()
         try:
             if workspace_path_has_glob(parts[2]):
-                matches = expand_owner_workspace_path_pattern(owner, parts[2], CFG)
+                matches = expand_owner_workspace_path_pattern(owner, parts[2], cfg)
                 if not matches:
                     return [output_line(f"file: no matches: {parts[2]}")]
                 destination_is_directory = parts[3] == "/" or any(
                     directory["path"] == parts[3].strip("/")
-                    for directory in list_owner_workspace_directories(owner, CFG)
+                    for directory in list_owner_workspace_directories(owner, cfg)
                 )
                 if len(matches) > 1 and not destination_is_directory:
                     return [output_line("file: destination must be an existing folder when moving multiple matches")]
                 lines = []
                 for match in matches:
-                    moved = move_owner_workspace_path(owner, match.path, parts[3], CFG)
+                    moved = move_owner_workspace_path(owner, match.path, parts[3], cfg)
                     lines.append(output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success"))
                 return lines
-            moved = move_owner_workspace_path(owner, parts[2], parts[3], CFG)
+            moved = move_owner_workspace_path(owner, parts[2], parts[3], cfg)
         except Exception as exc:
             return _workspace_command_error(exc)
         return [output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success")]

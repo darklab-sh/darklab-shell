@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
 import pty
 import select
 import signal
-import struct
 import subprocess
-import tempfile
-import termios
 import threading
 import time
 import uuid
@@ -25,7 +21,7 @@ from typing import Any, Iterator, cast
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from config import CFG, SCANNER_PREFIX
+from config import SCANNER_PREFIX, resolve_effective_cfg
 from core.process import (
     active_run_claim_owner_transition,
     active_run_owned_by,
@@ -35,7 +31,6 @@ from core.process import (
     active_runs_for_session,
     pid_pop,
     pid_register,
-    redis_client,
 )
 from services.pty import capture as pty_capture
 from services.pty.capture import (
@@ -43,123 +38,89 @@ from services.pty.capture import (
     _terminal_history_line_limit,
 )
 from services.runs.broker import _is_redis_idle_timeout_error
-from services.runs.output_model import LineKind, from_wire, line_event_from_legacy, to_wire
-from services.runs.output_store import unknown_line_event_collector
-from services import metrics as app_metrics
+from services.metrics_lazy import app_metrics
+from services.pty.runtime import (
+    KILL_BIN as KILL_BIN,
+    SUDO_BIN as SUDO_BIN,
+    bounded_dimension as _bounded_dimension,
+    command_env as _command_env,
+    prepare_child as _prepare_child,
+    set_pty_size as _set_pty_size,
+    terminate_run as _terminate_run,
+)
+from services.pty.snapshots import (
+    pty_snapshot_payload_from_run as _pty_snapshot_payload_from_run,
+)
+from services.pty import state as pty_state
+from services.pty.settings import (
+    _PTY_BUFFER_LIMIT as _PTY_BUFFER_LIMIT,
+    _PTY_CAPTURE_MAX_HISTORY_LINES as _PTY_CAPTURE_MAX_HISTORY_LINES,
+    _PTY_CAPTURE_MIN_HISTORY_LINES as _PTY_CAPTURE_MIN_HISTORY_LINES,
+    _PTY_INPUT_MAX_BYTES as _PTY_INPUT_MAX_BYTES,
+    _PTY_SNAPSHOT_MAX_BYTES as _PTY_SNAPSHOT_MAX_BYTES,
+    _PTY_SNAPSHOT_PUBLISH_BYTES as _PTY_SNAPSHOT_PUBLISH_BYTES,
+    _coerce_non_negative_int as _coerce_non_negative_int,
+    _pty_buffer_limit,
+    _pty_control_poll_seconds,
+    _pty_heartbeat_seconds,
+    _pty_input_max_bytes,
+    _pty_snapshot_min_publish_seconds,
+    _pty_snapshot_publish_bytes,
+    _pty_snapshot_publish_seconds,
+    _pty_stream_fetch_count,
+    _pty_stream_maxlen,
+)
+from services.pty.wire import (
+    coerce_text as _coerce_text,
+    control_key as _control_key,
+    decode_payload as _decode_payload,
+    json_payload_size as _json_payload_size,
+    meta_key as _meta_key,
+    normalize_event_id as _normalize_event_id,
+    snapshot_key as _snapshot_key,
+    stream_key as _stream_key,
+)
 
 log = logging.getLogger("shell")
+
+
+redis_client = pty_state.RedisClientProxy()
+
+_active_ttl = pty_state.active_ttl
+_completed_ttl = pty_state.completed_ttl
+_meta_matches_scope = pty_state.meta_matches_scope
+
+
+def _store_pty_meta(run: "PtyRun", *, closed: bool = False) -> None:
+    pty_state.store_pty_meta(run, redis_client=redis_client, closed=closed)
+
+
+def _safe_store_pty_meta(run: "PtyRun", *, closed: bool = False) -> bool:
+    return pty_state.safe_store_pty_meta(run, redis_client=redis_client, closed=closed)
+
+
+def _delete_pty_meta(run_id: str) -> None:
+    pty_state.delete_pty_meta(run_id, redis_client=redis_client)
+
+
+def _delete_pty_runtime_state(run_id: str, *, include_stream: bool = False) -> None:
+    pty_state.delete_pty_runtime_state(
+        run_id,
+        redis_client=redis_client,
+        include_stream=include_stream,
+    )
+
+
+def _load_pty_snapshot(run_id: str, session_id: str, team_id: str = "") -> dict[str, Any] | None:
+    return pty_state.load_pty_snapshot(
+        run_id,
+        session_id,
+        team_id,
+        redis_client=redis_client,
+    )
 pyte = pty_capture.pyte
-_PTY_CAPTURE_MAX_HISTORY_LINES = pty_capture._PTY_CAPTURE_MAX_HISTORY_LINES
-_PTY_CAPTURE_MIN_HISTORY_LINES = pty_capture._PTY_CAPTURE_MIN_HISTORY_LINES
-_PTY_SNAPSHOT_MAX_BYTES = pty_capture._PTY_SNAPSHOT_MAX_BYTES
 
-SUDO_BIN = "/usr/bin/sudo"
-KILL_BIN = "/bin/kill"
-RUN_SUBPROCESS_UMASK = 0o027
-_PTY_BUFFER_LIMIT = 512
-_PTY_INPUT_MAX_BYTES = 4096
-_PTY_HEARTBEAT_SECONDS = 15.0
-_PTY_CONTROL_POLL_SECONDS = 0.2
-_PTY_STREAM_FETCH_COUNT = 100
-_PTY_STREAM_MAXLEN = 5000
-_PTY_SNAPSHOT_PUBLISH_BYTES = 8192
-_PTY_SNAPSHOT_PUBLISH_SECONDS = 1.0
-_PTY_SNAPSHOT_MIN_PUBLISH_SECONDS = 0.2
-_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT = 200
-_PTY_SNAPSHOT_UNKNOWN_COLLECTOR = unknown_line_event_collector({"source": "pty_snapshot"})
 _PTY_STALE_MESSAGE = "PTY run is no longer active"
-_PTY_ENV_PASSTHROUGH_KEYS = (
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
-    "XDG_CONFIG_HOME",
-    "XDG_CACHE_HOME",
-    "XDG_DATA_HOME",
-    "TMPDIR",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "REQUESTS_CA_BUNDLE",
-    "CURL_CA_BUNDLE",
-    "NO_COLOR",
-    "CLICOLOR",
-    "COLORTERM",
-)
-def _coerce_non_negative_int(value: object, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        number = value
-    elif isinstance(value, float):
-        number = int(value)
-    elif isinstance(value, (str, bytes, bytearray)):
-        try:
-            number = int(value)
-        except ValueError:
-            return default
-    else:
-        return default
-    return number if number >= 0 else default
-
-
-def _cfg_positive_int(key: str, default: int) -> int:
-    return max(1, _coerce_non_negative_int(CFG.get(key), default))
-
-
-def _cfg_positive_float(key: str, default: float) -> float:
-    value = CFG.get(key)
-    if value is None or isinstance(value, bool):
-        return default
-    try:
-        number = float(cast(str | int | float, value))
-    except (TypeError, ValueError):
-        return default
-    return number if number > 0 else default
-
-
-def _pty_buffer_limit() -> int:
-    return _cfg_positive_int("interactive_pty_buffer_limit", _PTY_BUFFER_LIMIT)
-
-
-def _pty_input_max_bytes() -> int:
-    return _cfg_positive_int("interactive_pty_input_max_bytes", _PTY_INPUT_MAX_BYTES)
-
-
-def _pty_heartbeat_seconds() -> float:
-    return _cfg_positive_float("interactive_pty_heartbeat_seconds", _PTY_HEARTBEAT_SECONDS)
-
-
-def _pty_control_poll_seconds() -> float:
-    return _cfg_positive_float("interactive_pty_control_poll_seconds", _PTY_CONTROL_POLL_SECONDS)
-
-
-def _pty_stream_fetch_count() -> int:
-    return _cfg_positive_int("interactive_pty_stream_fetch_count", _PTY_STREAM_FETCH_COUNT)
-
-
-def _pty_stream_maxlen() -> int:
-    return _cfg_positive_int("interactive_pty_stream_maxlen", _PTY_STREAM_MAXLEN)
-
-
-def _pty_snapshot_publish_bytes() -> int:
-    return _cfg_positive_int("interactive_pty_snapshot_publish_bytes", _PTY_SNAPSHOT_PUBLISH_BYTES)
-
-
-def _pty_snapshot_publish_seconds() -> float:
-    return _cfg_positive_float("interactive_pty_snapshot_publish_seconds", _PTY_SNAPSHOT_PUBLISH_SECONDS)
-
-
-def _pty_snapshot_min_publish_seconds() -> float:
-    return _cfg_positive_float("interactive_pty_snapshot_min_publish_seconds", _PTY_SNAPSHOT_MIN_PUBLISH_SECONDS)
-
-
-def _pty_snapshot_fallback_entry_limit() -> int:
-    return _cfg_positive_int("interactive_pty_snapshot_fallback_entry_limit", _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT)
-
 
 class PtyDependencyError(RuntimeError):
     """Raised when an enabled PTY run cannot meet required dependencies."""
@@ -234,7 +195,7 @@ _runs_lock = threading.Lock()
 
 
 def pty_enabled() -> bool:
-    return bool(CFG.get("interactive_pty_enabled", False))
+    return bool(resolve_effective_cfg().get("interactive_pty_enabled", False))
 
 
 def pty_worker_supported() -> bool:
@@ -251,220 +212,6 @@ def pty_broker_available() -> bool:
 
 def pty_broker_unavailable_reason() -> str:
     return "Interactive PTY mode requires Redis for multi-worker deployments or WEB_CONCURRENCY=1."
-
-
-def _active_ttl() -> int:
-    return max(1, int(CFG.get("run_broker_active_stream_ttl_seconds", 14400) or 14400))
-
-
-def _completed_ttl() -> int:
-    return max(1, int(CFG.get("run_broker_completed_stream_ttl_seconds", 3600) or 3600))
-
-
-def _stream_key(run_id: str) -> str:
-    return f"ptystream:{run_id}"
-
-
-def _control_key(run_id: str) -> str:
-    return f"ptycontrol:{run_id}"
-
-
-def _meta_key(run_id: str) -> str:
-    return f"ptymeta:{run_id}"
-
-
-def _snapshot_key(run_id: str) -> str:
-    return f"ptysnapshot:{run_id}"
-
-
-def _coerce_text(value: object) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
-
-
-def _json_payload_size(payload: str) -> int:
-    return len(payload.encode("utf-8", errors="replace"))
-
-
-def _is_valid_stream_event_id(event_id: str | None) -> bool:
-    try:
-        left, right = str(event_id or "").split("-", 1)
-        int(left)
-        int(right)
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def _normalize_event_id(event_id: str | None) -> str:
-    if not event_id or event_id in {"-", "0", "0-0"}:
-        return "0-0"
-    return str(event_id) if _is_valid_stream_event_id(str(event_id)) else "0-0"
-
-
-def _log_pty_payload_decode_failed(
-    *,
-    run_id: str = "",
-    event_id: str = "",
-    reason: str,
-    context: str = "",
-) -> None:
-    log.warning("PTY_PAYLOAD_DECODE_FAILED", extra={
-        "run_id": run_id,
-        "event_id": event_id,
-        "reason": reason,
-        "context": context,
-    })
-
-
-def _decode_payload(
-    fields: object,
-    *,
-    run_id: str = "",
-    event_id: str = "",
-    context: str = "",
-) -> dict[str, Any] | None:
-    if not isinstance(fields, dict):
-        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason="fields_not_dict", context=context)
-        return None
-    raw = fields.get("payload")
-    if raw is None:
-        raw = fields.get(b"payload")
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8", errors="replace")
-    if not isinstance(raw, str):
-        reason = "missing_payload" if raw is None else "payload_not_text"
-        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason=reason, context=context)
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason="invalid_json", context=context)
-        return None
-    if not isinstance(payload, dict):
-        _log_pty_payload_decode_failed(run_id=run_id, event_id=event_id, reason="payload_not_object", context=context)
-        return None
-    return payload
-
-
-def _prepare_child() -> None:
-    os.setsid()
-    os.umask(RUN_SUBPROCESS_UMASK)
-
-
-def _bounded_dimension(value: object, default: int, min_value: int, max_value: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        number = value
-    elif isinstance(value, float):
-        number = int(value)
-    elif isinstance(value, (str, bytes, bytearray)):
-        try:
-            number = int(value)
-        except ValueError:
-            return default
-    else:
-        return default
-    return min(max(number, min_value), max_value)
-
-
-def _set_pty_size(fd: int, rows: int, cols: int) -> None:
-    try:
-        packed = struct.pack("HHHH", rows, cols, 0, 0)
-        fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
-    except OSError as exc:
-        log.warning("PTY_RESIZE_IOCTL_FAILED", extra={"fd": fd, "rows": rows, "cols": cols, "error": str(exc)})
-
-
-def _command_env() -> dict[str, str]:
-    env = {
-        key: value
-        for key in _PTY_ENV_PASSTHROUGH_KEYS
-        if (value := os.environ.get(key))
-    }
-    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
-    env.setdefault("HOME", tempfile.gettempdir())
-    env.setdefault("LANG", "C.UTF-8")
-    env.setdefault("LC_ALL", env.get("LANG", "C.UTF-8"))
-    env["TERM"] = "xterm-256color"
-    return env
-
-
-def _terminate_run(run: PtyRun) -> None:
-    if run.proc.poll() is not None:
-        return
-    try:
-        pgid = run.proc.pid
-        if SCANNER_PREFIX:
-            subprocess.run(
-                [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
-                timeout=5,
-            )
-        else:
-            os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as exc:
-        log.warning(
-            "PTY_TERMINATE_FAILED",
-            exc_info=True,
-            extra={"run_id": run.run_id, "pid": run.proc.pid, "cmd": run.command, "error": str(exc)},
-        )
-
-
-def _store_pty_meta(run: PtyRun, *, closed: bool = False) -> None:
-    if not redis_client:
-        return
-    payload = {
-        "run_id": run.run_id,
-        "session_id": run.session_id,
-        "team_id": run.team_id,
-        "command": run.command,
-        "started": run.started,
-        "rows": run.rows,
-        "cols": run.cols,
-        "closed": bool(closed),
-    }
-    redis_client.set(
-        _meta_key(run.run_id),
-        json.dumps(payload, separators=(",", ":")),
-        ex=_completed_ttl() if closed else _active_ttl(),
-    )
-    if closed:
-        redis_client.delete(_control_key(run.run_id), _snapshot_key(run.run_id))
-
-
-def _safe_store_pty_meta(run: PtyRun, *, closed: bool = False) -> bool:
-    try:
-        _store_pty_meta(run, closed=closed)
-        return True
-    except Exception as exc:
-        log.error("PTY_META_SAVE_FAILED", exc_info=True, extra={
-            "run_id": run.run_id,
-            "session": run.session_id,
-            "team_id": run.team_id,
-            "cmd": run.command,
-            "closed": bool(closed),
-            "error": str(exc),
-        })
-        return False
-
-
-def _delete_pty_meta(run_id: str) -> None:
-    if not redis_client:
-        return
-    redis_client.delete(_meta_key(run_id))
-    redis_client.delete(_control_key(run_id))
-    redis_client.delete(_snapshot_key(run_id))
-
-
-def _delete_pty_runtime_state(run_id: str, *, include_stream: bool = False) -> None:
-    if not redis_client:
-        return
-    keys = [_meta_key(run_id), _control_key(run_id), _snapshot_key(run_id)]
-    if include_stream:
-        keys.append(_stream_key(run_id))
-    redis_client.delete(*keys)
 
 
 def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
@@ -492,15 +239,6 @@ def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
         "cols": run.cols,
         "closed": run.closed,
     }
-
-
-def _meta_matches_scope(meta: dict[str, Any], session_id: str, team_id: str = "") -> bool:
-    if team_id:
-        return str(meta.get("team_id", "") or "") == str(team_id)
-    return (
-        str(meta.get("session_id", "")) == session_id
-        and str(meta.get("team_id", "") or "") == ""
-    )
 
 
 def _load_pty_meta_for_scope(run_id: str, session_id: str, team_id: str = "") -> dict[str, Any] | None:
@@ -572,57 +310,6 @@ def _load_active_pty_meta_for_scope(
     return meta, ""
 
 
-def _pty_snapshot_wire_entry(entry: object) -> dict[str, object]:
-    if isinstance(entry, dict):
-        return to_wire(from_wire(entry, _PTY_SNAPSHOT_UNKNOWN_COLLECTOR))
-    return to_wire(line_event_from_legacy(str(entry)))
-
-
-def _pty_snapshot_wire_entries(entries: Sequence[object]) -> list[dict[str, object]]:
-    return [_pty_snapshot_wire_entry(entry) for entry in entries]
-
-
-def _limited_snapshot_entries(entries: Sequence[dict[str, object]], ansi_snapshot: str) -> list[dict[str, object]]:
-    if ansi_snapshot:
-        return []
-    fallback_entry_limit = _pty_snapshot_fallback_entry_limit()
-    if len(entries) <= fallback_entry_limit:
-        return _pty_snapshot_wire_entries(entries)
-    return [
-        to_wire(
-            line_event_from_legacy(
-                "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
-                kind=LineKind.notice,
-            ),
-        ),
-        *_pty_snapshot_wire_entries(entries[-fallback_entry_limit:]),
-    ]
-
-
-def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) -> dict[str, Any]:
-    entries = run.terminal_capture.synthesize_entries()
-    ansi_snapshot, snapshot_truncated = run.terminal_capture.ansi_snapshot()
-    # Redis snapshots omit fallback entries when ANSI is available to keep the
-    # distributed payload bounded; local snapshots keep both for direct callers.
-    payload: dict[str, Any] = {
-        "run_id": run.run_id,
-        "command": run.command,
-        "started": run.started,
-        "rows": run.rows,
-        "cols": run.cols,
-        "after_event_id": run.capture_event_id,
-        "entries": _limited_snapshot_entries(entries, ansi_snapshot) if distributed else _pty_snapshot_wire_entries(entries),
-        "snapshot_format": "ansi" if ansi_snapshot else "plain",
-        "ansi_snapshot": ansi_snapshot,
-        "snapshot_truncated": snapshot_truncated,
-    }
-    if distributed:
-        payload["session_id"] = run.session_id
-        payload["team_id"] = run.team_id
-        payload["created_at"] = time.time()
-    return payload
-
-
 def _store_pty_snapshot(run: PtyRun, *, force: bool = False) -> None:
     if not redis_client:
         return
@@ -682,36 +369,6 @@ def _safe_store_pty_snapshot(run: PtyRun, *, force: bool = False) -> bool:
             "error": str(exc),
         })
         return False
-
-
-def _load_pty_snapshot(run_id: str, session_id: str, team_id: str = "") -> dict[str, Any] | None:
-    if not redis_client:
-        return None
-    raw = redis_client.get(_snapshot_key(run_id))
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8", errors="replace")
-    if not isinstance(raw, str):
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict) or not _meta_matches_scope(payload, session_id, team_id):
-        return None
-    response = dict(payload)
-    response["entries"] = _pty_snapshot_wire_entries(response.get("entries") or [])
-    try:
-        created_at = float(response.get("created_at", 0) or 0)
-    except (TypeError, ValueError):
-        created_at = 0
-    if created_at:
-        response["snapshot_age_seconds"] = round(max(0.0, time.time() - created_at), 3)
-    else:
-        response["snapshot_age_seconds"] = None
-    response.pop("session_id", None)
-    response.pop("team_id", None)
-    response.pop("created_at", None)
-    return response
 
 
 def pty_run_belongs_to_session(run_id: str, session_id: str) -> bool:
@@ -1156,7 +813,7 @@ def start_pty_run(
     default_cols_i = _bounded_dimension(default_cols, 100, 40, 240)
     rows_i = _bounded_dimension(rows, default_rows_i, 10, 60)
     cols_i = _bounded_dimension(cols, default_cols_i, 40, 240)
-    terminal_history_lines = _terminal_history_line_limit(CFG.get("max_output_lines", 0))
+    terminal_history_lines = _terminal_history_line_limit(resolve_effective_cfg().get("max_output_lines", 0))
     run_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
     master_fd = -1
@@ -1486,7 +1143,7 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
         return
 
     current_id = _normalize_event_id(after)
-    block_ms = max(1, int(float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
+    block_ms = max(1, int(float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
     first_read = True
     while True:
         try:

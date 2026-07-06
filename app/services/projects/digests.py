@@ -7,9 +7,8 @@ import hashlib
 import logging
 from typing import Any
 
-from config import CFG
-from core import database
-from core.database import db_connect
+from config import resolve_effective_cfg
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceNotFound
@@ -38,13 +37,13 @@ def _now() -> str:
 
 
 def _json_param(value: Any) -> Any:
-    return dialect_for_backend(database.DB_BACKEND).json_param(value)
+    return dialect_for_backend(get_db_backend()).json_param(value)
 
 
 def _loads_json_list(value: Any) -> list[str]:
     return [
         str(item)
-        for item in dialect_for_backend(database.DB_BACKEND).decode_json_list(value)
+        for item in dialect_for_backend(get_db_backend()).decode_json_list(value)
         if str(item or "").strip()
     ]
 
@@ -71,7 +70,7 @@ def _warn_invalid_config_once(key: str, value: Any, fallback: Any) -> None:
 
 
 def _configured_default_cadence() -> str:
-    raw_settings = CFG.get("project_digests")
+    raw_settings = resolve_effective_cfg().get("project_digests")
     settings = raw_settings if isinstance(raw_settings, dict) else {}
     cadence = str(settings.get("default_cadence_preset") or DEFAULT_DIGEST_CADENCE).strip().lower()
     if cadence in DIGEST_CADENCE_PRESETS:
@@ -82,7 +81,7 @@ def _configured_default_cadence() -> str:
 
 def _configured_first_send_lookback_hours(cadence: str) -> int:
     fallback = _DIGEST_CADENCE_LOOKBACK_HOURS.get(cadence, 24)
-    raw_settings = CFG.get("project_digests")
+    raw_settings = resolve_effective_cfg().get("project_digests")
     settings = raw_settings if isinstance(raw_settings, dict) else {}
     raw_value = settings.get("first_send_lookback_hours")
     try:
@@ -376,7 +375,7 @@ def _digest_event_key(identity: dict[str, str]) -> str:
 
 def get_digest_settings(session_id: str, project_id: str, *, team_id: str = "", conn: Any | None = None) -> dict[str, Any] | None:
     if conn is None:
-        with db_connect() as opened:
+        with get_db_connect()() as opened:
             return get_digest_settings(session_id, project_id, team_id=team_id, conn=opened)
 
     project = _project_row(conn, session_id, project_id, team_id=team_id)
@@ -407,7 +406,7 @@ def save_digest_settings(
     conn: Any | None = None,
 ) -> dict[str, Any]:
     if conn is None:
-        with db_connect() as opened:
+        with get_db_connect()() as opened:
             settings = save_digest_settings(session_id, project_id, payload, team_id=team_id, conn=opened)
             opened.commit()
             return settings

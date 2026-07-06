@@ -150,4 +150,4 @@ exec gosu appuser gunicorn \
     --threads "$WEB_THREADS" \
     --timeout 3600 \
     --control-socket /tmp/.gunicorn \
-    app:app
+    wsgi:application

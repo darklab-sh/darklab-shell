@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -75,7 +75,7 @@ def _metadata_from_row(row) -> dict[str, str | list[str]]:
 
 
 def list_secret_metadata(session_token: str) -> list[dict[str, str | list[str]]]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT name, consumer_envs, updated_at FROM secrets "
             "WHERE session_token = ? ORDER BY name",
@@ -153,7 +153,7 @@ def upsert_secret(
     team_id: str = "",
     audit_fields: dict[str, Any] | None = None,
 ) -> tuple[dict, bool]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         metadata, created = upsert_secret_with_connection(conn, session_token, name, value, consumer_envs)
         event_type = AuditEventType.SECRET_CREATE if created else AuditEventType.SECRET_UPDATE
         record_event(
@@ -185,7 +185,7 @@ def delete_secret(
     audit_fields: dict[str, Any] | None = None,
 ) -> bool:
     normalized_name = normalize_secret_name(name)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         cur = conn.execute(
             "DELETE FROM secrets WHERE session_token = ? AND name = ?",
             (session_token, normalized_name),
@@ -217,7 +217,7 @@ def get_secret_value_for_env(
     team_id: str = "",
 ) -> str | None:
     normalized_env = normalize_secret_name(env_name)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT ciphertext, nonce, consumer_envs FROM secrets "
             "WHERE session_token = ? ORDER BY updated_at DESC, name ASC",
@@ -245,7 +245,7 @@ def rewrap_session_secrets(
     audit_fields: dict[str, Any] | None = None,
 ) -> int:
     """Re-encrypt all secrets for a session under the currently active key."""
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT name, ciphertext, nonce FROM secrets WHERE session_token = ?",
             (session_token,),
@@ -290,7 +290,7 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
         "INSERT INTO secrets "  # nosec B608
         "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
-        + dialect_for_backend(DB_BACKEND).insert_or_ignore_clause(("session_token", "name"))
+        + dialect_for_backend(get_db_backend()).insert_or_ignore_clause(("session_token", "name"))
     )
     for row in rows:
         cur = conn.execute(
