@@ -704,7 +704,7 @@ Practical authoring guidance:
 - use `position` on multi-operand commands such as `tcptraceroute <host> <port>` or `telnet --interactive <host> <port>` so each placeholder appears only when that argument is next
 - use `interactive: true` on examples that should only appear when the instance has Interactive PTY enabled
 - add value-type metadata such as `domain`, `host`, `target`, `ip`, `url`, or `port_set` to flag or positional value slots that should capture and suggest recent targets
-- add `value_type: target` to workspace-required file/folder slots that should be replaced with live session workspace suggestions
+- add `value_type: workspace_path` to workspace-required file/folder slots that should be replaced with live session workspace suggestions without being treated as scan targets
 - use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
 - use `value: "..."` when the suggestion should be inserted and prefix-filtered normally
 - use `pipe_helpers` entries with `autocomplete.pipe.enabled: true` when a helper should appear after `command |`

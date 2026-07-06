@@ -1149,7 +1149,7 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 
 Session command variables are expanded inside the app before command policy validation and execution. `app/services/session/variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. The run-start path keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
 
-Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active personal/team workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid Files name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir tools/amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the active workspace's `tools/` folder so `amass engine` and the CLI share the same per-owner database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<active workspace>/tools` prefix through the same metadata, and run output filters display absolute hashed workspace paths as user-facing paths like `/tools/katana/resume.cfg`. TruffleHog Git scans add a narrow validation check that only accepts HTTPS repository URLs, keeping local path, `file://`, and `ssh://` scans out of the web-shell runtime. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
+Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active personal/team workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid Files name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning, while app-owned workspace path slots use `workspace_path` so file and folder names do not become scan targets. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir tools/amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the active workspace's `tools/` folder so `amass engine` and the CLI share the same per-owner database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<active workspace>/tools` prefix through the same metadata, and run output filters display absolute hashed workspace paths as user-facing paths like `/tools/katana/resume.cfg`. TruffleHog Git scans add a narrow validation check that only accepts HTTPS repository URLs, keeping local path, `file://`, and `ssh://` scans out of the web-shell runtime. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
 Registry-owned `requires_secrets` declarations resolve against the encrypted personal/team vault before validation-owned runtime wrappers can change the executed shell text; required missing secrets block the launch and successful injection emits a `SECRET_INJECTED` audit event. The full vault model — master-key bootstrap, AES-GCM row encryption, alias mapping, command-catalog integration, and the Options Secrets picker — lives in **Secrets and Vault** below.
 
@@ -2236,12 +2236,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,991
-- docs/inventory meta-tests: 62
-- `pytest`: 2311 (2261 behavior + 49 meta)
+- behavior tests: 3,994
+- docs/inventory meta-tests: 63
+- `pytest`: 2314 (2264 behavior + 50 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,054
+- total: 4,057
 
 ### Testing Architecture
 

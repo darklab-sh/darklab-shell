@@ -9,7 +9,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Open TODOs](#open-todos)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
-  - [Dedicated positional workspace-file value type](#dedicated-positional-workspace-file-value-type)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -43,11 +42,7 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-### Dedicated positional workspace-file value type
-
-- The `mv` and `file move` builtins declare their session-path argument as `value_type: target` under `feature_required: workspace`. The autocomplete layer reinterprets that as "list workspace file/folder entries" (via the `target` handler's `sourceHints`) and suppresses scan-target/recent injection for any workspace-required spec, so the behavior is correct. But `value_type: target` on a file-move command is misleading in the grammar, and these two specs are the only place the overload exists — file *flags* already have a clean dedicated mechanism (`workspace_flags` → `workspace_file_flags`).
-- The clean form would be a first-class positional workspace-file value type (for example `value_type: workspace_file`) whose handler sources workspace entries and injects nothing, then migrating `mv` and `file move` off `value_type: target`. Note this is a real refactor, not a rename: the only mechanism that currently lists top-level session entries for a positional arg is the `target` handler's `sourceHints`, so the entry-listing behavior has to be factored into the new handler (plus loader plumbing and a guard test). `workspace_path_arg_kinds` does not cover this — it only drills into a path once a `/` is typed.
-- Low priority: the current behavior is correct and drift-proofed at the suggestion chokepoint, and the overload is documented inline in `builtin_autocomplete.yaml` and the `target` handler. The one case that would justify the refactor is a future workspace command that needs both a session-file argument and a real scan-target argument, which the current spec-level suppression would get wrong.
+No open Technical Debt items are currently tracked.
 
 ---
 

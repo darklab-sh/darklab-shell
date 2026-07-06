@@ -16127,6 +16127,123 @@ class TestDerivedCommandRegistry:
                 spec = spec["subcommands"][subcommand]
             assert spec["arg_hints"][trigger][0]["value_type"] == value_type
 
+        assert context["mv"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
+        assert context["file"]["arg_hints"]["move"][0]["value_type"] == "workspace_path"
+
+    def test_workspace_path_value_type_does_not_feed_project_target_discovery(self):
+        cfg = {"workspace_enabled": True}
+
+        assert commands.command_project_target_inputs("mv notes.txt archive/notes.txt", cfg=cfg) == []
+        assert commands.command_project_target_inputs("file move notes.txt archive/notes.txt", cfg=cfg) == []
+
+    def test_workspace_path_value_type_does_not_trigger_restricted_inline_input(self):
+        cfg = {
+            "workspace_enabled": True,
+            "restricted_command_input_cidrs": ["10.0.0.0/8"],
+        }
+
+        assert commands._restricted_inline_input_reason("mv 10.0.0.5 archive/", cfg=cfg) == ""
+        assert commands._restricted_inline_input_reason("file move 10.0.0.5 archive/", cfg=cfg) == ""
+
+    def test_workspace_required_specs_do_not_overload_target_value_type(self):
+        paths = [
+            REPO_ROOT / "app/services/commands/builtin_autocomplete.yaml",
+            REPO_ROOT / "app/conf/commands.yaml",
+        ]
+        issues = []
+
+        def _workspace_required(spec):
+            if not isinstance(spec, dict):
+                return False
+            feature = spec.get("feature_required") or spec.get("requires_feature") or spec.get("feature")
+            features = feature if isinstance(feature, list) else [feature]
+            return any(str(item or "").strip().lower() == "workspace" for item in features)
+
+        def _value_type(data):
+            return str(data.get("value_type") or "").strip().lower() if isinstance(data, dict) else ""
+
+        def _target_list_file_flags(command):
+            flags_by_subcommand: dict[str, set[str]] = {"": set()}
+            for item in command.get("workspace_flags") or []:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("mode") == "read" and item.get("kind") != "directory" and item.get("flag"):
+                    flag = str(item["flag"])
+                    subcommands = item.get("subcommands")
+                    if isinstance(subcommands, list) and subcommands:
+                        for subcommand in subcommands:
+                            flags_by_subcommand.setdefault(str(subcommand), set()).add(flag)
+                    else:
+                        flags_by_subcommand[""].add(flag)
+            return flags_by_subcommand
+
+        def _target_list_file_flag_allowed(flags_by_subcommand, flag, subcommand):
+            return flag in flags_by_subcommand.get("", set()) or flag in flags_by_subcommand.get(subcommand, set())
+
+        def _scan_autocomplete(path, root, autocomplete, flags_by_subcommand, *, workspace_required=False, subcommand=""):
+            if not isinstance(autocomplete, dict):
+                return
+            active_workspace_required = workspace_required or _workspace_required(autocomplete)
+            for index, argument in enumerate(autocomplete.get("arguments") or []):
+                if (active_workspace_required or _workspace_required(argument)) and _value_type(argument) == "target":
+                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:{subcommand}:arguments[{index}]")
+            for flag in autocomplete.get("flags") or []:
+                if not isinstance(flag, dict):
+                    continue
+                if not (active_workspace_required or _workspace_required(flag)):
+                    continue
+                flag_value = str(flag.get("value") or "")
+                flag_value_type = _value_type(flag)
+                value_hint_type = _value_type(flag.get("value_hint") or {})
+                if "target" in {flag_value_type, value_hint_type} and not _target_list_file_flag_allowed(
+                    flags_by_subcommand,
+                    flag_value,
+                    subcommand,
+                ):
+                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:{subcommand}:flag:{flag_value}")
+            subcommands = autocomplete.get("subcommands") or []
+            if isinstance(subcommands, dict):
+                iterable_subcommands = [
+                    {"value": key, **value} if isinstance(value, dict) else {"value": key}
+                    for key, value in subcommands.items()
+                ]
+            else:
+                iterable_subcommands = subcommands
+            for sub in iterable_subcommands:
+                if not isinstance(sub, dict):
+                    continue
+                sub_name = str(sub.get("value") or "")
+                sub_workspace_required = active_workspace_required or _workspace_required(sub)
+                value_hint = sub.get("value_hint") or {}
+                if sub_workspace_required and _value_type(value_hint) == "target":
+                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:subcommand:{sub_name}")
+                _scan_autocomplete(
+                    path,
+                    root,
+                    sub,
+                    flags_by_subcommand,
+                    workspace_required=sub_workspace_required,
+                    subcommand=sub_name or subcommand,
+                )
+
+        for path in paths:
+            data = yaml.safe_load(path.read_text()) or {}
+            commands_data = data if isinstance(data, list) else data.get("commands") or []
+            for command in commands_data:
+                if not isinstance(command, dict):
+                    continue
+                root = str(command.get("root") or "<unknown>")
+                autocomplete = command.get("autocomplete") or {}
+                _scan_autocomplete(
+                    path,
+                    root,
+                    autocomplete,
+                    _target_list_file_flags(command),
+                    workspace_required=_workspace_required(command),
+                )
+
+        assert issues == []
+
     def test_real_registry_positional_argument_order_covers_known_host_port_slots(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 

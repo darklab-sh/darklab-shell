@@ -478,12 +478,6 @@ function _hintsContainValueType(hints, type) {
   return (Array.isArray(hints) ? hints : []).some(hint => _itemValueTypeIs(hint, type));
 }
 
-function _autocompleteSpecRequiresWorkspace(spec) {
-  const feature = spec && (spec.feature_required || spec.requires_feature || spec.feature);
-  const features = Array.isArray(feature) ? feature : [feature];
-  return features.some(item => String(item || '').trim().toLowerCase() === 'workspace');
-}
-
 function _wordlistCategoriesFromHints(hints) {
   const categories = [];
   (Array.isArray(hints) ? hints : []).forEach((hint) => {
@@ -556,6 +550,15 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
       slot && slot.active ? _withWordlistSuggestions(ctx, baseItems, slot.categories) : baseItems
     ),
   },
+  workspace_path: {
+    emptySlot: false,
+    slotFromHints: hints => _hintsContainValueType(hints, 'workspace_path'),
+    applySuggestions: (ctx, baseItems) => baseItems,
+    sourceHints: (_spec, hints) => {
+      if (!(Array.isArray(hints) && hints.some(hint => _itemValueTypeIs(hint, 'workspace_path')))) return null;
+      return _workspaceAutocompleteEntryHints();
+    },
+  },
   target: {
     emptySlot: false,
     slotFromHints: hints => _hintsContainValueType(hints, 'target'),
@@ -564,16 +567,6 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
       _withRecentValueSuggestions(ctx, baseItems, ['domain', 'ip', 'url', 'port_set']),
       ['domain', 'host', 'ip', 'cidr', 'url', 'port_set', 'target'],
     ),
-    // Workspace reinterpretation: on a feature_required: workspace command (e.g.
-    // the `mv` / `file move` builtins), a `value_type: target` arg means "list
-    // session file/folder entries," not a scan target. This sources those entries;
-    // _withTypedValueSlotSuggestions then suppresses scan-target/recent injection
-    // because the resolver reports workspaceTargetActive for this branch.
-    sourceHints: (spec, hints) => {
-      if (!_autocompleteSpecRequiresWorkspace(spec)) return null;
-      if (!(Array.isArray(hints) && hints.some(hint => _itemValueTypeIs(hint, 'target')))) return null;
-      return _workspaceAutocompleteEntryHints();
-    },
   },
 };
 
@@ -975,15 +968,15 @@ function _withWordlistSuggestions(ctx, baseItems, categories = []) {
   return _prependDedupedItems(wordlistItems, baseItems);
 }
 
-// True when the hint source reported any workspace-file signal: a workspace
-// file flag (e.g. `-iL`), a slash-path context, or a target slot that sourced
-// workspace file/directory entries. In all of these the base items are already
-// workspace entries, so scan-target/recent injection does not belong.
+// True when the hint source reported any workspace signal: a workspace file
+// flag (e.g. `-iL`), a slash-path context, or a typed workspace-path slot. In
+// all of these the base items are already workspace entries, so scan-target or
+// recent-value injection does not belong.
 function _resolvedWorkspaceContext(resolved) {
   return !!(resolved && (
     resolved.workspaceFlagActive
     || resolved.workspacePathActive
-    || resolved.workspaceTargetActive
+    || resolved.workspaceValueActive
   ));
 }
 
@@ -1057,8 +1050,15 @@ function _workspaceAutocompleteEntryHints() {
   ];
 }
 
-function _workspaceAutocompleteHintsForTargetSlot(spec, hints) {
-  return _valueTypeSourceHints('target', spec, hints);
+function _workspaceAutocompleteHintsForTypedSlot(spec, hints) {
+  const list = Array.isArray(hints) ? hints : [];
+  for (const hint of list) {
+    const valueType = String(hint && hint.value_type || '').trim().toLowerCase();
+    if (!valueType) continue;
+    const sourceHints = _valueTypeSourceHints(valueType, spec, list);
+    if (sourceHints !== null) return sourceHints;
+  }
+  return null;
 }
 
 function _autocompleteWorkspacePathKindFromArray(kinds, index) {
@@ -1133,16 +1133,16 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
     };
   }
 
-  const allowWorkspaceTarget = options.allowWorkspaceTarget !== false;
-  const workspaceTargetHints = allowWorkspaceTarget && !_autocompleteSpecHasWorkspacePathKinds(spec)
-    ? _workspaceAutocompleteHintsForTargetSlot(spec, baseHints)
+  const allowWorkspaceValue = options.allowWorkspaceValue !== false;
+  const workspaceValueHints = allowWorkspaceValue && !_autocompleteSpecHasWorkspacePathKinds(spec)
+    ? _workspaceAutocompleteHintsForTypedSlot(spec, baseHints)
     : null;
   return {
-    hints: workspaceTargetHints !== null ? workspaceTargetHints : baseHints,
+    hints: workspaceValueHints !== null ? workspaceValueHints : baseHints,
     filterQuery: ctx.currentToken,
     workspaceFlagActive: false,
     workspacePathActive: false,
-    workspaceTargetActive: workspaceTargetHints !== null,
+    workspaceValueActive: workspaceValueHints !== null,
   };
 }
 
@@ -1437,7 +1437,7 @@ function _buildContextAutocomplete(ctx) {
   const valueSlots = _autocompleteValueTypeSlots(ctx, spec, contextSpec);
   if (sequenceHints !== null) {
     const resolved = _resolveAutocompleteHintSource(ctx, spec, sequenceHints, {
-      allowWorkspaceTarget: false,
+      allowWorkspaceValue: false,
     });
     const sequenceItems = autocompleteCore.filterItems(
       _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery }),
@@ -1525,7 +1525,7 @@ function _buildContextAutocomplete(ctx) {
     });
   }
   const resolvedWorkspacePathHints = allowPositionalHints
-    ? _resolveAutocompleteHintSource(ctx, spec, [], { allowWorkspaceTarget: false })
+    ? _resolveAutocompleteHintSource(ctx, spec, [], { allowWorkspaceValue: false })
     : null;
   if (resolvedWorkspacePathHints && resolvedWorkspacePathHints.workspacePathActive) {
     const pathItems = autocompleteCore.filterItems(

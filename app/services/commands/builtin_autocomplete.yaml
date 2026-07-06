@@ -144,10 +144,8 @@ commands:
           value_hint:
             value: "<source> <destination>"
             hint_only: true
-            # Under feature_required: workspace, value_type: target is reinterpreted as
-            # "list session file/folder entries" and scan-target/recent injection is
-            # suppressed. This arg does NOT take a scan target.
-            value_type: target
+            # Workspace path covers both files and folders; it is not a scan target.
+            value_type: workspace_path
             description: "Session file or folder path"
         - value: rm
           description: "Remove a session file from this session"
@@ -337,10 +335,8 @@ commands:
       arguments:
         - value: "<source> <destination>"
           hint_only: true
-          # Under feature_required: workspace, value_type: target is reinterpreted as
-          # "list session file/folder entries" and scan-target/recent injection is
-          # suppressed. This arg does NOT take a scan target.
-          value_type: target
+          # Workspace path covers both files and folders; it is not a scan target.
+          value_type: workspace_path
           description: "Session file or folder path"
   - root: man
     description: "built-in: show a real or built-in manual page"

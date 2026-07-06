@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,991
-- docs/inventory meta-tests: 62
-- `pytest`: 2311 (2262 behavior + 49 meta)
+- behavior tests: 3,994
+- docs/inventory meta-tests: 63
+- `pytest`: 2314 (2264 behavior + 50 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,054
+- total: 4,057
 
 This document is organized in two parts:
 
@@ -802,6 +802,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_wordlist_metadata_covers_known_wordlist_flags` | Verifies that known wordlist-consuming command slots declare `value_type: wordlist` and the expected wordlist categories. |
 | `TestDerivedCommandRegistry.test_real_registry_restricted_input_metadata_covers_known_target_slots` | Verifies that known target-consuming command slots declare value metadata used by restricted command-input checks. |
+| `TestDerivedCommandRegistry.test_workspace_path_value_type_does_not_feed_project_target_discovery` | Verifies workspace path command values do not become project target candidates. |
+| `TestDerivedCommandRegistry.test_workspace_path_value_type_does_not_trigger_restricted_inline_input` | Verifies workspace paths named like restricted IPs are not blocked as scan-target inputs. |
+| `TestDerivedCommandRegistry.test_workspace_required_specs_do_not_overload_target_value_type` | Verifies workspace-required autocomplete specs do not reuse target value metadata for workspace path arguments. |
 | `TestDerivedCommandRegistry.test_real_registry_positional_argument_order_covers_known_host_port_slots` | Verifies that ordered positional autocomplete metadata is preserved for command roots with host and port slots. |
 | `TestDerivedCommandRegistry.test_nuclei_url_target_discovery_ignores_template_path_flags` | Verifies that Nuclei URL target discovery ignores template path flags instead of treating template names as project targets. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |

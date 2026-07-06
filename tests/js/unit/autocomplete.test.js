@@ -2829,11 +2829,10 @@ describe('autocomplete helpers', () => {
         acSuggestions: [],
         acContextRegistry: {
           mv: {
-            feature_required: 'workspace',
             argument_limit: 2,
             arg_hints: {
               __positional__: [
-                { value: '<source> <destination>', hintOnly: true, value_type: 'target', description: 'Session file or folder path' },
+                { value: '<source> <destination>', hintOnly: true, value_type: 'workspace_path', description: 'Session file or folder path' },
               ],
             },
           },
@@ -2881,9 +2880,6 @@ describe('autocomplete helpers', () => {
         acSuggestions: [],
         acContextRegistry: {
           file: {
-            // feature_required lives on the root and is inherited by the merged
-            // subcommand spec, so `file move` hits the workspace-reinterpretation path.
-            feature_required: 'workspace',
             flags: [],
             expects_value: [],
             arg_hints: {
@@ -2897,7 +2893,7 @@ describe('autocomplete helpers', () => {
                 expects_value: [],
                 arg_hints: {
                   __positional__: [
-                    { value: '<source> <destination>', hintOnly: true, value_type: 'target', description: 'Session file or folder path' },
+                    { value: '<source> <destination>', hintOnly: true, value_type: 'workspace_path', description: 'Session file or folder path' },
                   ],
                 },
                 subcommands: {},
@@ -3024,7 +3020,7 @@ describe('autocomplete helpers', () => {
             argument_limit: 2,
             arg_hints: {
               __positional__: [
-                { value: '<source> <destination>', hintOnly: true, value_type: 'target', description: 'Session file or folder path' },
+                { value: '<source> <destination>', hintOnly: true, value_type: 'workspace_path', description: 'Session file or folder path' },
                 { value: 'root.txt', description: 'session file · 1 B' },
               ],
             },
