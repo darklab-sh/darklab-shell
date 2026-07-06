@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import json
 import logging
 import re
@@ -40,7 +42,7 @@ def run(
     client: OpenAICompatibleClient,
     *,
     context: dict,
-    active_cfg: dict,
+    active_cfg: Mapping[str, Any],
     assist: dict,
     session_id: str,
     assist_id: str,

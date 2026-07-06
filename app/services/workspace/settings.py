@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from config import resolve_effective_cfg
 from services.teams.scope import OwnerContext, owner_context_for_scope
@@ -30,7 +30,7 @@ def mb_to_bytes(value: Any, default_mb: int) -> int:
     return coerce_int(value, default_mb, minimum=0) * 1024 * 1024
 
 
-def workspace_settings(cfg: dict[str, Any] | None = None) -> WorkspaceSettings:
+def workspace_settings(cfg: Mapping[str, Any] | None = None) -> WorkspaceSettings:
     active = resolve_effective_cfg(cfg)
     backend = str(active.get("workspace_backend") or "tmpfs").strip().lower()
     if backend not in {"tmpfs", "volume"}:

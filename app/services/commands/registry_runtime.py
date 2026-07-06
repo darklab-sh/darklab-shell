@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from collections.abc import Callable
+from typing import Any, Callable, Mapping
 
 from services.commands.registry_validation import split_command_argv
 from services.teams.scope import OwnerContext, owner_context_for_scope
@@ -50,7 +50,7 @@ def runtime_injection_token(
     token: str,
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> str:
     if "{session_workspace}" not in token:
@@ -68,7 +68,7 @@ def runtime_injection_flags(
     inject: dict[str, object],
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> list[str]:
     raw_flags = inject.get("flags")
@@ -86,7 +86,7 @@ def apply_runtime_inject_flags(
     *,
     runtime_adaptations_by_root: Callable[[], dict[str, dict[str, object]]],
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> tuple[str, str | None]:
     tokens = split_command_argv(command)

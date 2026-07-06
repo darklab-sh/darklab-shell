@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
-from typing import Any
+from typing import Any, Mapping
 
 log = logging.getLogger("services.workspace.files")
 
@@ -196,7 +196,7 @@ def _remove_inactive_workspace_directory(path: Path) -> None:
 def migrate_session_workspace(
     from_session_id: str,
     to_session_id: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ):
     """Merge one session workspace into another without overwriting files."""
     from services.workspace.files import (
@@ -359,7 +359,7 @@ def migrate_session_workspace(
 
 
 def cleanup_inactive_workspaces(
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     now: float | None = None,
     skip_session_id: str | None = None,

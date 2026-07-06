@@ -27,6 +27,7 @@ import pytest
 
 import app as shell_app_module
 import config as app_config
+from conftest import build_test_config
 from conftest import make_test_app as _test_app
 import core.database as db_module
 from core.database import DB_PATH, db_connect, db_init
@@ -1049,7 +1050,7 @@ class TestWorkerEntrypointLoggingSetup:
         from services.ai import worker
 
         order = []
-        replacement_cfg = {**app_config.CFG, "app_name": "late-ai-worker-config"}
+        replacement_cfg = build_test_config({"app_name": "late-ai-worker-config"})
         monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
         with mock.patch.object(
@@ -1080,7 +1081,7 @@ class TestWorkerEntrypointLoggingSetup:
     def test_notification_worker_main_configures_logging(self, monkeypatch):
         from services.notifications import worker
 
-        replacement_cfg = {**app_config.CFG, "app_name": "late-notification-worker-config"}
+        replacement_cfg = build_test_config({"app_name": "late-notification-worker-config"})
         monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
         with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
@@ -1099,7 +1100,7 @@ class TestWorkerEntrypointLoggingSetup:
     def test_scheduler_worker_main_configures_logging(self, monkeypatch):
         from services.scheduler import worker
 
-        replacement_cfg = {**app_config.CFG, "app_name": "late-scheduler-worker-config"}
+        replacement_cfg = build_test_config({"app_name": "late-scheduler-worker-config"})
         monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
         with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
@@ -1148,7 +1149,7 @@ class TestDbPrunedEvent:
         conn.close()
 
         try:
-            patched_cfg = {**shell_app_module.CFG, "permalink_retention_days": 5}
+            patched_cfg = build_test_config({"permalink_retention_days": 5})
             with mock.patch("core.database.CFG", patched_cfg):
                 with mock.patch.object(db_module.log, "info") as mock_info:
                     db_init()
@@ -1187,7 +1188,7 @@ class TestDbPrunedEvent:
         conn.close()
 
         try:
-            patched_cfg = {**shell_app_module.CFG, "permalink_retention_days": 5}
+            patched_cfg = build_test_config({"permalink_retention_days": 5})
             with mock.patch("core.database.CFG", patched_cfg):
                 with mock.patch.object(db_module.log, "info") as mock_info, \
                      mock.patch.object(db_module.log, "warning") as mock_warning:
@@ -1209,7 +1210,7 @@ class TestDbPrunedEvent:
 
     def test_db_pruned_not_emitted_when_retention_disabled(self):
         # permalink_retention_days=0 means disabled — no prune, no log
-        patched_cfg = {**shell_app_module.CFG, "permalink_retention_days": 0}
+        patched_cfg = build_test_config({"permalink_retention_days": 0})
         with mock.patch("core.database.CFG", patched_cfg):
             with mock.patch.object(db_module.log, "info") as mock_info:
                 db_init()
@@ -1219,7 +1220,7 @@ class TestDbPrunedEvent:
 
     def test_db_pruned_not_emitted_when_no_old_records(self):
         # Retention is active but no records are old enough to prune
-        patched_cfg = {**shell_app_module.CFG, "permalink_retention_days": 3650}  # 10 years
+        patched_cfg = build_test_config({"permalink_retention_days": 3650})  # 10 years
         with mock.patch("core.database.CFG", patched_cfg):
             with mock.patch.object(db_module.log, "info") as mock_info:
                 db_init()

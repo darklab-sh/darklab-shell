@@ -42,6 +42,10 @@ TEST_RATE_LIMIT_OVERRIDES = {
     "evidence_package_download_rate_limit_per_second": 1000,
 }
 
+def build_test_config(overrides=None):
+    return shell_config.CFG.with_overrides(overrides or {})
+
+
 shell_config.CFG.update(TEST_RATE_LIMIT_OVERRIDES)
 setup_prometheus_multiproc_dir(shell_config.CFG)
 os.environ.setdefault("DARKLAB_APP_START_TIME_SECONDS", "0")

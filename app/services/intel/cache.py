@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import hashlib
 import json
 import logging
@@ -36,7 +38,7 @@ def _coerce_positive_int(value: Any, fallback: int) -> int:
     return parsed if parsed > 0 else fallback
 
 
-def cache_ttl(provider: str, scope: str, cfg: dict[str, Any] | None = None) -> int:
+def cache_ttl(provider: str, scope: str, cfg: Mapping[str, Any] | None = None) -> int:
     active_cfg = cfg if cfg is not None else resolve_effective_cfg()
     setting = cache_ttl_setting(provider, scope)
     if setting:
@@ -113,7 +115,7 @@ def set_cached_response(
         _MEMORY_CACHE[key] = (time.time() + max(1, int(ttl_seconds)), encoded)
 
 
-def quota_negative_cache_ttl(provider: str, cfg: dict[str, Any] | None = None) -> int:
+def quota_negative_cache_ttl(provider: str, cfg: Mapping[str, Any] | None = None) -> int:
     normalized_provider = str(provider or "").strip().lower()
     provider_keys = {
         "virustotal": "intel_negative_cache_virustotal_quota_seconds",
@@ -148,7 +150,7 @@ def set_quota_exhausted(
     provider: str,
     *,
     reset_at: float | int | None = None,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client=None,
     now: float | None = None,
 ) -> dict[str, Any]:

@@ -23,6 +23,7 @@ import pytest
 
 import app as shell_app_module
 import config as app_config
+from conftest import build_test_config
 from conftest import make_test_app as _test_app
 import blueprints.run as run_routes
 import core.database as shell_db
@@ -2575,12 +2576,11 @@ class TestRunStreaming:
     def test_builtin_retention_reports_preview_and_full_output_policy(self):
         client = get_client()
 
-        with mock.patch("config.CFG", {
-            **app_config.CFG,
+        with mock.patch("config.CFG", build_test_config({
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
             "full_output_max_mb": 5,
-        }):
+        })):
             resp = _post_run(client, json={"command": "retention"})
             body = resp.get_data(as_text=True)
 
@@ -2897,7 +2897,7 @@ class TestRunStreaming:
         with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
              mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc), \
-             mock.patch("config.CFG", {**app_config.CFG, "max_output_lines": 2}):
+             mock.patch("config.CFG", build_test_config({"max_output_lines": 2})):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -3045,7 +3045,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        with mock.patch("config.CFG", {**app_config.CFG, "workspace_enabled": False}):
+        with mock.patch("config.CFG", build_test_config({"workspace_enabled": False})):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -3056,7 +3056,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_workspace_root_when_workspace_enabled(self):
         client = get_client()
 
-        with mock.patch("config.CFG", {**app_config.CFG, "workspace_enabled": True}):
+        with mock.patch("config.CFG", build_test_config({"workspace_enabled": True})):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -3228,8 +3228,9 @@ class TestRunStreaming:
             headers={"X-Session-ID": session_id},
         )
 
-        with mock.patch("config.CFG", {**shell_app_module.CFG, **cfg}), \
-             mock.patch("blueprints.run.CFG", {**shell_app_module.CFG, **cfg}), \
+        patched_cfg = build_test_config(cfg)
+        with mock.patch("config.CFG", patched_cfg), \
+             mock.patch("blueprints.run.CFG", patched_cfg), \
              mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
@@ -3321,8 +3322,9 @@ class TestRunStreaming:
             "pipe_helpers": [],
         }
 
-        with mock.patch("config.CFG", {**shell_app_module.CFG, **cfg}), \
-             mock.patch("blueprints.run.CFG", {**shell_app_module.CFG, **cfg}), \
+        patched_cfg = build_test_config(cfg)
+        with mock.patch("config.CFG", patched_cfg), \
+             mock.patch("blueprints.run.CFG", patched_cfg), \
              mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \

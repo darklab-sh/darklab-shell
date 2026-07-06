@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -41,7 +43,7 @@ def build_report_export_bundle(
     session_id: str = "",
     project_id: str = "",
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> ReportExportBundle:
     generated_at = datetime.now(timezone.utc)
     context = compose_report_context(
@@ -193,7 +195,7 @@ def build_report_export_archive(
     session_id: str = "",
     project_id: str = "",
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     archive_dir: str | os.PathLike[str] | None = None,
     progress_callback=None,
     build_job_id: str = "",

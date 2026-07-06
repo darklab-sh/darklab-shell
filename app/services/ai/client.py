@@ -10,7 +10,7 @@ import logging
 import socket
 import ssl
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -201,7 +201,7 @@ def _resolve_allowed_host(hostname: str, port: int, allowed_cidrs: list[str]) ->
 class OpenAICompatibleClient:
     def __init__(
         self,
-        cfg: dict | None = None,
+        cfg: Mapping[str, Any] | None = None,
         *,
         session_token: str | None = None,
         secret_scope_token: str | None = None,

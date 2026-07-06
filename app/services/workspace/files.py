@@ -7,6 +7,8 @@ workspace directory and enforces quota limits before writes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import errno
@@ -139,7 +141,7 @@ def _open_workspace_file_no_follow(path: Path) -> tuple[int, os.stat_result]:
 def open_workspace_file_for_download(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> BinaryIO:
     return open_owner_workspace_file_for_download(_workspace_session_owner_context(session_id), relative_path, cfg)
 
@@ -147,7 +149,7 @@ def open_workspace_file_for_download(
 def open_owner_workspace_file_for_download(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> BinaryIO:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -338,7 +340,7 @@ def _iter_workspace_entries(root: Path):
 
 def normalize_session_workspace_permissions(
     session_id: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> None:
     """Repair command-created workspace modes so appuser can list and read them."""
     normalize_owner_workspace_permissions(_workspace_session_owner_context(session_id), cfg)
@@ -346,7 +348,7 @@ def normalize_session_workspace_permissions(
 
 def normalize_owner_workspace_permissions(
     owner: OwnerContext | Any,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> None:
     """Repair command-created workspace modes so appuser can list and read them."""
     root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
@@ -358,7 +360,7 @@ def normalize_owner_workspace_permissions(
 def _repair_owner_workspace_relative_path_for_access(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     include_final_file: bool = False,
 ) -> None:
@@ -383,7 +385,7 @@ def _repair_owner_workspace_relative_path_for_access(
 def _repair_workspace_relative_path_for_access(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     include_final_file: bool = False,
 ) -> None:
@@ -481,7 +483,7 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
 def prepare_owner_workspace_target_for_command(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     mode: str,
     kind: str = "file",
@@ -520,7 +522,7 @@ def prepare_owner_workspace_target_for_command(
     return resolved
 
 
-def owner_workspace_usage(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
+def owner_workspace_usage(owner: OwnerContext | Any, cfg: Mapping[str, Any] | None = None) -> WorkspaceUsage:
     root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
     touch_owner_workspace(owner, cfg)
     bytes_used = 0
@@ -532,11 +534,11 @@ def owner_workspace_usage(owner: OwnerContext | Any, cfg: dict[str, Any] | None 
     return WorkspaceUsage(bytes_used=bytes_used, file_count=file_count)
 
 
-def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
+def workspace_usage(session_id: str, cfg: Mapping[str, Any] | None = None) -> WorkspaceUsage:
     return owner_workspace_usage(_workspace_session_owner_context(session_id), cfg)
 
 
-def list_owner_workspace_files(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def list_owner_workspace_files(owner: OwnerContext | Any, cfg: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
     touch_owner_workspace(owner, cfg)
     items: list[dict[str, Any]] = []
@@ -551,11 +553,11 @@ def list_owner_workspace_files(owner: OwnerContext | Any, cfg: dict[str, Any] | 
     return sorted(items, key=lambda item: str(item["path"]))
 
 
-def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def list_workspace_files(session_id: str, cfg: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     return list_owner_workspace_files(_workspace_session_owner_context(session_id), cfg)
 
 
-def list_owner_workspace_directories(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def list_owner_workspace_directories(owner: OwnerContext | Any, cfg: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     root = ensure_owner_workspace(owner, cfg).resolve(strict=True)
     touch_owner_workspace(owner, cfg)
     items: list[dict[str, Any]] = []
@@ -569,14 +571,14 @@ def list_owner_workspace_directories(owner: OwnerContext | Any, cfg: dict[str, A
     return sorted(items, key=lambda item: str(item["path"]))
 
 
-def list_workspace_directories(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def list_workspace_directories(session_id: str, cfg: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     return list_owner_workspace_directories(_workspace_session_owner_context(session_id), cfg)
 
 
 def create_owner_workspace_directory(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -595,7 +597,7 @@ def create_owner_workspace_directory(
 def create_workspace_directory(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return create_owner_workspace_directory(_workspace_session_owner_context(session_id), relative_path, cfg)
 
@@ -605,7 +607,7 @@ def _check_owner_write_limits(
     destination: Path,
     new_size: int,
     settings: WorkspaceSettings,
-    cfg: dict[str, Any] | None,
+    cfg: Mapping[str, Any] | None,
 ) -> None:
     if new_size > settings.max_file_bytes:
         app_metrics.record_workspace_quota_rejection()
@@ -633,7 +635,7 @@ def _check_write_limits(
     destination: Path,
     new_size: int,
     settings: WorkspaceSettings,
-    cfg: dict[str, Any] | None,
+    cfg: Mapping[str, Any] | None,
 ) -> None:
     _check_owner_write_limits(_workspace_session_owner_context(session_id), destination, new_size, settings, cfg)
 
@@ -663,7 +665,7 @@ def write_owner_workspace_text_file(
     owner: OwnerContext | Any,
     relative_path: str,
     text: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -692,7 +694,7 @@ def write_workspace_text_file(
     session_id: str,
     relative_path: str,
     text: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return write_owner_workspace_text_file(_workspace_session_owner_context(session_id), relative_path, text, cfg)
 
@@ -700,7 +702,7 @@ def write_workspace_text_file(
 def read_owner_workspace_text_file(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> str:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -723,7 +725,7 @@ def read_owner_workspace_text_file(
 def read_workspace_text_file(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> str:
     return read_owner_workspace_text_file(_workspace_session_owner_context(session_id), relative_path, cfg)
 
@@ -731,7 +733,7 @@ def read_workspace_text_file(
 def delete_owner_workspace_file(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> None:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -764,7 +766,7 @@ def delete_owner_workspace_file(
 def delete_workspace_file(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> None:
     delete_owner_workspace_file(_workspace_session_owner_context(session_id), relative_path, cfg)
 
@@ -839,7 +841,7 @@ def _workspace_glob_matches(pattern: PurePosixPath, path: PurePosixPath) -> bool
 def expand_owner_workspace_path_pattern(
     owner: OwnerContext | Any,
     relative_pattern: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     kind: str = "any",
 ) -> list[WorkspacePathMatch]:
@@ -874,7 +876,7 @@ def expand_owner_workspace_path_pattern(
 def expand_workspace_path_pattern(
     session_id: str,
     relative_pattern: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     kind: str = "any",
 ) -> list[WorkspacePathMatch]:
@@ -889,7 +891,7 @@ def expand_workspace_path_pattern(
 def owner_workspace_path_info(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -905,7 +907,7 @@ def owner_workspace_path_info(
 def workspace_path_info(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return owner_workspace_path_info(_workspace_session_owner_context(session_id), relative_path, cfg)
 
@@ -913,7 +915,7 @@ def workspace_path_info(
 def delete_owner_workspace_path(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> WorkspaceDeleteResult:
     info = owner_workspace_path_info(owner, relative_path, cfg)
     path = resolve_owner_workspace_path(owner, relative_path, cfg)
@@ -934,7 +936,7 @@ def delete_owner_workspace_path(
 def delete_workspace_path(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> WorkspaceDeleteResult:
     return delete_owner_workspace_path(_workspace_session_owner_context(session_id), relative_path, cfg)
 
@@ -977,7 +979,7 @@ def move_owner_workspace_path(
     owner: OwnerContext | Any,
     source_relative_path: str,
     destination_relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> WorkspaceMoveResult:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
@@ -1040,7 +1042,7 @@ def move_workspace_path(
     session_id: str,
     source_relative_path: str,
     destination_relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> WorkspaceMoveResult:
     return move_owner_workspace_path(
         _workspace_session_owner_context(session_id),
@@ -1060,7 +1062,7 @@ def _chmod_workspace_dir(path: Path) -> None:
 def migrate_session_workspace(
     from_session_id: str,
     to_session_id: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> WorkspaceMigrationResult:
     from services.workspace.maintenance import migrate_session_workspace as _migrate_session_workspace
 
@@ -1068,7 +1070,7 @@ def migrate_session_workspace(
 
 
 def cleanup_inactive_workspaces(
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     now: float | None = None,
     skip_session_id: str | None = None,

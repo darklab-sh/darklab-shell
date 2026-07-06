@@ -1,6 +1,6 @@
 """High-level command validation orchestration for the command registry."""
 
-from typing import Any
+from typing import Any, Mapping
 
 import config as app_config
 from services.commands.postfilters import parse_synthetic_postfilter
@@ -31,7 +31,7 @@ def validate_command(
     workspace_read_file_restriction_reason,
     apply_workspace_runtime_environment,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     workspace_cwd: str = "",
     extra_allowed_prefixes: list[str] | None = None,
     owner_context: OwnerContext | None = None,

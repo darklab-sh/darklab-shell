@@ -6,7 +6,7 @@ import logging
 import subprocess
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -188,7 +188,7 @@ def brokered_synthetic_run(
     cmd_type="builtin",
     owner_tab_id="",
     team_id="",
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     run_output_capture_fn: Callable[[str], Any],
     output_signal_classifier_cls: Callable[..., Any],
     publish_run_event_fn: Callable[[str, str, dict[str, Any]], Any],
@@ -291,7 +291,7 @@ def brokered_real_run_worker(
     workspace_artifacts,
     owner_tab_id,
     link_project_id="",
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     trufflehog_output_filter_cls: Callable[[str], Any],
     publish_broker_captured_line_fn: Callable[..., Any],
     output_batcher_cls: Callable[..., Any],
@@ -311,7 +311,7 @@ def brokered_real_run_worker(
     datetime_cls: Any = datetime,
 ) -> None:
     cfg_source = "explicit" if cfg is not None else "global"
-    active_cfg: dict[str, Any] = {}
+    active_cfg: Mapping[str, Any] = {}
     try:
         active_cfg = resolve_effective_cfg(cfg)
         command_timeout = active_cfg["command_timeout_seconds"] or None

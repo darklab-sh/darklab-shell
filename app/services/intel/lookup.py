@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from dataclasses import dataclass
 import logging
 import time
@@ -161,7 +163,7 @@ def lookup_entity(
     session_id: str,
     run_id: str = "",
     provider_factories: list[ProviderFactory] | None = None,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client=None,
 ) -> IntelLookupResult:
     normalized_type = str(entity_type or "").strip().lower()
@@ -195,7 +197,7 @@ def _lookup_provider(
     *,
     session_id: str,
     run_id: str,
-    cfg: dict[str, Any],
+    cfg: Mapping[str, Any],
     redis_client,
 ) -> ProviderLookup:
     started = time.perf_counter()

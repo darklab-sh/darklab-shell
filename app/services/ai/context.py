@@ -65,7 +65,7 @@ def build_run_context(
     *,
     session_id: str | None = None,
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     variant: str = "default",
 ) -> AIContextResult:
     """Return capped, redacted context for a saved run."""
@@ -187,7 +187,7 @@ def _assemble_context(
     max_input_chars: int,
     redaction_rules: list[dict[str, Any]],
     secret_names: set[str],
-    active_cfg: dict,
+    active_cfg: Mapping[str, Any],
     variant: str,
 ) -> dict[str, Any]:
     runtime_seconds = _runtime_seconds(run)
@@ -329,7 +329,7 @@ def _finalize_context(
     )
 
 
-def _redact_value(value: Any, rules: list[dict[str, Any]], secret_names: set[str], cfg: dict) -> Any:
+def _redact_value(value: Any, rules: list[dict[str, Any]], secret_names: set[str], cfg: Mapping[str, Any]) -> Any:
     pre_bytes = 0
     redacted_bytes = 0
 
@@ -357,7 +357,7 @@ def _redact_value(value: Any, rules: list[dict[str, Any]], secret_names: set[str
     return loaded
 
 
-def _redact_text(text: str, rules: list[dict[str, Any]], secret_names: set[str], cfg: dict) -> tuple[str, int, int]:
+def _redact_text(text: str, rules: list[dict[str, Any]], secret_names: set[str], cfg: Mapping[str, Any]) -> tuple[str, int, int]:
     scrubbed = scrub_prompt_boundaries(_strip_workspace_paths(text, cfg))
     redacted = apply_redaction_rules(scrubbed, rules)
     redacted = _strip_secret_names(redacted, secret_names)
@@ -370,7 +370,7 @@ def _redact_events(
     events: list[LineEvent],
     rules: list[dict[str, Any]],
     secret_names: set[str],
-    cfg: dict,
+    cfg: Mapping[str, Any],
     *,
     compact: bool = False,
 ) -> list[dict[str, Any]]:
@@ -798,7 +798,7 @@ def _strip_secret_names(text: str, secret_names: set[str]) -> str:
     )
 
 
-def _strip_workspace_paths(text: str, cfg: dict) -> str:
+def _strip_workspace_paths(text: str, cfg: Mapping[str, Any]) -> str:
     if not cfg.get("workspace_enabled"):
         return text
     try:

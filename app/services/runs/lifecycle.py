@@ -9,7 +9,7 @@ import shlex
 import shutil
 import subprocess
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -410,7 +410,7 @@ def prepare_real_command(
     resolve_secret_environment_fn: Callable[..., tuple[dict[str, str], list[str]]] = resolve_secret_environment,
     command_root_fn: Callable[[str], str | None] = command_root,
     cmd_denied_log_extra_fn: Callable[[str, str, str, str], dict[str, Any]],
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> PreparedRealCommand:
     active_cfg = resolve_effective_cfg(cfg)
     registry_command = execution_command
@@ -532,7 +532,7 @@ def start_real_command_process(
     owner_tab_id: str = "",
     team_id: str = "",
     owner_context: OwnerContext | None = None,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     run_output_capture_fn: Callable[[str], RunOutputCapture],
     popen_fn: Callable[..., subprocess.Popen] = subprocess.Popen,
     preexec_fn: Callable[[], None] | None = None,

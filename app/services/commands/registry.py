@@ -12,7 +12,7 @@ import logging
 import os
 import re
 from time import monotonic_ns
-from typing import Any
+from typing import Any, Mapping
 import yaml
 
 import config as app_config
@@ -737,7 +737,7 @@ def _runtime_injection_token(
     token: str,
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> str:
     return registry_runtime.runtime_injection_token(
@@ -752,7 +752,7 @@ def _runtime_injection_flags(
     inject: dict[str, object],
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> list[str]:
     return registry_runtime.runtime_injection_flags(
@@ -767,7 +767,7 @@ def _apply_runtime_inject_flags(
     command: str,
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> tuple[str, str | None]:
     return registry_runtime.apply_runtime_inject_flags(
@@ -880,7 +880,7 @@ def _workspace_flag_absolute_passthrough(value: str, mode: str) -> bool:
 
 def _wget_default_directory_prefix(
     session_id: str,
-    cfg: dict,
+    cfg: Mapping[str, Any],
     workspace_cwd: str,
     *,
     owner_context: OwnerContext | None = None,
@@ -893,7 +893,7 @@ def _wget_default_directory_prefix(
     )
 
 
-def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+def _restricted_command_networks(cfg: Mapping[str, Any] | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     active_cfg = cfg or app_config.CFG
     raw_values = active_cfg.get("restricted_command_input_cidrs") or []
     if isinstance(raw_values, str):
@@ -950,7 +950,7 @@ def _autocomplete_project_target_flag_specs(spec: dict[str, object]) -> dict[str
     return registry_targets._autocomplete_project_target_flag_specs(spec)
 
 
-def command_project_target_inputs(command: str, cfg: dict | None = None) -> list[dict[str, str]]:
+def command_project_target_inputs(command: str, cfg: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
     """Return registry-typed command inputs that can become project targets."""
     return registry_targets.command_project_target_inputs(
         command,
@@ -963,7 +963,7 @@ def _autocomplete_spec_needs_normalization(spec: dict[str, object]) -> bool:
     return registry_targets.autocomplete_spec_needs_normalization(spec)
 
 
-def _autocomplete_spec_for_tokens(tokens: list[str], cfg: dict | None = None) -> tuple[dict[str, object], int]:
+def _autocomplete_spec_for_tokens(tokens: list[str], cfg: Mapping[str, Any] | None = None) -> tuple[dict[str, object], int]:
     return registry_targets.autocomplete_spec_for_tokens(
         tokens,
         cfg,
@@ -987,7 +987,7 @@ def _restricted_input_reason(value: str) -> str:
     return registry_targets.restricted_input_reason(value)
 
 
-def _restricted_inline_input_reason(command: str, cfg: dict | None = None) -> str:
+def _restricted_inline_input_reason(command: str, cfg: Mapping[str, Any] | None = None) -> str:
     networks = _restricted_command_networks(cfg)
     return registry_targets.restricted_inline_input_reason(
         command,
@@ -1000,7 +1000,7 @@ def _restricted_inline_input_reason(command: str, cfg: dict | None = None) -> st
 def _workspace_read_file_restriction_reason(
     command: str,
     session_id: str,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     workspace_cwd: str = "",
     owner_context: OwnerContext | None = None,
@@ -1070,7 +1070,7 @@ def _puredns_resolver_restriction_reason(command: str) -> str:
 def _rewrite_workspace_file_flags(
     command: str,
     session_id: str,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     workspace_cwd: str = "",
     owner_context: OwnerContext | None = None,
@@ -1101,7 +1101,7 @@ def validate_command(
     command: str,
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     workspace_cwd: str = "",
     extra_allowed_prefixes: list[str] | None = None,
     owner_context: OwnerContext | None = None,
@@ -1142,7 +1142,7 @@ def rewrite_command(
     command: str,
     *,
     session_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     owner_context: OwnerContext | None = None,
 ) -> tuple[str, str | None]:
     """Rewrite commands that need a TTY or specific flags into a safe non-interactive equivalent.

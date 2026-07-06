@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from copy import deepcopy
 from dataclasses import dataclass
 import logging
@@ -49,7 +51,7 @@ def default_report_templates_path() -> Path:
     return _bundled_conf_dir() / "report_templates.yaml"
 
 
-def configured_report_templates_path(cfg: dict | None = None) -> Path:
+def configured_report_templates_path(cfg: Mapping[str, Any] | None = None) -> Path:
     active_cfg = cfg or _config.CFG
     raw_path = str(active_cfg.get("report_templates_file") or "report_templates.yaml").strip()
     path = Path(raw_path or "report_templates.yaml")
@@ -117,7 +119,7 @@ def clear_report_template_catalog_cache() -> None:
     _CATALOG_CACHE["catalog"] = None
 
 
-def load_report_template_catalog(cfg: dict | None = None) -> ReportTemplateCatalog:
+def load_report_template_catalog(cfg: Mapping[str, Any] | None = None) -> ReportTemplateCatalog:
     path = configured_report_templates_path(cfg)
     default_path = default_report_templates_path()
     signature = (
@@ -146,5 +148,5 @@ def load_report_template_catalog(cfg: dict | None = None) -> ReportTemplateCatal
     return catalog
 
 
-def list_report_templates(cfg: dict | None = None) -> list[dict[str, Any]]:
+def list_report_templates(cfg: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     return [deepcopy(template) for template in load_report_template_catalog(cfg).templates]

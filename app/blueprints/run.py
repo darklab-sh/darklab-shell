@@ -29,7 +29,7 @@ from services.commands.registry import (
     validate_command,
     command_project_target_inputs,
 )
-from config import CFG, SCANNER_PREFIX, get_share_redaction_rules
+from config import CFG, SCANNER_PREFIX, get_share_redaction_rules, resolve_effective_cfg
 from extensions import limiter  # noqa: F401 - compatibility seam for run_broker/run_pty
 from services.commands.builtins import execute_builtin_command, resolve_builtin_command, resolves_exact_special_builtin_command
 from core.helpers import get_client_ip, get_log_session_id, get_session_id  # noqa: F401
@@ -439,7 +439,7 @@ def _normalize_client_side_run_lines(lines, command: str):
     return run_finalization.normalize_client_side_run_lines(
         lines,
         command,
-        cfg=CFG,
+        cfg=resolve_effective_cfg(),
         capture_event_with_signals_fn=_capture_event_with_signals,
         output_signal_classifier_cls=OutputSignalClassifier,
         get_share_redaction_rules_fn=get_share_redaction_rules,

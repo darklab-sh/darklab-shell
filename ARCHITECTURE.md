@@ -980,7 +980,7 @@ Service functions open their own `db_connect()` context by default, with common 
 
 Runtime state that tests and startup code may replace has one source of truth. Redis clients are reached through `core.process.RedisClientProxy`, database backend and connection access go through `core.database_access.get_db_backend()` and `get_db_connect()`, and mutable service config is resolved with `config.resolve_effective_cfg(cfg=None)`. These helpers read the live source at call time, so split modules observe the same test overrides and startup state without parent modules copying globals into child modules.
 
-Service modules should not import `DB_BACKEND`, `db_connect`, or `CFG` into local module globals. They should call the shared accessor/helper at the point of use or accept an explicit `cfg`/connection argument when a caller owns that context. Existing route-layer globals that are still part of Flask registration or decorator-time setup are tracked as a compatibility baseline, and `tests/py/test_architecture.py` fails if a new local DB, config, or Redis singleton binding appears outside the approved source-of-truth and compatibility paths.
+Service modules should not import `DB_BACKEND`, `db_connect`, or `CFG` into local module globals. They should call the shared accessor/helper at the point of use or accept an explicit `cfg`/connection argument when a caller owns that context. The effective config object is a pydantic-backed `AppConfig` mapping: existing `.get(...)`, `[...]`, `.items()`, and copy/export reads keep working, while known-key code can use attribute access such as `cfg.database_backend`. Nested sections remain typed through attribute access, such as `cfg.notifications.smtp`, while mapping reads return plain Python data for compatibility. Tests that need a replacement config use `build_test_config(...)` so replacements keep the same validated shape as production config; scoped `patch.dict` overrides remain available for narrow mapping-compatibility tests. Existing route-layer globals that are still part of Flask registration or decorator-time setup are tracked as a compatibility baseline, and `tests/py/test_architecture.py` fails if a new local DB, config, or Redis singleton binding or unapproved bare-dict `CFG` replacement appears outside the approved source-of-truth, compatibility, and stale-global sentinel paths.
 
 ### Python Module Layout
 
@@ -988,7 +988,7 @@ Route modules are grouped by the user-facing resource they handle. Large bluepri
 
 Service modules are split by responsibility rather than by line count alone. Query helpers, payload shaping, lifecycle orchestration, config/default helpers, and import/export helpers live in focused sibling modules when there is a clean seam. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay in one file because splitting them would make them harder to read.
 
-`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional. It also guards the approved baseline for local DB, config, and Redis singleton bindings so new import-time bindings do not appear.
+`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional. It also guards the approved baseline for local DB, config, and Redis singleton bindings, plus bare-dict config replacement sentinels, so new import-time bindings and unvalidated config replacement tests do not appear.
 
 ### Backend Runtime Boundaries
 
@@ -1835,8 +1835,13 @@ The current event inventory is:
 | DEBUG | `NOTIFICATION_SMTP_SEND_ATTEMPT` | notification email channel | host, port, tls_mode, timeout, channel_id |
 | DEBUG | `SCHEDULE_FIRE_CLAIMED` | scheduler dispatch | schedule_id, owner_kind, session, claimed, fired_at, command_root |
 | DEBUG | `BODY_STORE_DELETE_MISS` | large body storage | rel_path, kind |
+| DEBUG | `CONFIG_SOURCE_SELECTED` | config loading | conf_dir, local_overlay |
+| DEBUG | `CONFIG_OVERLAY_APPLIED` | config loading | source, known_keys, unknown_keys |
+| DEBUG | `CONFIG_ENV_OVERRIDES_APPLIED` | config loading | env_keys |
+| DEBUG | `CONFIG_LEGACY_KEY_MIGRATED` | config loading | legacy_key, target_key, source |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format |
+| INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
+| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
 | INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
 | INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
 | INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
@@ -2056,7 +2061,10 @@ The current event inventory is:
 | WARN | `RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK` | full-output artifact loading | rel_path, row_index, reason, error |
 | WARN | `COMMAND_REGISTRY_LOCAL_OVERLAY_INVALID` | command registry loading | path, error |
 | WARN | `BODY_STORE_LOAD_FALLBACK` | large body storage | rel_path, kind, error |
-| WARN | `CONFIG_LOCAL_LOAD_FAILED` | config loading | path, error |
+| WARN | `CONFIG_UNKNOWN_KEY_IGNORED` | config loading | key, source |
+| WARN | `CONFIG_VALUE_DROPPED` | config loading | key, source, reason, cidr/suffix |
+| WARN | `CONFIG_VALUE_DEFAULTED` | config loading | key, source, reason, fallback |
+| WARN | `CONFIG_VALUE_CLAMPED` | config loading | key, source, reason, minimum/maximum |
 | WARN | `POSTGRES_READ_RETRY` | Postgres backend read retry | sqlstate, operation, retry_delay_ms |
 | WARN | `REDIS_UNAVAILABLE` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db, redis_configured, fallback |
 | WARN | `WORKSPACE_ROOT_MISMATCH` | runtime bootstrap | workspace_root_env, workspace_root_config |
@@ -2093,6 +2101,7 @@ The current event inventory is:
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `CONFIG_LOAD_FAILED` | config loading | phase, source, key, error (+ traceback when available) |
 | ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
 | ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
 | ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
@@ -2205,6 +2214,8 @@ The Flask index route embeds the same normalized browser config payload that `/c
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence and storage controls such as `persist_full_run_output`, `full_output_max_mb`, and the `workspace_*` settings stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB values are converted to bytes internally before artifact or workspace quota logic runs.
 
+Backend config is loaded into one validated, pydantic-backed `AppConfig` object at startup. `config.yaml`, `config.local.yaml`, and supported environment variables feed that object in precedence order; known nested sections merge by field; unknown keys are warned and ignored; malformed YAML or invalid structural types stop startup before Flask or worker loops proceed. The public object remains mapping-compatible for older callers, attribute access exposes typed nested sections for new code, and `model_json_schema()` exposes the schema for tooling and tests.
+
 This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob. The full theme contract lives in its own top-level section below.
 
 ---
@@ -2225,12 +2236,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,978
+- behavior tests: 3,991
 - docs/inventory meta-tests: 62
-- `pytest`: 2297 (2248 behavior + 49 meta)
+- `pytest`: 2310 (2261 behavior + 49 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,040
+- total: 4,053
 
 ### Testing Architecture
 

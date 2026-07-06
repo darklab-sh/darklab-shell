@@ -273,6 +273,14 @@ app/blueprints/watchers.py: from config import CFG
 """.strip().splitlines()
 )
 
+_BARE_DICT_CFG_SENTINEL_ALLOWLIST = frozenset({
+    "tests/py/test_backend_modules.py: builtins_discovery.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_misc.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_runtime.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_system.CFG bare-dict stale-global sentinel",
+    "tests/py/test_backend_modules.py: builtins_workspace.CFG bare-dict stale-global sentinel",
+})
+
 
 def _wc_line_count(path: Path) -> int:
     return path.read_bytes().count(b"\n")
@@ -470,6 +478,41 @@ def _singleton_binding_guard_offenders(root: Path = _REPO_ROOT / "app") -> set[s
                     offenders.add(f"{relative_path}: core.database.CFG")
             elif isinstance(node, ast.ClassDef) and node.name in {"RedisClientProxy", "_RedisClientProxy"}:
                 offenders.add(f"{relative_path}: local Redis proxy class {node.name}")
+    return offenders
+
+
+def _name_for_ast_expr(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _name_for_ast_expr(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _bare_dict_cfg_monkeypatch_offenders(root: Path = _REPO_ROOT / "tests" / "py") -> set[str]:
+    offenders: set[str] = set()
+    for path in sorted(root.rglob("test_*.py")):
+        relative_path = path.relative_to(_REPO_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setattr"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "monkeypatch"
+            ):
+                continue
+            if len(node.args) < 3:
+                continue
+            if not (isinstance(node.args[1], ast.Constant) and node.args[1].value == "CFG"):
+                continue
+            if not isinstance(node.args[2], ast.Dict):
+                continue
+            target_name = _name_for_ast_expr(node.args[0]) or "<unknown>"
+            offenders.add(f"{relative_path}: {target_name}.CFG bare-dict stale-global sentinel")
     return offenders
 
 
@@ -707,12 +750,21 @@ class RedisClientProxy:
     def test_no_new_local_singleton_bindings_beyond_phase0_baseline(self):
         offenders = _singleton_binding_guard_offenders()
         new_offenders = sorted(offenders - _SINGLETON_BINDING_GUARD_BASELINE)
+        bare_dict_cfg_offenders = sorted(
+            _bare_dict_cfg_monkeypatch_offenders() - _BARE_DICT_CFG_SENTINEL_ALLOWLIST
+        )
 
         assert not new_offenders, (
             "New local singleton bindings detected. Use the shared accessor/helper/proxy "
             "conventions or update the Phase 0 dependency-injection plan before expanding "
             "the approved compatibility baseline:\n"
             + "\n".join(f"  {offender}" for offender in new_offenders)
+        )
+        assert not bare_dict_cfg_offenders, (
+            "Bare-dict CFG monkeypatches detected. Use build_test_config(...) for CFG "
+            "replacement tests, or document an intentional stale-global sentinel in "
+            "_BARE_DICT_CFG_SENTINEL_ALLOWLIST:\n"
+            + "\n".join(f"  {offender}" for offender in bare_dict_cfg_offenders)
         )
 
 

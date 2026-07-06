@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from urllib.parse import urlparse
 
 from config import resolve_effective_cfg
 
 
-def _is_bundled_llama_cpp(active: dict) -> bool:
+def _is_bundled_llama_cpp(active: Mapping[str, Any]) -> bool:
     try:
         host = urlparse(str(active.get("ai_base_url") or "")).hostname
     except ValueError:
@@ -15,7 +18,7 @@ def _is_bundled_llama_cpp(active: dict) -> bool:
     return str(host or "").strip().lower() == "llama"
 
 
-def ai_cfg(cfg: dict | None = None) -> dict:
+def ai_cfg(cfg: Mapping[str, Any] | None = None) -> dict:
     """Return the effective AI config subset with stable key names."""
     active = resolve_effective_cfg(cfg)
     raw_cidrs = active.get("ai_base_url_allowed_cidrs") or []

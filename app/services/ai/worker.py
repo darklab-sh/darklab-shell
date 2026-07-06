@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from contextlib import contextmanager
 import logging
 import signal
@@ -114,7 +116,7 @@ def _handle_stop(signum, frame):  # noqa: ANN001
     _STOP = True
 
 
-def run_once(*, limit: int = DEFAULT_LIMIT, cfg: dict | None = None) -> int:
+def run_once(*, limit: int = DEFAULT_LIMIT, cfg: Mapping[str, Any] | None = None) -> int:
     """Reap stale assists and process a small batch of queued assists."""
     _load_runtime_dependencies()
     processed = reclaim_stale_assists()
@@ -145,7 +147,7 @@ def run_once(*, limit: int = DEFAULT_LIMIT, cfg: dict | None = None) -> int:
     return processed
 
 
-def _process_assist(assist: dict, *, cfg: dict | None = None) -> None:
+def _process_assist(assist: dict, *, cfg: Mapping[str, Any] | None = None) -> None:
     _load_runtime_dependencies()
     active_cfg = resolve_effective_cfg(cfg)
     assist_id = str(assist.get("id") or "")
@@ -295,7 +297,7 @@ def _assist_db_heartbeat(
         thread.join(timeout=1.0)
 
 
-def _record_worker_error_metric(variant: str, error_code: str, cfg: dict) -> None:
+def _record_worker_error_metric(variant: str, error_code: str, cfg: Mapping[str, Any]) -> None:
     _load_runtime_dependencies()
     app_metrics.record_ai_request(
         variant or "summary",

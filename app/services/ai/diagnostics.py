@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import logging
 import time
 from typing import Any
@@ -25,7 +27,7 @@ def _model_ids(payload: dict[str, Any]) -> set[str]:
     return ids
 
 
-def provider_probe(cfg: dict | None = None) -> dict[str, Any]:
+def provider_probe(cfg: Mapping[str, Any] | None = None) -> dict[str, Any]:
     settings = ai_cfg(cfg)
     result = {
         "enabled": settings["enabled"],
@@ -82,7 +84,7 @@ def provider_probe(cfg: dict | None = None) -> dict[str, Any]:
     return result
 
 
-def run_test_prompt(cfg: dict | None = None) -> dict[str, Any]:
+def run_test_prompt(cfg: Mapping[str, Any] | None = None) -> dict[str, Any]:
     settings = ai_cfg(cfg)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

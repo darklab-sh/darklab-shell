@@ -37,7 +37,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import IO, cast
 
 import pytest
@@ -56,6 +56,7 @@ import services.reports.storage as report_storage
 import services.reports.templates as report_templates
 import runtime_bootstrap
 import app as shell_app_module
+from conftest import build_test_config
 from conftest import make_test_app as _test_app
 import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
@@ -2363,10 +2364,21 @@ class TestLoadConfig:
         assert cfg["workspace_root"] == "/env/workspaces"
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
-        warning.assert_called_once_with(
-            "AI_BASE_URL_ALLOWED_CIDR_INVALID",
-            extra={"cidr": "not-a-cidr"},
-        )
+        warning.assert_has_calls([
+            mock.call(
+                "AI_BASE_URL_ALLOWED_CIDR_INVALID",
+                extra={"cidr": "not-a-cidr"},
+            ),
+            mock.call(
+                "CONFIG_VALUE_DROPPED",
+                extra={
+                    "key": "ai_base_url_allowed_cidrs",
+                    "source": "AI_BASE_URL_ALLOWED_CIDRS",
+                    "reason": "invalid_cidr",
+                    "cidr": "not-a-cidr",
+                },
+            ),
+        ])
 
     def test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
@@ -2378,10 +2390,21 @@ class TestLoadConfig:
                 cfg = app_config.load_config(tmp)
 
         assert cfg["restricted_command_input_cidrs"] == ["10.0.0.0/8", "169.254.169.254/32"]
-        warning.assert_called_once_with(
-            "RESTRICTED_COMMAND_INPUT_CIDR_INVALID",
-            extra={"cidr": "not-a-cidr"},
-        )
+        warning.assert_has_calls([
+            mock.call(
+                "RESTRICTED_COMMAND_INPUT_CIDR_INVALID",
+                extra={"cidr": "not-a-cidr"},
+            ),
+            mock.call(
+                "CONFIG_VALUE_DROPPED",
+                extra={
+                    "key": "restricted_command_input_cidrs",
+                    "source": "RESTRICTED_COMMAND_INPUT_CIDRS",
+                    "reason": "invalid_cidr",
+                    "cidr": "not-a-cidr",
+                },
+            ),
+        ])
 
     def test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2400,10 +2423,21 @@ class TestLoadConfig:
                 cfg = app_config.load_config(tmp)
 
         assert cfg["output_entity_extra_domain_suffixes"] == ["local", "corp", "xn--caf-dma"]
-        warning.assert_called_once_with(
-            "OUTPUT_ENTITY_EXTRA_DOMAIN_SUFFIX_INVALID",
-            extra={"suffix": "bad_suffix"},
-        )
+        warning.assert_has_calls([
+            mock.call(
+                "OUTPUT_ENTITY_EXTRA_DOMAIN_SUFFIX_INVALID",
+                extra={"suffix": "bad_suffix"},
+            ),
+            mock.call(
+                "CONFIG_VALUE_DROPPED",
+                extra={
+                    "key": "output_entity_extra_domain_suffixes",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "invalid_domain_suffix",
+                    "suffix": "bad_suffix",
+                },
+            ),
+        ])
 
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2417,8 +2451,11 @@ class TestLoadConfig:
                     prompt_domain: local
                     default_theme: base-theme.yaml
                     output_preview_max_mb: 2MB
-                    full_output_max_mb: 7MB
+                    full_output_max_bytes: 7340032
                     rate_limit_per_minute: 30
+                    ai_enabled: yes
+                    ai_max_concurrent: "3"
+                    audit_export_max_rows: 999999
                     """
                 ))
             with open(local_path, "w") as f:
@@ -2429,7 +2466,8 @@ class TestLoadConfig:
                     rate_limit_per_minute: 99
                     """
                 ))
-            cfg = app_config.load_config(tmp)
+            with mock.patch.object(app_config.log, "warning"):
+                cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "abcdefghijklmnopqrst"
         assert cfg["prompt_username"] == "local"
@@ -2447,9 +2485,12 @@ class TestLoadConfig:
         assert cfg["database_pool_min"] == 1
         assert cfg["database_pool_max"] == 5
         assert cfg["database_postgres_jit"] is False
+        assert cfg["ai_enabled"] is True
         assert cfg["ai_timeout_seconds"] == 120
+        assert cfg["ai_max_concurrent"] == 3
         assert cfg["ai_max_output_tokens"] == 120
         assert cfg["ai_next_commands_max_output_tokens"] == 180
+        assert cfg["audit_export_max_rows"] == 200000
         assert cfg["workspace_enabled"] is False
         assert cfg["workspace_backend"] == "tmpfs"
         assert cfg["workspace_quota_mb"] == 50
@@ -2518,6 +2559,334 @@ class TestLoadConfig:
         assert cfg["intel_negative_cache_urlscan_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_threatfox_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_securitytrails_quota_seconds"] == 21600
+
+    def test_unknown_yaml_keys_warn_and_are_ignored(self):
+        app_config.CONFIG_LOAD_WARNINGS.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "config.yaml")
+            with open(config_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    unknown_top_level: ignored
+                    notifications:
+                      smtp:
+                        unknown_nested: ignored
+                    """
+                ))
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert "unknown_top_level" not in cfg
+        assert "unknown_nested" not in cfg["notifications"]["smtp"]
+        assert app_config.CONFIG_LOAD_WARNINGS[-2:] == [
+            {"key": "unknown_top_level", "source": config_path},
+            {"key": "notifications.smtp.unknown_nested", "source": config_path},
+        ]
+        warning.assert_has_calls([
+            mock.call(
+                "CONFIG_UNKNOWN_KEY_IGNORED",
+                extra={"key": "unknown_top_level", "source": config_path},
+            ),
+            mock.call(
+                "CONFIG_UNKNOWN_KEY_IGNORED",
+                extra={"key": "notifications.smtp.unknown_nested", "source": config_path},
+            ),
+        ])
+
+    def test_forgiving_config_fields_coerce_human_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    full_output_max_mb: 25mb
+                    output_preview_max_mb: 2MB
+                    ai_enabled: yes
+                    database_postgres_jit: "true"
+                    ai_max_concurrent: "4"
+                    audit_export_max_rows: 999999
+                    """
+                ))
+
+            with mock.patch.object(app_config.log, "warning") as warning:
+                cfg = app_config.load_config(tmp)
+
+        assert cfg["full_output_max_mb"] == 25
+        assert cfg["full_output_max_bytes"] == 25 * 1024 * 1024
+        assert cfg["output_preview_max_mb"] == 2
+        assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
+        assert cfg["ai_enabled"] is True
+        assert cfg["database_postgres_jit"] is True
+        assert cfg["ai_max_concurrent"] == 4
+        assert cfg["audit_export_max_rows"] == 200000
+        warning.assert_called_once_with(
+            "CONFIG_VALUE_CLAMPED",
+            extra={
+                "key": "audit_export_max_rows",
+                "source": os.path.join(tmp, "config.yaml"),
+                "reason": "above_maximum",
+                "maximum": 200000,
+            },
+        )
+
+    def test_config_yaml_non_mapping_root_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write("- not-a-mapping\n")
+
+            with mock.patch.object(app_config.log, "error") as error:
+                with pytest.raises(app_config.ConfigLoadError, match="expected a mapping"):
+                    app_config.load_config(tmp)
+
+        error.assert_called_once_with(
+            "CONFIG_LOAD_FAILED",
+            exc_info=False,
+            extra={
+                "phase": "root_shape",
+                "source": os.path.join(tmp, "config.yaml"),
+                "key": "",
+                "error": "expected a mapping",
+            },
+        )
+
+    def test_malformed_local_config_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.local.yaml"), "w") as f:
+                f.write("app_name: [\n")
+
+            with mock.patch.object(app_config.log, "error") as error:
+                with pytest.raises(app_config.ConfigLoadError, match="Invalid YAML"):
+                    app_config.load_config(tmp)
+
+        error.assert_called_once()
+        assert error.call_args.args == ("CONFIG_LOAD_FAILED",)
+        assert error.call_args.kwargs["exc_info"] is True
+        assert error.call_args.kwargs["extra"]["phase"] == "yaml_parse"
+        assert error.call_args.kwargs["extra"]["source"] == os.path.join(tmp, "config.local.yaml")
+
+    def test_nested_overlay_deep_merges_section_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    notifications:
+                      smtp:
+                        host: smtp.example.test
+                    scheduler:
+                      default_timezone: America/Chicago
+                    watchers:
+                      max_per_session: 7
+                    project_digests:
+                      default_cadence_preset: weekly
+                    """
+                ))
+
+            cfg = app_config.load_config(tmp)
+
+        assert cfg.get("notifications", {}).get("smtp", {}).get("host") == "smtp.example.test"
+        assert cfg["notifications"]["smtp"]["host"] == "smtp.example.test"
+        assert cfg["notifications"]["smtp"]["port"] == 587
+        assert cfg["notifications"]["retry"]["max_attempts"] == 6
+        assert cfg["notifications"]["events"]["retention_days"] == 30
+        assert cfg.notifications.smtp.host == "smtp.example.test"
+        assert cfg.notifications.retry.max_attempts == 6
+        assert cfg.notifications.events.retention_days == 30
+        assert cfg.get("scheduler", {}).get("default_timezone") == "America/Chicago"
+        assert cfg["scheduler"]["max_per_session"] == 32
+        assert cfg.scheduler.default_timezone == "America/Chicago"
+        assert cfg.get("watchers", {}).get("max_per_session") == 7
+        assert cfg.watchers.max_per_session == 7
+        assert cfg.get("project_digests", {}).get("default_cadence_preset") == "weekly"
+        assert cfg["project_digests"]["first_send_lookback_hours"] == 24
+        assert cfg.project_digests.default_cadence_preset == "weekly"
+
+    def test_validation_error_reports_source_and_redacts_secret_values(self):
+        cases = [
+            (
+                "ai_api_key",
+                "super-secret-value",
+                """
+                ai_api_key:
+                  - super-secret-value
+                """,
+            ),
+            (
+                "ai_api_key_secret_name",
+                "ai-key-secret-ref",
+                """
+                ai_api_key_secret_name:
+                  - ai-key-secret-ref
+                """,
+            ),
+            (
+                "notifications.smtp.password_secret_id",
+                "smtp-password-secret-ref",
+                """
+                notifications:
+                  smtp:
+                    password_secret_id:
+                      - smtp-password-secret-ref
+                """,
+            ),
+        ]
+        for key, raw_secret, yaml_text in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                config_path = os.path.join(tmp, "config.yaml")
+                with open(config_path, "w") as f:
+                    f.write(textwrap.dedent(yaml_text))
+
+                with mock.patch.object(app_config.log, "error") as error:
+                    with pytest.raises(app_config.ConfigLoadError) as exc_info:
+                        app_config.load_config(tmp)
+
+            message = str(exc_info.value)
+            assert f"{key} from {config_path}" in message
+            assert "value=<redacted>" in message
+            assert raw_secret not in message
+            error.assert_called_once()
+            assert error.call_args.args == ("CONFIG_LOAD_FAILED",)
+            assert error.call_args.kwargs["extra"]["phase"] == "schema_validation"
+            assert error.call_args.kwargs["extra"]["key"] == key
+
+        cases = [
+            ("notifications", "notifications: []\n"),
+            ("notifications.smtp.port", "notifications:\n  smtp:\n    port: '587'\n"),
+            ("scheduler", "scheduler: false\n"),
+        ]
+        for key, yaml_text in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                config_path = os.path.join(tmp, "config.yaml")
+                with open(config_path, "w") as f:
+                    f.write(yaml_text)
+
+                with pytest.raises(app_config.ConfigLoadError) as exc_info:
+                    app_config.load_config(tmp)
+
+            message = str(exc_info.value)
+            assert f"{key} from {config_path}" in message
+            assert "Invalid app config" in message
+
+    def test_validation_error_redacts_only_sensitive_url_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "config.yaml")
+            with open(config_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    database_url:
+                      - postgresql://darklab:secret@postgres:5432/darklab_shell
+                    intel_rate_limit_urlscan_bucket:
+                      - not-a-secret
+                    """
+                ))
+
+            with pytest.raises(app_config.ConfigLoadError) as exc_info:
+                app_config.load_config(tmp)
+
+        message = str(exc_info.value)
+        assert f"database_url from {config_path}" in message
+        assert f"intel_rate_limit_urlscan_bucket from {config_path}" in message
+        assert "database_url from " in message and "value=<redacted>" in message
+        assert "postgresql://darklab:secret@postgres:5432/darklab_shell" not in message
+        assert "intel_rate_limit_urlscan_bucket" in message
+        assert "value=['not-a-secret']" in message
+
+    def test_app_config_supports_patch_dict_mapping_compatibility(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = app_config.load_config(tmp)
+        original = dict(cfg)
+        redacted_cfg = cfg.with_overrides({
+            "ai_api_key": "secret-from-test",
+            "database_url": "postgresql://user:password@db/darklab",
+        })
+        assert "secret-from-test" not in repr(redacted_cfg)
+        assert "postgresql://user:password@db/darklab" not in repr(redacted_cfg)
+        assert "'ai_api_key': '<redacted>'" in repr(redacted_cfg)
+
+        with mock.patch.dict(cfg, {"app_name": "patched-shell"}):
+            assert cfg["app_name"] == "patched-shell"
+
+        assert dict(cfg) == original
+
+    def test_app_config_mutations_are_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = app_config.load_config(tmp)
+
+        cfg["max_tabs"] = 9
+        assert cfg["max_tabs"] == 9
+
+        with pytest.raises(app_config.ConfigLoadError, match="max_tabs") as exc_info:
+            cfg["max_tabs"] = "garbage"
+        assert "value='garbage'" in str(exc_info.value)
+        assert cfg["max_tabs"] == 9
+
+        with pytest.raises(app_config.ConfigLoadError, match="notifications") as exc_info:
+            cfg["notifications"] = "bad"
+        assert "value='bad'" in str(exc_info.value)
+        assert cfg["notifications"]["smtp"]["port"] == 587
+
+        with pytest.raises(app_config.ConfigLoadError, match="scheduler") as exc_info:
+            cfg.scheduler = []
+        assert "value=[]" in str(exc_info.value)
+        assert getattr(cfg.scheduler, "tick_seconds") == 5
+
+        long_value = "x" * 200
+        with pytest.raises(app_config.ConfigLoadError, match="max_tabs") as exc_info:
+            cfg["max_tabs"] = long_value
+        assert long_value not in str(exc_info.value)
+        assert "..." in str(exc_info.value)
+        assert cfg["max_tabs"] == 9
+
+    def test_app_config_clear_resets_to_valid_schema_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = app_config.load_config(tmp)
+
+        cfg.clear()
+
+        assert cfg["app_name"] == "darklab_shell"
+        assert cfg["notifications"]["smtp"]["port"] == 587
+
+    def test_app_config_overrides_rerun_derived_normalization(self):
+        cfg = build_test_config({
+            "full_output_max_mb": 1,
+            "output_preview_max_mb": 2,
+            "database_pool_min": 10,
+            "database_pool_max": 1,
+        })
+
+        assert cfg["full_output_max_mb"] == 1
+        assert cfg["full_output_max_bytes"] == 1 * 1024 * 1024
+        assert cfg["output_preview_max_mb"] == 2
+        assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
+        assert cfg["database_pool_min"] == 10
+        assert cfg["database_pool_max"] == 10
+
+    def test_config_section_helpers_accept_mapping_instances(self, monkeypatch):
+        from services import notifications as notifications_service
+        from services import scheduler as scheduler_service
+        from services.notifications import dispatcher as notification_dispatcher
+        from services.notifications.channels import email as email_channel
+
+        notifications_cfg = MappingProxyType({
+            "delivery_rate_per_minute": 17,
+            "http_timeout_seconds": "21",
+            "test_timeout_seconds": "3",
+            "retry": MappingProxyType({"max_attempts": 5}),
+            "events": MappingProxyType({"retention_days": 8}),
+            "smtp": MappingProxyType({"host": "smtp.example.invalid"}),
+        })
+        root_cfg = MappingProxyType({
+            "scheduler": MappingProxyType({"tick_seconds": 11}),
+            "notifications": notifications_cfg,
+        })
+        monkeypatch.setattr(scheduler_service, "resolve_effective_cfg", lambda: root_cfg)
+        monkeypatch.setattr(notifications_service, "resolve_effective_cfg", lambda: root_cfg)
+
+        assert scheduler_service.scheduler_cfg().get("tick_seconds") == 11
+        assert notifications_service.notification_cfg().get("delivery_rate_per_minute") == 17
+        assert notification_dispatcher._retry_cfg().get("max_attempts") == 5
+        assert notification_dispatcher._events_cfg().get("retention_days") == 8
+        assert email_channel._smtp_cfg(notifications_cfg).get("host") == "smtp.example.invalid"
+        assert email_channel._timeout_seconds({}, cfg=notifications_cfg) == 21.0
+        assert email_channel._timeout_seconds({}, cfg=notifications_cfg, test_send=True) == 3.0
 
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2593,6 +2962,23 @@ class TestLoadConfig:
         assert args == ("WORKSPACE_ROOT_MISMATCH",)
         assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
+    def test_log_loaded_config_does_not_replay_unknown_keys_as_local_load_failures(self):
+        app_config.CONFIG_LOAD_WARNINGS[:] = [{"key": "unknown_key", "source": "/tmp/config.yaml"}]
+        try:
+            with mock.patch.object(runtime_bootstrap.log, "warning") as warning, \
+                 mock.patch.object(runtime_bootstrap.log, "info") as info:
+                runtime_bootstrap.log_loaded_config(build_test_config({"workspace_enabled": True}))
+        finally:
+            app_config.CONFIG_LOAD_WARNINGS.clear()
+
+        warning.assert_not_called()
+        info.assert_called_once()
+        assert info.call_args.args == ("CONFIG_LOADED",)
+        assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
+        assert "warning_count" in info.call_args.kwargs["extra"]
+        assert "schema_field_count" in info.call_args.kwargs["extra"]
+        assert "env_key_count" in info.call_args.kwargs["extra"]
 
     def test_startup_active_run_cleanup_uses_redis_lock(self, monkeypatch):
         class FalseyRedis(process._FakeRedisClient):
@@ -4811,14 +5197,14 @@ class TestProjectOverviewContract:
         from services.watchers import service as watcher_service
 
         db_path = self._project_db(monkeypatch, tmp_path)
-        monkeypatch.setattr(database, "CFG", {
+        monkeypatch.setattr(database, "CFG", build_test_config({
             "scheduler": {
                 "default_timezone": "UTC",
                 "max_catchup_window_seconds": 3600,
                 "tick_seconds": 5,
             },
             "watchers": {"max_per_session": 32},
-        })
+        }))
         project = project_workspace.create_project("tok_overview_recent", {"name": "Overview Recent"})
         assert project is not None
         target = project_workspace.add_project_target(
@@ -5841,7 +6227,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-parity.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             sqlite_columns = {
@@ -5893,7 +6279,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-inventory.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -5955,7 +6341,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-manifest.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -5983,7 +6369,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-drift-guard.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -6012,7 +6398,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-strict-drift.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -6141,7 +6527,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "schema-drift.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -6553,7 +6939,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-unified-stamp.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                     database.db_init()
             conn = sqlite3.connect(db_path)
@@ -6612,7 +6998,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-baseline-source.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             try:
@@ -6643,7 +7029,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-partial-baseline.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     monkeypatch.setattr(baseline, "create_sqlite_fts_schema", crash_after_partial_baseline)
                     with pytest.raises(RuntimeError, match="simulated crash"):
                         database.db_init()
@@ -6721,7 +7107,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-ledgered-no-ladder.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                     database.db_init()
             conn = sqlite3.connect(db_path)
@@ -6748,7 +7134,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-unified-db-init.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     monkeypatch.setattr(database, "_run_schema_migrations", migration_runner)
                     database.db_init()
                     database.db_init()
@@ -6795,7 +7181,7 @@ class TestPostgresMigrations:
                 conn.close()
 
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     with pytest.raises(SchemaReconciliationError, match="darklab_shell 2\\.3\\.1"):
                         database.db_init()
 
@@ -6832,7 +7218,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-legacy-watcher-fires-checks.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -6870,7 +7256,7 @@ class TestPostgresMigrations:
             }
 
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     with mock.patch("core.migrations.reconciliation.log.warning") as warning:
                         database.db_init()
 
@@ -6903,7 +7289,7 @@ class TestPostgresMigrations:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "sqlite-preledger-verify-once.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -6915,7 +7301,7 @@ class TestPostgresMigrations:
 
             monkeypatch.setattr(reconciliation, "verify_sqlite_head_or_raise", counted_verify)
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
         assert verify_count == 1
@@ -7584,14 +7970,14 @@ class TestSchedulerFoundation:
         db_path = os.path.join(tmp_path, "scheduler.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(database, "CFG", {
+        monkeypatch.setattr(database, "CFG", build_test_config({
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",
                 "max_catchup_window_seconds": 3600,
                 "tick_seconds": 5,
             },
-        })
+        }))
         database.db_init()
         return database.db_connect()
 
@@ -8234,8 +8620,7 @@ class TestSchedulerFoundation:
     def test_scheduler_worker_run_once_runs_daily_retention(self, monkeypatch, tmp_path):
         from services.scheduler import worker
 
-        cfg = {
-            **app_config.CFG,
+        cfg = build_test_config({
             "permalink_retention_days": 30,
             "audit_retention_days": 30,
             "scheduler": {
@@ -8243,7 +8628,7 @@ class TestSchedulerFoundation:
                 "max_catchup_window_seconds": 3600,
                 "tick_seconds": 5,
             },
-        }
+        })
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started) "
@@ -8337,8 +8722,7 @@ class TestSchedulerFoundation:
 class TestWatchersFoundation:
     def _watcher_db(self, monkeypatch, tmp_path, *, max_per_session=32):
         db_path = os.path.join(tmp_path, "watchers.db")
-        cfg = {
-            **app_config.CFG,
+        cfg = build_test_config({
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",
@@ -8348,7 +8732,7 @@ class TestWatchersFoundation:
             "watchers": {
                 "max_per_session": max_per_session,
             },
-        }
+        })
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         monkeypatch.setattr(database, "CFG", cfg)
@@ -8581,9 +8965,14 @@ class TestWatchersFoundation:
         assert sent["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
         assert sent["last_sent_at"] == "2026-05-20T11:01:00+00:00"
         digests._CONFIG_WARNED_KEYS.clear()
-        with mock.patch.dict(
-            app_config.CFG,
-            {"project_digests": {"default_cadence_preset": "quarterly", "first_send_lookback_hours": "later"}},
+        with mock.patch(
+            "services.projects.digests.resolve_effective_cfg",
+            return_value={
+                "project_digests": {
+                    "default_cadence_preset": "quarterly",
+                    "first_send_lookback_hours": "later",
+                }
+            },
         ), mock.patch.object(digests.log, "warning") as warning_log:
             assert digests._configured_default_cadence() == "daily"
             assert digests._configured_first_send_lookback_hours("daily") == 24
@@ -10847,7 +11236,7 @@ class TestWatchersFoundation:
 class TestNotificationsPhase0:
     def _notification_db(self, monkeypatch, tmp_path):
         db_path = tmp_path / "notifications.db"
-        cfg = {**app_config.CFG, "permalink_retention_days": 0}
+        cfg = build_test_config({"permalink_retention_days": 0})
         monkeypatch.setattr(database, "DB_PATH", str(db_path))
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         monkeypatch.setattr(database, "CFG", cfg)
@@ -22553,7 +22942,7 @@ class TestAuditEvents:
         tmp = tempfile.TemporaryDirectory()
         db_path = os.path.join(tmp.name, "audit.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0, "audit_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0, "audit_retention_days": 0})):
                 database.db_init()
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -23420,7 +23809,7 @@ class TestDatabaseInit:
 
     def _create_tables(self, db_path):
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
 
     def test_atlas_lookup_split_modules_read_shared_backend_accessor(self, monkeypatch):
@@ -26875,7 +27264,7 @@ SQL syntax error near q</response>
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
@@ -27000,7 +27389,7 @@ SQL syntax error near q</response>
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()  # second call
 
     def test_current_schema_accepts_project_digest_schedule_and_notifications(self):
@@ -27057,7 +27446,7 @@ SQL syntax error near q</response>
             conn.close()
             # Re-init with 30-day retention — old run should be pruned
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -27078,7 +27467,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -27109,7 +27498,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             label_count = conn.execute(
@@ -27161,7 +27550,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             rows = {
@@ -27205,7 +27594,7 @@ SQL syntax error near q</response>
             conn.close()
             # Re-init with retention=0 — nothing should be pruned
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -27226,7 +27615,7 @@ SQL syntax error near q</response>
             conn.commit()
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 30})):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -27272,7 +27661,7 @@ class TestSessionVariables:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                 session_variables.set_session_variable("sess-vars", "HOST", "ip.darklab.sh")
                 session_variables.set_session_variable("sess-vars", "PORT", "443")
@@ -27298,7 +27687,7 @@ class TestSessionVariables:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                 with pytest.raises(session_variables.InvalidSessionVariableName):
                     session_variables.set_session_variable("sess-vars", "host", "ip.darklab.sh")
@@ -27312,15 +27701,14 @@ class TestBuiltinConfigAccess:
     def test_split_builtin_modules_read_shared_config_without_cfg_sync(self, monkeypatch):
         from services.commands import builtins_discovery, builtins_misc, builtins_runtime, builtins_system, builtins_workspace
 
-        active_cfg = {
-            **app_config.CFG,
+        active_cfg = build_test_config({
             "app_name": "Phase Three Shell",
             "command_timeout_seconds": 77,
             "max_output_lines": 9,
             "recent_commands_limit": 6,
             "workspace_enabled": True,
             "workspace_quota_mb": 12,
-        }
+        })
 
         def fake_faq(app_name, _readme):
             return [{"question": f"{app_name} question", "answer": "shared config answer"}]
@@ -27371,7 +27759,7 @@ class TestBuiltinStatus:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "status.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -27421,7 +27809,7 @@ class TestBuiltinStats:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -27536,7 +27924,7 @@ class TestBuiltinStats:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats-builtin-only.db")
             with mock.patch("core.database.DB_PATH", db_path):
-                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -27637,7 +28025,7 @@ class TestSecretsVault:
     def test_database_init_creates_secrets_table_and_index_idempotently(self, tmp_path):
         db_path = os.path.join(tmp_path, "secrets-schema.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
                 database.db_init()
             conn = sqlite3.connect(db_path)
@@ -27658,7 +28046,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             metadata, created = secrets_storage.upsert_secret(
                 "old-session",
@@ -27681,7 +28069,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             secrets_storage.upsert_secret("old-session", "vt_api_key", "source-secret")
             secrets_storage.upsert_secret("new-session", "vt_api_key", "destination-secret")
@@ -27697,7 +28085,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             older_ciphertext, older_nonce = secrets_vault.encrypt_secret("older-secret")
             newer_ciphertext, newer_nonce = secrets_vault.encrypt_secret("newer-secret")
@@ -27738,7 +28126,7 @@ class TestSecretsVault:
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
             secrets_storage.upsert_secret(
                 "secret-session",

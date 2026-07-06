@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import logging
 from typing import Any
 
@@ -47,7 +49,7 @@ def enqueue_summary_assist(
     *,
     team_id: str = "",
     force: bool = False,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
     active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
@@ -124,7 +126,7 @@ def enqueue_next_commands_assist(
     *,
     team_id: str = "",
     force: bool = False,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
     active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
@@ -195,7 +197,7 @@ def enqueue_next_commands_assist(
     return public, status_code
 
 
-def _enforce_ai_write_rate_limit(session_id: str, cfg: dict, *, variant: str) -> None:
+def _enforce_ai_write_rate_limit(session_id: str, cfg: Mapping[str, Any], *, variant: str) -> None:
     bypass_session_limit, client_ip = _diagnostics_client_bypasses_session_limit(cfg)
     try:
         result = check_ai_route_rate_limit(session_id, cfg=cfg, bypass_session_limit=bypass_session_limit)
@@ -231,7 +233,7 @@ def _enforce_ai_write_rate_limit(session_id: str, cfg: dict, *, variant: str) ->
     )
 
 
-def _diagnostics_client_bypasses_session_limit(cfg: dict) -> tuple[bool, str]:
+def _diagnostics_client_bypasses_session_limit(cfg: Mapping[str, Any]) -> tuple[bool, str]:
     if not has_request_context():
         return False, ""
     client_ip = get_client_ip()

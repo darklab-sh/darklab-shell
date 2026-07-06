@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
-from collections.abc import Callable
+from typing import Any, Callable, Mapping
 
 import config as app_config
 from services.commands import registry_targets
@@ -201,7 +201,7 @@ def workspace_flag_absolute_passthrough(value: str, mode: str) -> bool:
 
 def wget_default_directory_prefix(
     session_id: str,
-    cfg: dict | None,
+    cfg: Mapping[str, Any] | None,
     workspace_cwd: str,
     *,
     owner_context: OwnerContext | None = None,
@@ -233,13 +233,13 @@ def wget_default_directory_prefix(
 def workspace_read_file_restriction_reason(
     command: str,
     session_id: str,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     workspace_cwd: str = "",
     owner_context: OwnerContext | None = None,
     networks,
     load_commands_registry: Callable[[], dict],
-    load_autocomplete_context: Callable[[dict | None], dict],
+    load_autocomplete_context: Callable[[Mapping[str, Any] | None], dict],
 ) -> str:
     if not networks or not session_id:
         return ""
@@ -296,7 +296,7 @@ def workspace_read_file_restriction_reason(
 def rewrite_workspace_file_flags(
     command: str,
     session_id: str,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     workspace_cwd: str = "",
     owner_context: OwnerContext | None = None,

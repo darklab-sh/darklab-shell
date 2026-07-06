@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 import config as app_config
 from core.helpers import get_log_session_id
@@ -77,7 +77,7 @@ class RunFinalizeRecords:
     auto_promote_summary: dict | None = None
 
 
-def run_output_capture(run_id: str, cfg: dict | None = None) -> RunOutputCapture:
+def run_output_capture(run_id: str, cfg: Mapping[str, Any] | None = None) -> RunOutputCapture:
     active_cfg = app_config.CFG if cfg is None else cfg
     return RunOutputCapture(
         run_id=run_id,
@@ -92,7 +92,7 @@ def normalize_client_side_run_lines(
     lines,
     command: str,
     *,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     capture_event_with_signals_fn: Callable | None = None,
     output_signal_classifier_cls: Callable = OutputSignalClassifier,
     get_share_redaction_rules_fn: Callable = app_config.get_share_redaction_rules,
@@ -324,7 +324,7 @@ def completed_run_output_state(
     session_id,
     capture,
     *,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     load_full_output_entries_fn: Callable = load_full_output_entries,
 ) -> CompletedRunOutputState:
     active_cfg = app_config.CFG if cfg is None else cfg
@@ -448,7 +448,7 @@ def _discover_project_targets_for_finalize(
     command,
     active_project_link,
     *,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     command_project_target_inputs_fn: Callable = command_project_target_inputs,
     record_project_target_discoveries_fn: Callable = record_project_target_discoveries,
 ) -> list:
@@ -738,7 +738,7 @@ def save_completed_run(
     run_kind=RUN_KIND_EXTERNAL,
     owner_tab_id="",
     finalize_summary=None,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     load_full_output_entries_fn: Callable = load_full_output_entries,
     workspace_artifacts_with_sizes_fn: Callable = workspace_artifacts_with_sizes,
     record_run_findings_fn: Callable = record_run_findings,
@@ -887,7 +887,7 @@ def finalize_completed_run(
     workspace_artifacts=None,
     owner_tab_id="",
     link_project_id="",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     save_completed_run_fn: Callable = save_completed_run,
 ):
     active_cfg = app_config.CFG if cfg is None else cfg
@@ -962,7 +962,7 @@ def persist_completed_pty_run(
     *,
     transcript_mode: object = "final_frame",
     owner_tab_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     capture_factory: Callable = run_output_capture,
     capture_event_with_signals_fn: Callable = capture_event_with_signals,
     save_completed_run_fn: Callable = save_completed_run,

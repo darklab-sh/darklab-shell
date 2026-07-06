@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
@@ -59,7 +61,7 @@ def redis_available(redis_client: Any | None = None) -> bool:
 def check_ai_route_rate_limit(
     session_id: str,
     *,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client: Any | None = None,
     now: float | None = None,
     bypass_session_limit: bool = False,
@@ -129,7 +131,7 @@ def enqueue_lock(
             store.delete(key)
 
 
-def acquire_worker_slot(*, cfg: dict | None = None, redis_client: Any | None = None) -> AIWorkerSlot:
+def acquire_worker_slot(*, cfg: Mapping[str, Any] | None = None, redis_client: Any | None = None) -> AIWorkerSlot:
     """Acquire one global provider-call slot or return a non-acquired slot."""
     active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)

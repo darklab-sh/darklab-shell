@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
@@ -10,7 +12,7 @@ import os
 from pathlib import Path
 import signal
 import time
-from typing import Iterator
+from typing import Any, Iterator
 
 from config import resolve_data_dir, resolve_effective_cfg
 from core import database
@@ -84,7 +86,7 @@ def maybe_run_retention(
     *,
     now: str | None = None,
     monotonic_now: float | None = None,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, int]:
     """Run run/snapshot and audit retention at most once per day."""
     global _last_retention_check_monotonic

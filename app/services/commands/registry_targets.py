@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
-from collections.abc import Callable
+from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
 
 from services.commands import registry_autocomplete
@@ -143,9 +143,9 @@ def autocomplete_spec_needs_normalization(spec: dict[str, object]) -> bool:
 
 def autocomplete_spec_for_tokens(
     tokens: list[str],
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
-    load_autocomplete_context: Callable[[dict | None], dict],
+    load_autocomplete_context: Callable[[Mapping[str, Any] | None], dict],
 ) -> tuple[dict[str, object], int]:
     if not tokens:
         return {}, 1
@@ -179,9 +179,9 @@ def flag_value_from_token(tokens: list[str], index: int, flag: str) -> tuple[str
 
 def command_project_target_inputs(
     command: str,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
-    load_autocomplete_context: Callable[[dict | None], dict],
+    load_autocomplete_context: Callable[[Mapping[str, Any] | None], dict],
 ) -> list[dict[str, str]]:
     """Return registry-typed command inputs that can become project targets."""
     tokens = split_command_argv(command)
@@ -290,10 +290,10 @@ def restricted_input_reason(value: str) -> str:
 
 def restricted_inline_input_reason(
     command: str,
-    cfg: dict | None,
+    cfg: Mapping[str, Any] | None,
     *,
     networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network],
-    load_autocomplete_context: Callable[[dict | None], dict],
+    load_autocomplete_context: Callable[[Mapping[str, Any] | None], dict],
 ) -> str:
     if not networks:
         return ""

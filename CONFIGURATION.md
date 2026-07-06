@@ -15,8 +15,30 @@ Resolution order for the main app config is:
 1. Built-in defaults from `app/config.py`
 2. `app/conf/config.yaml`
 3. Optional untracked `app/conf/config.local.yaml`
+4. Environment variables for the settings that support them
 
-Most settings in `config.yaml` are read at startup. After changing `config.yaml` or `config.local.yaml`, restart the app container:
+The loader validates the final config at startup. Malformed YAML, a non-mapping file root, or a structurally invalid value stops startup with a specific key/source message. Unknown keys are ignored and logged as `CONFIG_UNKNOWN_KEY_IGNORED` so typos do not quietly become live settings. Error messages redact secret-looking values, including `ai_api_key`, AI secret names, SMTP password secret ids, credential-bearing DSNs such as `database_url`, and webhook-style fields. Non-secret invalid values are shown in a shortened form so ordinary typos are easier to fix.
+
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, and `project_digests` merge by field. A local file can override one nested value without restating the whole section.
+
+The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#development-workflow).
+
+### Schema Contract
+
+The application settings table below is the operator reference. The schema contract is:
+
+| Field group | Validation posture |
+|-------------|--------------------|
+| Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Forgiving booleans | `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
+| Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
+| Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
+| Normalized lists | CIDR lists and `output_entity_extra_domain_suffixes` drop invalid entries with key/source warning logs. Redaction rules are normalized through the same snapshot-share rule validator used at runtime |
+| Derived effective keys | `output_preview_max_bytes` is derived from `output_preview_max_mb`, and `full_output_max_bytes` is derived from `full_output_max_mb` unless the legacy byte key is supplied and the MB key is still at its built-in default |
+| Secret-looking values | Load errors and config object representations redact API keys, secret names/ids, passwords, webhook-like keys, and credential-bearing URLs such as `database_url` |
+
+Most settings in `config.yaml` are read at startup. After changing `config.yaml`, `config.local.yaml`, or an environment variable used by the app config, restart the app container:
 
 ```bash
 docker compose restart
@@ -61,6 +83,7 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | `conf/themes/*.yaml` | On next page load, permalink load, diagnostics load, or HTML export |
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
+| `conf/config.local.yaml` | After `docker compose restart` |
 
 ---
 
@@ -253,8 +276,10 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `high_volume_output_line_threshold` | `50000` | Browser-facing. Pauses live rendering for brokered command output after this many received lines. Output keeps counting, kill controls stay available, and backend preview/full-output storage still follows the normal output settings. `0` disables the pause |
 | `high_volume_output_status_interval_lines` | `50000` | Browser-facing. When high-volume live-output mode is active, show another status line after this many additional received lines |
 | `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
+| `output_preview_max_bytes` | derived from `output_preview_max_mb` | Server-side only. Effective byte value used by storage code after startup. Operators should set `output_preview_max_mb`; this key exists so runtime callers can use one byte-count value |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
+| `full_output_max_bytes` | derived from `full_output_max_mb` | Server-side only. Effective byte value used by artifact storage after startup. Operators should set `full_output_max_mb`; legacy byte-based config is still accepted only when the MB setting is left at its built-in default |
 | `workspace_enabled` | `false` | Server-side only. Enables app-managed personal and team Files. This does not enable shell navigation or redirection by itself |
 | `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. Team Files on `tmpfs` are single-container scratch space and disappear on restart; use `volume` for durable shared team Files |
 | `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed personal `sess_*` and team `team_*` workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |

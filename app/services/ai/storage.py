@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
@@ -116,7 +118,7 @@ def enqueue_assist(
     context_result,
     *,
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     model: str | None = None,
     prompt_version: str,
     prompt_version_source: str = "canonical",

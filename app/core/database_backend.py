@@ -15,7 +15,7 @@ import logging
 import os
 import sqlite3
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 log = logging.getLogger("shell")
 
@@ -281,7 +281,7 @@ def parse_database_backend(value: Any) -> DatabaseBackend:
         ) from exc
 
 
-def configured_database_backend(cfg: dict[str, Any]) -> DatabaseBackend:
+def configured_database_backend(cfg: Mapping[str, Any]) -> DatabaseBackend:
     return parse_database_backend(cfg.get("database_backend"))
 
 
@@ -293,11 +293,11 @@ def dialect_for_backend(backend: DatabaseBackend) -> DatabaseDialect:
     raise DatabaseBackendError(f"No dialect registered for {backend.value!r}")
 
 
-def configured_database_dialect(cfg: dict[str, Any]) -> DatabaseDialect:
+def configured_database_dialect(cfg: Mapping[str, Any]) -> DatabaseDialect:
     return dialect_for_backend(configured_database_backend(cfg))
 
 
-def require_sqlite_backend(cfg: dict[str, Any], feature: str = "database") -> None:
+def require_sqlite_backend(cfg: Mapping[str, Any], feature: str = "database") -> None:
     backend = configured_database_backend(cfg)
     if backend == DatabaseBackend.SQLITE:
         return
@@ -315,7 +315,7 @@ def _postgres_connection_options(*, jit_enabled: bool) -> str:
     return " ".join(option_parts)
 
 
-def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool, str]:
+def postgres_pool_settings(cfg: Mapping[str, Any]) -> tuple[str, int, int, bool, str]:
     dsn = str(cfg.get("database_url") or "").strip()
     if not dsn:
         raise PostgresConnectionError("database_url is required when database_backend='postgres'")
@@ -333,7 +333,7 @@ def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool, st
     return dsn, min_size, max_size, jit_enabled, _postgres_connection_options(jit_enabled=jit_enabled)
 
 
-def postgres_pool_metrics_snapshot(cfg: dict[str, Any]) -> dict[str, int]:
+def postgres_pool_metrics_snapshot(cfg: Mapping[str, Any]) -> dict[str, int]:
     """Return bounded, non-secret Postgres pool state for Prometheus scrapes."""
     pool_config = postgres_pool_settings(cfg)
     _, min_size, max_size, jit_enabled, _ = pool_config
@@ -393,7 +393,7 @@ def _load_postgres_pool_types():
     return ConnectionPool, dict_row
 
 
-def get_postgres_pool(cfg: dict[str, Any]) -> Any:
+def get_postgres_pool(cfg: Mapping[str, Any]) -> Any:
     global _POSTGRES_POOL, _POSTGRES_POOL_CONFIG
     pool_config = postgres_pool_settings(cfg)
     if _POSTGRES_POOL is not None and _POSTGRES_POOL_CONFIG == pool_config:
@@ -442,7 +442,7 @@ def close_postgres_pool() -> None:
         log.info("POSTGRES_POOL_CLOSED")
 
 
-def connect_postgres(cfg: dict[str, Any]) -> Any:
+def connect_postgres(cfg: Mapping[str, Any]) -> Any:
     return get_postgres_pool(cfg).connection()
 
 
@@ -581,7 +581,7 @@ class _PostgresSqliteCompatConnectionContext:
         return self._context.__exit__(exc_type, exc, traceback)
 
 
-def connect_postgres_sqlite_compat(cfg: dict[str, Any]) -> Any:
+def connect_postgres_sqlite_compat(cfg: Mapping[str, Any]) -> Any:
     return _PostgresSqliteCompatConnectionContext(connect_postgres(cfg))
 
 

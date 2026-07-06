@@ -17,6 +17,7 @@ import uuid
 import pytest
 
 import config
+from conftest import build_test_config
 import core.database as core_database
 from core.database_backend import DatabaseBackend
 from core.database_backend import PostgresSqliteCompatConnection
@@ -2411,7 +2412,7 @@ def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postg
         yield PostgresSqliteCompatConnection(conn)
 
     monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(database, "CFG", {**database.CFG, "permalink_retention_days": 5})
+    monkeypatch.setattr(database, "CFG", build_test_config({"permalink_retention_days": 5}))
     monkeypatch.setattr(database, "connect_postgres", lambda _cfg: _postgres_db_connect())
     monkeypatch.setattr(database, "_run_schema_migrations", lambda _conn, _backend: [])
     monkeypatch.setattr(database, "db_connect", _postgres_db_connect)

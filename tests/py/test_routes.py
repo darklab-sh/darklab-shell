@@ -30,6 +30,7 @@ from urllib.parse import quote, urlencode
 import unittest.mock as mock
 
 import app as shell_app_module
+from conftest import build_test_config
 from conftest import make_test_app as _test_app
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
@@ -1970,7 +1971,10 @@ SQL syntax error near q</response>
             assert limit_warning["stage"] == "preview"
 
             atlas_import_workflow._INVALID_CFG_LIMIT_WARNED.discard("atlas_import_preview_sample_limit")
-            with mock.patch.dict(config.CFG, {"atlas_import_preview_sample_limit": "nope"}, clear=False), \
+            invalid_limit_cfg = {
+                "atlas_import_preview_sample_limit": "nope",
+            }
+            with mock.patch("services.atlas.import_limits.resolve_effective_cfg", return_value=invalid_limit_cfg), \
                     mock.patch.object(atlas_import_workflow.log, "warning") as mock_config_warning:
                 invalid_config_preview = client.post(
                     "/atlas/imports/preview",
@@ -4041,8 +4045,9 @@ class TestTeamRoutes:
             _CapturedThread.instances = []
             fake_proc = _RouteFakeProc(pid=8790)
 
-            with mock.patch("config.CFG", {**shell_app_module.CFG, **workspace_cfg}), \
-                 mock.patch("blueprints.run.CFG", {**shell_app_module.CFG, **workspace_cfg}), \
+            patched_cfg = build_test_config(workspace_cfg)
+            with mock.patch("config.CFG", patched_cfg), \
+                 mock.patch("blueprints.run.CFG", patched_cfg), \
                  mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
                  mock.patch("blueprints.run.broker_available", return_value=True), \
                  mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
@@ -17431,7 +17436,9 @@ class TestRunRoute:
         client = get_client()
         session = "client-run-preview-cap-" + uuid.uuid4().hex[:8]
         huge_line = "Current theme: " + ("x" * 1000)
-        with mock.patch.dict("blueprints.run.CFG", {"max_output_lines": 50, "output_preview_max_bytes": 140}):
+        run_cfg = dict(config.CFG)
+        run_cfg.update({"max_output_lines": 50, "output_preview_max_bytes": 140})
+        with mock.patch("blueprints.run.resolve_effective_cfg", return_value=run_cfg):
             resp = client.post(
                 "/run/client",
                 headers={"X-Session-ID": session},

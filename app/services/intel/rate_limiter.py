@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import json
 import logging
 import threading
@@ -35,7 +37,7 @@ def _coerce_positive_int(value: Any, fallback: int) -> int:
     return parsed if parsed > 0 else fallback
 
 
-def _bucket_settings(provider: str, cfg: dict[str, Any], profile: str = "") -> tuple[int, int]:
+def _bucket_settings(provider: str, cfg: Mapping[str, Any], profile: str = "") -> tuple[int, int]:
     setting = rate_limit_setting(provider, profile)
     if setting:
         return (
@@ -111,7 +113,7 @@ def check_rate_limit(
     provider: str,
     *,
     profile: str = "",
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     redis_client=None,
     now: float | None = None,
 ) -> RateLimitResult:

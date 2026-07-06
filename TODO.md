@@ -21,7 +21,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
-  - [Typed, validated configuration model](#typed-validated-configuration-model)
   - [Right-size project documentation](#right-size-project-documentation)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
@@ -32,7 +31,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No Open TODOs are currently tracked.
+No open TODOs are currently tracked.
 
 ---
 
@@ -177,12 +176,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Typed, validated configuration model
-- Problem: configuration is effectively its own subsystem with no schema. `config.py` is ~1,190 lines feeding on large YAML inputs (`commands.yaml` ~184K, `config.yaml` ~42K) plus a ~3,760-line command `registry.py`, and it is consumed through untyped `CFG.get(...)` access scattered across the code. Misconfiguration surfaces late and diffusely rather than at boot.
-- Approach:
-  - Introduce a typed, validated settings model (for example pydantic-settings or equivalent) that fails fast at startup with a clear message when config is missing or malformed.
-  - Replace ad-hoc `CFG.get(...)` reads with attribute access on the validated model so config keys are discoverable and type-checked.
 
 ### Right-size project documentation
 - Problem: several docs are treated as append-only logs and have grown past the point of being read or kept accurate — `CHANGELOG.md` (~792K), `README.md` (~127K), `ARCHITECTURE.md` (~280K), `FEATURES.md` (~188K). Documentation this large drifts from reality and buries the parts newcomers actually need.

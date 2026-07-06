@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from config import APP_CONF_DIR, CONFIG_LOAD_WARNINGS, resolve_effective_cfg
+from config import APP_CONF_DIR, get_config_load_summary, resolve_effective_cfg
 from core.logging_setup import configure_logging
 from services.metrics_environment import setup_prometheus_multiproc_dir
 
@@ -25,9 +25,8 @@ def configure_runtime_logging(cfg: Mapping[str, Any] | None = None) -> None:
 
 def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
     active_cfg = resolve_effective_cfg(cfg)
-    for warning in CONFIG_LOAD_WARNINGS:
-        log.warning("CONFIG_LOCAL_LOAD_FAILED", extra=dict(warning))
     conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
+    load_summary = get_config_load_summary()
     log.info(
         "CONFIG_LOADED",
         extra={
@@ -37,6 +36,10 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
             "log_level": str(active_cfg.get("log_level") or ""),
             "log_format": str(active_cfg.get("log_format") or ""),
+            "warning_count": int(load_summary.get("warning_count") or 0),
+            "schema_field_count": int(load_summary.get("schema_field_count") or 0),
+            "env_key_count": len(load_summary.get("env_keys") or []),
+            "legacy_key_migrated": bool(load_summary.get("legacy_key_migrated", False)),
         },
     )
 

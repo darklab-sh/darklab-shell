@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, Mapping
 
 import config as app_config
 from services.commands.registry import command_root
@@ -318,7 +318,7 @@ def format_jq_value(value: Any, *, raw: bool, compact: bool) -> str:
 class WorkspacePathOutputFilter:
     """Display absolute owner-workspace paths as user-facing workspace paths."""
 
-    def __init__(self, session_id: str, cfg: dict, *, owner_context: OwnerContext | None = None):
+    def __init__(self, session_id: str, cfg: Mapping[str, Any], *, owner_context: OwnerContext | None = None):
         self.prefix = ""
         self.pattern = None
         if not session_id or not cfg.get("workspace_enabled"):

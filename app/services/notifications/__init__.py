@@ -1,5 +1,6 @@
 """Outbound notification service primitives."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from config import resolve_effective_cfg
@@ -12,9 +13,9 @@ from services.notifications.base import (
 from services.notifications.models import ChannelResult, NotificationChannel, NotificationEvent
 
 
-def notification_cfg() -> dict[str, Any]:
+def notification_cfg() -> Mapping[str, Any]:
     cfg = resolve_effective_cfg().get("notifications", {})
-    return cfg if isinstance(cfg, dict) else {}
+    return cfg if isinstance(cfg, Mapping) else {}
 
 
 __all__ = [

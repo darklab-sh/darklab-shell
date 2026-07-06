@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -215,7 +217,7 @@ def report_generation_metadata(
     context: dict[str, Any],
     *,
     generated_at: datetime | str | None = None,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     active_cfg = resolve_effective_cfg(cfg)
     app_name = str(active_cfg.get("app_name") or PROJECT_NAME or "darklab_shell")
@@ -406,7 +408,7 @@ def render_report_markdown(
     session_id: str = "",
     project_id: str = "",
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     generated_at: datetime | str | None = None,
 ) -> str:
     context = compose_report_context(
@@ -424,7 +426,7 @@ def render_report_markdown_from_context(
     context: dict[str, Any],
     *,
     generated_at: datetime | str | None = None,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> str:
     title = report_title(context)
     generation = report_generation_metadata(context, generated_at=generated_at, cfg=cfg)
@@ -443,7 +445,7 @@ def render_report_html(
     session_id: str = "",
     project_id: str = "",
     team_id: str = "",
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
     generated_at: datetime | str | None = None,
 ) -> str:
     context = compose_report_context(
@@ -461,7 +463,7 @@ def render_report_html_from_context(
     context: dict[str, Any],
     *,
     generated_at: datetime | str | None = None,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> str:
     generation = report_generation_metadata(context, generated_at=generated_at, cfg=cfg)
     return _REPORT_HTML_TEMPLATE.render(

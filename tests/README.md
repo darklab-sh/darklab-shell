@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,978
+- behavior tests: 3,991
 - docs/inventory meta-tests: 62
-- `pytest`: 2297 (2248 behavior + 49 meta)
+- `pytest`: 2310 (2261 behavior + 49 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,040
+- total: 4,053
 
 This document is organized in two parts:
 
@@ -515,6 +515,18 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values` | Verifies that `RESTRICTED_COMMAND_INPUT_CIDRS` overrides YAML policy, preserves valid CIDRs, and warns on malformed values. |
 | `TestLoadConfig.test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values` | Verifies generic-output extra domain suffix config normalizes case, dots, IDNs, and duplicate values while warning on invalid suffixes. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
+| `TestLoadConfig.test_unknown_yaml_keys_warn_and_are_ignored` | Verifies unknown top-level and nested config keys warn with source context and stay out of the effective config. |
+| `TestLoadConfig.test_forgiving_config_fields_coerce_human_values` | Verifies forgiving config fields still coerce human-edited boolean, integer, capped integer, and megabyte values before schema validation. |
+| `TestLoadConfig.test_config_yaml_non_mapping_root_fails_fast` | Verifies that a non-mapping `config.yaml` root fails during config load. |
+| `TestLoadConfig.test_malformed_local_config_fails_fast` | Verifies malformed optional local config now fails during config load. |
+| `TestLoadConfig.test_nested_overlay_deep_merges_section_defaults` | Verifies partial nested config overlays keep sibling defaults. |
+| `TestLoadConfig.test_validation_error_reports_source_and_redacts_secret_values` | Verifies validation errors identify the config source without echoing secret values. |
+| `TestLoadConfig.test_validation_error_redacts_only_sensitive_url_fields` | Verifies credential-bearing URL fields are redacted without treating provider names like urlscan as secrets. |
+| `TestLoadConfig.test_app_config_supports_patch_dict_mapping_compatibility` | Verifies the validated config object still supports `mock.patch.dict` mapping semantics. |
+| `TestLoadConfig.test_app_config_mutations_are_validated` | Verifies direct config mutations re-run schema validation and leave the prior valid value intact on failure. |
+| `TestLoadConfig.test_app_config_clear_resets_to_valid_schema_defaults` | Verifies clearing the config mapping resets it through schema defaults instead of leaving a partial invalid mapping. |
+| `TestLoadConfig.test_app_config_overrides_rerun_derived_normalization` | Verifies test config overrides recompute derived byte aliases and database pool relationships. |
+| `TestLoadConfig.test_config_section_helpers_accept_mapping_instances` | Verifies scheduler and notification config section helpers preserve read-only mapping inputs instead of falling back to empty defaults. |
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
 | `TestLoadConfig.test_get_share_redaction_rules_returns_empty_when_disabled` | Checks that effective share redaction rules are empty when the feature is disabled. |
@@ -523,6 +535,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
+| `TestLoadConfig.test_log_loaded_config_does_not_replay_unknown_keys_as_local_load_failures` | Verifies startup config logging does not replay unknown-key warnings under the removed local-load-failure event. |
 | `TestLoadConfig.test_startup_active_run_cleanup_uses_redis_lock` | Verifies startup active-run metadata cleanup only runs once while the Redis lock is held. |
 | `TestLoadConfig.test_startup_active_run_cleanup_runs_without_redis_lock` | Verifies startup active-run metadata cleanup still runs when no Redis lock client is available. |
 | `TestPackagePresetCatalog.test_default_package_presets_match_current_wizard_ids` | Verifies the shipped package preset catalog keeps the four built-in preset ids and policies. |

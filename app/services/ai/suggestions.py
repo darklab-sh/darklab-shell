@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from collections import Counter
 from functools import lru_cache
 import ipaddress
@@ -115,7 +117,7 @@ def validate_suggestions(
     context: dict[str, Any],
     session_id: str,
     project_target_snapshot: list[dict[str, Any]] | None = None,
-    cfg: dict | None = None,
+    cfg: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Return payload with validation fields plus rows for the audit table."""
     active_cfg = resolve_effective_cfg(cfg)
@@ -202,7 +204,7 @@ def _validate_one(
     source_fingerprint: tuple[Any, ...] | None,
     known_ports: set[int],
     session_id: str,
-    cfg: dict,
+    cfg: Mapping[str, Any],
 ) -> dict[str, Any]:
     command = str(item.get("command") or "").strip()
     normalized = unicodedata.normalize("NFKC", command)
@@ -874,7 +876,7 @@ def _is_target_redaction_marker(value: str) -> bool:
     return bool(_TARGET_REDACTION_RE.fullmatch(str(value or "").strip()))
 
 
-def _contains_redaction_marker(command: str, target: str, cfg: dict) -> bool:
+def _contains_redaction_marker(command: str, target: str, cfg: Mapping[str, Any]) -> bool:
     if _TARGET_REDACTION_RE.search(command) or _TARGET_REDACTION_RE.search(target):
         return True
     markers = {REDACTED_ENTITY_SENTINEL, "[secret-name-redacted]"}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Mapping
 
 from services.teams.scope import OwnerContext
 from services.workspace.modes import WORKSPACE_DIR_MODE
@@ -21,17 +21,17 @@ from services.workspace.settings import (
 log = logging.getLogger("services.workspace.files")
 
 
-def owner_workspace_dir(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> Path:
+def owner_workspace_dir(owner: OwnerContext | Any, cfg: Mapping[str, Any] | None = None) -> Path:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
     return workspace_root(settings) / owner_workspace_name(owner)
 
 
-def session_workspace_dir(session_id: str, cfg: dict[str, Any] | None = None) -> Path:
+def session_workspace_dir(session_id: str, cfg: Mapping[str, Any] | None = None) -> Path:
     return owner_workspace_dir(_workspace_session_owner_context(session_id), cfg)
 
 
-def ensure_owner_workspace(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> Path:
+def ensure_owner_workspace(owner: OwnerContext | Any, cfg: Mapping[str, Any] | None = None) -> Path:
     path = owner_workspace_dir(owner, cfg)
     path.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
     try:
@@ -41,11 +41,11 @@ def ensure_owner_workspace(owner: OwnerContext | Any, cfg: dict[str, Any] | None
     return path
 
 
-def ensure_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) -> Path:
+def ensure_session_workspace(session_id: str, cfg: Mapping[str, Any] | None = None) -> Path:
     return ensure_owner_workspace(_workspace_session_owner_context(session_id), cfg)
 
 
-def touch_owner_workspace(owner: OwnerContext | Any, cfg: dict[str, Any] | None = None) -> None:
+def touch_owner_workspace(owner: OwnerContext | Any, cfg: Mapping[str, Any] | None = None) -> None:
     """Mark an owner workspace active without exposing that detail to users."""
     path = ensure_owner_workspace(owner, cfg)
     try:
@@ -63,7 +63,7 @@ def touch_owner_workspace(owner: OwnerContext | Any, cfg: dict[str, Any] | None 
         )
 
 
-def touch_session_workspace(session_id: str, cfg: dict[str, Any] | None = None) -> None:
+def touch_session_workspace(session_id: str, cfg: Mapping[str, Any] | None = None) -> None:
     """Mark the session workspace active without exposing that detail to users."""
     touch_owner_workspace(_workspace_session_owner_context(session_id), cfg)
 
@@ -119,7 +119,7 @@ def reject_symlinks_under(path: Path) -> None:
 def resolve_owner_workspace_path(
     owner: OwnerContext | Any,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     ensure_parent: bool = False,
 ) -> Path:
@@ -153,7 +153,7 @@ def resolve_owner_workspace_path(
 def resolve_workspace_path(
     session_id: str,
     relative_path: str,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     *,
     ensure_parent: bool = False,
 ) -> Path:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, NotRequired, TypedDict
 
 from config import resolve_effective_cfg
@@ -126,7 +126,7 @@ def validate_command_for_run(
     *,
     extra_allowed_prefixes: list[str] | None = None,
     owner_context: OwnerContext | None = None,
-    cfg: dict[str, Any] | None = None,
+    cfg: Mapping[str, Any] | None = None,
     is_command_allowed_fn: Callable[[str], tuple[bool, str]] = is_command_allowed,
     validate_command_fn: Callable[..., CommandValidationResult] = validate_command,
 ) -> CommandValidationResult:

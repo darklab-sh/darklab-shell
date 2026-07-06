@@ -42,7 +42,6 @@ def save_client_side_run():
         return capability_response
     client_ip = run_routes.get_client_ip()
     raw_lines = data.get("lines", [])
-    raw_line_count = len(raw_lines) if isinstance(raw_lines, list) else 0
     if not isinstance(raw_lines, list):
         run_routes.log.warning("CLIENT_RUN_OUTPUT_INVALID", extra={
             "session": run_routes.get_log_session_id(session_id),
@@ -50,15 +49,16 @@ def save_client_side_run():
             "cmd": command,
             "payload_type": type(raw_lines).__name__,
         })
+    active_cfg = run_routes.resolve_effective_cfg()
     lines, preview_truncated, output_line_count = run_routes._normalize_client_side_run_lines(raw_lines, command)
     if isinstance(raw_lines, list) and preview_truncated:
         run_routes.log.warning("CLIENT_RUN_OUTPUT_TRUNCATED", extra={
             "session": run_routes.get_log_session_id(session_id),
             "ip": client_ip,
             "cmd": command,
-            "raw_line_count": raw_line_count,
+            "raw_line_count": len(raw_lines),
             "stored_line_count": len(lines),
-            "limit": run_routes.CFG["max_output_lines"],
+            "limit": active_cfg["max_output_lines"],
         })
     run_id = str(run_routes.uuid.uuid4())
     started = datetime.now(timezone.utc)
@@ -68,7 +68,7 @@ def save_client_side_run():
         "run_search",
         run_id,
         output_search_text,
-        run_routes.inline_threshold_bytes(run_routes.CFG.get("runs_search_text_inline_max_bytes")),
+        run_routes.inline_threshold_bytes(active_cfg.get("runs_search_text_inline_max_bytes")),
     )
 
     run_routes.log.info("RUN_START", extra={

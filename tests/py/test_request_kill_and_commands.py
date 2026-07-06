@@ -10,7 +10,7 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app_module
-import config as app_config
+from conftest import build_test_config
 from conftest import make_test_app as _test_app
 from blueprints.run import KILL_BIN, SUDO_BIN
 from core.helpers import get_session_id
@@ -1024,7 +1024,7 @@ class TestBuiltinCommandResolution:
         owner = team_owner_context("team-builtins-files", actor_session_id="tok_builtin_actor")
         write_owner_workspace_text_file(owner, "notes.txt", "team notes\n", cfg)
 
-        with mock.patch("config.CFG", {**app_config.CFG, **cfg}):
+        with mock.patch("config.CFG", build_test_config(cfg)):
             read_events, read_exit = execute_builtin_command(
                 "cat notes.txt",
                 "tok_builtin_actor",

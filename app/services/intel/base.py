@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -78,7 +80,7 @@ class Provider(ABC):
         session_token: str,
         *,
         profile: str = "",
-        cfg: dict[str, Any] | None = None,
+        cfg: Mapping[str, Any] | None = None,
         redis_client=None,
         now: float | None = None,
     ):
@@ -93,7 +95,7 @@ class Provider(ABC):
             now=now,
         )
 
-    def cache_ttl(self, entity_type: str, *, cfg: dict[str, Any] | None = None) -> int:
+    def cache_ttl(self, entity_type: str, *, cfg: Mapping[str, Any] | None = None) -> int:
         from services.intel.cache import cache_ttl
 
         scope = self.cache_scopes.get(str(entity_type or "").strip().lower(), entity_type)
