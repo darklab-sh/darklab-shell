@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from core import database
+from core.database_access import get_db_backend
 from core.database_backend import (
     DatabaseBackend,
     SQLiteOperationalError,
@@ -31,7 +31,7 @@ def _history_backend(conn=None) -> DatabaseBackend:
         backend = getattr(conn, "database_backend", None)
         if backend is not None:
             return parse_database_backend(backend)
-    return database.DB_BACKEND
+    return get_db_backend()
 
 
 def normalize_history_filter_text(value: object) -> str:

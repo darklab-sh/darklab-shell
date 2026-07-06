@@ -10,14 +10,14 @@ import tempfile
 import time
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 
 DEFAULT_PROMETHEUS_MULTIPROC_DIR = Path(tempfile.gettempdir()) / "darklab_shell-prom"
 log = logging.getLogger("shell")
 
 
 def setup_prometheus_multiproc_dir(cfg: Mapping[str, Any] | None = None) -> str:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     configured = str(active_cfg.get("prometheus_multiproc_dir") or "").strip()
     path = Path(configured).expanduser() if configured else DEFAULT_PROMETHEUS_MULTIPROC_DIR
     source = "config" if configured else "default"

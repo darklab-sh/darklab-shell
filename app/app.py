@@ -36,7 +36,7 @@ from blueprints.watchers import watchers_bp
 from blueprints.workspace import workspace_bp
 from blueprints.projects import projects_bp
 from core.http_rate_limit import check_dynamic_route_rate_limit
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend
 from core.process import redis_storage_uri
 from services.workspace.files import cleanup_inactive_workspaces
@@ -370,14 +370,14 @@ def _maybe_cleanup_workspaces():
 
 def _maybe_checkpoint_sqlite_wal():
     global _last_sqlite_wal_checkpoint_monotonic
-    if DB_BACKEND != DatabaseBackend.SQLITE:
+    if get_db_backend() != DatabaseBackend.SQLITE:
         return
     now = _sqlite_wal_checkpoint_monotonic()
     if now - _last_sqlite_wal_checkpoint_monotonic < _SQLITE_WAL_CHECKPOINT_INTERVAL_SECONDS:
         return
     _last_sqlite_wal_checkpoint_monotonic = now
     try:
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
     except Exception:
         log.warning("SQLITE_WAL_CHECKPOINT_FAILED", exc_info=True)

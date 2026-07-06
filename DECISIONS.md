@@ -36,6 +36,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [URL Entity Host Links](#url-entity-host-links)
 - [Backend Architecture Decisions](#backend-architecture-decisions)
   - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
+  - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
 - [Frontend Decisions](#frontend-decisions)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Export Rendering Centralization (ExportHtmlUtils)](#export-rendering-centralization-exporthtmlutils)
@@ -164,6 +165,24 @@ This pattern keeps Flask registration stable for `app.create_app()` while lettin
 Services split on real responsibility boundaries rather than line count alone. Query reads, payload shaping, lifecycle orchestration, settings/defaults, import/export helpers, and low-level process helpers can live in focused siblings when that makes ownership clearer. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay whole because splitting them would make review harder, not easier.
 
 The size ratchet in `tests/py/test_architecture.py` records that intent. Split files and cohesive ratchet-only files cannot quietly grow past their current baseline, and every file in the decomposed families must have an explicit budget entry. The route contract and import-compatibility tests make the same point from another angle: decomposition is allowed to move code, but it is not allowed to change user-visible routes or supported parent import surfaces by accident.
+
+### Mutable Runtime State Uses Source-Owner Accessors
+
+**Split services read mutable runtime state from the source owner instead of copying global objects at import time.**
+
+The core modules still own the process-wide state: `config.py` owns the loaded config, `core.database` owns database backend and connection setup, and `core.process` owns Redis/process state. The refactor does not remove those owners. It removes the unsafe pattern where split services copied `CFG`, `DB_BACKEND`, `db_connect`, or `redis_client` into their own module globals and then silently missed later app-factory, worker, or test replacement.
+
+The chosen shape is deliberately small:
+
+- database state goes through `core.database_access.get_db_backend()` and `core.database_access.get_db_connect()`
+- Redis state goes through the shared `core.process.RedisClientProxy` compatibility path
+- config reads use `config.resolve_effective_cfg(cfg=None)` or an explicit `cfg` argument when the caller already owns scoped config
+
+That design keeps the existing runtime owners intact while making reads late-bound. It also keeps tests honest: patches belong on `core.database.DB_BACKEND`, `core.database.db_connect`, `core.process.redis_client`, or `config.CFG`, not on child-module aliases that production code no longer reads.
+
+Removing the core owners outright would be a much larger settings/runtime-container rewrite and would not solve the immediate stale-binding problem by itself. Copying source globals down into child modules was simpler in the short term, but it made split modules fragile under Postgres route tests, worker bootstrap, app-factory replacement, and runtime Redis initialization. The accessor/proxy layer is the smallest durable boundary that fixes those seams without changing the app's public module surfaces.
+
+The architecture suite enforces this decision. It keeps an explicit compatibility baseline for older route-level `CFG` imports, blocks new local service-module singleton bindings, catches alias-style rebinding such as `db_connect = database.db_connect`, and flags module-qualified stale config reads such as `database.CFG`. If a future change needs to expand that baseline, the test failure should be treated as a design review prompt, not just a lint cleanup.
 
 ---
 

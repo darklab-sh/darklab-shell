@@ -5,6 +5,7 @@ import json
 import sqlite3
 import uuid
 
+import config as app_config
 from conftest import make_test_app as _test_app
 from core.database import DB_PATH
 from services.teams.storage import token_hash
@@ -282,7 +283,7 @@ class TestSessionMigrate:
         }
         cfg.update(overrides)
         for key, value in cfg.items():
-            monkeypatch.setitem(workspace.CFG, key, value)
+            monkeypatch.setitem(app_config.CFG, key, value)
         return cfg
 
     def test_returns_200_with_valid_request(self):

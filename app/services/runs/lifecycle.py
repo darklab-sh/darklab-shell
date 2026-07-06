@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from config import CFG, SCANNER_PREFIX
+from config import SCANNER_PREFIX, resolve_effective_cfg
 from core.helpers import get_log_session_id
 from core.output_signals import OutputSignalClassifier
 from services.commands.registry import (
@@ -412,7 +412,7 @@ def prepare_real_command(
     cmd_denied_log_extra_fn: Callable[[str, str, str, str], dict[str, Any]],
     cfg: dict[str, Any] | None = None,
 ) -> PreparedRealCommand:
-    active_cfg = cfg or CFG
+    active_cfg = resolve_effective_cfg(cfg)
     registry_command = execution_command
     effective_context = effective_owner_context_fn(owner_context, session_id)
     validation = validate_command_with_owner_fn(
@@ -548,18 +548,43 @@ def start_real_command_process(
     shell_bin: str | None = None,
     datetime_cls: Any = datetime,
 ) -> StartedRealCommand:
-    active_cfg = cfg or CFG
     run_id = str(uuid.uuid4())
     run_started = datetime_cls.now(timezone.utc).isoformat()
-    capture = run_output_capture_fn(run_id)
-    signal_classifier = output_signal_classifier_cls(
-        prepared_real.execution_command,
-        cmd_type="real",
-        extra_domain_suffixes=active_cfg.get("output_entity_extra_domain_suffixes", []),
-    )
-    workspace_owner = owner_context or owner_context_for_scope_fn(session_id, team_id=team_id)
-    workspace_path_filter = workspace_path_filter_cls(session_id, active_cfg, owner_context=workspace_owner)
-    env_overrides = dict(prepared_real.env_overrides)
+    cfg_source = "explicit" if cfg is not None else "global"
+    output_entity_suffix_count: int | None = None
+    try:
+        active_cfg = resolve_effective_cfg(cfg)
+        output_entity_suffixes = active_cfg.get("output_entity_extra_domain_suffixes", [])
+        output_entity_suffix_count = len(output_entity_suffixes) if hasattr(output_entity_suffixes, "__len__") else None
+        capture = run_output_capture_fn(run_id)
+        signal_classifier = output_signal_classifier_cls(
+            prepared_real.execution_command,
+            cmd_type="real",
+            extra_domain_suffixes=output_entity_suffixes,
+        )
+        workspace_owner = owner_context or owner_context_for_scope_fn(session_id, team_id=team_id)
+        workspace_path_filter = workspace_path_filter_cls(session_id, active_cfg, owner_context=workspace_owner)
+        env_overrides = dict(prepared_real.env_overrides)
+    except Exception as exc:
+        log.error("RUN_SPAWN_SETUP_FAILED", exc_info=True, extra={
+            "run_id": run_id,
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "cmd": original_command,
+            "cfg_source": cfg_source,
+            "workspace_filter": "init",
+            "output_entity_suffix_count": output_entity_suffix_count,
+        })
+        raise RunSpawnError(str(exc)) from exc
+    log.debug("RUN_SPAWN_SETUP_RESOLVED", extra={
+        "run_id": run_id,
+        "session": get_log_session_id(session_id),
+        "team_id": team_id,
+        "cfg_source": cfg_source,
+        "workspace_filter_enabled": bool(active_cfg.get("workspace_enabled")),
+        "output_entity_suffix_count": output_entity_suffix_count,
+    })
     popen_env = None
 
     try:

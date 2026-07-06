@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, TypeVar
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import metadata_owner_id
 from services.projects.contracts import MAX_ENTITY_ID_LEN
@@ -24,9 +24,7 @@ from services.projects.list_metrics import (
     project_entity_owner_clause as _project_entity_owner_clause,
     project_finding_owner_clause as _project_finding_owner_clause,
 )
-from services.projects import artifact_queries as _artifact_queries
 from services.projects import list_queries as _list_queries
-from services.projects import package_queries as _package_queries
 from services.projects.models import (
     row_to_link as _row_to_link,
     row_to_project as _row_to_project,
@@ -55,23 +53,14 @@ _T = TypeVar("_T")
 
 
 def run_project_transaction(callback: Callable[[Any], _T]) -> _T:
-    return run_transaction(callback, connect=db_connect)
-
-
-def _sync_list_query_backend() -> None:
-    _list_queries.DB_BACKEND = DB_BACKEND
-    _list_queries.db_connect = db_connect
-    _artifact_queries.db_connect = db_connect
-    _package_queries.db_connect = db_connect
+    return run_transaction(callback, connect=get_db_connect())
 
 
 def list_projects(session_id, *, include_archived=False, team_id=""):
-    _sync_list_query_backend()
     return _list_queries.list_projects(session_id, include_archived=include_archived, team_id=team_id)
 
 
 def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0, include_counts=False, team_id=""):
-    _sync_list_query_backend()
     return _list_queries.list_projects_page(
         session_id,
         include_archived=include_archived,
@@ -83,12 +72,10 @@ def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0
 
 
 def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
-    _sync_list_query_backend()
     return _list_queries.list_projects_switcher(session_id, query=query, limit=limit, team_id=team_id)
 
 
 def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, offset=0, team_id=""):
-    _sync_list_query_backend()
     return _list_project_artifacts_impl(
         session_id,
         project_id,
@@ -100,27 +87,23 @@ def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, of
 
 
 def get_project_run_file_artifact(session_id, project_id, artifact_id, *, team_id=""):
-    _sync_list_query_backend()
     return _get_project_run_file_artifact_impl(session_id, project_id, artifact_id, team_id=team_id)
 
 
 def _list_all_project_artifacts(session_id, project_id, *, team_id=""):
-    _sync_list_query_backend()
     return _list_all_project_artifacts_impl(session_id, project_id, team_id=team_id)
 
 
 def list_evidence_packages(session_id, project_id, *, team_id=""):
-    _sync_list_query_backend()
     return _list_evidence_packages_impl(session_id, project_id, team_id=team_id)
 
 
 def get_evidence_package(session_id, project_id, package_id, *, team_id=""):
-    _sync_list_query_backend()
     return _get_evidence_package_impl(session_id, project_id, package_id, team_id=team_id)
 
 
 def get_project(session_id, project_id, *, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project_select_prefix = "SELECT "
         project_where_prefix = " FROM projects WHERE "
@@ -205,7 +188,7 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra
         type_filter += "AND e.type = ? "
     run_owner_sql, _run_owner_params = shared_owner_where("", team_id=team_id, table_alias="er")
     entity_owner_sql = "" if team_id else "AND e.session_id = ? "
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     provider_list_expr = dialect.string_agg_distinct("eis.provider")
     value_order_expr = dialect.case_insensitive_order("e.canonical_value")
     return (
@@ -389,7 +372,7 @@ def _project_finding_summary_rows(conn, session_id, project_id, *, team_id=""):
 
 
 def get_project_summary(session_id, project_id, *, team_id="", include_provenance=False):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project_select_prefix = "SELECT "
@@ -679,7 +662,7 @@ def _project_entity_filter_clause(conn, session_id, project_id, filters, *, team
 def list_project_entities(session_id, project_id, filters=None, *, entity_type="", limit=50, offset=0, team_id=""):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     normalized_type = _trim_text(entity_type, 32).lower()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project_row = conn.execute(
             "SELECT 1 FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
@@ -732,7 +715,7 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0, team_id="",
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     search = _trim_text(query, 256).lower()
     search_like = f"%{search}%"
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project_row = conn.execute(

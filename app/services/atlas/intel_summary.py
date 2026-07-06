@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.intel.registry import provider_label
 from services.storage.body_store import load_text_body, stored_body_pointer
@@ -21,7 +21,7 @@ def _load_json_dict(value: object) -> dict[str, Any]:
         text = load_text_body(value)
     else:
         return {}
-    return dialect_for_backend(DB_BACKEND).decode_json_dict(text)
+    return dialect_for_backend(get_db_backend()).decode_json_dict(text)
 
 
 def _row_to_intel_snapshot(row) -> dict[str, Any]:

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import services.runs.comparison as run_comparison
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, SQLiteOperationalError, dialect_for_backend
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id
 from core.output_signals import command_root as output_command_root
@@ -56,52 +56,39 @@ class HistoryListResult:
     fts_query: str | None
 
 
-def _sync_mutation_backend() -> None:
-    _history_mutations.db_connect = db_connect
-
-
 def delete_history_run(**kwargs):
-    _sync_mutation_backend()
     return _history_mutations.delete_history_run(**kwargs)
 
 
 def history_run_cleanup_preview(session_id: str, run_id: str):
-    _sync_mutation_backend()
     return _history_mutations.history_run_cleanup_preview(session_id, run_id)
 
 
 def bulk_export_rows(owner_scope, run_ids: list[str], snapshot_ids: list[str]):
-    _sync_mutation_backend()
     return _history_mutations.bulk_export_rows(owner_scope, run_ids, snapshot_ids)
 
 
 def bulk_delete_runs(**kwargs):
-    _sync_mutation_backend()
     return _history_mutations.bulk_delete_runs(**kwargs)
 
 
 def clear_history_runs(**kwargs):
-    _sync_mutation_backend()
     return _history_mutations.clear_history_runs(**kwargs)
 
 
 def save_snapshot(**kwargs):
-    _sync_mutation_backend()
     return _history_mutations.save_snapshot(**kwargs)
 
 
 def bulk_delete_snapshots(**kwargs):
-    _sync_mutation_backend()
     return _history_mutations.bulk_delete_snapshots(**kwargs)
 
 
 def snapshot_row(share_id: str):
-    _sync_mutation_backend()
     return _history_mutations.snapshot_row(share_id)
 
 
 def delete_snapshot(**kwargs):
-    _sync_mutation_backend()
     return _history_mutations.delete_snapshot(**kwargs)
 
 
@@ -134,11 +121,11 @@ def history_root_rows_from_command_rows(rows) -> list[dict[str, str]]:
 
 def history_match_clause(query: str, scope: str, *, force_like: bool = False):
     clause = run_search_clause(
-        DB_BACKEND,
+        get_db_backend(),
         query,
         scope,
         alias="r",
-        prefer_sqlite_fts=DB_BACKEND != DatabaseBackend.POSTGRES and not force_like,
+        prefer_sqlite_fts=get_db_backend() != DatabaseBackend.POSTGRES and not force_like,
         postgres_placeholder="?",
     )
     return clause.sql, clause.params, clause.fts_query
@@ -164,7 +151,7 @@ def history_base_clause(
     sql = f" FROM runs r WHERE {scope_sql}"
     params: list[Any] = list(scope_params)
     if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
-        run_kind_expr = "r.run_kind" if has_run_kind_column else history_run_kind_sql("r.command", DB_BACKEND)
+        run_kind_expr = "r.run_kind" if has_run_kind_column else history_run_kind_sql("r.command", get_db_backend())
         sql += f" AND {run_kind_expr} = ?"
         params.append(run_kind)
     if project_id:
@@ -245,7 +232,7 @@ def history_snapshot_base_clause(owner_scope, query: str, date_range: str, proje
     if project_id:
         sql += " AND 1 = 0"
     if query:
-        if DB_BACKEND == DatabaseBackend.POSTGRES:
+        if get_db_backend() == DatabaseBackend.POSTGRES:
             sql += " AND s.label ILIKE ?"
             params.append(f"%{query}%")
         else:
@@ -269,7 +256,7 @@ def entity_labels_by_entity_ids(conn, entity_type: str, entity_ids) -> dict[str,
         "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
         "WHERE entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
-        "ORDER BY " + dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC",
+        "ORDER BY " + dialect_for_backend(get_db_backend()).case_insensitive_order("label") + ", created ASC",
         [entity_type, *ids],
     ).fetchall()
     grouped = {entity_id: [] for entity_id in ids}
@@ -537,7 +524,7 @@ def list_history_items(
 
         run_select = (
             "SELECT 'run' AS type, r.id, "
-            + ("r.run_kind" if has_run_kind_column else history_run_kind_sql("r.command", DB_BACKEND))
+            + ("r.run_kind" if has_run_kind_column else history_run_kind_sql("r.command", get_db_backend()))
             + " AS run_kind, r.command, r.started, r.finished, r.exit_code, "
             "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated, "
             "r.command AS label, r.started AS created, r.started AS sort_created"
@@ -613,7 +600,7 @@ def list_history_items(
             item["note_count"] = 1 if item["note"] else 0
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         try:
             query_started = time.perf_counter()
             items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(conn)
@@ -664,7 +651,7 @@ def recent_history_commands(owner_scope, *, limit: int) -> list[dict[str, str]]:
         + scope_sql
         + " GROUP BY command ORDER BY latest_started DESC LIMIT ?"
     )
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(recent_commands_sql, (*scope_params, limit)).fetchall()
     return [
         {"command": str(row["command"]), "started": row["latest_started"]}
@@ -674,9 +661,9 @@ def recent_history_commands(owner_scope, *, limit: int) -> list[dict[str, str]]:
 
 
 def session_history_stats(session_id: str, owner_scope) -> dict[str, Any]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         scope_sql, scope_params = owner_scope.predicate()
-        if DB_BACKEND == DatabaseBackend.POSTGRES:
+        if get_db_backend() == DatabaseBackend.POSTGRES:
             run_stats_prefix = """
                 SELECT COUNT(*) AS total,
                        SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
@@ -758,13 +745,13 @@ def session_history_stats(session_id: str, owner_scope) -> dict[str, Any]:
 
 
 def schedule_refs_for_active_runs(run_ids) -> dict[str, dict[str, str]]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return schedule_refs_by_run(conn, [str(run_id) for run_id in run_ids if str(run_id or "")])
 
 
 def compare_run_rows(session_id: str, left_id: str, right_id: str):
     query_started = time.perf_counter()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
@@ -777,7 +764,7 @@ def compare_run_rows(session_id: str, left_id: str, right_id: str):
 
 
 def compare_candidate_rows(session_id: str, run_id: str):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         source_row = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
@@ -801,7 +788,7 @@ def compare_candidate_rows(session_id: str, run_id: str):
 
 def compare_persisted_objects(session_id: str, left_id: str, right_id: str):
     query_started = time.perf_counter()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         left_findings, left_persisted_finding_count, left_findings_truncated = (
             run_comparison.run_finding_compare_items(
                 conn,
@@ -871,7 +858,7 @@ def compare_persisted_objects(session_id: str, left_id: str, right_id: str):
 
 
 def history_run_row(run_id: str):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
@@ -882,7 +869,7 @@ def history_run_row(run_id: str):
 
 
 def history_run_private_metadata(run_id: str, session_id: str, run_team_id: str, *, include_private_metadata: bool):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         artifacts_by_run = run_file_artifacts_by_run(conn, [run_id])
         finding_counts_by_run = run_finding_counts_by_run(conn, [run_id]) if include_private_metadata else {}
         atlas_counts = (

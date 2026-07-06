@@ -4,13 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, TypeVar
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.atlas import intel_summary as _intel_summary_module
-from services.atlas import lookup_export as _lookup_export_module
-from services.atlas import lookup_metadata as _lookup_metadata_module
-from services.atlas import lookup_runs as _lookup_runs_module
-from services.atlas import lookup_search as _lookup_search_module
 from services.atlas.lookup_filters import (
     finding_run_filter_params as _finding_run_filter_params,
     finding_run_filter_sql as _finding_run_filter_sql,
@@ -102,13 +97,11 @@ _T = TypeVar("_T")
 
 
 def run_atlas_read(callback: Callable[[Any], _T]) -> _T:
-    _sync_lookup_backends()
-    return run_read(callback, connect=db_connect)
+    return run_read(callback, connect=get_db_connect())
 
 
 def run_atlas_transaction(callback: Callable[[Any], _T]) -> _T:
-    _sync_lookup_backends()
-    return run_transaction(callback, connect=db_connect)
+    return run_transaction(callback, connect=get_db_connect())
 
 
 def atlas_summary_for_owner(session_id: str, *, team_id: str, **filters: str) -> dict[str, Any]:
@@ -251,31 +244,19 @@ def _row_to_finding(row) -> dict[str, Any]:
     }
 
 
-def _sync_lookup_backends() -> None:
-    _intel_summary_module.DB_BACKEND = DB_BACKEND
-    _lookup_export_module.DB_BACKEND = DB_BACKEND
-    _lookup_metadata_module.DB_BACKEND = DB_BACKEND
-    _lookup_runs_module.DB_BACKEND = DB_BACKEND
-    _lookup_search_module.DB_BACKEND = DB_BACKEND
-
-
 def list_source_runs(*args, **kwargs):
-    _sync_lookup_backends()
     return _list_source_runs_impl(*args, **kwargs)
 
 
 def atlas_counts_by_run(*args, **kwargs):
-    _sync_lookup_backends()
     return _atlas_counts_by_run_impl(*args, **kwargs)
 
 
 def atlas_entities_export(*args, **kwargs):
-    _sync_lookup_backends()
     return _atlas_entities_export_impl(*args, **kwargs)
 
 
 def _metadata_for_entity(conn, session_id: str, entity_id: str, *, team_id: str = "") -> dict[str, Any]:
-    _sync_lookup_backends()
     metadata_owner_sql = _metadata_owner_sql("", team_id)
     project_scope_sql = _project_scope_sql("p", team_id)
     return _metadata_for_entity_impl(
@@ -289,7 +270,6 @@ def _metadata_for_entity(conn, session_id: str, entity_id: str, *, team_id: str 
 
 
 def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str], *, team_id: str = "") -> dict[str, dict[str, Any]]:
-    _sync_lookup_backends()
     metadata_owner_sql = _metadata_owner_sql("", team_id)
     project_scope_sql = _project_scope_sql("p", team_id)
     return _list_metadata_for_entities_impl(
@@ -443,9 +423,8 @@ def list_findings(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    _sync_lookup_backends()
     search = str(query or "").strip()
-    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
     search_columns = [
         "f.title",
         "f.raw_line",
@@ -578,7 +557,6 @@ def list_findings(
         ],
     ).fetchall()
     findings = [_row_to_finding(row) for row in rows]
-    _sync_lookup_backends()
     sources_by_finding = _finding_import_sources_by_id(
         conn,
         session_id,
@@ -601,7 +579,6 @@ def list_findings(
 
 
 def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "") -> dict[str, Any] | None:
-    _sync_lookup_backends()
     finding_scope_sql = _finding_source_scope_sql("f", team_id)
     finding_scope_params = _finding_source_scope_params(session_id, team_id)
     occurrence_scope_sql = _run_scope_sql("r", team_id)
@@ -633,7 +610,6 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
         "ORDER BY fo.seen_at DESC, fo.run_id DESC, fo.line_number DESC LIMIT ?",
         [finding_id, *occurrence_scope_params, ENTITY_DETAIL_RUN_LIMIT],
     ).fetchall()
-    _sync_lookup_backends()
     return {
         "finding": {
             **_row_to_finding(row),
@@ -678,12 +654,11 @@ def list_entities(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    _sync_lookup_backends()
     normalized_type = str(entity_type or "").strip().lower()
     if normalized_type not in ATLAS_ENTITY_TYPES:
         normalized_type = ""
     search = str(query or "").strip()
-    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
     search_columns = ["e.canonical_value"]
     metadata_params = _metadata_owner_params(session_id, team_id)
     search_exprs = _entity_metadata_search_exprs(team_id, "e.id")
@@ -816,7 +791,6 @@ def entity_detail(
     runs_offset: int = 0,
     findings_offset: int = 0,
 ) -> dict[str, Any] | None:
-    _sync_lookup_backends()
     safe_runs_offset = max(0, int(runs_offset or 0))
     safe_findings_offset = max(0, int(findings_offset or 0))
     entity_scope_sql = _entity_scope_sql("e", team_id)
@@ -897,7 +871,6 @@ def entity_detail(
     ).fetchall()
     intel_snapshots = [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows]
     findings = [_row_to_finding(finding) for finding in finding_rows]
-    _sync_lookup_backends()
     sources_by_finding = _finding_import_sources_by_id(
         conn,
         session_id,

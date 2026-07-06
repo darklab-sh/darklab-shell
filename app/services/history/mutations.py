@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.database import db_connect, delete_run_artifacts, delete_snapshot_metadata
+from core.database import delete_run_artifacts, delete_snapshot_metadata
+from core.database_access import get_db_connect
 from services.atlas.cleanup import atlas_run_cleanup_preview, delete_atlas_cleanup_preview
 from services.audit.models import AuditEventType, AuditTargetType
 from services.audit.recorder import record_event
@@ -21,7 +22,7 @@ def delete_history_run(
 ) -> tuple[int, dict[str, int]]:
     scope_sql, scope_params = owner_scope.predicate()
     atlas_cleanup = {"entities": 0, "findings": 0}
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owned = conn.execute(
             "SELECT id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
             (run_id, *scope_params),
@@ -53,7 +54,7 @@ def delete_history_run(
 
 
 def history_run_cleanup_preview(session_id: str, run_id: str):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owned = conn.execute(
             "SELECT id FROM runs WHERE id = ? AND session_id = ?",
             (run_id, session_id),
@@ -64,7 +65,7 @@ def history_run_cleanup_preview(session_id: str, run_id: str):
 
 
 def bulk_export_rows(owner_scope, run_ids: list[str], snapshot_ids: list[str]):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owned_runs = {}
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
@@ -100,7 +101,7 @@ def bulk_delete_runs(
     counts = {"deleted": 0, "not_found": 0, "rejected": 0}
     results = []
     deletable_ids = []
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         placeholders = ",".join("?" for _ in run_ids)
         scope_sql, scope_params = owner_scope.predicate(table_alias="runs")
         rows = conn.execute(
@@ -145,7 +146,7 @@ def bulk_delete_runs(
 
 
 def clear_history_runs(*, owner_scope, audit_fields: dict[str, Any]) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         scope_sql, scope_params = owner_scope.predicate()
         run_ids = [
             row["id"]
@@ -184,7 +185,7 @@ def save_snapshot(
     audit_details: dict[str, Any],
     redaction_audit: bool,
 ) -> None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO snapshots (id, session_id, team_id, label, created, content) VALUES (?, ?, ?, ?, ?, ?)",
             (share_id, session_id, team_id, label, created, stored_content),
@@ -222,7 +223,7 @@ def bulk_delete_snapshots(
     counts = {"deleted": 0, "not_found": 0, "rejected": 0}
     results = []
     deletable_ids = []
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         placeholders = ",".join("?" for _ in snapshot_ids)
         rows = conn.execute(
             f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
@@ -258,13 +259,13 @@ def bulk_delete_snapshots(
 
 
 def snapshot_row(share_id: str):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute("SELECT * FROM snapshots WHERE id = ?", (share_id,)).fetchone()
     return dict(row) if row else None
 
 
 def delete_snapshot(*, session_id: str, share_id: str, audit_fields: dict[str, Any]) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         snapshot_rows = conn.execute(
             "SELECT id FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),

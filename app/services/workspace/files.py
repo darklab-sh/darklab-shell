@@ -22,7 +22,6 @@ import subprocess
 import tempfile
 from typing import Any, BinaryIO
 
-from config import CFG as CFG  # noqa: F401 - compatibility seam for workspace tests/callers
 from services.teams.scope import OwnerContext
 from services.workspace.modes import (
     WORKSPACE_COMMAND_DIR_MODE as WORKSPACE_COMMAND_DIR_MODE,
@@ -643,12 +642,12 @@ def _check_write_limits(
 def workspace_owner_write_lock(owner: OwnerContext | Any):
     """Serialize quota-gated writes; Postgres locks per owner, SQLite locks all writers."""
     context = _coerce_owner_context(owner)
-    from core import database  # noqa: PLC0415
+    from core.database_access import get_db_backend, get_db_connect  # noqa: PLC0415
     from core.database_backend import DatabaseBackend, postgres_advisory_lock_id  # noqa: PLC0415
 
     namespace = f"darklab_shell_workspace:{context.scope}:{context.owner_id}"
-    with database.db_connect() as conn:
-        if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+    with get_db_connect()() as conn:
+        if get_db_backend() == DatabaseBackend.POSTGRES:
             conn.execute("SELECT pg_advisory_xact_lock(?)", (postgres_advisory_lock_id(namespace),))
         else:
             conn.execute("BEGIN IMMEDIATE")

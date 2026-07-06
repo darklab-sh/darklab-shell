@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.teams.scope import OwnerContext, owner_context_for_scope
 from services.workspace.models import WorkspaceDisabled, WorkspaceError, WorkspaceSettings
 
@@ -31,7 +31,7 @@ def mb_to_bytes(value: Any, default_mb: int) -> int:
 
 
 def workspace_settings(cfg: dict[str, Any] | None = None) -> WorkspaceSettings:
-    active = CFG if cfg is None else cfg
+    active = resolve_effective_cfg(cfg)
     backend = str(active.get("workspace_backend") or "tmpfs").strip().lower()
     if backend not in {"tmpfs", "volume"}:
         backend = "tmpfs"

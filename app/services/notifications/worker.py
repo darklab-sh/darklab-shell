@@ -7,7 +7,7 @@ import os
 import signal
 import time
 
-from config import CFG
+from config import resolve_effective_cfg
 from core.database_backend import is_transient_postgres_error
 from runtime_bootstrap import bootstrap_runtime
 from services.notifications.dispatcher import dispatch_due_events, prune_sent_events
@@ -65,7 +65,13 @@ def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS, limit: int = 100)
 
 def main() -> None:
     try:
-        bootstrap_runtime(CFG, init_metrics=False, init_process=False, init_db=True, runtime_name="notification_worker")
+        bootstrap_runtime(
+            resolve_effective_cfg(),
+            init_metrics=False,
+            init_process=False,
+            init_db=True,
+            runtime_name="notification_worker",
+        )
     except Exception:
         log.error("NOTIFICATION_WORKER_BOOTSTRAP_FAILED", exc_info=True, extra={"phase": "bootstrap_runtime"})
         raise

@@ -7,8 +7,8 @@ from typing import Any
 
 from flask import has_request_context
 
-from config import CFG
-from core.database import db_connect
+from config import resolve_effective_cfg
+from core.database_access import get_db_connect
 from core.helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs
 from core.output_signals import extract_target
 from core.process import active_run_belongs_to_scope, active_runs_for_session
@@ -49,7 +49,7 @@ def enqueue_summary_assist(
     force: bool = False,
     cfg: dict | None = None,
 ) -> tuple[dict[str, Any], int]:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
     if not settings["enabled"]:
         raise AIAssistRouteError("ai_disabled", "AI assists are disabled.", status_code=403)
@@ -126,7 +126,7 @@ def enqueue_next_commands_assist(
     force: bool = False,
     cfg: dict | None = None,
 ) -> tuple[dict[str, Any], int]:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
     if not settings["enabled"]:
         raise AIAssistRouteError("ai_disabled", "AI assists are disabled.", status_code=403)
@@ -285,7 +285,7 @@ def _owned_run_row(session_id: str, run_id: str, *, team_id: str = "") -> dict[s
             "WHERE session_id = ? AND (team_id IS NULL OR team_id = '') AND id = ?"
         )
         params = (session_id, run_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
 

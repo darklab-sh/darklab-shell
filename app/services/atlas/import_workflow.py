@@ -8,7 +8,7 @@ import logging
 import uuid
 from typing import Any, BinaryIO, IO
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend, parse_database_backend
 from core.helpers import get_log_session_id
 from services.atlas.import_analysis import (
@@ -90,7 +90,7 @@ def _timestamp(value: datetime | None = None) -> str:
 
 
 def _conn_dialect(conn):
-    backend = getattr(conn, "database_backend", DB_BACKEND)
+    backend = getattr(conn, "database_backend", get_db_backend())
     return dialect_for_backend(parse_database_backend(backend))
 
 
@@ -145,7 +145,7 @@ def preview_atlas_import(
         created_dt = _utc_now()
         expires_dt = created_dt + timedelta(minutes=_draft_ttl_minutes())
         original_digest = hashlib.sha256(source_bytes).hexdigest()
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             stage = "cleanup_expired_drafts"
             cleanup_expired_import_drafts(conn=conn, now=_timestamp(created_dt))
             stage = "analyze_rows"
@@ -249,7 +249,7 @@ def cleanup_expired_import_drafts(*, conn=None, now: str | None = None) -> int:
     """Delete abandoned, unapplied import drafts whose preview window expired."""
     timestamp = now or project_now()
     if conn is None:
-        with db_connect() as owned_conn:
+        with get_db_connect()() as owned_conn:
             count = cleanup_expired_import_drafts(conn=owned_conn, now=timestamp)
             owned_conn.commit()
             return count
@@ -521,7 +521,7 @@ def _apply_atlas_import_impl(
     now = project_now()
     batch_id = "impb_" + uuid.uuid4().hex
     _update_apply_log_context(log_context, batch_id=batch_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         _update_apply_log_context(log_context, stage="load_draft")
         draft = _load_draft(conn, session_id, draft_id, team_id=team_id)
         if not draft:

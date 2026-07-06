@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
-from core import database
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.atlas.materializer import url_host_identity
 from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip, parse_canonical_port
@@ -101,7 +101,7 @@ def _overview_app_ports_by_host(
         team_id,
         [str(row["id"] or "") for row in rows],
     )
-    dialect = dialect_for_backend(database.DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     by_host: dict[str, dict[tuple[int, str], dict[str, Any]]] = defaultdict(dict)
     skipped_missing_host_count = 0
     skipped_malformed_count = 0
@@ -449,4 +449,3 @@ def _overview_app_evidence(
             if coverage_state == "scanned_no_ports_seen" else ""
         ),
     }
-

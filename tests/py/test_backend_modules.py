@@ -1328,7 +1328,7 @@ class TestAIAssistContextAndStorage:
                 def __exit__(self, exc_type, exc, traceback):
                     return False
 
-            monkeypatch.setattr(ai_storage, "db_connect", lambda: CompatContext())
+            monkeypatch.setattr(database, "db_connect", lambda: CompatContext())
             context = SimpleNamespace(
                 context_hash="ctx-context-manager",
                 input_chars=120,
@@ -2595,7 +2595,11 @@ class TestLoadConfig:
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
 
     def test_startup_active_run_cleanup_uses_redis_lock(self, monkeypatch):
-        fake_redis = process._FakeRedisClient()
+        class FalseyRedis(process._FakeRedisClient):
+            def __bool__(self):
+                return False
+
+        fake_redis = FalseyRedis()
         calls = []
 
         monkeypatch.setattr(process, "redis_client", fake_redis)
@@ -2609,11 +2613,15 @@ class TestLoadConfig:
             },
         )
 
-        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
-        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+        with mock.patch.object(runtime_bootstrap.log, "debug") as debug:
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
 
         assert len(calls) == 1
         assert fake_redis.get(runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY) is not None
+        events = [call.args[0] for call in debug.call_args_list]
+        assert "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_LOCK_ACQUIRED" in events
+        assert "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_LOCK_HELD" in events
 
     def test_startup_active_run_cleanup_runs_without_redis_lock(self, monkeypatch):
         calls = []
@@ -2629,10 +2637,21 @@ class TestLoadConfig:
             },
         )
 
-        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
-        runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+        with mock.patch.object(runtime_bootstrap.log, "warning") as warning:
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
+            runtime_bootstrap.cleanup_active_run_metadata_on_startup()
 
         assert len(calls) == 2
+        call = next(
+            call
+            for call in warning.call_args_list
+            if call.args[0] == "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED"
+        )
+        extra = call.kwargs["extra"]
+        assert extra["redis_client_present"] is False
+        assert extra["redis_client_type"] == ""
+        assert extra["lock_key"] == runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY
+        assert extra["lock_ttl_seconds"] == runtime_bootstrap._ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS
 
 
 class TestPackagePresetCatalog:
@@ -7406,8 +7425,8 @@ class TestTeamModeFoundation:
             team = storage.create_team(conn, name="Scoped Operators", creator_session_token="tok_scope_owner")
             conn.commit()
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 _test_app().test_request_context("/history"):
+            with _test_app().test_request_context("/history"), \
+                 mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
                     scope = request_scope.current_request_scope("tok_scope_owner", request)
             assert scope.is_team is False
@@ -7417,12 +7436,11 @@ class TestTeamModeFoundation:
             assert personal_extra["source"] == "none"
             assert personal_extra["session"].startswith("tok_sco")
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 _test_app().test_request_context(
+            with _test_app().test_request_context(
                 f"/api/v1/history?team_id={team['id']}",
                 method="GET",
                 environ_base={"REMOTE_ADDR": "198.51.100.10"},
-            ):
+            ), mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
                     team_scope = request_scope.current_request_scope("tok_scope_owner", request)
             assert team_scope.is_team is True
@@ -7436,11 +7454,10 @@ class TestTeamModeFoundation:
             assert team_extra["method"] == "GET"
             assert team_extra["session"] != "tok_scope_owner"
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 _test_app().test_request_context(
+            with _test_app().test_request_context(
                 "/api/v1/history",
                 headers={"X-Team-ID": team["id"]},
-            ):
+            ), mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "warning") as mock_warning:
                     with pytest.raises(request_scope.RequestScopeError):
                         request_scope.current_request_scope("tok_scope_other", request)
@@ -7463,14 +7480,14 @@ class TestTeamModeFoundation:
             storage.update_team_status(conn, team["id"], status="archived")
             conn.commit()
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+            with _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}), \
+                 mock.patch.object(database, "db_connect", return_value=conn):
                 with pytest.raises(request_scope.RequestScopeError) as blocked:
                     request_scope.current_request_scope("tok_archived_owner", request)
             assert blocked.value.code == "team_archived"
 
-            with mock.patch.object(request_scope, "db_connect", return_value=conn), \
-                 _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}):
+            with _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}), \
+                 mock.patch.object(database, "db_connect", return_value=conn):
                 scope = request_scope.current_request_scope("tok_archived_owner", request, allow_archived=True)
 
             assert scope.is_team is True
@@ -8239,7 +8256,7 @@ class TestSchedulerFoundation:
             )
             conn.commit()
 
-        monkeypatch.setattr(worker, "CFG", cfg)
+        monkeypatch.setattr(app_config, "CFG", cfg)
         monkeypatch.setattr(worker, "_last_retention_check_monotonic", None)
 
         assert worker.run_once(limit=5) == 0
@@ -8320,9 +8337,8 @@ class TestSchedulerFoundation:
 class TestWatchersFoundation:
     def _watcher_db(self, monkeypatch, tmp_path, *, max_per_session=32):
         db_path = os.path.join(tmp_path, "watchers.db")
-        monkeypatch.setattr(database, "DB_PATH", db_path)
-        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(database, "CFG", {
+        cfg = {
+            **app_config.CFG,
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",
@@ -8332,7 +8348,11 @@ class TestWatchersFoundation:
             "watchers": {
                 "max_per_session": max_per_session,
             },
-        })
+        }
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "CFG", cfg)
+        monkeypatch.setattr(app_config, "CFG", cfg)
         database.db_init()
         return database.db_connect()
 
@@ -10827,9 +10847,11 @@ class TestWatchersFoundation:
 class TestNotificationsPhase0:
     def _notification_db(self, monkeypatch, tmp_path):
         db_path = tmp_path / "notifications.db"
+        cfg = {**app_config.CFG, "permalink_retention_days": 0}
         monkeypatch.setattr(database, "DB_PATH", str(db_path))
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(database, "CFG", {"permalink_retention_days": 0})
+        monkeypatch.setattr(database, "CFG", cfg)
+        monkeypatch.setattr(app_config, "CFG", cfg)
         database.db_init()
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -10941,7 +10963,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"do_not_disturb": True, "retry": {"base_delay_seconds": 1}}
+        app_config.CFG["notifications"] = {"do_not_disturb": True, "retry": {"base_delay_seconds": 1}}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_dnd")
@@ -10997,7 +11019,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"delivery_rate_per_minute": 1}
+        app_config.CFG["notifications"] = {"delivery_rate_per_minute": 1}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_rate")
@@ -11057,7 +11079,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"delivery_rate_per_minute": 1}
+        app_config.CFG["notifications"] = {"delivery_rate_per_minute": 1}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_retry_rate")
@@ -11104,7 +11126,7 @@ class TestNotificationsPhase0:
         from services.notifications import dispatcher
 
         self._notification_db(monkeypatch, tmp_path).close()
-        database.CFG["notifications"] = {"retry": {"base_delay_seconds": 30}}
+        app_config.CFG["notifications"] = {"retry": {"base_delay_seconds": 30}}
 
         assert dispatcher._retry_delay_seconds(1) == 60
         assert dispatcher._retry_delay_seconds(2) == 120
@@ -11121,7 +11143,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"retry": {"max_age_hours": 24, "max_attempts": 6}}
+        app_config.CFG["notifications"] = {"retry": {"max_age_hours": 24, "max_attempts": 6}}
         now = datetime.now(timezone.utc)
         old_created = (now - timedelta(hours=25)).isoformat()
         try:
@@ -11179,7 +11201,7 @@ class TestNotificationsPhase0:
         _reset_channel_registry_for_tests()
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"retry": {"base_delay_seconds": 1, "max_attempts": 6, "max_age_hours": 24}}
+        app_config.CFG["notifications"] = {"retry": {"base_delay_seconds": 1, "max_attempts": 6, "max_age_hours": 24}}
         now = datetime.now(timezone.utc).isoformat()
         try:
             self._insert_channel(conn, "ntc_failure_modes")
@@ -11241,7 +11263,7 @@ class TestNotificationsPhase0:
         from services.notifications.models import STATUS_DEAD, STATUS_SENT, TRIGGER_TEST
 
         conn = self._notification_db(monkeypatch, tmp_path)
-        database.CFG["notifications"] = {"events": {"retention_days": 30}}
+        app_config.CFG["notifications"] = {"events": {"retention_days": 30}}
         now = datetime(2026, 5, 20, tzinfo=timezone.utc).isoformat()
         old_created = (datetime(2026, 5, 20, tzinfo=timezone.utc) - timedelta(days=31)).isoformat()
         fresh_created = (datetime(2026, 5, 20, tzinfo=timezone.utc) - timedelta(days=1)).isoformat()
@@ -17663,7 +17685,7 @@ class TestRunBrokerMemoryStore:
 
     def test_memory_store_marks_trimmed_replay_with_notice(self):
         store = run_broker._MemoryRunBrokerStore()
-        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+        with mock.patch.dict(app_config.CFG, {"run_broker_max_replay_bytes": 160}):
             store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
             store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
             events = store.events_after("run-1", after_id="0-0", limit=10)
@@ -17675,7 +17697,7 @@ class TestRunBrokerMemoryStore:
 
     def test_memory_store_uses_max_output_lines_as_replay_event_bound(self):
         store = run_broker._MemoryRunBrokerStore()
-        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
+        with mock.patch.dict(app_config.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
             store.publish("run-1", "started", {"run_id": "run-1"})
             store.publish("run-1", "output_batch", {
                 "lines": [{"text": "line 1"}],
@@ -17710,7 +17732,7 @@ class TestRunBrokerMemoryStore:
 
     def test_memory_store_does_not_replay_trim_notice_after_real_cursor(self):
         store = run_broker._MemoryRunBrokerStore()
-        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+        with mock.patch.dict(app_config.CFG, {"run_broker_max_replay_bytes": 160}):
             store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
             tail = store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
 
@@ -17726,7 +17748,7 @@ class TestRunBrokerMemoryStore:
             run_broker.BrokerEvent("6-0", {"type": "exit", "code": 0}),
         ]
 
-        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2}):
+        with mock.patch.dict(app_config.CFG, {"max_output_lines": 2}):
             bounded = run_broker._bounded_replay_events(events)
 
         visible_text = [str(event.payload.get("text", "")) for event in bounded]
@@ -17897,7 +17919,7 @@ class TestRunBrokerMemoryStore:
 
     def test_broker_requires_redis_when_configured(self):
         with mock.patch.object(process, "redis_client", None), \
-             mock.patch.dict(run_broker.CFG, {
+             mock.patch.dict(app_config.CFG, {
                  "run_broker_enabled": True,
                  "run_broker_require_redis": True,
              }):
@@ -17908,7 +17930,7 @@ class TestRunBrokerMemoryStore:
 
     def test_broker_allows_memory_store_when_redis_is_optional(self):
         with mock.patch.object(process, "redis_client", None), \
-             mock.patch.dict(run_broker.CFG, {
+             mock.patch.dict(app_config.CFG, {
                  "run_broker_enabled": True,
                  "run_broker_require_redis": False,
              }):
@@ -17918,6 +17940,54 @@ class TestRunBrokerMemoryStore:
 
 
 class TestProcessRedisWorkerConfiguration:
+    def test_redis_client_proxy_reads_process_state_at_call_time(self, monkeypatch):
+        from blueprints import assets as assets_blueprint
+        from services.pty import state as pty_state
+        from services.pty import wire as pty_wire
+
+        proxy = process.RedisClientProxy()
+
+        def default_arg_status(client=proxy):
+            return bool(client), client.ping()
+
+        monkeypatch.setattr(process, "redis_client", None)
+        assert bool(proxy) is False
+        with pytest.raises(AttributeError):
+            proxy.ping()
+
+        first = process._FakeRedisClient()
+        monkeypatch.setattr(process, "redis_client", first)
+        assert bool(proxy) is True
+        assert proxy.ping() is True
+        assert default_arg_status() == (True, True)
+
+        second = mock.Mock()
+        second.ping.return_value = "pong"
+        monkeypatch.setattr(process, "redis_client", second)
+        assert proxy.ping() == "pong"
+        assert default_arg_status() == (True, "pong")
+
+        runtime_client = process._FakeRedisClient()
+        monkeypatch.setattr(process, "redis_client", runtime_client)
+        assert assets_blueprint._redis_client().ping() is True
+        with mock.patch.dict(app_config.CFG, {"run_broker_enabled": True, "run_broker_require_redis": True}):
+            assert run_broker.broker_available() is True
+            assert run_broker.broker_unavailable_reason() == ""
+        cleanup_owner, lock_type = runtime_bootstrap._acquire_active_run_startup_cleanup_lock()
+        assert (cleanup_owner, lock_type) == (True, "redis")
+
+        run = SimpleNamespace(
+            run_id="pty-late-redis",
+            session_id="sess-late-redis",
+            team_id="",
+            command="bash",
+            started="2026-05-20T12:00:00+00:00",
+            rows=24,
+            cols=80,
+        )
+        pty_state.store_pty_meta(run)
+        assert runtime_client.get(pty_wire.meta_key(run.run_id)) is not None
+
     def test_multi_worker_requires_redis(self):
         with mock.patch.object(process.log, "critical") as critical:
             with pytest.raises(RuntimeError, match="Redis is required when WEB_CONCURRENCY=4"):
@@ -22350,14 +22420,14 @@ class TestRewriteIdempotent:
 
 class TestExpiryNote:
     def test_returns_empty_when_retention_zero(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0}, clear=False):
             result = _expiry_note("2024-01-01T00:00:00+00:00")
         assert result == ""
 
     def test_returns_expiry_text_when_not_expired(self):
         # Created 5 days ago, retention 30 days → ~25 days remaining
         created = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note(created)
         assert "expires in" in result
         assert "days" in result
@@ -22365,25 +22435,25 @@ class TestExpiryNote:
     def test_returns_expires_today_when_less_than_24h(self):
         # Created just under retention_days ago so < 24 h remains
         created = (datetime.now(timezone.utc) - timedelta(days=6, hours=23)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 7}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 7}, clear=False):
             result = _expiry_note(created)
         assert "expires today" in result
 
     def test_returns_empty_when_already_expired(self):
         # Created longer ago than retention
         created = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note(created)
         assert result == ""
 
     def test_returns_empty_on_invalid_date(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note("not-a-date")
         assert result == ""
 
     def test_includes_expiry_date(self):
         created = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30}, clear=False):
             result = _expiry_note(created)
         # Should include a YYYY-MM-DD formatted date
         import re
@@ -22394,15 +22464,15 @@ class TestExpiryNote:
 
 class TestPromptEchoText:
     def test_uses_configured_prompt_identity(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             assert _prompt_echo_text("ls -la") == "ops@darklab:~ $ ls -la"
 
     def test_falls_back_to_default_identity_when_parts_are_missing(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "", "prompt_domain": ""}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "", "prompt_domain": ""}):
             assert _prompt_echo_text("ls -la") == "anon@darklab.sh:~ $ ls -la"
 
     def test_strips_trailing_space_when_label_empty(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
             assert _prompt_echo_text("") == "anon@darklab.sh:~ $"
 
 
@@ -22413,7 +22483,7 @@ class TestNormalizePermalinkLinesPromptEcho:
     same prompt identity as the live shell."""
 
     def test_unstructured_content_uses_configured_prefix(self):
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -22423,7 +22493,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
             {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
         ]
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -22433,7 +22503,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
             {"text": "hello", "cls": ""},
         ]
-        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         # Existing echo survives; normalizer does not prepend a second one.
         echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]
@@ -22445,31 +22515,31 @@ class TestNormalizePermalinkLinesPromptEcho:
 
 class TestPermalinkErrorPage:
     def test_returns_404_status(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}, clear=False):
             with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert resp.status_code == 404
 
     def test_includes_noun_in_body(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}, clear=False):
             with _test_app().app_context():
                 resp = _permalink_error_page("run")
         assert b"run" in resp.data
 
     def test_includes_app_name(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}, clear=False):
             with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"my-shell" in resp.data
 
     def test_mentions_retention_when_configured(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}, clear=False):
             with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"30 days" in resp.data or b"1 month" in resp.data
 
     def test_no_retention_mention_when_unlimited(self):
-        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+        with mock.patch.dict("config.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}, clear=False):
             with _test_app().app_context():
                 resp = _permalink_error_page("snapshot")
         # Unlimited mode should not mention an automatic deletion period
@@ -23353,43 +23423,75 @@ class TestDatabaseInit:
             with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                 database.db_init()
 
-    def test_atlas_lookup_syncs_split_module_backend_seams(self, monkeypatch):
-        from services.atlas import intel_summary, lookup as atlas_lookup
-        from services.atlas import lookup_export, lookup_metadata, lookup_runs, lookup_search
+    def test_atlas_lookup_split_modules_read_shared_backend_accessor(self, monkeypatch):
+        from services.atlas import lookup_metadata, lookup_search
 
-        monkeypatch.setattr(atlas_lookup, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
-        for module in (intel_summary, lookup_export, lookup_metadata, lookup_runs, lookup_search):
-            monkeypatch.setattr(module, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        monkeypatch.setattr(atlas_lookup, "_list_source_runs_impl", lambda *args, **kwargs: {"runs": []})
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
+        postgres_dialect = database_backend.dialect_for_backend(database_backend.DatabaseBackend.POSTGRES)
+        postgres_label_order = postgres_dialect.case_insensitive_order("label")
+        assert lookup_metadata.label_order_sql() == postgres_label_order + ", created ASC"
+        assert lookup_search.atlas_search_clause(["entities.canonical_value"]) == (
+            "AND (? = '' OR " + postgres_dialect.text_search_expr("entities.canonical_value") + ") "
+        )
 
-        assert atlas_lookup.list_source_runs(object(), "session") == {"runs": []}
-        assert {
-            module.DB_BACKEND
-            for module in (intel_summary, lookup_export, lookup_metadata, lookup_runs, lookup_search)
-        } == {database_backend.DatabaseBackend.POSTGRES}
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        sqlite_dialect = database_backend.dialect_for_backend(database_backend.DatabaseBackend.SQLITE)
+        sqlite_label_order = sqlite_dialect.case_insensitive_order("label")
+        assert lookup_metadata.label_order_sql() == sqlite_label_order + ", created ASC"
+        assert lookup_search.atlas_search_clause(["entities.canonical_value"]) == (
+            "AND (? = '' OR " + sqlite_dialect.text_search_expr("entities.canonical_value") + ") "
+        )
 
-    def test_project_queries_sync_split_module_db_connect_seams(self, monkeypatch):
-        from services.projects import artifact_queries, package_queries, queries as project_queries
+    def test_split_query_modules_read_shared_db_connect_accessor(self, monkeypatch):
+        from services.atlas import lookup as atlas_lookup
+        from services.history import mutations as history_mutations
+        from services.projects import artifact_queries, package_queries
 
-        def sentinel_connect():
-            raise AssertionError("delegated implementation should be patched")
+        opened = []
 
-        monkeypatch.setattr(project_queries, "db_connect", sentinel_connect)
-        monkeypatch.setattr(artifact_queries, "db_connect", lambda: None)
-        monkeypatch.setattr(package_queries, "db_connect", lambda: None)
-        monkeypatch.setattr(project_queries, "_list_project_artifacts_impl", lambda *args, **kwargs: {"artifacts": []})
-        monkeypatch.setattr(project_queries, "_get_project_run_file_artifact_impl", lambda *args, **kwargs: {"id": "artifact"})
-        monkeypatch.setattr(project_queries, "_list_all_project_artifacts_impl", lambda *args, **kwargs: [])
-        monkeypatch.setattr(project_queries, "_list_evidence_packages_impl", lambda *args, **kwargs: [{"id": "pkg"}])
-        monkeypatch.setattr(project_queries, "_get_evidence_package_impl", lambda *args, **kwargs: {"id": "pkg"})
+        class EmptyCursor:
+            rowcount = 0
 
-        assert project_queries.list_project_artifacts("session", "project") == {"artifacts": []}
-        assert project_queries.get_project_run_file_artifact("session", "project", "artifact") == {"id": "artifact"}
-        assert project_queries._list_all_project_artifacts("session", "project") == []
-        assert project_queries.list_evidence_packages("session", "project") == [{"id": "pkg"}]
-        assert project_queries.get_evidence_package("session", "project", "pkg") == {"id": "pkg"}
-        assert artifact_queries.db_connect is sentinel_connect
-        assert package_queries.db_connect is sentinel_connect
+            def fetchone(self):
+                return None
+
+            def fetchall(self):
+                return []
+
+        class FakeConn:
+            def __init__(self):
+                self.queries = []
+
+            def __enter__(self):
+                opened.append(self)
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def execute(self, sql, params=()):
+                self.queries.append((sql, tuple(params)))
+                return EmptyCursor()
+
+            def commit(self):
+                return None
+
+        def fake_connect():
+            return FakeConn()
+
+        owner_scope = SimpleNamespace(predicate=lambda *args, **kwargs: ("session_id = ?", ["session"]))
+        monkeypatch.setattr(database, "db_connect", fake_connect)
+
+        assert artifact_queries.list_project_artifacts("session", "project") is None
+        assert package_queries.list_evidence_packages("session", "project") is None
+        assert history_mutations.history_run_cleanup_preview("session", "run-1") is None
+        assert atlas_lookup.run_atlas_read(lambda conn: conn) is opened[-1]
+        assert len(opened) == 4
+        assert any("FROM projects" in query for query, _params in opened[0].queries)
+        assert any("FROM projects" in query for query, _params in opened[1].queries)
+        assert any("FROM runs" in query for query, _params in opened[2].queries)
+        assert history_mutations.bulk_export_rows(owner_scope, [], []) == ({}, {})
+        assert len(opened) == 5
 
     def test_creates_runs_and_snapshots_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -27204,6 +27306,64 @@ class TestSessionVariables:
                     session_variables.expand_session_variables("curl https://$HOST", "sess-vars")
                 with pytest.raises(session_variables.InvalidSessionVariableReference):
                     session_variables.expand_session_variables("curl https://${HOST:-darklab.sh}", "sess-vars")
+
+
+class TestBuiltinConfigAccess:
+    def test_split_builtin_modules_read_shared_config_without_cfg_sync(self, monkeypatch):
+        from services.commands import builtins_discovery, builtins_misc, builtins_runtime, builtins_system, builtins_workspace
+
+        active_cfg = {
+            **app_config.CFG,
+            "app_name": "Phase Three Shell",
+            "command_timeout_seconds": 77,
+            "max_output_lines": 9,
+            "recent_commands_limit": 6,
+            "workspace_enabled": True,
+            "workspace_quota_mb": 12,
+        }
+
+        def fake_faq(app_name, _readme):
+            return [{"question": f"{app_name} question", "answer": "shared config answer"}]
+
+        seen_workspace_cfg = []
+
+        def fake_workspace_settings(cfg):
+            seen_workspace_cfg.append(cfg)
+            return SimpleNamespace(max_files=4, quota_bytes=1024)
+
+        monkeypatch.setattr(app_config, "CFG", active_cfg)
+        monkeypatch.setattr(builtin_commands, "load_all_faq", fake_faq)
+        monkeypatch.setattr(builtins_discovery, "CFG", {"app_name": "stale discovery"}, raising=False)
+        monkeypatch.setattr(builtins_misc, "CFG", {"app_name": "stale misc"}, raising=False)
+        monkeypatch.setattr(builtins_runtime, "CFG", {"recent_commands_limit": 1, "workspace_enabled": False}, raising=False)
+        monkeypatch.setattr(builtins_system, "CFG", {"app_name": "stale system", "workspace_enabled": False}, raising=False)
+        monkeypatch.setattr(builtins_workspace, "CFG", {"workspace_enabled": False}, raising=False)
+        monkeypatch.setattr(builtins_workspace, "workspace_settings", fake_workspace_settings)
+        monkeypatch.setattr(builtins_workspace, "list_owner_workspace_files", lambda *_args: [])
+        monkeypatch.setattr(builtins_workspace, "list_owner_workspace_directories", lambda *_args: [])
+        monkeypatch.setattr(
+            builtins_workspace,
+            "owner_workspace_usage",
+            lambda *_args: SimpleNamespace(file_count=0, bytes_used=0),
+        )
+
+        builtin_commands._sync_builtin_module_hooks()
+
+        faq_text = "\n".join(str(line["text"]) for line in builtins_discovery.run_builtin_faq())
+        limits_text = "\n".join(str(line["text"]) for line in builtins_runtime.run_builtin_limits())
+        assert "Phase Three Shell question" in faq_text
+        assert builtins_misc.run_builtin_banner(load_ascii_art_func=lambda: "") == [
+            {"type": "output", "text": "Phase Three Shell"}
+        ]
+        assert builtins_misc.run_builtin_groups() == [{"type": "output", "text": "Phase Three Shell operators"}]
+        assert builtins_system.run_builtin_env("sess-phase3")[1]["text"] == "APP_NAME=Phase Three Shell"
+        assert builtins_system.run_builtin_pwd() == [{"type": "output", "text": "/"}]
+        assert "77s (0 = unlimited)" in limits_text
+        assert "9" in limits_text
+        assert "12 MB" in limits_text
+        workspace_lines = builtins_workspace.run_builtin_workspace("file list", "sess-phase3")
+        assert any(str(line["text"]).startswith("Session files:") for line in workspace_lines)
+        assert seen_workspace_cfg == [active_cfg]
 
 
 class TestBuiltinStatus:

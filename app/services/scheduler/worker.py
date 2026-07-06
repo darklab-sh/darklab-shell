@@ -12,7 +12,7 @@ import signal
 import time
 from typing import Iterator
 
-from config import CFG, resolve_data_dir
+from config import resolve_data_dir, resolve_effective_cfg
 from core import database
 from core.database_backend import DatabaseBackend, is_transient_postgres_error, postgres_advisory_lock_id
 from runtime_bootstrap import bootstrap_runtime
@@ -96,7 +96,7 @@ def maybe_run_retention(
     ):
         return {"runs": 0, "snapshots": 0, "audit_events": 0}
 
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     pruned = database.prune_retention(conn, cfg=active_cfg)
     audit_events = prune_events(conn=conn, now=now, cfg=active_cfg)
     _last_retention_check_monotonic = current_monotonic
@@ -204,7 +204,13 @@ def run_forever(*, tick_seconds: float | None = None, limit: int = 50) -> None:
 
 def main() -> None:
     try:
-        bootstrap_runtime(CFG, init_metrics=False, init_process=True, init_db=True, runtime_name="scheduler_worker")
+        bootstrap_runtime(
+            resolve_effective_cfg(),
+            init_metrics=False,
+            init_process=True,
+            init_db=True,
+            runtime_name="scheduler_worker",
+        )
     except Exception:
         log.error("SCHEDULER_WORKER_BOOTSTRAP_FAILED", exc_info=True, extra={"phase": "bootstrap_runtime", "pid": os.getpid()})
         raise

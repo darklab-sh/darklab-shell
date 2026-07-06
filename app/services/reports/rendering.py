@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from config import APP_VERSION, CFG, PROJECT_NAME
+from config import APP_VERSION, PROJECT_NAME, resolve_effective_cfg
 from services.projects.package_rendering import _PACKAGE_JINJA
 
 from .composition import compose_report_context
@@ -217,7 +217,7 @@ def report_generation_metadata(
     generated_at: datetime | str | None = None,
     cfg: dict | None = None,
 ) -> dict[str, str]:
-    active_cfg = cfg or CFG
+    active_cfg = resolve_effective_cfg(cfg)
     app_name = str(active_cfg.get("app_name") or PROJECT_NAME or "darklab_shell")
     version = str(APP_VERSION or "").strip()
     export = context.get("export") if isinstance(context, dict) else {}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
@@ -24,7 +24,7 @@ def load_session_preferences(conn, session_id):
     ).fetchone()
     if not row:
         return {}
-    return dialect_for_backend(DB_BACKEND).decode_json_dict(row["preferences"])
+    return dialect_for_backend(get_db_backend()).decode_json_dict(row["preferences"])
 
 
 def save_session_preferences(conn, session_id, preferences):
@@ -32,7 +32,7 @@ def save_session_preferences(conn, session_id, preferences):
     conn.execute(
         "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
         "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-        (session_id, dialect_for_backend(DB_BACKEND).json_param(preferences), updated),
+        (session_id, dialect_for_backend(get_db_backend()).json_param(preferences), updated),
     )
 
 

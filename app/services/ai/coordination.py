@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Any, Iterator
 
-from config import CFG
+from config import resolve_effective_cfg
 from core import process
 from services.metrics_lazy import app_metrics
 from services.ai import ai_cfg
@@ -65,7 +65,7 @@ def check_ai_route_rate_limit(
     bypass_session_limit: bool = False,
 ) -> AIRateLimitResult:
     """Consume the per-session and global AI write buckets."""
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     store = _redis_store(redis_client)
     current = time.time() if now is None else float(now)
     session_limit = max(1, int(active_cfg.get("ai_rate_limit_per_session_hour") or 5))
@@ -131,7 +131,7 @@ def enqueue_lock(
 
 def acquire_worker_slot(*, cfg: dict | None = None, redis_client: Any | None = None) -> AIWorkerSlot:
     """Acquire one global provider-call slot or return a non-acquired slot."""
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
     limit = max(1, int(settings.get("max_concurrent") or 1))
     store = _redis_store(redis_client)

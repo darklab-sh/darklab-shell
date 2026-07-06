@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.projects.actors import actor_for_session as _actor_for_session
 from services.projects.actors import team_actor_map as _team_actor_map
 from services.projects.artifacts import (
@@ -136,7 +136,7 @@ def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, of
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     search = _trim_text(filters.get("q") or filters.get("query") or "", 128).lower()
     search_like = f"%{search}%"
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project_row = conn.execute(
@@ -218,7 +218,7 @@ def get_project_run_file_artifact(session_id, project_id, artifact_id, *, team_i
     artifact_id = _trim_text(artifact_id, MAX_ENTITY_ID_LEN)
     if not artifact_id:
         return None
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         row = conn.execute(

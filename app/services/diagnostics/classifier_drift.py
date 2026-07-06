@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any, Mapping, cast
 
-from config import CFG
+from config import resolve_effective_cfg
 from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from services.commands.registry import command_root, is_help_invocation
 from services.runs.kinds import RUN_KIND_BUILTIN
@@ -144,10 +144,11 @@ def _recent_run_rows(conn, limit: int):
 def _reclassify_events(run: Mapping[str, object], events: list[LineEvent]) -> list[LineEvent]:
     command = str(run.get("command") or "")
     cmd_type = "builtin" if str(run.get("run_kind") or "") == RUN_KIND_BUILTIN else "real"
+    cfg = resolve_effective_cfg()
     classifier = OutputSignalClassifier(
         command,
         cmd_type=cmd_type,
-        extra_domain_suffixes=CFG.get("output_entity_extra_domain_suffixes", []),
+        extra_domain_suffixes=cfg.get("output_entity_extra_domain_suffixes", []),
     )
     current_events = []
     for stored in events:

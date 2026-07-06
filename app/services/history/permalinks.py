@@ -10,10 +10,10 @@ from pathlib import Path
 from flask import Response, render_template
 
 from config import (
-    CFG,
     DARK_THEME,
     THEME_REGISTRY,
     get_theme_entry,
+    resolve_effective_cfg,
     theme_runtime_css_vars,
 )
 from core.helpers import FONT_FILES, current_theme_name
@@ -75,13 +75,14 @@ def _format_retention(days: int) -> str:
 
 def _prompt_echo_text(label: str) -> str:
     # Single server-side source of truth for prompt-echo text on synthesized
-    # history/snapshot lines. Reads CFG prompt identity settings so permalinks render
+    # history/snapshot lines. Reads configured prompt identity settings so permalinks render
     # the full configured prefix (e.g. "anon@darklab:~ $ ls -la") rather than a
     # reduced "$ ls -la" echo that drifts from the live shell. Paired with the
     # JS export helper (ExportHtmlUtils.renderExportPromptEcho) that consumes
     # this text by splitting on its first space to colorize the prefix.
-    username = str(CFG.get("prompt_username") or "anon").strip() or "anon"
-    domain = str(CFG.get("prompt_domain") or "darklab.sh").strip() or "darklab.sh"
+    cfg = resolve_effective_cfg()
+    username = str(cfg.get("prompt_username") or "anon").strip() or "anon"
+    domain = str(cfg.get("prompt_domain") or "darklab.sh").strip() or "darklab.sh"
     prefix = f"{username}@{domain}:~ $"
     return f"{prefix} {label}".rstrip()
 
@@ -235,7 +236,7 @@ def _build_permalink_header_model(
 
 def _expiry_note(created: str) -> str:
     """Return an HTML snippet showing how long until this permalink expires."""
-    retention = CFG.get("permalink_retention_days", 0)
+    retention = resolve_effective_cfg().get("permalink_retention_days", 0)
     if not retention:
         return ""
     try:
@@ -270,8 +271,9 @@ def _permalink_context(
 ):
     # Build one context shape for both live responses and downloadable HTML so
     # metadata/actions stay in sync across both surfaces.
-    app_name = CFG.get("app_name", "darklab_shell")
-    theme_entry = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    cfg = resolve_effective_cfg()
+    app_name = cfg.get("app_name", "darklab_shell")
+    theme_entry = get_theme_entry(current_theme_name(), fallback=cfg.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
     created_fmt = created[:19].replace("T", " ") + " UTC"
@@ -319,7 +321,8 @@ def _permalink_context(
 
 def _permalink_error_page(noun: str) -> Response:
     """Render a themed 404 page for a missing permalink (snapshot or run)."""
-    retention = CFG.get("permalink_retention_days", 0)
+    cfg = resolve_effective_cfg()
+    retention = cfg.get("permalink_retention_days", 0)
     retention_str = _format_retention(retention)
     if retention == 0:
         detail = (
@@ -332,8 +335,8 @@ def _permalink_error_page(noun: str) -> Response:
             f"the {noun} may have been deleted, or it may have expired under "
             f"the current retention period ({retention_str})."
         )
-    app_name = CFG.get("app_name", "darklab_shell")
-    current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    app_name = cfg.get("app_name", "darklab_shell")
+    current_theme = get_theme_entry(current_theme_name(), fallback=cfg.get("default_theme", "darklab_obsidian.yaml"))
     html = render_template(
         "permalink_error.html",
         page_title=f"{app_name} — {noun} not found",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.atlas.import_helpers import safe_label as _safe_label
 from services.atlas.import_parser import ImportParserLimits
 
@@ -33,7 +33,7 @@ class AtlasImportError(ValueError):
 
 
 def cfg_limit(key: str, default: int) -> int:
-    raw_value = CFG.get(key, default)
+    raw_value = resolve_effective_cfg().get(key, default)
     invalid = False
     try:
         value = int(raw_value)

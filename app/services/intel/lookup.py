@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any, Callable
 
-from config import CFG
+from config import resolve_effective_cfg
 from core import process
 from core.helpers import get_log_session_id
 from services.metrics_lazy import app_metrics
@@ -165,7 +165,7 @@ def lookup_entity(
     redis_client=None,
 ) -> IntelLookupResult:
     normalized_type = str(entity_type or "").strip().lower()
-    active_cfg = cfg or CFG
+    active_cfg = cfg if cfg is not None else resolve_effective_cfg()
     active_redis = process.redis_client if redis_client is None else redis_client
     canonical = canonical_entity(normalized_type, value)
     lookups: list[ProviderLookup] = []

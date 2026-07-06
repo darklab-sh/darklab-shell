@@ -12,7 +12,7 @@ import re
 import secrets
 import time
 
-from config import CFG, resolve_data_dir
+from config import resolve_data_dir, resolve_effective_cfg
 from core.helpers import get_log_session_id
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -503,6 +503,6 @@ def start_report_export_job(session_id, project_id, draft, *, cfg=None, team_id=
     }
     _write_job(job)
     log.info("REPORT_EXPORT_JOB_QUEUED", extra=_job_log_extra(job))
-    cfg_snapshot = dict(CFG if cfg is None else cfg)
+    cfg_snapshot = dict(resolve_effective_cfg(cfg))
     _EXECUTOR.submit(_run_job, job["id"], cfg_snapshot)
     return _public_job(job)

@@ -5,17 +5,17 @@ from __future__ import annotations
 from typing import Any
 
 def _workspace_project_names_expr() -> str:
-    from core.database import DB_BACKEND  # noqa: PLC0415
+    from core.database_access import get_db_backend  # noqa: PLC0415
     from core.database_backend import dialect_for_backend  # noqa: PLC0415
 
-    return dialect_for_backend(DB_BACKEND).string_agg_distinct("p.name")
+    return dialect_for_backend(get_db_backend()).string_agg_distinct("p.name")
 
 
 def _workspace_label_order_sql() -> str:
-    from core.database import DB_BACKEND  # noqa: PLC0415
+    from core.database_access import get_db_backend  # noqa: PLC0415
     from core.database_backend import dialect_for_backend  # noqa: PLC0415
 
-    return dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC"
+    return dialect_for_backend(get_db_backend()).case_insensitive_order("label") + ", created ASC"
 
 
 def _workspace_metadata_owner_where(scope: Any, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
@@ -34,7 +34,7 @@ def _workspace_metadata_owner_where(scope: Any, table_alias: str = "") -> tuple[
 
 
 def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, dict[str, Any]]:
-    from core.database import db_connect  # noqa: PLC0415
+    from core.database_access import get_db_connect  # noqa: PLC0415
 
     clean_paths = sorted({str(path) for path in paths if path})
     if not clean_paths:
@@ -45,7 +45,7 @@ def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, d
     run_owner_sql, run_owner_params = scope.predicate(table_alias="r")
     project_owner_sql, project_owner_params = scope.predicate(table_alias="p")
     metadata_owner_sql, metadata_owner_params = _workspace_metadata_owner_where(scope)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "  # nosec
             "COUNT(DISTINCT rfa.run_id) AS run_count, MAX(r.started) AS last_seen, "
@@ -112,14 +112,14 @@ def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, d
 
 
 def delete_workspace_file_metadata(scope: Any, paths: list[str]) -> None:
-    from core.database import db_connect  # noqa: PLC0415
+    from core.database_access import get_db_connect  # noqa: PLC0415
 
     clean_paths = sorted({str(path) for path in paths if path})
     if not clean_paths:
         return
     placeholders = ",".join("?" for _ in clean_paths)
     metadata_owner_sql, metadata_owner_params = _workspace_metadata_owner_where(scope)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         conn.execute(
             "DELETE FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "  # nosec
             f"AND entity_id IN ({placeholders})",
@@ -134,7 +134,7 @@ def delete_workspace_file_metadata(scope: Any, paths: list[str]) -> None:
 
 
 def move_workspace_file_metadata(scope: Any, path_map: dict[str, str]) -> None:
-    from core.database import db_connect  # noqa: PLC0415
+    from core.database_access import get_db_connect  # noqa: PLC0415
 
     clean_map = {
         str(source): str(destination)
@@ -146,7 +146,7 @@ def move_workspace_file_metadata(scope: Any, path_map: dict[str, str]) -> None:
     destinations = sorted(set(clean_map.values()))
     placeholders = ",".join("?" for _ in destinations)
     metadata_owner_sql, metadata_owner_params = _workspace_metadata_owner_where(scope)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         conn.execute(
             "DELETE FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "  # nosec
             f"AND entity_id IN ({placeholders})",

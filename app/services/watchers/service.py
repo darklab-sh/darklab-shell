@@ -7,6 +7,7 @@ import logging
 import uuid
 from typing import Any, Callable, TypeVar
 
+from config import resolve_effective_cfg
 from core import database
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
@@ -311,7 +312,7 @@ def row_to_watcher_fire(row: Any) -> WatcherFire:
 
 
 def _max_watchers_per_session() -> int:
-    raw = database.CFG.get("watchers", {}).get("max_per_session")
+    raw = resolve_effective_cfg().get("watchers", {}).get("max_per_session")
     try:
         configured = int(raw or 32)
     except (TypeError, ValueError):

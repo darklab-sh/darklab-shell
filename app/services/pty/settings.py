@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.pty import capture as pty_capture
 
 _PTY_CAPTURE_MAX_HISTORY_LINES = pty_capture._PTY_CAPTURE_MAX_HISTORY_LINES
@@ -41,11 +41,11 @@ def _coerce_non_negative_int(value: object, default: int) -> int:
 
 
 def _cfg_positive_int(key: str, default: int) -> int:
-    return max(1, _coerce_non_negative_int(CFG.get(key), default))
+    return max(1, _coerce_non_negative_int(resolve_effective_cfg().get(key), default))
 
 
 def _cfg_positive_float(key: str, default: float) -> float:
-    value = CFG.get(key)
+    value = resolve_effective_cfg().get(key)
     if value is None or isinstance(value, bool):
         return default
     try:

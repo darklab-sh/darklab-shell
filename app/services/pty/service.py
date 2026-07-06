@@ -21,7 +21,7 @@ from typing import Any, Iterator, cast
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from config import CFG, SCANNER_PREFIX
+from config import SCANNER_PREFIX, resolve_effective_cfg
 from core.process import (
     active_run_claim_owner_transition,
     active_run_owned_by,
@@ -195,7 +195,7 @@ _runs_lock = threading.Lock()
 
 
 def pty_enabled() -> bool:
-    return bool(CFG.get("interactive_pty_enabled", False))
+    return bool(resolve_effective_cfg().get("interactive_pty_enabled", False))
 
 
 def pty_worker_supported() -> bool:
@@ -813,7 +813,7 @@ def start_pty_run(
     default_cols_i = _bounded_dimension(default_cols, 100, 40, 240)
     rows_i = _bounded_dimension(rows, default_rows_i, 10, 60)
     cols_i = _bounded_dimension(cols, default_cols_i, 40, 240)
-    terminal_history_lines = _terminal_history_line_limit(CFG.get("max_output_lines", 0))
+    terminal_history_lines = _terminal_history_line_limit(resolve_effective_cfg().get("max_output_lines", 0))
     run_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
     master_fd = -1
@@ -1143,7 +1143,7 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
         return
 
     current_id = _normalize_event_id(after)
-    block_ms = max(1, int(float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
+    block_ms = max(1, int(float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
     first_read = True
     while True:
         try:

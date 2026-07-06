@@ -8,15 +8,14 @@ import secrets
 import logging
 from datetime import datetime, timezone
 
+from config import resolve_effective_cfg
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 
 log = logging.getLogger("shell")
 
 
 def cfg_int(key, default, *, cfg=None):
-    if cfg is None:
-        from config import CFG
-        cfg = CFG
+    cfg = resolve_effective_cfg(cfg)
     try:
         value = int(cfg.get(key, default))
     except (AttributeError, TypeError, ValueError):

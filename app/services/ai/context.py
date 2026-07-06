@@ -11,8 +11,8 @@ import logging
 import re
 from typing import Any, Mapping
 
-from config import CFG, get_share_redaction_rules
-from core.database import db_connect
+from config import get_share_redaction_rules, resolve_effective_cfg
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, redact_line_entries
 from services.ai import ai_cfg
@@ -69,9 +69,9 @@ def build_run_context(
     variant: str = "default",
 ) -> AIContextResult:
     """Return capped, redacted context for a saved run."""
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         run_row = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "

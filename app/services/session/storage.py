@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.audit.models import AuditEventType
@@ -212,7 +212,7 @@ def save_session_preferences_to_conn(conn: Any, session_id: str, preferences: di
     conn.execute(
         "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
         "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-        (session_id, dialect_for_backend(DB_BACKEND).json_param(preferences), updated),
+        (session_id, dialect_for_backend(get_db_backend()).json_param(preferences), updated),
     )
 
 
@@ -224,7 +224,7 @@ def create_session_token(
     audit_details: dict[str, Any],
     audit_target_id: str,
 ) -> None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO session_tokens (token, created) VALUES (?, ?) ON CONFLICT(token) DO NOTHING",
             (session_token, created),
@@ -240,7 +240,7 @@ def create_session_token(
 
 
 def session_token_created(token: str) -> str | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT created FROM session_tokens WHERE token = ?",
             (token,),
@@ -249,7 +249,7 @@ def session_token_created(token: str) -> str | None:
 
 
 def session_token_exists(token: str) -> bool:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT 1 FROM session_tokens WHERE token = ?",
             (token,),
@@ -264,7 +264,7 @@ def revoke_session_token(
     audit_details: dict[str, Any],
     audit_target_id: str,
 ) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         result = conn.execute(
             "DELETE FROM session_tokens WHERE token = ?",
             (token,),
@@ -420,7 +420,7 @@ def list_recent_values_for_conn(
 
 
 def list_recent_values(session_id: str, team_id: str = "", kinds: Sequence[str] | None = None) -> dict[str, list[str]]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return list_recent_values_for_conn(conn, session_id, team_id, kinds)
 
 
@@ -462,7 +462,7 @@ def upsert_recent_values_for_conn(conn: Any, session_id: str, team_id: str, valu
 
 
 def save_recent_values(session_id: str, team_id: str, values: Any) -> tuple[int, dict[str, list[str]]]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         saved = upsert_recent_values_for_conn(conn, session_id, team_id, values)
         response_values = list_recent_values_for_conn(conn, session_id, team_id)
         conn.commit()
@@ -514,7 +514,7 @@ def migrate_session_records(
     audit_details: dict[str, Any],
     audit_target_id: str,
 ) -> dict[str, int]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         runs_result = conn.execute(
             "UPDATE runs SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
@@ -523,7 +523,7 @@ def migrate_session_records(
             "UPDATE snapshots SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
-        dialect = dialect_for_backend(DB_BACKEND)
+        dialect = dialect_for_backend(get_db_backend())
         stars_insert = conn.execute(
             "INSERT INTO starred_commands (session_id, command) "  # nosec B608
             "SELECT ?, command FROM starred_commands WHERE session_id = ? "
@@ -585,7 +585,7 @@ def migrate_session_records(
 
 
 def get_preferences(session_id: str) -> dict[str, Any]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT preferences, updated FROM session_preferences WHERE session_id = ?",
             (session_id,),
@@ -600,7 +600,7 @@ def get_preferences(session_id: str) -> dict[str, Any]:
 
 def save_preferences(session_id: str, raw_preferences: dict[str, object], updated: str) -> dict[str, object]:
     prefs = normalize_session_preferences(raw_preferences)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if "pref_atlas_saved_views" not in raw_preferences:
             existing_views = load_session_preferences_from_conn(conn, session_id).get("pref_atlas_saved_views")
             if existing_views:
@@ -611,7 +611,7 @@ def save_preferences(session_id: str, raw_preferences: dict[str, object], update
 
 
 def mark_tour_seen(session_id: str, tour_version: int, updated: str) -> dict[str, object]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         prefs = load_session_preferences_from_conn(conn, session_id)
         prefs["pref_tour_seen_version"] = tour_version
         save_session_preferences_to_conn(conn, session_id, prefs, updated)
@@ -620,7 +620,7 @@ def mark_tour_seen(session_id: str, tour_version: int, updated: str) -> dict[str
 
 
 def session_counts(session_id: str) -> dict[str, int]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS n FROM runs WHERE session_id = ?",
             (session_id,),
@@ -641,7 +641,7 @@ def session_counts(session_id: str) -> dict[str, int]:
 
 
 def list_starred_commands(session_id: str) -> list[str]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT command FROM starred_commands WHERE session_id = ? ORDER BY command",
             (session_id,),
@@ -650,7 +650,7 @@ def list_starred_commands(session_id: str) -> list[str]:
 
 
 def add_starred_command(session_id: str, command: str) -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         result = conn.execute(
             "INSERT INTO starred_commands (session_id, command) VALUES (?, ?) "
             "ON CONFLICT(session_id, command) DO NOTHING",
@@ -661,7 +661,7 @@ def add_starred_command(session_id: str, command: str) -> int:
 
 
 def remove_starred_commands(session_id: str, command: str = "") -> int:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if command:
             result = conn.execute(
                 "DELETE FROM starred_commands WHERE session_id = ? AND command = ?",

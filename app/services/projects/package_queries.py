@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.projects.actors import actor_for_session, team_actor_map
 from services.projects.metadata import _attach_package_metadata
 from services.projects.packages import row_to_evidence_package as _row_to_evidence_package
@@ -10,7 +10,7 @@ from services.projects.scope import shared_owner_where
 
 
 def list_evidence_packages(session_id, project_id, *, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
@@ -45,7 +45,7 @@ def list_evidence_packages(session_id, project_id, *, team_id=""):
 
 
 def get_evidence_package(session_id, project_id, package_id, *, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         package_owner_sql = ""
         package_params = [*owner_params, project_id, package_id]

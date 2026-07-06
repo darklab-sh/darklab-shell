@@ -24,28 +24,14 @@ from core.helpers import (
     get_client_ip,
     get_log_session_id,
 )
-import core.process as process_state
+from core.process import RedisClientProxy
 
 log = logging.getLogger("shell")
 
 assets_bp = Blueprint("assets", __name__)
 
 
-class _RedisClientProxy:
-    def _client(self):
-        return process_state.redis_client
-
-    def __bool__(self) -> bool:
-        return bool(self._client())
-
-    def __getattr__(self, name: str):
-        client = self._client()
-        if client is None:
-            raise AttributeError(name)
-        return getattr(client, name)
-
-
-redis_client = _RedisClientProxy()
+redis_client = RedisClientProxy()
 
 
 def _redis_client():

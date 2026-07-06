@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 import unicodedata
 
-from config import CFG, get_share_redaction_rules
+from config import get_share_redaction_rules, resolve_effective_cfg
 from core.helpers import get_log_session_id
 from core.output_signals import command_root as output_command_root
 from core.output_signals import extract_target
@@ -118,7 +118,7 @@ def validate_suggestions(
     cfg: dict | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Return payload with validation fields plus rows for the audit table."""
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     project_targets = project_target_snapshot or []
     trusted_targets = _trusted_targets(context, project_targets)
     source_targets = _source_targets(context, project_targets)

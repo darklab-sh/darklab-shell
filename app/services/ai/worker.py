@@ -9,7 +9,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from core.database_backend import is_transient_postgres_error
 from core.helpers import get_log_session_id
 from runtime_bootstrap import bootstrap_runtime, setup_metrics_environment
@@ -51,7 +51,7 @@ def _load_runtime_dependencies() -> None:
         log.debug("AI_WORKER_DEPENDENCIES_SKIPPED", extra={"reason": "already_loaded"})
     else:
         log.debug("AI_WORKER_DEPENDENCIES_LOADING")
-    setup_metrics_environment(CFG)
+    setup_metrics_environment(resolve_effective_cfg())
     from services import metrics as loaded_metrics  # noqa: PLC0415
     from services.ai import next_commands, summarize  # noqa: PLC0415
     from services.ai.client import (  # noqa: PLC0415
@@ -123,7 +123,7 @@ def run_once(*, limit: int = DEFAULT_LIMIT, cfg: dict | None = None) -> int:
             "AI_ASSIST_STALE_RECLAIMED",
             extra={"count": processed, "stale_after_seconds": 300},
         )
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     for _ in range(max(1, int(limit))):
         try:
             slot = acquire_worker_slot(cfg=active_cfg)
@@ -147,7 +147,7 @@ def run_once(*, limit: int = DEFAULT_LIMIT, cfg: dict | None = None) -> int:
 
 def _process_assist(assist: dict, *, cfg: dict | None = None) -> None:
     _load_runtime_dependencies()
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     assist_id = str(assist.get("id") or "")
     run_id = str(assist.get("run_id") or "")
     session_id = str(assist.get("session_id") or "")
@@ -368,7 +368,7 @@ def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS) -> None:
 
 def main() -> None:
     try:
-        bootstrap_runtime(CFG, init_process=True, init_db=True, runtime_name="ai_worker")
+        bootstrap_runtime(resolve_effective_cfg(), init_process=True, init_db=True, runtime_name="ai_worker")
     except Exception:
         log.error("AI_WORKER_BOOTSTRAP_FAILED", exc_info=True, extra={"phase": "bootstrap_runtime"})
         raise

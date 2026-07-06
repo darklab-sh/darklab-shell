@@ -158,6 +158,8 @@ Before merging a version branch back to `main`:
 
 **Python module layout** — keep blueprints as HTTP adapters. New persistence and business logic belongs in `services/` or shared `core/` helpers, while blueprint siblings should group routes by resource family and register onto the parent blueprint object. Split service files by a real responsibility boundary such as query reads, payload shaping, lifecycle orchestration, defaults/settings, or import/export helpers. If a file is a cohesive artifact, leave it together and let the architecture ratchet guard it from quiet growth.
 
+**Runtime singletons** — don't add local module-level copies of mutable runtime globals. Use `core.process.RedisClientProxy` for Redis state, `core.database_access.get_db_backend()` / `get_db_connect()` for database state, and `config.resolve_effective_cfg(cfg=None)` for service config. If a caller owns the transaction or config, accept that object explicitly instead of importing a local `DB_BACKEND`, `db_connect`, or `CFG` binding. The architecture suite blocks new local singleton bindings outside the approved source-of-truth and compatibility paths.
+
 **JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports intentional browser globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks an intentional browser-boundary publish path. Match the existing style of the file you are editing. ESLint checks app source, tests, tooling, and scripts, enforces syntax/global safety for browser code, and keeps the 2-space indentation, single quote, and no-semicolon rules scoped to config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
@@ -214,8 +216,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2293 pytest + 1474 Vitest + 269 Playwright = 4,036 tests**.
-That total includes 3,976 behavior tests plus 60 docs/inventory meta-tests.
+Current totals: **2297 pytest + 1474 Vitest + 269 Playwright = 4,040 tests**.
+That total includes 3,978 behavior tests plus 62 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration

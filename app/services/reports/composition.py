@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 import config as _config
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import list_project_findings
@@ -301,7 +301,7 @@ def _attach_full_finding_triage(session_id: str, findings: list[dict[str, Any]],
     finding_ids = [str(finding.get("id") or "") for finding in findings if finding.get("id")]
     if not finding_ids:
         return
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
     for finding in findings:
         triage = triage_by_id.get(str(finding.get("id") or ""))

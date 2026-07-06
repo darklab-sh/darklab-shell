@@ -9,7 +9,7 @@ import re
 import subprocess
 from typing import cast
 
-from config import CFG, PROJECT_README
+from config import PROJECT_README, resolve_effective_cfg
 from services.commands.builtins_catalog import _SYNTHETIC_MAN_EXCLUDED_ROOTS
 from services.commands.builtins_format import (
     format_terminal_link as _format_terminal_link,
@@ -397,7 +397,7 @@ def _run_builtin_man_for_synthetic_topic(
 
 
 def run_builtin_faq() -> list[dict[str, object]]:
-    entries = load_all_faq(CFG["app_name"], PROJECT_README)
+    entries = load_all_faq(resolve_effective_cfg()["app_name"], PROJECT_README)
     if not entries:
         return _text_lines([
             "No configured FAQ entries are available in the web shell.",

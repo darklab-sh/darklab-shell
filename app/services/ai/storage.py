@@ -10,7 +10,7 @@ import time
 from typing import Any
 import uuid
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.metrics_lazy import app_metrics
 from services.ai import ai_cfg
 
@@ -28,7 +28,7 @@ def _connection_scope(conn=None):
     if conn is not None:
         yield conn
         return
-    with db_connect() as owned:
+    with get_db_connect()() as owned:
         yield owned
 
 
@@ -341,7 +341,7 @@ def update_assist_progress(assist_id: str, progress: dict[str, Any], *, conn=Non
 def reclaim_stale_assists(*, stale_after_seconds: int = 300) -> int:
     with _timed_db_operation("ai_reclaim_stale_assists"):
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, stale_after_seconds))).isoformat()
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             cur = conn.execute(
                 "UPDATE ai_run_assists SET status = 'failed', progress = ?, error_code = 'ai_unavailable', "
                 "error_message = 'AI worker heartbeat expired', updated_at = ? "
@@ -360,7 +360,7 @@ def list_recent_assists_for_run(
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     with _timed_db_operation("ai_list_recent_assists"):
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             normalized_limit = max(1, min(100, int(limit)))
             if team_id:
                 rows = conn.execute(

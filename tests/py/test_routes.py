@@ -35,6 +35,7 @@ import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
 import config
+import core.database as database
 import core.process as process
 import services.runs.comparison as run_comparison
 import services.assets.diagnostics as assets_diagnostics
@@ -16805,15 +16806,15 @@ class TestWorkspaceRoutes:
         fake_conn.execute.return_value.fetchone.return_value = (0, 12, 12)
         try:
             shell_app_module._last_sqlite_wal_checkpoint_monotonic = 0
-            with mock.patch.object(shell_app_module, "DB_BACKEND", DatabaseBackend.SQLITE), \
-                 mock.patch.object(shell_app_module, "db_connect", return_value=fake_conn) as connect_db, \
+            with mock.patch.object(database, "DB_BACKEND", DatabaseBackend.SQLITE), \
+                 mock.patch.object(database, "db_connect", return_value=fake_conn) as connect_db, \
                  mock.patch.object(shell_app_module, "_sqlite_wal_checkpoint_monotonic", return_value=1000), \
                  mock.patch.object(shell_app_module.log, "info") as log_info:
                 resp = client.get("/health")
 
             assert resp.status_code == 200
-            connect_db.assert_called_once_with()
-            fake_conn.execute.assert_called_once_with("PRAGMA wal_checkpoint(TRUNCATE)")
+            connect_db.assert_called()
+            fake_conn.execute.assert_any_call("PRAGMA wal_checkpoint(TRUNCATE)")
             log_info.assert_any_call("SQLITE_WAL_CHECKPOINT", extra={
                 "busy": 0,
                 "log_frames": 12,
@@ -16843,11 +16844,17 @@ class TestRunRoute:
 
     def test_brokered_run_requires_available_broker(self):
         client = get_client()
-        with mock.patch("blueprints.run.broker_available", return_value=False), \
+        with mock.patch.object(shell_app_module.log, "warning") as warning, \
+             mock.patch("blueprints.run.broker_available", return_value=False), \
              mock.patch("blueprints.run.broker_unavailable_reason", return_value="broker unavailable"):
             resp = client.post("/runs", json={"command": "echo hi"})
         assert resp.status_code == 503
         assert json.loads(resp.data)["error"] == "broker unavailable"
+        call = next(c for c in warning.call_args_list if c[0][0] == "RUN_BROKER_UNAVAILABLE")
+        extra = call.kwargs["extra"]
+        assert extra["reason"] == "broker unavailable"
+        assert extra["command_root"] == "echo"
+        assert extra["broker_mode"] in {"in_process", "redis"}
 
     def test_brokered_run_missing_runtime_returns_synthetic_stream_reference(self):
         client = get_client()

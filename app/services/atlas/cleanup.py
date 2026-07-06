@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.storage.body_store import delete_text_body
@@ -31,11 +31,11 @@ def _placeholders(values: list[str]) -> str:
 
 
 def _insert_ignore_sql(table: str) -> str:
-    return f"INSERT INTO {table} (id) VALUES (?) {dialect_for_backend(DB_BACKEND).insert_or_ignore_clause(('id',))}"  # nosec
+    return f"INSERT INTO {table} (id) VALUES (?) {dialect_for_backend(get_db_backend()).insert_or_ignore_clause(('id',))}"  # nosec
 
 
 def _create_cleanup_temp_table(conn, table_name: str) -> None:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
+    if get_db_backend() == DatabaseBackend.POSTGRES:
         conn.execute(f"DROP TABLE IF EXISTS pg_temp.{table_name}")  # nosec
         conn.execute(
             f"CREATE TEMP TABLE {table_name} (id TEXT PRIMARY KEY) ON COMMIT DROP"  # nosec

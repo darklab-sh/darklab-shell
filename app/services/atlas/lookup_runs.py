@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.atlas.lookup_filters import sql_join as _sql_join
 from services.atlas.scope import (
@@ -36,7 +36,7 @@ def atlas_counts_by_run(conn, session_id: str, run_ids: list[str], *, team_id: s
     }
     if not ids:
         return counts
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     run_filter_sql, run_filter_params = dialect.in_clause("id", ids)
     run_scope_sql = _run_scope_sql("", team_id)
     run_scope_params = _run_scope_params(session_id, team_id)
@@ -100,7 +100,7 @@ def list_source_runs(
     """Return recent/searchable runs that currently contribute Atlas rows."""
     search = str(query or "").strip()
     selected_run_id = str(run_id or "").strip()
-    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
     safe_limit = max(1, min(int(limit or ATLAS_RUN_FILTER_LIMIT), ATLAS_RUN_FILTER_LIMIT))
     run_scope_sql = _run_scope_sql("r", team_id)
     run_scope_params = _run_scope_params(session_id, team_id)
@@ -143,7 +143,7 @@ def list_source_runs(
         "  WHERE ",
         run_scope_sql,
         "  AND (? = '' OR r.id = ? OR ",
-        dialect_for_backend(DB_BACKEND).text_search_expr("r.command"),
+        dialect_for_backend(get_db_backend()).text_search_expr("r.command"),
         "  ) ",
         "  ORDER BY CASE WHEN r.id = ? THEN 0 ELSE 1 END, r.started DESC, r.id DESC ",
         "  LIMIT ?",

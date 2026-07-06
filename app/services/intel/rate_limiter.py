@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from core import process
 from core.helpers import get_log_session_id
 from services.intel.registry import rate_limit_setting
@@ -115,7 +115,7 @@ def check_rate_limit(
     redis_client=None,
     now: float | None = None,
 ) -> RateLimitResult:
-    active_cfg = cfg or CFG
+    active_cfg = cfg if cfg is not None else resolve_effective_cfg()
     capacity, refill_seconds = _bucket_settings(provider, active_cfg, profile)
     current_time = time.time() if now is None else float(now)
     key = _bucket_key(session_token, provider, profile)

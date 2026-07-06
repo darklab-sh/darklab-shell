@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, NotRequired, TypedDict
 
-from config import CFG
+from config import resolve_effective_cfg
 from core.helpers import get_log_session_id
 from services.commands.registry import CommandValidationResult, is_command_allowed, validate_command
 from services.teams.scope import OwnerContext
@@ -140,7 +140,7 @@ def validate_command_for_run(
             display_command=command,
             exec_command=command,
         )
-    active_cfg = cfg or CFG
+    active_cfg = resolve_effective_cfg(cfg)
     effective_owner = effective_owner_context(owner_context, session_id)
     if effective_owner is not None:
         return validate_command_fn(

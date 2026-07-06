@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import (
     metadata_owner_params,
@@ -62,16 +62,16 @@ def row_to_import_source(row) -> dict[str, Any]:
 
 def label_order_sql(prefix: str = "") -> str:
     column = f"{prefix}label" if prefix else "label"
-    return dialect_for_backend(DB_BACKEND).case_insensitive_order(column) + ", created ASC"
+    return dialect_for_backend(get_db_backend()).case_insensitive_order(column) + ", created ASC"
 
 
 def name_order_sql(prefix: str = "") -> str:
     column = f"{prefix}name" if prefix else "name"
-    return dialect_for_backend(DB_BACKEND).case_insensitive_order(column)
+    return dialect_for_backend(get_db_backend()).case_insensitive_order(column)
 
 
 def provider_order_sql() -> str:
-    return dialect_for_backend(DB_BACKEND).case_insensitive_order("provider")
+    return dialect_for_backend(get_db_backend()).case_insensitive_order("provider")
 
 
 def entity_import_sources(conn, session_id: str, entity_id: str, *, team_id: str = "") -> list[dict[str, Any]]:
@@ -100,7 +100,7 @@ def finding_import_sources_by_id(
     ids = list(dict.fromkeys(str(finding_id or "").strip() for finding_id in finding_ids if str(finding_id or "").strip()))
     if not ids:
         return {}
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     id_filter_sql, id_filter_params = dialect.in_clause("occ.finding_id", ids)
     batch_scope_sql = project_scope_sql("batch", team_id)
     batch_scope_params = project_scope_params(session_id, team_id)
@@ -175,7 +175,7 @@ def list_metadata_for_entities(
     if not entity_ids:
         return {}
     metadata_params = metadata_owner_params(session_id, team_id)
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     entity_filter_sql, entity_filter_params = dialect.in_clause("entity_id", entity_ids)
     link_filter_sql, link_filter_params = dialect.in_clause("l.entity_id", entity_ids)
     project_params = project_scope_params(session_id, team_id)

@@ -542,6 +542,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── core/
 │   │   ├── __init__.py         # Core helper package marker
 │   │   ├── database.py         # DB connection, schema init, retention pruning
+│   │   ├── database_access.py  # Lazy database backend/connect accessors for service modules
 │   │   ├── database_backend.py # Backend enum, dialect helpers, pool setup, and storage diagnostics boundary
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
 │   │   ├── http_rate_limit.py  # Baseline dynamic-route throttle for scanner-resistant request handling
@@ -597,6 +598,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── output_structured_signals.py # JSON and structured scanner signal/entity helpers
 │   │   ├── output_targets.py   # Command root and target extraction helpers
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
+│   │   ├── process_redis.py    # Shared Redis client proxy for process-state consumers
 │   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   │   └── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to factory construction)

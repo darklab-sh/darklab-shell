@@ -8,6 +8,7 @@ import sqlite3
 import unittest.mock as mock
 from typing import Any
 
+import config as app_config
 from conftest import make_test_app as _test_app
 from core.database import db_init, db_connect
 from services.commands.builtins import execute_builtin_command
@@ -25,9 +26,8 @@ def _line_text(line: dict[str, object]) -> str:
 def _schedule_client(monkeypatch, tmp_path):
     db_path = str(tmp_path / "schedules.db")
     lock_path = str(tmp_path / "schedules.lock")
-    monkeypatch.setattr("core.database.DB_PATH", db_path)
-    monkeypatch.setattr("core.database.DB_INIT_LOCK_PATH", lock_path)
-    monkeypatch.setattr("core.database.CFG", {
+    cfg = {
+        **app_config.CFG,
         "permalink_retention_days": 0,
         "scheduler": {
             "default_timezone": "UTC",
@@ -35,7 +35,11 @@ def _schedule_client(monkeypatch, tmp_path):
             "max_catchup_window_seconds": 3600,
             "tick_seconds": 5,
         },
-    })
+    }
+    monkeypatch.setattr("core.database.DB_PATH", db_path)
+    monkeypatch.setattr("core.database.DB_INIT_LOCK_PATH", lock_path)
+    monkeypatch.setattr("core.database.CFG", cfg)
+    monkeypatch.setattr("config.CFG", cfg)
     db_init()
     return get_client(), db_path
 
@@ -465,7 +469,7 @@ class TestSchedulesRoutes:
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_cap"
         _register_token(token)
-        with mock.patch.dict("core.database.CFG", {
+        with mock.patch.dict("config.CFG", {
             "permalink_retention_days": 0,
             "scheduler": {
                 "default_timezone": "UTC",

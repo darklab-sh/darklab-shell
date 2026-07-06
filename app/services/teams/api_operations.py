@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.database_access import get_db_connect
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.teams import storage as team_storage
@@ -28,7 +29,7 @@ def _record_team_api_audit(
 
 
 def team_member_for_api(team_id: str, session_token: str) -> dict[str, Any]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         member = team_storage.get_team_membership(conn, team_id, session_token)
     if not member:
         raise TeamNotFound("Team not found.")
@@ -36,7 +37,7 @@ def team_member_for_api(team_id: str, session_token: str) -> dict[str, Any]:
 
 
 def list_teams_for_api(session_id: str) -> list[dict[str, Any]]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         return team_storage.list_teams_for_token(conn, session_id)
 
 
@@ -48,7 +49,7 @@ def create_team_for_api(
     display_name: str,
     audit_fields: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         team, recovery = team_storage.create_team_with_recovery_code(
             conn,
             name=name,
@@ -69,7 +70,7 @@ def create_team_for_api(
 
 
 def team_detail_for_api(team_id: str, session_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         actor = team_storage.get_team_membership(conn, team_id, session_id)
         if not actor:
             raise TeamNotFound("Team not found.")
@@ -89,7 +90,7 @@ def update_team_for_api(
     pause_automation,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, int]]:
     del actor
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         team = team_storage.update_team_status(conn, team_id, status=status)
         paused = {"watchers": 0, "schedules": 0}
         if status == "archived":
@@ -122,7 +123,7 @@ def create_team_invite_for_api(
     label: str,
     audit_fields: dict[str, Any],
 ) -> dict[str, Any]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         team_storage.require_active_team(conn, team_id)
         invite = team_storage.create_team_invite_with_code(
             conn,
@@ -150,7 +151,7 @@ def revoke_team_invite_for_api(
     *,
     audit_fields: dict[str, Any],
 ) -> bool:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         team_storage.require_active_team(conn, team_id)
         invite = conn.execute("SELECT team_id FROM team_invites WHERE id = ?", (invite_id,)).fetchone()
         if not invite or str(invite["team_id"] or "") != team_id:
@@ -175,7 +176,7 @@ def redeem_team_invite_for_api(
     display_name: str,
     audit_fields: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         member = team_storage.redeem_team_invite(
             conn,
             code=code,
@@ -200,7 +201,7 @@ def redeem_team_invite_for_api(
 
 
 def team_member_and_target_for_api(team_id: str, session_id: str, member_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         actor = team_storage.get_team_membership(conn, team_id, session_id)
         if not actor:
             raise TeamNotFound("Team not found.")
@@ -220,7 +221,7 @@ def update_team_member_for_api(
     display_name: str | None,
     audit_fields: dict[str, Any],
 ) -> dict[str, Any]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         member = team_storage.update_team_member(conn, member_id, role=role, display_name=display_name)
         if not member:
             raise TeamNotFound("Team member not found.")
@@ -247,7 +248,7 @@ def remove_team_member_for_api(
     target: dict[str, Any],
     audit_fields: dict[str, Any],
 ) -> bool:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         removed = team_storage.soft_remove_team_member(conn, member_id)
         if removed:
             _record_team_api_audit(
@@ -262,7 +263,7 @@ def remove_team_member_for_api(
 
 
 def leave_team_for_api(team_id: str, *, actor: dict[str, Any], audit_fields: dict[str, Any]) -> bool:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         removed = team_storage.soft_remove_team_member(conn, actor["id"])
         if removed:
             _record_team_api_audit(
@@ -282,7 +283,7 @@ def rotate_team_recovery_for_api(
     actor: dict[str, Any],
     audit_fields: dict[str, Any],
 ) -> dict[str, Any]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         team_storage.require_active_team(conn, team_id)
         recovery = team_storage.rotate_team_recovery_code(
             conn,
@@ -307,7 +308,7 @@ def redeem_team_recovery_for_api(
     display_name: str,
     audit_fields: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    with team_storage.db_connect() as conn:
+    with get_db_connect()() as conn:
         member = team_storage.redeem_team_recovery_code(
             conn,
             code=code,

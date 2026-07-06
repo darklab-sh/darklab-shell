@@ -4,7 +4,7 @@ Active project preference helpers.
 
 from __future__ import annotations
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     ACTIVE_PROJECT_RECENTS_PREF_KEY,
@@ -124,7 +124,7 @@ def active_project_id_from_preferences(conn, session_id, *, team_id=""):
 
 
 def get_active_project(session_id, *, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         preferences = load_session_preferences(conn, session_id)
         preference_key = _active_project_key(team_id)
         project_id = str(preferences.get(preference_key) or "")
@@ -160,7 +160,7 @@ def set_active_project(session_id, project_id, *, team_id=""):
     project_id = trim_text(project_id, MAX_ENTITY_ID_LEN)
     if not project_id:
         raise ProjectWorkspaceError("project_id is required")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project_select_prefix = "SELECT "
         project_where_prefix = " FROM projects WHERE "
@@ -190,7 +190,7 @@ def set_active_project(session_id, project_id, *, team_id=""):
 
 
 def clear_active_project(session_id, *, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if team_id:
             preferences = load_session_preferences(conn, session_id)
             original_preferences = dict(preferences)

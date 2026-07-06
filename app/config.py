@@ -602,6 +602,10 @@ def load_config(conf_dir=None):
 CFG = load_config()
 
 
+def resolve_effective_cfg(cfg=None):
+    return CFG if cfg is None else cfg
+
+
 def _is_writable_directory(path):
     try:
         os.makedirs(path, exist_ok=True)

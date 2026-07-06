@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.helpers import get_log_session_id
 from core.process import active_runs_for_session, active_runs_for_team
 from services.history.run_metadata import (
@@ -89,7 +89,7 @@ def run_status_from_active_or_row(run_id: str, session_id: str, team_id: str = "
     for active in active_runs_for_owner(session_id, team_id):
         if str(active.get("run_id") or "") == run_id:
             return active_run_summary(active)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         scope_sql, scope_params = run_owner_clause(session_id, team_id, alias="")
         row = conn.execute(
             f"SELECT * FROM runs WHERE {scope_sql} AND id = ?",  # nosec
@@ -139,7 +139,7 @@ def history_where(
         where.append("r.started <= ?")
         params.append(filters["until"])
     if filters["q"]:
-        search = run_search_clause(DB_BACKEND, filters["q"], search_scope, alias="r", postgres_placeholder="?")
+        search = run_search_clause(get_db_backend(), filters["q"], search_scope, alias="r", postgres_placeholder="?")
         if search.predicate_sql:
             if offloaded_ids:
                 placeholders = ",".join("?" for _ in offloaded_ids)
@@ -167,7 +167,7 @@ def history_search_candidate_runs(
 ) -> list[dict[str, Any]]:
     offloaded_ids: list[str] = []
     if filters["q"]:
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             offloaded_ids = history_offloaded_search_run_ids(
                 conn,
                 session_id,
@@ -179,7 +179,7 @@ def history_search_candidate_runs(
                 filters["project_id"],
                 run_kind=filters["run_kind"] or "all",
             )
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         where_sql, params = history_where(
             session_id,
             team_id,
@@ -279,7 +279,7 @@ def history_rows(
 ) -> tuple[list[dict[str, Any]], int]:
     offloaded_ids: list[str] = []
     if filters["q"]:
-        with db_connect() as conn:
+        with get_db_connect()() as conn:
             offloaded_ids = history_offloaded_search_run_ids(
                 conn,
                 session_id,
@@ -291,7 +291,7 @@ def history_rows(
                 filters["project_id"],
                 run_kind=filters["run_kind"] or "all",
             )
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         where_sql, params = history_where(session_id, team_id, filters, offloaded_ids=offloaded_ids)
         needs_line_scan = False
         candidate_count: int | None = None
@@ -376,7 +376,7 @@ def history_rows(
 
 
 def load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any] | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         scope_sql, scope_params = run_owner_clause(session_id, team_id, alias="runs")
         row = conn.execute(
             "SELECT runs.*, art.rel_path "  # nosec
@@ -397,7 +397,7 @@ def load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any
 
 
 def artifact_for_run(session_id: str, team_id: str, run_id: str, artifact_id: str) -> dict[str, Any] | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         scope_sql, scope_params = run_owner_clause(session_id, team_id, alias="")
         run_row = conn.execute(
             f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
@@ -420,7 +420,7 @@ def artifact_for_run(session_id: str, team_id: str, run_id: str, artifact_id: st
 
 
 def artifacts_for_run(session_id: str, team_id: str, run_id: str) -> list[dict[str, Any]] | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         scope_sql, scope_params = run_owner_clause(session_id, team_id, alias="")
         run_row = conn.execute(
             f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec

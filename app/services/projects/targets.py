@@ -12,7 +12,8 @@ import re
 from urllib.parse import urlparse
 
 import config as _config
-from core.database import DB_BACKEND, db_connect, validate_project_link_source
+from core.database import validate_project_link_source
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.atlas.materializer import upsert_entity, url_host_identity
@@ -271,7 +272,7 @@ def _target_source_detail(source_detail):
 
 
 def _source_detail_marks_project_target(source_detail):
-    detail = dialect_for_backend(DB_BACKEND).decode_json_dict(source_detail)
+    detail = dialect_for_backend(get_db_backend()).decode_json_dict(source_detail)
     if not isinstance(detail, dict):
         return False
     value = detail.get(PROJECT_TARGET_SOURCE_DETAIL_FLAG)
@@ -323,7 +324,7 @@ def _ensure_project_entity_link(
 ):
     source = validate_project_link_source(source)
     source_detail = _target_source_detail(source_detail)
-    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail)
+    detail_json = dialect_for_backend(get_db_backend()).json_param(source_detail)
     entity_id = upsert_entity(
         conn,
         session_id,
@@ -551,7 +552,7 @@ def list_project_targets(
     include_provenance=False,
 ):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="er")
         metadata_session = metadata_owner_id(session_id, team_id)
@@ -596,7 +597,7 @@ def list_project_targets(
         if normalized_type:
             type_filter += "AND e.type = ? "
             params.append(normalized_type)
-        dialect = dialect_for_backend(DB_BACKEND)
+        dialect = dialect_for_backend(get_db_backend())
         provider_list_expr = dialect.string_agg_distinct("eis.provider")
         value_order_expr = dialect.case_insensitive_order("e.canonical_value")
         rows = conn.execute(
@@ -663,7 +664,7 @@ def add_project_target(session_id, project_id, data, *, team_id=""):
             source="manual",
             team_id=team_id,
         )
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec
@@ -819,7 +820,7 @@ def update_project_target(session_id, project_id, target_id, data, *, team_id=""
     payload = _normalize_target_payload(data, partial=True)
     if not payload:
         raise ProjectWorkspaceError("target update payload is empty")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         current = _select_project_target_row(conn, session_id, project_id, target_id, team_id=team_id)
         if not current:
             return None
@@ -899,7 +900,7 @@ def delete_project_target(session_id, project_id, target_id, *, team_id=""):
     target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
     if not target_id:
         raise ProjectWorkspaceError("target id is required")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE " + project_owner_sql + " AND id = ?",  # nosec

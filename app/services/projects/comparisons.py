@@ -5,7 +5,7 @@ Project run comparison helpers.
 from __future__ import annotations
 
 import services.runs.comparison as run_comparison
-from core.database import db_connect
+from core.database_access import get_db_connect
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
     MAX_LABEL_LEN,
@@ -67,7 +67,7 @@ def _run_compare_summary(row):
 
 def compare_project_runs(session_id, project_id, filters=None):
     filters = filters if isinstance(filters, dict) else {}
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             (session_id, project_id),

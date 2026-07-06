@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.commands.builtins_catalog import (
     _SNARKY_POWEROFF_RESPONSES,
     _SNARKY_REBOOT_RESPONSES,
@@ -20,7 +20,7 @@ from services.commands.registry import load_ascii_art, split_command_argv
 def run_builtin_banner(load_ascii_art_func=load_ascii_art) -> list[dict[str, object]]:
     art = load_ascii_art_func()
     if not art:
-        return [{"type": "output", "text": CFG["app_name"]}]
+        return [{"type": "output", "text": resolve_effective_cfg()["app_name"]}]
     return _text_lines(art.splitlines())
 
 
@@ -62,7 +62,7 @@ def run_builtin_fortune() -> list[dict[str, object]]:
 
 
 def run_builtin_groups() -> list[dict[str, object]]:
-    return [{"type": "output", "text": f"{CFG['app_name']} operators"}]
+    return [{"type": "output", "text": f"{resolve_effective_cfg()['app_name']} operators"}]
 
 
 def run_builtin_poweroff() -> list[dict[str, object]]:

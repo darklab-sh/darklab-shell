@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 from core.helpers import get_log_session_id
 from services.runs.kinds import run_kind_for_cmd_type
 from services.runs.output_model import LineEvent, LineKind, LineRole, line_event_from_legacy
@@ -196,7 +196,7 @@ def brokered_synthetic_run(
     save_completed_run_fn: Callable[..., Any],
     app_metrics_obj,
 ) -> str:
-    active_cfg = cfg or CFG
+    active_cfg = resolve_effective_cfg(cfg)
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = run_output_capture_fn(run_id)
@@ -310,11 +310,44 @@ def brokered_real_run_worker(
     poll_seconds: float,
     datetime_cls: Any = datetime,
 ) -> None:
-    active_cfg = cfg or CFG
-    command_timeout = active_cfg["command_timeout_seconds"] or None
-    heartbeat_interval = active_cfg.get("run_broker_heartbeat_seconds") or active_cfg["heartbeat_interval_seconds"]
-    run_started_dt = datetime_cls.fromisoformat(run_started)
-    trufflehog_output_filter = trufflehog_output_filter_cls(original_command)
+    cfg_source = "explicit" if cfg is not None else "global"
+    active_cfg: dict[str, Any] = {}
+    try:
+        active_cfg = resolve_effective_cfg(cfg)
+        command_timeout = active_cfg["command_timeout_seconds"] or None
+        heartbeat_interval = active_cfg.get("run_broker_heartbeat_seconds") or active_cfg["heartbeat_interval_seconds"]
+        run_started_dt = datetime_cls.fromisoformat(run_started)
+        trufflehog_output_filter = trufflehog_output_filter_cls(original_command)
+    except (KeyError, TypeError, ValueError) as exc:
+        log.error("RUN_BROKER_STREAM_CONFIG_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "ip": client_ip,
+            "cmd": original_command,
+            "cfg_source": cfg_source,
+            "missing_key": str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else "",
+            "error_type": type(exc).__name__,
+            "command_timeout_present": "command_timeout_seconds" in active_cfg,
+            "heartbeat_interval_present": (
+                "heartbeat_interval_seconds" in active_cfg
+                or "run_broker_heartbeat_seconds" in active_cfg
+            ),
+        })
+        try:
+            publish_run_event_fn(run_id, "error", {"text": str(exc)})
+        except Exception:
+            log.error("RUN_BROKER_STREAM_CONFIG_ERROR_PUBLISH_FAILED", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "ip": client_ip,
+            })
+        finally:
+            cleanup_proc_stream_fn(proc)
+            pid_pop_fn(run_id)
+            active_run_remove_fn(run_id)
+        return
 
     def _process_real_output_line(line: str) -> list[str]:
         filtered = workspace_path_filter.process_output_line(line)

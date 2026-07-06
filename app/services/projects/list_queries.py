@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.projects.active import (
     active_project_id_from_preferences as _active_project_id_from_preferences,
@@ -26,7 +26,7 @@ def _project_list_order_sql():
     return (
         "ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, "
         "CASE WHEN status = 'archived' THEN 1 ELSE 0 END, "
-        + dialect_for_backend(DB_BACKEND).case_insensitive_order("name")
+        + dialect_for_backend(get_db_backend()).case_insensitive_order("name")
         + ", updated DESC, created DESC"
     )
 
@@ -63,7 +63,7 @@ def _project_rows_to_list_projects(conn, session_id, rows, *, include_counts=Fal
 
 
 def list_projects(session_id, *, include_archived=False, team_id=""):
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         where_sql, where_params = _project_list_where_sql(session_id, team_id=team_id, include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id, team_id=team_id)
         rows = conn.execute(
@@ -80,7 +80,7 @@ def list_projects(session_id, *, include_archived=False, team_id=""):
 
 def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0, include_counts=False, team_id=""):
     safe_limit, safe_offset = _normalize_page_window(limit, offset, maximum=100)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         where_sql, where_params = _project_list_where_sql(session_id, team_id=team_id, include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id, team_id=team_id)
         total_row = conn.execute(
@@ -112,7 +112,7 @@ def _project_rows_by_id(rows):
 def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
     safe_limit = max(1, min(int(limit or 8), 20))
     search_query = _trim_text(query, MAX_PROJECT_NAME_LEN).strip()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         where_sql, where_params = _project_list_where_sql(session_id, team_id=team_id, include_archived=False)
         active_project_id = _active_project_id_from_preferences(conn, session_id, team_id=team_id)
         recent_project_ids = _active_project_recent_ids_from_preferences(conn, session_id, team_id=team_id, limit=8)
@@ -149,7 +149,7 @@ def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
                 "WHEN LOWER(name) LIKE ? THEN 1 "
                 "ELSE 2 END, "
                 + mru_order_sql
-                + dialect_for_backend(DB_BACKEND).case_insensitive_order("name")
+                + dialect_for_backend(get_db_backend()).case_insensitive_order("name")
                 + ", updated DESC, created DESC "
                 "LIMIT ?",
                 (
@@ -202,7 +202,7 @@ def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
                 + where_sql
                 + exclude_sql
                 + " ORDER BY "
-                + dialect_for_backend(DB_BACKEND).case_insensitive_order("name")
+                + dialect_for_backend(get_db_backend()).case_insensitive_order("name")
                 + ", updated DESC, created DESC "
                 "LIMIT ?",
                 (*where_params, *exclude_params, remaining_limit),

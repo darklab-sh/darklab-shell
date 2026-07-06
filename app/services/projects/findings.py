@@ -11,7 +11,7 @@ import re
 import shlex
 from typing import Any
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from core.output_signals import strip_ansi_codes
 from services.atlas.scope import finding_exists_in_scope
 from services.atlas.recalculation import recalculate_atlas_findings
@@ -244,7 +244,7 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
         "  FROM run_occurrences WHERE row_num = 1"
         ") "
     )
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id)
         run = conn.execute(
             "SELECT 1 FROM runs WHERE " + run_owner_sql + " AND id = ?",  # nosec
@@ -296,7 +296,7 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
     if not finding_id:
         raise ProjectWorkspaceError("finding id is required")
     review_state = _normalize_finding_review_payload(data)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not finding_exists_in_scope(conn, session_id, finding_id, team_id=team_id):
             return None
         result = conn.execute(
@@ -327,7 +327,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
     if len(finding_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         raise ProjectWorkspaceError("too_many")
     review_state = _normalize_finding_review_payload(data)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         project = conn.execute(
@@ -394,7 +394,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
     filters = filters if isinstance(filters, dict) else {}
     paginated = limit is not None or include_total
     safe_limit, safe_offset = _normalize_page_window(limit, offset, enabled=paginated)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id)
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         metadata_owner_sql, metadata_owner_params = _metadata_owner_where(session_id, team_id, table_alias="filter_label")

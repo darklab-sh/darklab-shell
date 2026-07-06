@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from config import APP_CONF_DIR, CFG, CONFIG_LOAD_WARNINGS
+from config import APP_CONF_DIR, CONFIG_LOAD_WARNINGS, resolve_effective_cfg
 from core.logging_setup import configure_logging
 from services.metrics_environment import setup_prometheus_multiproc_dir
 
@@ -20,11 +20,11 @@ _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS = 60
 
 
 def configure_runtime_logging(cfg: Mapping[str, Any] | None = None) -> None:
-    configure_logging(CFG if cfg is None else cfg)
+    configure_logging(resolve_effective_cfg(cfg))
 
 
 def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     for warning in CONFIG_LOAD_WARNINGS:
         log.warning("CONFIG_LOCAL_LOAD_FAILED", extra=dict(warning))
     conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
@@ -42,7 +42,7 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
 
 
 def setup_metrics_environment(cfg: Mapping[str, Any] | None = None) -> str:
-    path = setup_prometheus_multiproc_dir(CFG if cfg is None else cfg)
+    path = setup_prometheus_multiproc_dir(resolve_effective_cfg(cfg))
     os.environ.setdefault("DARKLAB_APP_START_TIME_SECONDS", str(int(time.time())))
     return path
 
@@ -52,7 +52,7 @@ def warn_workspace_root_config_drift(
     environ: Mapping[str, str] | None = None,
 ) -> None:
     """Warn when container env and app config point at different workspace roots."""
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     active_environ = os.environ if environ is None else environ
     env_root = str(active_environ.get("WORKSPACE_ROOT") or "").strip()
     cfg_root = str(active_cfg.get("workspace_root") or "").strip()
@@ -74,7 +74,7 @@ def warn_workspace_root_config_drift(
 def init_process_runtime(cfg: Mapping[str, Any] | None = None) -> object | None:
     from core.process import init_process  # noqa: PLC0415
 
-    return init_process(CFG if cfg is None else cfg)
+    return init_process(resolve_effective_cfg(cfg))
 
 
 def init_database() -> None:
@@ -84,26 +84,41 @@ def init_database() -> None:
 
 
 def _acquire_active_run_startup_cleanup_lock() -> tuple[bool, str]:
-    from core.process import redis_client  # noqa: PLC0415
+    from core import process  # noqa: PLC0415
 
+    redis_client = process.redis_client
+    redis_context = {
+        "redis_client_present": redis_client is not None,
+        "redis_client_type": type(redis_client).__name__ if redis_client is not None else "",
+        "redis_configured": bool(getattr(process, "REDIS_URL", "")),
+        "lock_key": _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY,
+        "lock_ttl_seconds": _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS,
+    }
     if redis_client is None:
         log.warning(
             "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED",
-            extra={"reason": "lock_unavailable", "fallback": "per_worker", "pid": os.getpid()},
+            extra={**redis_context, "reason": "lock_unavailable", "fallback": "per_worker", "pid": os.getpid()},
         )
         return True, "none"
     try:
-        return bool(redis_client.set(
+        lock_acquired = bool(redis_client.set(
             _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY,
             f"{os.getpid()}:{int(time.time())}",
             ex=_ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS,
             nx=True,
-        )), "redis"
+        ))
+        log.debug(
+            "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_LOCK_ACQUIRED"
+            if lock_acquired
+            else "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_LOCK_HELD",
+            extra={**redis_context, "pid": os.getpid(), "lock_type": "redis"},
+        )
+        return lock_acquired, "redis"
     except Exception:
         log.warning(
             "ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED",
             exc_info=True,
-            extra={"reason": "lock_failed", "fallback": "per_worker", "pid": os.getpid()},
+            extra={**redis_context, "reason": "lock_failed", "fallback": "per_worker", "pid": os.getpid()},
         )
         return True, "none"
 
@@ -178,7 +193,7 @@ def bootstrap_runtime(
     cleanup_active_runs: bool = False,
     runtime_name: str = "runtime",
 ) -> None:
-    active_cfg = CFG if cfg is None else cfg
+    active_cfg = resolve_effective_cfg(cfg)
     started = time.monotonic()
     flags = _bootstrap_step_flags(
         init_metrics=init_metrics,
@@ -214,7 +229,7 @@ def bootstrap_runtime(
 
 def bootstrap(config: Mapping[str, Any] | None = None):
     """Build the web app after all runtime side effects have run."""
-    active_config = CFG if config is None else config
+    active_config = resolve_effective_cfg(config)
     started = time.monotonic()
     bootstrap_runtime(active_config, cleanup_active_runs=True, runtime_name="web")
     # app.create_app assembles the product app; app_factory.create_app is the

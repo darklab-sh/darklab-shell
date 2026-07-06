@@ -8,8 +8,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from config import CFG
-from core.database import DB_BACKEND, db_connect
+from config import resolve_effective_cfg
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.atlas.scope import entity_exists_in_scope, metadata_owner_id
@@ -73,7 +73,7 @@ def persist_lookup_for_existing_entity(
     team_id: str = "",
 ) -> dict[str, Any] | None:
     """Persist lookup provider snapshots when the Atlas entity already exists."""
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         entity_id = _matching_entity_id(
             conn,
             session_id,
@@ -93,7 +93,7 @@ def persist_lookup_for_existing_entity(
 
 def refresh_entity_intel(session_id: str, entity_id: str, *, team_id: str = "") -> dict[str, Any] | None:
     """Refresh provider intel for one Atlas entity and persist snapshots."""
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not entity_exists_in_scope(conn, session_id, entity_id, team_id=team_id):
             return None
         entity = conn.execute(
@@ -135,7 +135,7 @@ def _persist_lookup_snapshots(
     fetched_at = _now()
     snapshots: list[dict[str, Any]] = []
     replaced_payloads: list[Any] = []
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         for provider_lookup in lookup.providers:
             provider = provider_lookup.provider
             status = provider_lookup.status
@@ -170,9 +170,9 @@ def _persist_lookup_snapshots(
                 "intel_payload",
                 f"{entity_id}-{provider}",
                 json.dumps(payload, sort_keys=True),
-                inline_threshold_bytes(CFG.get("intel_payload_inline_max_bytes")),
+                inline_threshold_bytes(resolve_effective_cfg().get("intel_payload_inline_max_bytes")),
             )
-            data_json = dialect_for_backend(DB_BACKEND).decode_json_dict(data_json_text)
+            data_json = dialect_for_backend(get_db_backend()).decode_json_dict(data_json_text)
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
                 "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
@@ -188,7 +188,7 @@ def _persist_lookup_snapshots(
                     provider,
                     status,
                     summary,
-                    dialect_for_backend(DB_BACKEND).json_param(data_json),
+                    dialect_for_backend(get_db_backend()).json_param(data_json),
                     fetched_at,
                 ),
             )

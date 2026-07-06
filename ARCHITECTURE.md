@@ -960,7 +960,7 @@ flowchart TB
 
 ### Flask Construction And Startup Contract
 
-`app.create_app(config=None)` is the app-specific factory. It builds a Flask app, registers Darklab's blueprints, hooks, error handlers, Jinja globals, and limiter extension, then returns the app without running startup I/O. Uppercase keys in the optional mapping are copied into `app.config`; the existing lowercase `rate_limit_enabled` convenience maps to `RATELIMIT_ENABLED`. Route and service modules still read the global config until the typed settings work replaces that pattern.
+`app.create_app(config=None)` is the app-specific factory. It builds a Flask app, registers Darklab's blueprints, hooks, error handlers, Jinja globals, and limiter extension, then returns the app without running startup I/O. Uppercase keys in the optional mapping are copied into `app.config`; the existing lowercase `rate_limit_enabled` convenience maps to `RATELIMIT_ENABLED`. Service code reads mutable runtime config through the shared effective-config helper, while app and blueprint modules keep the narrow route-layer globals that still belong to the current Flask wiring.
 
 `app_factory.create_app(...) -> Flask` is the lower-level constructor used by `app.create_app(...)`. It accepts already-chosen extensions, blueprints, hooks, error handlers, and Jinja globals. Application code should normally call `app.create_app(...)` instead of this helper so the product wiring stays centralized.
 
@@ -976,13 +976,19 @@ Service functions open their own `db_connect()` context by default, with common 
 
 `tests/py/test_architecture.py` enforces that boundary. It scans every blueprint for direct connection calls, aliased `db_connect` imports, raw execute-family calls, SQL-shaped string fragments, core database imports, backend/dialect imports, and persistence cleanup helper imports. The execute-family check is intentionally conservative: any `.execute()`, `.executemany()`, or `.executescript()` attribute call in a blueprint is treated as persistence-like and fails the suite.
 
+### Shared Runtime Accessors
+
+Runtime state that tests and startup code may replace has one source of truth. Redis clients are reached through `core.process.RedisClientProxy`, database backend and connection access go through `core.database_access.get_db_backend()` and `get_db_connect()`, and mutable service config is resolved with `config.resolve_effective_cfg(cfg=None)`. These helpers read the live source at call time, so split modules observe the same test overrides and startup state without parent modules copying globals into child modules.
+
+Service modules should not import `DB_BACKEND`, `db_connect`, or `CFG` into local module globals. They should call the shared accessor/helper at the point of use or accept an explicit `cfg`/connection argument when a caller owns that context. Existing route-layer globals that are still part of Flask registration or decorator-time setup are tracked as a compatibility baseline, and `tests/py/test_architecture.py` fails if a new local DB, config, or Redis singleton binding appears outside the approved source-of-truth and compatibility paths.
+
 ### Python Module Layout
 
 Route modules are grouped by the user-facing resource they handle. Large blueprints keep one public blueprint object in the parent module, define that object before importing route-group siblings, and let those sibling modules register routes by importing the parent blueprint. This keeps `app.create_app()` pointed at the same parent blueprint while avoiding one route file that owns every endpoint for a surface.
 
 Service modules are split by responsibility rather than by line count alone. Query helpers, payload shaping, lifecycle orchestration, config/default helpers, and import/export helpers live in focused sibling modules when there is a clean seam. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay in one file because splitting them would make them harder to read.
 
-`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional.
+`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional. It also guards the approved baseline for local DB, config, and Redis singleton bindings so new import-time bindings do not appear.
 
 ### Backend Runtime Boundaries
 
@@ -2219,12 +2225,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,976
-- docs/inventory meta-tests: 60
-- `pytest`: 2293 (2246 behavior + 47 meta)
+- behavior tests: 3,978
+- docs/inventory meta-tests: 62
+- `pytest`: 2297 (2248 behavior + 49 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,036
+- total: 4,040
 
 ### Testing Architecture
 

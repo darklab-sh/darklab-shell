@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, TypeVar
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.storage.transactions import run_transaction
 
@@ -12,7 +12,7 @@ _T = TypeVar("_T")
 
 
 def run_persistence_transaction(callback: Callable[[Any], _T]) -> _T:
-    return run_transaction(callback, connect=db_connect)
+    return run_transaction(callback)
 
 
 def insert_run_row(
@@ -34,7 +34,7 @@ def insert_run_row(
     full_output_truncated: object,
     output_search_text: str,
 ) -> None:
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     conn.execute(
         "INSERT INTO runs "
         "("
@@ -74,7 +74,7 @@ def upsert_run_output_artifact(
     truncated: object,
     created: str,
 ) -> None:
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     params = (
         run_id,
         rel_path,
@@ -84,7 +84,7 @@ def upsert_run_output_artifact(
         dialect.boolean_param(truncated),
         created,
     )
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
+    if get_db_backend() == DatabaseBackend.POSTGRES:
         conn.execute(
             "INSERT INTO run_output_artifacts "
             "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
@@ -136,7 +136,7 @@ def scan_target_observation_count(conn: Any, run_id: str) -> int:
 
 
 def run_scope_visibility_from_db(run_id: str, session_id: str, team_id: str = "") -> tuple[bool, bool, str]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if team_id:
             row = conn.execute(
                 "SELECT 1 FROM runs WHERE id = ? AND team_id = ?",

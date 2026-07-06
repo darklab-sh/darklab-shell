@@ -8,7 +8,8 @@ import ipaddress
 import re
 from typing import Any
 
-from core.database import DB_BACKEND, PROJECT_LINK_SOURCES
+from core.database import PROJECT_LINK_SOURCES
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 
 
@@ -41,7 +42,7 @@ def _decode_source_detail(value: Any) -> dict[str, Any]:
     if value in (None, ""):
         return {}
     try:
-        return dialect_for_backend(DB_BACKEND).decode_json_dict(value)
+        return dialect_for_backend(get_db_backend()).decode_json_dict(value)
     except (TypeError, ValueError):
         return {}
 

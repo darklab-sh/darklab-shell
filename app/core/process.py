@@ -20,6 +20,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from config import CFG
+from core.process_redis import RedisClientProxy as RedisClientProxy
 
 try:
     import psutil  # pyright: ignore[reportMissingModuleSource]

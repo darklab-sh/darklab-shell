@@ -22,6 +22,7 @@ from types import SimpleNamespace
 import pytest
 
 import app as shell_app_module
+import config as app_config
 from conftest import make_test_app as _test_app
 import blueprints.run as run_routes
 import core.database as shell_db
@@ -2574,8 +2575,8 @@ class TestRunStreaming:
     def test_builtin_retention_reports_preview_and_full_output_policy(self):
         client = get_client()
 
-        with mock.patch("services.commands.builtins.CFG", {
-            **shell_app_module.CFG,
+        with mock.patch("config.CFG", {
+            **app_config.CFG,
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
             "full_output_max_mb": 5,
@@ -2896,7 +2897,7 @@ class TestRunStreaming:
         with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
              mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc), \
-             mock.patch("services.commands.builtins.CFG", {**shell_app_module.CFG, "max_output_lines": 2}):
+             mock.patch("config.CFG", {**app_config.CFG, "max_output_lines": 2}):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -3005,7 +3006,7 @@ class TestRunStreaming:
                 )
             conn.commit()
 
-        with mock.patch.dict("services.commands.builtins.CFG", {"recent_commands_limit": 3}):
+        with mock.patch.dict(app_config.CFG, {"recent_commands_limit": 3}):
             resp = _post_run(
                 client,
                 json={"command": "history"},
@@ -3044,7 +3045,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        with mock.patch("services.commands.builtins.CFG", {**shell_app_module.CFG, "workspace_enabled": False}):
+        with mock.patch("config.CFG", {**app_config.CFG, "workspace_enabled": False}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -3055,7 +3056,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_workspace_root_when_workspace_enabled(self):
         client = get_client()
 
-        with mock.patch("services.commands.builtins.CFG", {**shell_app_module.CFG, "workspace_enabled": True}):
+        with mock.patch("config.CFG", {**app_config.CFG, "workspace_enabled": True}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 

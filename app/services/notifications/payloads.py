@@ -7,7 +7,7 @@ import shlex
 from typing import Any
 from urllib.parse import urljoin
 
-from config import CFG
+from config import resolve_effective_cfg
 from services.notifications.models import (
     TRIGGER_PTY_SESSION_ENDED,
     TRIGGER_PROJECT_DIGEST,
@@ -159,7 +159,7 @@ def _project_monitoring_path(project: dict[str, Any], summary: dict[str, Any], d
 
 
 def _absolute_or_relative_url(path: str) -> str:
-    base_url = str(CFG.get("app_public_base_url") or "").strip()
+    base_url = str(resolve_effective_cfg().get("app_public_base_url") or "").strip()
     if not base_url:
         return path
     return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))

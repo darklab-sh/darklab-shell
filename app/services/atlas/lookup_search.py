@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.atlas.lookup_filters import sql_join as _sql_join
 from services.atlas.scope import metadata_owner_sql as _metadata_owner_sql
 
 
 def atlas_search_clause(columns: list[str], extra_exprs: tuple[str, ...] = ()) -> str:
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     expressions = [dialect.text_search_expr(column) for column in columns]
     expressions.extend(extra_exprs)
     return "AND (? = '' OR " + " OR ".join(expressions) + ") "
@@ -52,7 +52,7 @@ def metadata_search_expr(
         f"AND {alias}.entity_type = '{entity_type}' ",
         f"AND {alias}.entity_id = {entity_id_sql} ",
         "AND ",
-        dialect_for_backend(DB_BACKEND).text_search_expr(f"{alias}.{column}"),
+        dialect_for_backend(get_db_backend()).text_search_expr(f"{alias}.{column}"),
         ")",
     ))
 

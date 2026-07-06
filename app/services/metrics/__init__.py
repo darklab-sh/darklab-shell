@@ -8,7 +8,7 @@ import platform
 import re
 from typing import Any
 
-from config import APP_VERSION, CFG
+from config import APP_VERSION, resolve_effective_cfg
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE
 from services.metrics_environment import setup_prometheus_multiproc_dir as setup_prometheus_multiproc_dir
 from services.commands.registry_validation import command_root
@@ -205,7 +205,7 @@ _LABEL_CARDINALITY_SEEN: dict[tuple[str, str], set[str]] = {}
 
 
 def _configured_buckets(key: str, defaults: tuple[float, ...]) -> tuple[float, ...]:
-    raw = CFG.get(key)
+    raw = resolve_effective_cfg().get(key)
     if not isinstance(raw, (list, tuple)):
         return defaults
     values = []

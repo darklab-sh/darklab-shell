@@ -7,7 +7,7 @@ import io
 import json
 from typing import Any
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.atlas.intel_summary import _load_json_dict
 from services.atlas.lookup_filters import (
@@ -92,7 +92,7 @@ def _query_export_entities(
     if normalized_type not in ATLAS_ENTITY_TYPES:
         normalized_type = ""
     search = str(query or "").strip()
-    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
     search_columns = ["e.canonical_value"]
     metadata_params = _metadata_owner_params(session_id, team_id)
     search_exprs = _entity_metadata_search_exprs(team_id, "e.id")

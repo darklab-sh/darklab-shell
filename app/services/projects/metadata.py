@@ -8,7 +8,8 @@ import secrets
 from datetime import datetime, timezone
 
 import config as _config
-from core.database import DB_BACKEND, db_connect, validate_project_entity_type
+from core.database import validate_project_entity_type
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import entity_exists_in_scope, finding_exists_in_scope, metadata_owner_id
 from services.projects.contracts import (
@@ -31,9 +32,7 @@ from services.workspace.files import WorkspaceError, resolve_owner_workspace_pat
 
 
 def _cfg_int(key, default, *, cfg=None):
-    if cfg is None:
-        from config import CFG
-        cfg = CFG
+    cfg = _config.resolve_effective_cfg(cfg)
     try:
         value = int(cfg.get(key, default))
     except (AttributeError, TypeError, ValueError):
@@ -55,7 +54,7 @@ def _now() -> str:
 
 
 def _label_order_sql() -> str:
-    return dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC"
+    return dialect_for_backend(get_db_backend()).case_insensitive_order("label") + ", created ASC"
 
 
 def _new_entity_label_id() -> str:
@@ -558,7 +557,7 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id, *, team
 def list_entity_labels(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         rows = conn.execute(
@@ -584,7 +583,7 @@ def add_entity_label(session_id, entity_type, entity_id, data, *, team_id=""):
     metadata_session, metadata_team_id = _metadata_row_owner_values(session_id, team_id)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
     created = _now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         row = conn.execute(
@@ -651,7 +650,7 @@ def delete_entity_label(session_id, entity_type, entity_id, data, *, team_id="")
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     label = _normalize_label_payload(data)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         result = conn.execute(
@@ -665,14 +664,14 @@ def delete_entity_label(session_id, entity_type, entity_id, data, *, team_id="")
 
 def entity_metadata_target_exists(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id)
 
 
 def get_entity_note(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         row = conn.execute(
@@ -689,7 +688,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data, *, team_id=""):
     metadata_session, metadata_team_id = _metadata_row_owner_values(session_id, team_id)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
     now = _now()
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         existing = conn.execute(
@@ -751,7 +750,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data, *, team_id=""):
 def delete_entity_note(session_id, entity_type, entity_id, *, team_id=""):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         result = conn.execute(
@@ -766,7 +765,7 @@ def get_finding_triage_details(session_id, finding_id, *, team_id=""):
     finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
     if not finding_id:
         raise ProjectWorkspaceError("finding_id is required")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
             return None
         triage_map = _finding_triage_by_id(conn, session_id, [finding_id], team_id=team_id)
@@ -777,7 +776,7 @@ def finding_triage_target_exists(session_id, finding_id, *, team_id=""):
     finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
     if not finding_id:
         raise ProjectWorkspaceError("finding_id is required")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id)
 
 
@@ -785,7 +784,7 @@ def upsert_finding_triage_details(session_id, finding_id, data, *, team_id=""):
     finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
     if not finding_id:
         raise ProjectWorkspaceError("finding_id is required")
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
             return None
         result = upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, team_id=team_id)
@@ -892,7 +891,7 @@ def delete_finding_triage_details(session_id, finding_id, *, team_id=""):
     if not finding_id:
         raise ProjectWorkspaceError("finding_id is required")
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
             return None
         result = conn.execute(

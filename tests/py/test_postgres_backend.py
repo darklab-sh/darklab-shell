@@ -16,6 +16,8 @@ import uuid
 
 import pytest
 
+import config
+import core.database as core_database
 from core.database_backend import DatabaseBackend
 from core.database_backend import PostgresSqliteCompatConnection
 from services.history.search import run_search_clause
@@ -612,19 +614,6 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
     from core import database as core_database
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.api_v1 import auth as api_auth
-    from services.history import api_queries as history_api_queries
-    from services.projects import active as project_active
-    from services.projects import crud as project_crud
-    from services.projects import findings as project_findings
-    from services.projects import links as project_links
-    from services.projects import metadata as project_metadata
-    from services.projects import models as project_models
-    from services.projects import preferences as project_preferences
-    from services.projects import queries as project_queries
-    from services.projects import targets as project_targets
-    from services.teams import request_scope as team_request_scope
-    from services.teams import storage as team_storage
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -643,24 +632,8 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    for module in (history_api_queries, project_links, project_models, project_queries, project_targets, team_storage):
-        monkeypatch.setattr(module, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    for module in (
-        api_auth,
-        core_database,
-        history_api_queries,
-        project_active,
-        project_crud,
-        project_findings,
-        project_links,
-        project_queries,
-        project_targets,
-        team_request_scope,
-        team_storage,
-    ):
-        monkeypatch.setattr(module, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(project_metadata, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     def api_headers(token: str, *, team_id: str = "") -> dict[str, str]:
         headers = {"Authorization": f"Bearer {token}"}
@@ -846,7 +819,6 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.history import queries as history_queries
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -874,7 +846,8 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(history_queries, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     resp = app.test_client().get(
         "/history/commands?limit=3",
@@ -898,7 +871,6 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.history import queries as history_queries
     from services.storage import body_store
 
     conn = postgres_schema.conn
@@ -965,8 +937,8 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(history_queries, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(history_queries, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     resp = app.test_client().get(
         "/history?q=104.21&scope=all&include_total=1",
@@ -999,7 +971,6 @@ def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
     from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.history import queries as history_queries
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1040,8 +1011,8 @@ def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(history_queries, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(history_queries, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     resp = app.test_client().get("/history/stats", headers={"X-Session-ID": session_id})
     data = json.loads(resp.data)
@@ -1089,8 +1060,8 @@ def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, pos
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(builtins_runtime, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(builtins_runtime, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(builtins_runtime, "list_session_variables", lambda _session_id: [])
 
     lines = builtins_runtime.run_builtin_stats(
@@ -1116,7 +1087,6 @@ def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.runs import persistence as run_persistence
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1126,8 +1096,8 @@ def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(run_persistence, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(run_persistence, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     resp = app.test_client().post(
         "/run/client",
@@ -1161,7 +1131,7 @@ def test_run_output_artifact_upsert_writes_to_postgres(monkeypatch, postgres_sch
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
-    monkeypatch.setattr(run_persistence, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     run_persistence.upsert_run_output_artifact(
         PostgresSqliteCompatConnection(conn),
@@ -1203,8 +1173,6 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-    from services.history import queries as history_queries
-    from services.runs import persistence as run_persistence
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1261,10 +1229,10 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
         def finalize(self):
             return None
 
-    monkeypatch.setattr(run_persistence, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(run_persistence, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(history_queries, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(history_queries, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(run_blueprint, "load_full_output_entries", lambda _rel_path: persisted_entries)
     monkeypatch.setattr(run_blueprint, "_workspace_artifacts_with_sizes", lambda _session_id, artifacts: artifacts)
 
@@ -1367,7 +1335,6 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
     import blueprints.run as run_blueprint
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.runs import persistence as run_persistence
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1400,8 +1367,8 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
     def failing_record_findings(db_conn, _session_id, _run_id, _entries):
         db_conn.execute("INSERT INTO missing_finalize_table VALUES (?)", ("boom",))
 
-    monkeypatch.setattr(run_persistence, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(run_persistence, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(run_blueprint, "record_run_findings", failing_record_findings)
     monkeypatch.setattr(run_blueprint, "materialize_run_entities", lambda *_args, **_kwargs: [])
 
@@ -1443,7 +1410,6 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.history import queries as history_queries
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1453,8 +1419,8 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(history_queries, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(history_queries, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     client = app.test_client()
     create_resp = client.post(
@@ -1485,8 +1451,6 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.session import storage as session_storage
-    from services.workflows import user_workflows
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1496,10 +1460,10 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(session_storage, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(session_storage, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(user_workflows, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(user_workflows, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     client = app.test_client()
     preferences_resp = client.post(
@@ -1573,9 +1537,6 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-    from services.secrets import storage as secrets_storage
-    from services.session import storage as session_storage
-    from services.workflows import user_workflows
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1617,8 +1578,8 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(session_storage, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(session_storage, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(session_blueprint, "migrate_session_workspace", lambda _from_id, _to_id: SimpleNamespace(
         migrated_files=0,
@@ -1626,8 +1587,8 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         migrated_directories=0,
         skipped_directories=0,
     ))
-    monkeypatch.setattr(secrets_storage, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(user_workflows, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     client = app.test_client()
     token_resp = client.get("/session/token/generate", headers={"X-Session-ID": source_session_id})
@@ -1754,7 +1715,7 @@ def test_secret_session_migration_uses_postgres_conflict_handling(monkeypatch, p
         ("new-session", "VT_API_KEY", b"destination", b"nonce2", '["VT_API_KEY"]', "created", "updated"),
     )
     conn.commit()
-    monkeypatch.setattr(secrets_storage, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     migrated = secrets_storage.migrate_session_secrets(
         PostgresSqliteCompatConnection(conn),
@@ -1782,16 +1743,9 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from core import database as core_database
     from services.atlas.materializer import materialize_run_entities
-    from services.projects import active as project_active
-    from services.projects import crud as project_crud
     from services.projects import findings as project_findings
-    from services.projects import links as project_links
-    from services.projects import metadata as project_metadata
-    from services.projects import models as project_models
-    from services.projects import preferences as project_preferences
-    from services.projects import queries as project_queries
-    from services.projects import targets as project_targets
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1801,12 +1755,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    for module in (project_links, project_models, project_queries, project_targets):
-        monkeypatch.setattr(module, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    for module in (project_active, project_crud, project_findings, project_links, project_queries, project_targets):
-        monkeypatch.setattr(module, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(project_metadata, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     client = app.test_client()
     create_resp = client.post(
@@ -2035,10 +1985,6 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-    from services.atlas import cleanup as atlas_cleanup
-    from services.atlas import lookup as atlas_lookup
-    from services.projects import metadata as project_metadata
-    from services.projects import preferences as project_preferences
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -2125,11 +2071,8 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(atlas_lookup, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(atlas_lookup, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(atlas_cleanup, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(project_metadata, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     client = app.test_client()
     summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
@@ -2244,10 +2187,10 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
         "observations": ["x" * 128],
     }
     monkeypatch.setattr(body_store, "DATA_DIR", str(tmp_path))
-    monkeypatch.setitem(intel_bridge.CFG, "intel_payload_inline_max_bytes", 1)
-    monkeypatch.setattr(atlas_lookup, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(intel_bridge, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(intel_bridge, "db_connect", _postgres_db_connect)
+    monkeypatch.setitem(config.CFG, "intel_payload_inline_max_bytes", 1)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(intel_bridge, "lookup_entity", lambda *args, **kwargs: SimpleNamespace(
         entity_type="domain",
         canonical_value="darklab.sh",

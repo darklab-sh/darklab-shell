@@ -42,7 +42,21 @@ def start_brokered_run():
         team_role = str((owner_scope.member or {}).get("role") or "")
 
     if not run_routes.broker_available():
-        return jsonify({"error": run_routes.broker_unavailable_reason()}), 503
+        reason = run_routes.broker_unavailable_reason()
+        log_method = (
+            run_routes.log.info
+            if reason == "Run broker is disabled by configuration."
+            else run_routes.log.warning
+        )
+        log_method("RUN_BROKER_UNAVAILABLE", extra={
+            "session": run_routes.get_log_session_id(session_id),
+            "ip": client_ip,
+            "reason": reason,
+            "broker_mode": run_routes.broker_mode(),
+            "team_requested": bool(team_id or run_routes.requested_team_id(request)),
+            "command_root": run_routes.command_root(original_command) or "",
+        })
+        return jsonify({"error": reason}), 503
 
     try:
         started = run_routes._start_brokered_run_service(

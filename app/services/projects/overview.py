@@ -10,10 +10,9 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from core.database import db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from core import database
 from services.atlas.lookup import _row_to_intel_snapshot, summarize_intel_snapshots
 from services.atlas.scope import metadata_owner_id
 from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES
@@ -283,7 +282,7 @@ def get_project_intel_overview(
         "target_limit": OVERVIEW_TARGET_LIMIT,
         "windowed": bool(window_start or window_end),
     })
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
         project_row = conn.execute(
             "SELECT " + project_select_columns() + " FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
@@ -581,7 +580,7 @@ def _overview_activity_link(target_type: str, target_id: str) -> dict[str, str]:
 
 
 def _overview_recent_activity(conn, session_id: str, team_id: str, project_id: str) -> list[dict[str, Any]]:
-    dialect = dialect_for_backend(database.DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     owner_sql, owner_params = _overview_audit_owner_scope(session_id, team_id)
     rows = conn.execute(
         "SELECT id, event_type, target_type, target_id, details, created "
@@ -621,7 +620,7 @@ def _overview_latest_completed_audit_event(
     event_type: str,
 ) -> dict[str, str]:
     owner_sql, owner_params = _overview_audit_owner_scope(session_id, team_id)
-    dialect = dialect_for_backend(database.DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     rows = conn.execute(
         "SELECT id, target_id, job_id, details, created "
         "FROM audit_events "

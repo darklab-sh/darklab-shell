@@ -7,8 +7,9 @@ import logging
 import time
 from typing import Any
 
-from config import CFG
+from config import resolve_effective_cfg
 import core.process as process_state
+from core.process import RedisClientProxy as RedisClientProxy
 from services.pty.snapshots import pty_snapshot_wire_entries
 from services.pty.wire import control_key as _control_key
 from services.pty.wire import meta_key as _meta_key
@@ -18,32 +19,16 @@ from services.pty.wire import stream_key as _stream_key
 log = logging.getLogger("shell")
 
 
-class RedisClientProxy:
-    """Proxy process-level Redis state so monkeypatches stay visible at call time."""
-
-    def _client(self) -> Any | None:
-        return process_state.redis_client
-
-    def __bool__(self) -> bool:
-        return bool(self._client())
-
-    def __getattr__(self, name: str) -> Any:
-        client = self._client()
-        if client is None:
-            raise AttributeError(name)
-        return getattr(client, name)
-
-
 def _redis_client(redis_client: Any | None = None) -> Any | None:
     return redis_client if redis_client is not None else process_state.redis_client
 
 
 def active_ttl() -> int:
-    return max(1, int(CFG.get("run_broker_active_stream_ttl_seconds", 14400) or 14400))
+    return max(1, int(resolve_effective_cfg().get("run_broker_active_stream_ttl_seconds", 14400) or 14400))
 
 
 def completed_ttl() -> int:
-    return max(1, int(CFG.get("run_broker_completed_stream_ttl_seconds", 3600) or 3600))
+    return max(1, int(resolve_effective_cfg().get("run_broker_completed_stream_ttl_seconds", 3600) or 3600))
 
 
 def store_pty_meta(run: Any, *, redis_client: Any | None = None, closed: bool = False) -> None:

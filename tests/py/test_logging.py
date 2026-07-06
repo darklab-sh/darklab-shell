@@ -26,6 +26,7 @@ import unittest.mock as mock
 import pytest
 
 import app as shell_app_module
+import config as app_config
 from conftest import make_test_app as _test_app
 import core.database as db_module
 from core.database import DB_PATH, db_connect, db_init
@@ -792,6 +793,55 @@ class TestRunFailureEvents:
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_BROKER_STREAM_ERROR"]
         assert len(calls) == 1
 
+        from services.runs import broker_worker
+
+        cleanup_calls = []
+        removed = []
+        published = []
+        with mock.patch.object(broker_worker.log, "error") as mock_error:
+            broker_worker.brokered_real_run_worker(
+                proc=fake_proc,
+                run_id="run-broker-config",
+                session_id="broker-config-session",
+                team_id="team-config",
+                client_ip="203.0.113.44",
+                original_command="echo bad-config",
+                run_started="2026-05-20T12:00:00+00:00",
+                capture=object(),
+                signal_classifier=object(),
+                postfilter=object(),
+                workspace_path_filter=object(),
+                variable_notice="",
+                rewrite_notice="",
+                workspace_notices=[],
+                workspace_artifacts=[],
+                owner_tab_id="",
+                cfg={},
+                trufflehog_output_filter_cls=lambda _command: object(),
+                publish_broker_captured_line_fn=lambda *args, **kwargs: None,
+                output_batcher_cls=object,
+                make_nonblocking_stream_reader_fn=lambda _stdout: {},
+                stdout_ready_fn=lambda *_args: False,
+                read_available_stream_lines_fn=lambda *_args, **_kwargs: ([], True),
+                wait_for_proc_exit_code_fn=lambda _proc: 0,
+                timeout_notice_fn=lambda _timeout: "",
+                terminate_process_group_fn=lambda _proc: None,
+                finalize_completed_run_fn=lambda *args, **kwargs: {"elapsed": 0},
+                publish_project_finalize_notices_fn=lambda *args: None,
+                publish_run_event_fn=lambda *args: published.append(args),
+                cleanup_proc_stream_fn=lambda _proc: cleanup_calls.append(True),
+                pid_pop_fn=lambda run_id: removed.append(("pid", run_id)),
+                active_run_remove_fn=lambda run_id: removed.append(("active", run_id)),
+                poll_seconds=0.01,
+            )
+
+            config_calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_BROKER_STREAM_CONFIG_ERROR"]
+        assert len(config_calls) == 1
+        assert config_calls[0].kwargs["extra"]["missing_key"] == "command_timeout_seconds"
+        assert published == [("run-broker-config", "error", {"text": "'command_timeout_seconds'"})]
+        assert cleanup_calls == [True]
+        assert removed == [("pid", "run-broker-config"), ("active", "run-broker-config")]
+
 
 class TestRequestResponseDebugEvents:
     """REQUEST/RESPONSE stay DEBUG-only while REQUEST_COMPLETED keeps routine probes quiet."""
@@ -995,10 +1045,12 @@ class TestWorkerEntrypointLoggingSetup:
         log_initialized.assert_called_once_with(flask_app=fake_app, duration_ms=250)
         fake_app.run.assert_called_once_with(host="0.0.0.0", port=8888, threaded=True)
 
-    def test_ai_worker_main_bootstraps_loads_dependencies_then_runs(self):
+    def test_ai_worker_main_bootstraps_loads_dependencies_then_runs(self, monkeypatch):
         from services.ai import worker
 
         order = []
+        replacement_cfg = {**app_config.CFG, "app_name": "late-ai-worker-config"}
+        monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
         with mock.patch.object(
             worker,
@@ -1017,7 +1069,7 @@ class TestWorkerEntrypointLoggingSetup:
 
         assert order == ["bootstrap", "load_dependencies", "run_forever"]
         bootstrap_runtime.assert_called_once_with(
-            worker.CFG,
+            replacement_cfg,
             init_process=True,
             init_db=True,
             runtime_name="ai_worker",
@@ -1025,15 +1077,18 @@ class TestWorkerEntrypointLoggingSetup:
         load_runtime_dependencies.assert_called_once_with()
         run_forever.assert_called_once_with()
 
-    def test_notification_worker_main_configures_logging(self):
+    def test_notification_worker_main_configures_logging(self, monkeypatch):
         from services.notifications import worker
+
+        replacement_cfg = {**app_config.CFG, "app_name": "late-notification-worker-config"}
+        monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
         with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
              mock.patch.object(worker, "run_forever") as run_forever:
             worker.main()
 
         bootstrap_runtime.assert_called_once_with(
-            worker.CFG,
+            replacement_cfg,
             init_metrics=False,
             init_process=False,
             init_db=True,
@@ -1041,15 +1096,18 @@ class TestWorkerEntrypointLoggingSetup:
         )
         run_forever.assert_called_once_with()
 
-    def test_scheduler_worker_main_configures_logging(self):
+    def test_scheduler_worker_main_configures_logging(self, monkeypatch):
         from services.scheduler import worker
+
+        replacement_cfg = {**app_config.CFG, "app_name": "late-scheduler-worker-config"}
+        monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
         with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
              mock.patch.object(worker, "run_forever") as run_forever:
             worker.main()
 
         bootstrap_runtime.assert_called_once_with(
-            worker.CFG,
+            replacement_cfg,
             init_metrics=False,
             init_process=True,
             init_db=True,
@@ -1885,6 +1943,18 @@ class TestRunSpawnErrorEvent:
                         self._post_run(client, "ping 8.8.8.8")
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR"]
         assert len(calls) == 1
+
+        with mock.patch.object(shell_app_module.log, "error") as mock_error:
+            with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
+                with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
+                    with mock.patch("blueprints.run._WorkspacePathOutputFilter", side_effect=RuntimeError("filter setup failed")):
+                        self._post_run(client, "ping 8.8.4.4")
+        setup_calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_SETUP_FAILED"]
+        assert len(setup_calls) == 1
+        extra = setup_calls[0].kwargs["extra"]
+        assert extra["cfg_source"] == "explicit"
+        assert extra["workspace_filter"] == "init"
+        assert extra["cmd"] == "ping 8.8.4.4"
 
     def test_spawn_error_extra_has_ip(self):
         client = get_client()

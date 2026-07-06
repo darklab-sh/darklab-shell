@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, TypeVar
 from uuid import uuid4
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend
 from core.database_backend import DatabaseBackend
 from services.storage.transactions import run_read, run_transaction
 
@@ -36,11 +36,11 @@ _T = TypeVar("_T")
 
 
 def run_team_read(callback: Callable[[Any], _T]) -> _T:
-    return run_read(callback, connect=db_connect)
+    return run_read(callback)
 
 
 def run_team_transaction(callback: Callable[[Any], _T]) -> _T:
-    return run_transaction(callback, connect=db_connect)
+    return run_transaction(callback)
 
 
 def now() -> str:
@@ -279,7 +279,7 @@ def active_owner_count(conn: Any, team_id: str) -> int:
 
 
 def _lock_active_owner_rows(conn: Any, team_id: str) -> None:
-    if DB_BACKEND != DatabaseBackend.POSTGRES:
+    if get_db_backend() != DatabaseBackend.POSTGRES:
         return
     conn.execute(
         "SELECT id FROM team_members "

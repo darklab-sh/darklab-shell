@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 import secrets
 
-from core.database import DB_BACKEND, db_connect
+from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend, integrity_error_types
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.scope import shared_owner_where
@@ -27,7 +27,7 @@ def _now() -> str:
 
 
 def _decode_draft(value: Any) -> dict[str, Any]:
-    return dialect_for_backend(DB_BACKEND).decode_json_dict(value)
+    return dialect_for_backend(get_db_backend()).decode_json_dict(value)
 
 
 def row_to_report_draft(row) -> dict[str, Any] | None:
@@ -60,7 +60,7 @@ def get_report_draft_on_conn(conn, session_id: str, project_id: str, *, team_id:
 
 
 def get_report_draft(session_id: str, project_id: str, *, team_id: str = "") -> dict[str, Any] | None:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return get_report_draft_on_conn(conn, session_id, project_id, team_id=team_id)
 
 
@@ -105,7 +105,7 @@ def save_report_draft_on_conn(
         conn.execute(
             "UPDATE project_reports SET draft = ?, report_format_version = ?, updated = ? WHERE id = ?",
             (
-                dialect_for_backend(DB_BACKEND).json_param(normalized_draft),
+                dialect_for_backend(get_db_backend()).json_param(normalized_draft),
                 REPORT_FORMAT_VERSION,
                 timestamp,
                 existing["id"],
@@ -135,13 +135,13 @@ def save_report_draft_on_conn(
                 normalized_session_id,
                 normalized_team_id,
                 normalized_project_id,
-                dialect_for_backend(DB_BACKEND).json_param(normalized_draft),
+                dialect_for_backend(get_db_backend()).json_param(normalized_draft),
                 REPORT_FORMAT_VERSION,
                 timestamp,
                 timestamp,
             ),
         )
-    except integrity_error_types(DB_BACKEND) as exc:
+    except integrity_error_types(get_db_backend()) as exc:
         raise ReportDraftConflict("report draft changed; reload before saving") from exc
     inserted = get_report_draft_on_conn(
         conn,
@@ -162,7 +162,7 @@ def save_report_draft(
     team_id: str = "",
     expected_updated: str = "",
 ) -> dict[str, Any]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         saved = save_report_draft_on_conn(
             conn,
             session_id,

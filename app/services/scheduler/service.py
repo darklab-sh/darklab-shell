@@ -7,6 +7,7 @@ import logging
 import uuid
 from typing import Any, Callable, TypeVar
 
+from config import resolve_effective_cfg
 from core import database
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
@@ -138,7 +139,7 @@ def _bool_param(value: Any) -> Any:
 
 
 def _max_schedules_per_session() -> int:
-    raw = database.CFG.get("scheduler", {}).get("max_per_session")
+    raw = resolve_effective_cfg().get("scheduler", {}).get("max_per_session")
     try:
         configured = int(raw or 32)
     except (TypeError, ValueError):

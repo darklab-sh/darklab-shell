@@ -8,7 +8,7 @@ from typing import Any, NoReturn
 
 from flask import Request
 
-from core.database import db_connect
+from core.database_access import get_db_connect
 from core.helpers import get_client_ip, get_log_session_id
 
 from .scope import OwnerContext, personal_owner_context, shared_owner_predicate, team_owner_context
@@ -203,7 +203,7 @@ def current_request_scope(
             source=source,
             status_code=401,
         )
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         member = get_team_membership(conn, team_id, session_id)
     if not member:
         _raise_scope_error(

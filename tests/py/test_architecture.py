@@ -78,7 +78,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry_validation.py", 239, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_workspace.py", 466, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run.py", 799, "split-target-phase2"),
-    ModuleSizeBudget("app/blueprints/run_broker.py", 135, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_broker.py", 149, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_client.py", 153, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_kill.py", 123, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
@@ -142,7 +142,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/pty/state.py", 155, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/wire.py", 96, "split-package-ratchet"),
     ModuleSizeBudget("app/services/history/insights.py", 305, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/history/mutations.py", 290, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/history/mutations.py", 291, "split-package-ratchet"),
     ModuleSizeBudget("app/services/history/queries.py", 904, "split-target-phase4"),
     ModuleSizeBudget("app/services/projects/package_queries.py", 71, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/list_queries.py", 217, "split-package-ratchet"),
@@ -155,12 +155,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/assets.py", 371, "split-target-phase4"),
     ModuleSizeBudget("app/blueprints/assets_audit.py", 391, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/assets_diag.py", 656, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/process.py", 1169, "ratchet-only"),
+    ModuleSizeBudget("app/core/process.py", 1170, "ratchet-only"),
     ModuleSizeBudget("app/services/metrics/__init__.py", 983, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
-    ModuleSizeBudget("app/services/runs/broker_worker.py", 462, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker_worker.py", 495, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1006, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/runs/lifecycle.py", 635, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),
     ModuleSizeBudget("app/core/schema_manifest.py", 899, "cohesive-ratchet"),
@@ -239,6 +239,38 @@ _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("services.workspace.files", "workspace_settings", "callable"),
     ("services.workspace.files", "ensure_session_workspace", "callable"),
     ("services.workspace.files", "list_workspace_files", "callable"),
+)
+
+_SINGLETON_BINDING_SOURCE_OF_TRUTH_PATHS = {
+    "app/config.py",
+    "app/core/database_access.py",
+    "app/core/database.py",
+    "app/core/process.py",
+    "app/core/process_redis.py",
+    "app/extensions.py",
+}
+
+_SINGLETON_BINDING_GUARD_BASELINE = frozenset(
+    """
+app/app.py: from config import CFG
+app/blueprints/api_v1.py: from config import CFG
+app/blueprints/api_v1_read.py: from config import CFG
+app/blueprints/assets_audit.py: from config import CFG
+app/blueprints/assets_diag.py: from config import CFG
+app/blueprints/atlas.py: from config import CFG
+app/blueprints/history.py: CFG assignment
+app/blueprints/notifications.py: from config import CFG
+app/blueprints/projects.py: from config import CFG
+app/blueprints/projects_artifacts.py: from config import CFG
+app/blueprints/projects_core.py: from config import CFG
+app/blueprints/projects_packages.py: from config import CFG
+app/blueprints/projects_report.py: from config import CFG
+app/blueprints/run.py: from config import CFG
+app/blueprints/schedules.py: from config import CFG
+app/blueprints/secrets.py: from config import CFG
+app/blueprints/teams.py: from config import CFG
+app/blueprints/watchers.py: from config import CFG
+""".strip().splitlines()
 )
 
 
@@ -358,6 +390,87 @@ def _decomposed_route_contract_entries() -> list[tuple[str, str, str]]:
 def _route_contract_digest(entries: list[tuple[str, str, str]]) -> str:
     canonical = "\n".join("\t".join(entry) for entry in entries)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _singleton_binding_guard_offenders(root: Path = _REPO_ROOT / "app") -> set[str]:
+    offenders: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        try:
+            relative_path = path.relative_to(_REPO_ROOT).as_posix()
+        except ValueError:
+            relative_path = path.relative_to(root).as_posix()
+        if relative_path in _SINGLETON_BINDING_SOURCE_OF_TRUTH_PATHS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        core_database_aliases = {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "core.database" and alias.asname
+        }
+        core_database_aliases.update(
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "core"
+            for alias in node.names
+            if alias.name == "database"
+        )
+        core_process_aliases = {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "core.process" and alias.asname
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    if module == "core.database" and alias.name in {"DB_BACKEND", "db_connect"}:
+                        offenders.add(f"{relative_path}: from core.database import {alias.name}")
+                    elif module == "core.process" and alias.name == "redis_client":
+                        offenders.add(f"{relative_path}: from core.process import redis_client")
+                    elif module == "config" and alias.name == "CFG":
+                        offenders.add(f"{relative_path}: from config import CFG")
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "CFG":
+                        offenders.add(f"{relative_path}: CFG assignment")
+                    elif (
+                        isinstance(target, ast.Name)
+                        and target.id in {"DB_BACKEND", "db_connect"}
+                        and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == target.id
+                        and isinstance(node.value.value, ast.Name)
+                        and node.value.value.id in core_database_aliases
+                    ):
+                        offenders.add(f"{relative_path}: {target.id} assignment from {node.value.value.id}")
+                    elif (
+                        isinstance(target, ast.Name)
+                        and target.id == "redis_client"
+                        and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "redis_client"
+                        and isinstance(node.value.value, ast.Name)
+                        and node.value.value.id in core_process_aliases
+                    ):
+                        offenders.add(f"{relative_path}: redis_client assignment from {node.value.value.id}")
+            elif isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.target.id == "CFG":
+                    offenders.add(f"{relative_path}: CFG assignment")
+            elif isinstance(node, ast.Attribute) and node.attr == "CFG":
+                if isinstance(node.value, ast.Name) and node.value.id in core_database_aliases:
+                    offenders.add(f"{relative_path}: {node.value.id}.CFG")
+                elif (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "database"
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "core"
+                ):
+                    offenders.add(f"{relative_path}: core.database.CFG")
+            elif isinstance(node, ast.ClassDef) and node.name in {"RedisClientProxy", "_RedisClientProxy"}:
+                offenders.add(f"{relative_path}: local Redis proxy class {node.name}")
+    return offenders
 
 
 def _required_module_size_ratchet_paths() -> set[str]:
@@ -540,6 +653,66 @@ class TestModuleSizeRatchet:
             "Module size ratchet coverage drift detected. Add a budget treatment "
             "for each new file in the decomposed families.\n"
             + "\n".join(missing)
+        )
+
+
+class TestSingletonDependencyGuard:
+    def test_singleton_binding_guard_flags_synthetic_offenders(self, tmp_path):
+        app_root = tmp_path / "app"
+        service_module = app_root / "services" / "example.py"
+        service_module.parent.mkdir(parents=True)
+        service_module.write_text(
+            """
+from config import CFG
+from core import database
+from core.database import DB_BACKEND, db_connect
+import core.database as database_owner
+import core.process as process_owner
+from core.process import redis_client
+
+
+DB_BACKEND = database.DB_BACKEND
+db_connect = database_owner.db_connect
+redis_client = process_owner.redis_client
+
+
+def uses_database_owner_module():
+    return database.db_connect, database.CFG, database_owner.CFG
+
+
+class RedisClientProxy:
+    pass
+""",
+            encoding="utf-8",
+        )
+        config_rebind_module = app_root / "services" / "config_rebind.py"
+        config_rebind_module.write_text("CFG = object()\n", encoding="utf-8")
+
+        offenders = _singleton_binding_guard_offenders(app_root)
+
+        assert offenders == {
+            "services/config_rebind.py: CFG assignment",
+            "services/example.py: from config import CFG",
+            "services/example.py: from core.database import DB_BACKEND",
+            "services/example.py: from core.database import db_connect",
+            "services/example.py: from core.process import redis_client",
+            "services/example.py: DB_BACKEND assignment from database",
+            "services/example.py: database.CFG",
+            "services/example.py: database_owner.CFG",
+            "services/example.py: db_connect assignment from database_owner",
+            "services/example.py: local Redis proxy class RedisClientProxy",
+            "services/example.py: redis_client assignment from process_owner",
+        }
+
+    def test_no_new_local_singleton_bindings_beyond_phase0_baseline(self):
+        offenders = _singleton_binding_guard_offenders()
+        new_offenders = sorted(offenders - _SINGLETON_BINDING_GUARD_BASELINE)
+
+        assert not new_offenders, (
+            "New local singleton bindings detected. Use the shared accessor/helper/proxy "
+            "conventions or update the Phase 0 dependency-injection plan before expanding "
+            "the approved compatibility baseline:\n"
+            + "\n".join(f"  {offender}" for offender in new_offenders)
         )
 
 

@@ -23,15 +23,15 @@ log = logging.getLogger("shell")
 
 
 def _database_context():
-    from core.database import db_connect
+    from core.database_access import get_db_connect
 
-    return db_connect()
+    return get_db_connect()()
 
 
 def _database_backend() -> DatabaseBackend:
-    from core.database import DB_BACKEND
+    from core.database_access import get_db_backend
 
-    return DB_BACKEND
+    return get_db_backend()
 
 
 def _database_path() -> Path:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.projects.metadata import _metadata_owner_where
 from services.projects.scope import shared_owner_where
@@ -60,7 +60,7 @@ def project_list_metrics(conn, session_id, project_ids, *, team_id=""):
     finding_summaries = {project_id: empty_project_finding_summary() for project_id in ids}
     if not ids:
         return counts, finding_summaries
-    dialect = dialect_for_backend(DB_BACKEND)
+    dialect = dialect_for_backend(get_db_backend())
     project_filter_sql, project_filter_params = dialect.in_clause("l.project_id", ids)
     package_filter_sql, package_filter_params = dialect.in_clause("project_id", ids)
     meta_filter_sql, meta_filter_params = dialect.in_clause("entity_id", ids)

@@ -21,7 +21,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
-  - [Replace global singletons with injected dependencies](#replace-global-singletons-with-injected-dependencies)
   - [Typed, validated configuration model](#typed-validated-configuration-model)
   - [Right-size project documentation](#right-size-project-documentation)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
@@ -178,12 +177,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Replace global singletons with injected dependencies
-- Problem: `redis_client`, `limiter`, and `CFG` are module-level globals imported throughout the app. This is workable but drives the re-export/compat gymnastics in `app.py` and makes isolated testing awkward, since collaborators are bound at import time rather than passed in.
-- Approach:
-  - Pass dependencies explicitly (or attach them to an app-scoped registry / Flask extensions pattern) instead of importing module globals.
-  - Sequence this after the application factory lands, since the factory provides the natural place to construct and wire these dependencies once per app.
 
 ### Typed, validated configuration model
 - Problem: configuration is effectively its own subsystem with no schema. `config.py` is ~1,190 lines feeding on large YAML inputs (`commands.yaml` ~184K, `config.yaml` ~42K) plus a ~3,760-line command `registry.py`, and it is consumed through untyped `CFG.get(...)` access scattered across the code. Misconfiguration surfaces late and diffusely rather than at boot.

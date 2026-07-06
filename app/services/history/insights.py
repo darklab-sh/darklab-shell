@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import services.runs.comparison as run_comparison
-from core.database import db_connect
+from core.database_access import get_db_connect
 from core.helpers import is_failed_exit_code
 from core.output_targets import command_root as output_command_root
 from services.runs.kinds import RUN_KIND_EXTERNAL
@@ -76,7 +76,7 @@ def _command_category_map() -> dict[str, str]:
 
 
 def history_insights(session_id: str, owner_scope, *, days: int | None = None) -> dict[str, Any]:
-    with db_connect() as conn:
+    with get_db_connect()() as conn:
         return history_insights_from_conn(conn, session_id, owner_scope, days=days)
 
 

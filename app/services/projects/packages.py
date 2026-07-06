@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 import re
 
 import config as _config
-from core.database import DB_BACKEND
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from core.redaction import apply_redaction_rules
 from services.projects.package_presets import known_package_preset_ids
@@ -59,7 +59,7 @@ def row_to_evidence_package(row):
     if not row:
         return None
     try:
-        manifest = dialect_for_backend(DB_BACKEND).decode_json_dict(row["manifest"])
+        manifest = dialect_for_backend(get_db_backend()).decode_json_dict(row["manifest"])
     except (TypeError, ValueError):
         manifest = {}
     manifest = normalize_evidence_package_manifest(manifest)

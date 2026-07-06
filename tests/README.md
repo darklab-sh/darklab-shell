@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,976
-- docs/inventory meta-tests: 60
-- `pytest`: 2293 (2246 behavior + 47 meta)
+- behavior tests: 3,978
+- docs/inventory meta-tests: 62
+- `pytest`: 2297 (2248 behavior + 49 meta)
 - `vitest`: 1474 (1461 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,036
+- total: 4,040
 
 This document is organized in two parts:
 
@@ -460,6 +460,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestDecomposedRouteContract.test_decomposed_blueprint_route_contract_matches_pre_split_set` | Verifies decomposed blueprint route families keep the same method, path, and endpoint contract as the pre-split route set. |
 | `TestModuleSizeRatchet.test_tracked_modules_do_not_grow_past_baseline` | Verifies oversized split targets and cohesive ratchet-only modules do not grow past their current line-count baselines. |
 | `TestModuleSizeRatchet.test_decomposed_module_families_are_all_classified` | Verifies every file in the decomposed module families has an explicit size-ratchet budget. |
+| `TestSingletonDependencyGuard.test_singleton_binding_guard_flags_synthetic_offenders` | Verifies the dependency-injection guard flags synthetic local DB, config, Redis, and duplicate Redis proxy singleton bindings. |
+| `TestSingletonDependencyGuard.test_no_new_local_singleton_bindings_beyond_phase0_baseline` | Verifies no new local DB, config, or Redis singleton bindings are added beyond the approved dependency-injection compatibility baseline. |
 | `TestPublicImportCompatibility.test_moved_public_symbols_remain_available_from_parent_modules` | Verifies representative moved route and service helpers remain available from their parent import surfaces. |
 
 #### `test_backend_modules.py`
@@ -906,6 +908,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunBrokerMemoryStore.test_redis_publish_trims_stream_with_replay_derived_maxlen` | Verifies that Redis broker publishes trim streams with a replay-derived maximum length. |
 | `TestRunBrokerMemoryStore.test_broker_requires_redis_when_configured` | Verifies that broker availability fails with an operator-facing message when Redis is required but unavailable. |
 | `TestRunBrokerMemoryStore.test_broker_allows_memory_store_when_redis_is_optional` | Verifies that local development can use the in-memory broker store when Redis is optional. |
+| `TestProcessRedisWorkerConfiguration.test_redis_client_proxy_reads_process_state_at_call_time` | Verifies the shared Redis client proxy preserves truthiness, attribute forwarding, monkeypatch visibility, and default-argument behavior. |
 | `TestProcessRedisWorkerConfiguration.test_multi_worker_requires_redis` | Verifies that multi-worker startup fails fast when Redis is unavailable. |
 | `TestProcessRedisWorkerConfiguration.test_single_worker_allows_in_process_fallback` | Verifies that single-worker local mode can still use in-process active-run state without Redis. |
 | `TestProcessRedisWorkerConfiguration.test_multi_worker_allows_redis_client` | Verifies that Redis-backed multi-worker startup is accepted. |
@@ -1108,8 +1111,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_scoped_events_team_viewer_reads_project_activity_only_for_own_team` | Verifies team viewers can read safe project activity for their team but cannot read foreign projects or broad team activity. |
 | `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
-| `TestDatabaseInit.test_atlas_lookup_syncs_split_module_backend_seams` | Verifies Atlas lookup wrappers sync the patched backend into split lookup helper modules before delegating. |
-| `TestDatabaseInit.test_project_queries_sync_split_module_db_connect_seams` | Verifies project query wrappers sync the patched database connection seam into split artifact and package query modules before delegating. |
+| `TestDatabaseInit.test_atlas_lookup_split_modules_read_shared_backend_accessor` | Verifies split Atlas lookup helper modules observe backend changes through the shared database accessor. |
+| `TestDatabaseInit.test_split_query_modules_read_shared_db_connect_accessor` | Verifies split project and history query modules observe connection changes through the shared database accessor. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_run_output_summary_backfill_marks_empty_runs_once` | Verifies startup marks legacy runs with empty structured output as handled instead of retrying them on every restart. |
 | `TestDatabaseInit.test_run_output_summary_backfill_marks_failures_once` | Verifies startup records unreadable run-output summary backfill attempts once, logs the degraded reason counts, and skips them on the next normal pass. |
@@ -1185,6 +1188,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestBodyStore.test_inline_threshold_accepts_human_readable_byte_values` | Verifies large-body offload thresholds accept byte counts plus `kb` and `mb` strings. |
 | `TestSessionVariables.test_set_list_unset_and_expand_variables` | Verifies that session command variables can be stored, listed, expanded in `$NAME` and `${NAME}` forms, and removed. |
 | `TestSessionVariables.test_rejects_invalid_names_and_undefined_references` | Verifies that invalid variable names, undefined variables, and unsupported shell-style `$...` syntax are rejected. |
+| `TestBuiltinConfigAccess.test_split_builtin_modules_read_shared_config_without_cfg_sync` | Verifies that split built-in command modules read the shared live config instead of stale child-module `CFG` attributes. |
 | `TestBuiltinStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
 | `TestBuiltinStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
 | `TestBuiltinStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
