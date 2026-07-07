@@ -54,6 +54,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 - API v1 team Project finding lists now include cross-member findings that are reachable through authorized team Project run/entity links, matching the Project count and finding-summary rollups.
 - Architecture guardrails now reflect the current static build route, post-baseline migration shape, and split-module baselines from the performance and index work.
 - Frontend module inventory now classifies the lazy Files bridge resolver helpers as the workspace bridge contract, so resolver-helper drift checks cover the new first-use Files boundary.
+- Finding triage now uses a lightweight bridge for Project, Atlas, and Findings board labels/actions, so the full remediation and verification editor stays out of the initial shell and loads only when a user opens triage.
+  - **Tests:** focused browser-module coverage verifies the triage editor, Atlas desktop/mobile paths, Project workspace triage actions, and frontend inventory guard still work with the lazy editor boundary.
+- HTML/PDF export formatting now uses a lightweight shell and permalink bridge, so the full export formatter stays out of the initial shell bundle and loads only for styled HTML/PDF exports.
+  - **Tests:** focused browser-module coverage verifies tab export, permalink export, PDF helper loading, shell bundle lazy-entry contracts, and frontend inventory guard still work with the lazy export boundary.
+- Terminal tour commands now route through a lightweight lazy bridge, so the terminal-guided tour implementation loads only when a user runs `tour`.
+- Playwright-only browser hooks now load through a tiny `navigator.webdriver` gate, keeping the E2E hook surface out of ordinary shell startup while preserving the test-only globals under Playwright.
+  - Together, the regenerated shell bundle is about 82.3 KB smaller raw, 21.2 KB smaller gzip, and 17.8 KB smaller Brotli than the previous committed bundle.
 - Personal-scope migration SQL and Project list finding-summary queries now use analyzer-friendly static SQL statements or local SQL assembly helpers, clearing Bandit's B608 warnings while keeping caller values bound through parameters.
 - Asset build-file serving now imports Werkzeug's `safe_join` from its public module, clearing the Pylance private-import warning without changing the route behavior.
 - Personal Atlas and Project reads now use the same explicit personal-team predicate as their partial indexes, and startup normalizes legacy personal rows with `NULL` team IDs so SQLite and Postgres can keep those list, count, and slug lookups on indexed plans.

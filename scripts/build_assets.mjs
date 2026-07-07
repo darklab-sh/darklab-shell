@@ -22,7 +22,9 @@ import { basename, dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import {
   brotliCompressSync,
+  brotliDecompressSync,
   constants as zlibConstants,
+  gunzipSync,
   gzipSync,
 } from 'zlib';
 import { build as esbuild } from 'esbuild';
@@ -137,6 +139,29 @@ function precompressedVariants(content) {
     }),
     gz: gzipSync(buffer, { level: 9 }),
   };
+}
+
+// Compressed sidecars are not byte-reproducible across zlib/brotli versions:
+// the same input yields different (but equally valid) output under different
+// Node runtimes. Comparing the decompressed payloads keeps the staleness gate
+// version-independent, so it flags genuinely changed content rather than
+// harmless compressor drift between the build host and CI runners.
+const SIDECAR_DECOMPRESSORS = {
+  gz: gunzipSync,
+  br: brotliDecompressSync,
+};
+
+function buildOutputContentDiffers(filename, expectedPath, committedPath) {
+  const decompress = SIDECAR_DECOMPRESSORS[filename.split('.').pop()];
+  if (!decompress) {
+    return sha256(readFileSync(expectedPath)) !== sha256(readFileSync(committedPath));
+  }
+  try {
+    return sha256(decompress(readFileSync(expectedPath)))
+      !== sha256(decompress(readFileSync(committedPath)));
+  } catch {
+    return true;
+  }
 }
 
 function writeBuildAsset(filename, content) {
@@ -691,7 +716,7 @@ if (checkOnly) {
     const committedPath = resolve(committedDir, file);
     return existsSync(committedPath)
       && statSync(expectedPath).isFile()
-      && sha256(readFileSync(expectedPath)) !== sha256(readFileSync(committedPath));
+      && buildOutputContentDiffers(file, expectedPath, committedPath);
   });
   if (staleSources.length || missing.length || extra.length || changed.length) {
     const details = [

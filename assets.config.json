@@ -81,6 +81,7 @@
     }
   },
   "lazy": [
+    "/static/js/export_html.js",
     "/static/js/export_pdf.js",
     "/static/js/features/atlas/atlas_tabs.js",
     "/static/js/features/atlas/atlas_entity_row.js",
@@ -89,6 +90,7 @@
     "/static/js/features/atlas/atlas_mobile.js",
     "/static/js/features/atlas/atlas_mobile_bridge.js",
     "/static/js/features/findings/findings_board_modal.js",
+    "/static/js/features/findings/finding_triage_editor.js",
     "/static/js/features/projects/project_activity.js",
     "/static/js/features/projects/project_overview.js",
     "/static/js/features/projects/project_monitoring.js",
@@ -138,6 +140,7 @@
     "/static/js/status_monitor.js",
     "/static/js/workspace.js",
     "/static/js/features/workspace/workspace_drag_drop.js",
+    "/static/js/features/tour/tour_cli.js",
     "/static/js/tour_modal.js",
     "/static/js/features/watchers/watchers_modal.js",
     "/vendor/jspdf.umd.min.js",

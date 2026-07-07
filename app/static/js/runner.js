@@ -144,7 +144,7 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from './features/team_scope.js';
-import { handleTourCommand as importedHandleTourCommand } from './features/tour/tour_cli.js';
+import { handleTourCommand as importedHandleTourCommand } from './features/tour/tour_cli_bridge.js';
 import {
   hasComposerPromptHandler as importedHasComposerPromptHandler,
   setComposerPromptMode as importedSetComposerPromptMode,

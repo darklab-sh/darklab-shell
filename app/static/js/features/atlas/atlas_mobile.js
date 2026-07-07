@@ -25,7 +25,7 @@ import { closeActionSheet as importedCloseActionSheet, openActionSheet as import
 import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
 import { enhanceAppSelects as importedEnhanceAppSelects, syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
 import { bindTabStripEdgeListener as importedBindTabStripEdgeListener, syncActiveTabStripScroll as importedSyncActiveTabStripScroll } from '../../ui/ui_tab_strip_edges.js';
-import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 import {
   DarklabTeamScope as importedTeamScope,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,

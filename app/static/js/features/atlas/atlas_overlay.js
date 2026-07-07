@@ -19,7 +19,7 @@ import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
 import { apiFetch as importedApiFetch, logClientError as importedLogClientError } from '../../session.js';
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_details.js';
-import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 import {
   DarklabTeamScope as importedTeamScope,
   activeTeamScopeCan as importedActiveTeamScopeCan,

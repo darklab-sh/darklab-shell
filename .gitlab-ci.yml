@@ -46,7 +46,7 @@ test-js-e2e:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -q nodejs iputils-ping
+    - curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && apt-get install -y -q nodejs iputils-ping
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
     - npm ci
     - npx playwright install --with-deps chromium

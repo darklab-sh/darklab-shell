@@ -64,6 +64,10 @@ import {
   _historyEntityNoteBody as importedHistoryEntityNoteBody,
   _historyExitLabel as importedHistoryExitLabel,
 } from './history_rows.js';
+import {
+  ExportHtmlUtils as importedExportHtmlUtils,
+  loadExportHtmlUtils as importedLoadExportHtmlUtils,
+} from '../../export_html_bridge.js';
 
 const HISTORY_RUN_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -80,7 +84,34 @@ const DarklabAtlasEntityRow = (typeof importedAtlasEntityRow !== 'undefined' && 
   || _historyRunGlobalValue('DarklabAtlasEntityRow');
 const DarklabAtlasTabs = (typeof importedAtlasTabs !== 'undefined' && importedAtlasTabs)
   || _historyRunGlobalValue('DarklabAtlasTabs');
-const ExportHtmlUtils = _historyRunGlobalValue('ExportHtmlUtils');
+let ExportHtmlUtils = (typeof importedExportHtmlUtils !== 'undefined' && importedExportHtmlUtils)
+  || _historyRunGlobalValue('ExportHtmlUtils')
+  || null;
+
+function _historyRunRefreshExportHtmlUtils() {
+  ExportHtmlUtils = (typeof importedExportHtmlUtils !== 'undefined' && importedExportHtmlUtils)
+    || _historyRunGlobalValue('ExportHtmlUtils')
+    || ExportHtmlUtils
+    || null;
+  return ExportHtmlUtils;
+}
+
+async function _historyRunEnsureExportHtmlUtils() {
+  const current = _historyRunRefreshExportHtmlUtils();
+  if (
+    current
+    && current.isLazyExportHtmlBridge !== true
+    && typeof current.buildTerminalExportHtml === 'function'
+  ) {
+    return current;
+  }
+  const load = (typeof importedLoadExportHtmlUtils !== 'undefined' && importedLoadExportHtmlUtils)
+    || _historyRunGlobalFunction('loadExportHtmlUtils');
+  if (typeof load !== 'function') return null;
+  const loaded = await load();
+  ExportHtmlUtils = loaded && loaded.ExportHtmlUtils ? loaded.ExportHtmlUtils : loaded;
+  return ExportHtmlUtils;
+}
 
 function _historyRunAppConfig() {
   if (typeof importedGetAppConfig === 'function') return importedGetAppConfig();
@@ -2167,7 +2198,10 @@ async function _exportHistoryRunTxt() {
 }
 
 async function _exportHistoryRunHtml() {
-  if (!ExportHtmlUtils) throw new Error('ExportHtmlUtils unavailable');
+  const htmlUtils = await _historyRunEnsureExportHtmlUtils();
+  if (!htmlUtils || typeof htmlUtils.buildTerminalExportHtml !== 'function') {
+    throw new Error('ExportHtmlUtils unavailable');
+  }
   const run = await _historyRunLoadExportRun();
   const exportModel = _historyRunBuildExportModel(run);
   if (!exportModel.rawLines.length) {
@@ -2175,15 +2209,15 @@ async function _exportHistoryRunHtml() {
     return;
   }
   const ansiRenderer = _historyRunCreateAnsiUpRenderer();
-  const { linesHtml, prefixWidth, summaryHtml } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+  const { linesHtml, prefixWidth, summaryHtml } = htmlUtils.buildExportLinesHtml(exportModel.rawLines, {
     getPrefix: () => '',
     ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : _historyRunEscapeHtml(String(text ?? '')),
   });
   const [fontFacesCss, exportCss] = await Promise.all([
-    ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
-    ExportHtmlUtils.fetchTerminalExportCss().catch(() => ''),
+    htmlUtils.fetchVendorFontFacesCss().catch(() => ''),
+    htmlUtils.fetchTerminalExportCss().catch(() => ''),
   ]);
-  const html = ExportHtmlUtils.buildTerminalExportHtml({
+  const html = htmlUtils.buildTerminalExportHtml({
     appName: exportModel.appName,
     title: exportModel.title,
     metaLine: exportModel.metaLine,
@@ -2202,6 +2236,7 @@ async function _exportHistoryRunPdf() {
   if (!loadPdfUtils) {
     throw new Error('PDF library not loaded');
   }
+  await _historyRunEnsureExportHtmlUtils();
   const pdfUtils = await loadPdfUtils;
   const run = await _historyRunLoadExportRun();
   const exportModel = _historyRunBuildExportModel(run);

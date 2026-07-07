@@ -7,6 +7,7 @@ import {
   openHistory,
   openHistoryWithEntries,
   waitForHistoryRuns,
+  waitForHistoryCommands,
   closeHistory,
   createShareSnapshot,
   clickHistoryRunMenuAction,
@@ -814,7 +815,7 @@ test.describe('history drawer', () => {
     ]
     const sessionId = await browserSessionId(page)
     seedExternalHistoryRuns(testInfo, { sessionId, commands: bulkCommands })
-    const runs = await waitForHistoryRuns(page, 2)
+    const runs = await waitForHistoryCommands(page, bulkCommands)
     const selectedRunIds = runs
       .filter(run => bulkCommands.includes(run.command))
       .map(run => String(run.id))
@@ -874,11 +875,7 @@ test.describe('history drawer', () => {
 
   test('run comparison split view works from history and project entry points', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
-    const sessionId = await page.evaluate(() => (
-      typeof SESSION_ID === 'string' && SESSION_ID
-        ? SESSION_ID
-        : localStorage.getItem('session_id')
-    ))
+    const sessionId = await browserSessionId(page)
     const fixture = seedCompareFixture(testInfo, { sessionId })
 
     await openHistoryWithEntries(page)

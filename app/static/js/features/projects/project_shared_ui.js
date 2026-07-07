@@ -8,7 +8,7 @@ import {
 import {
   verificationStatusLabel as importedVerificationStatusLabel,
   verificationStatusTone as importedVerificationStatusTone,
-} from '../findings/finding_triage_editor.js';
+} from '../findings/finding_triage_bridge.js';
 
 let exportedDarklabProjectSharedUi = null;
 

@@ -975,7 +975,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
 │   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
 │   │       ├── e2e_test_hooks.js # Test-only browser hooks used by Playwright and unit harnesses
+│   │       ├── e2e_test_hooks_loader.js # Tiny Playwright-only hook loader that keeps test globals out of normal startup
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
+│   │       ├── export_html_bridge.js # Lightweight export HTML bridge for lazy styled HTML/PDF exports
 │   │       ├── export_pdf.js   # Lazy-loaded shared PDF export module
 │   │       ├── features/
 │   │       │   ├── atlas/
@@ -994,6 +996,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── command_registry_bridge.js # Command registry ESM bridge for lazy command catalog UI
 │   │       │   │   └── faq_helpers.js # FAQ command chips, allowed-command summary, and limits rendering
 │   │       │   ├── findings/
+│   │       │   │   ├── finding_triage_bridge.js # Lightweight finding-triage bridge for lazy remediation controls
 │   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
 │   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
@@ -1095,7 +1098,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── theme/
 │   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
 │   │       │   ├── tour/
-│   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   │   ├── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   │   └── tour_cli_bridge.js # Lightweight terminal tour bridge that loads the full tour command on first use
 │   │       │   ├── watchers/
 │   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/

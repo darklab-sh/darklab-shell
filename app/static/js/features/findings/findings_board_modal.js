@@ -18,7 +18,7 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
-import { DarklabFindingTriageEditor as importedFindingTriageEditor } from './finding_triage_editor.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from './finding_triage_bridge.js';
 
 let exportedOpenFindingsBoard = null;
 let exportedCloseFindingsBoard = null;

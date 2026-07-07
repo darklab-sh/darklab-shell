@@ -17,9 +17,12 @@ import { setWorkspaceHandlers as importedSetWorkspaceHandlers } from '../workspa
 
 let exportedLoadAtlasOverlay = null;
 let exportedLoadCommandRegistry = null;
+let exportedLoadExportHtmlUtils = null;
 let exportedLoadFindingsBoard = null;
+let exportedLoadFindingTriageEditor = null;
 let exportedLoadMobileRunningIndicator = null;
 let exportedLoadSchedulesModal = null;
+let exportedLoadTourCliCommand = null;
 let exportedLoadWorkspaceSurface = null;
 let exportedLoadWatchersModal = null;
 
@@ -75,6 +78,7 @@ let exportedLoadWatchersModal = null;
     const configured = _lazyAssetConfig()[name];
     const normalized = _normalizeLazyAssetEntry(configured);
     if (normalized.url) return normalized;
+    if (name === 'export_html') return { url: '/static/js/export_html.js', type: 'module' };
     if (name === 'export_pdf') return { url: '/static/js/export_pdf.js', type: 'module' };
     if (name === 'atlas_tabs') return { url: '/static/js/features/atlas/atlas_tabs.js', type: 'module' };
     if (name === 'atlas_entity_row') return { url: '/static/js/features/atlas/atlas_entity_row.js', type: 'module' };
@@ -82,6 +86,7 @@ let exportedLoadWatchersModal = null;
     if (name === 'atlas_overlay') return { url: '/static/js/features/atlas/atlas_overlay.js', type: 'module' };
     if (name === 'atlas_mobile') return { url: '/static/js/features/atlas/atlas_mobile.js', type: 'module' };
     if (name === 'findings_board') return { url: '/static/js/features/findings/findings_board_modal.js', type: 'module' };
+    if (name === 'finding_triage_editor') return { url: '/static/js/features/findings/finding_triage_editor.js', type: 'module' };
     if (name === 'project_activity') return { url: '/static/js/features/projects/project_activity.js', type: 'module' };
     if (name === 'project_overview') return { url: '/static/js/features/projects/project_overview.js', type: 'module' };
     if (name === 'project_monitoring') return { url: '/static/js/features/projects/project_monitoring.js', type: 'module' };
@@ -127,6 +132,7 @@ let exportedLoadWatchersModal = null;
     if (name === 'mobile_running_indicator') {
       return { url: '/static/js/features/mobile/mobile_running_indicator.js', type: 'module' };
     }
+    if (name === 'tour_cli') return { url: '/static/js/features/tour/tour_cli.js', type: 'module' };
     if (name === 'tour_modal') return { url: '/static/js/tour_modal.js', type: 'module' };
     if (name === 'watchers_modal') return { url: '/static/js/features/watchers/watchers_modal.js', type: 'module' };
     if (name === 'status_monitor_core') return { url: '/static/js/features/status-monitor/status_monitor_core.js', type: 'module' };
@@ -373,7 +379,23 @@ let exportedLoadWatchersModal = null;
     return window.jspdf.jsPDF;
   }
 
+  async function loadExportHtmlUtils() {
+    const existing = window.ExportHtmlUtils;
+    if (
+      existing
+      && existing.isLazyExportHtmlBridge !== true
+      && typeof existing.buildTerminalExportHtml === 'function'
+    ) {
+      return existing;
+    }
+    const htmlModule = await loadLazyAsset('export_html');
+    return _requireLazyModuleExport(htmlModule, 'ExportHtmlUtils', value => (
+      value && typeof value.buildTerminalExportHtml === 'function'
+    ));
+  }
+
   async function loadExportPdfUtils() {
+    await loadExportHtmlUtils();
     const pdfModule = await loadLazyAsset('export_pdf');
     return _requireLazyModuleExport(pdfModule, 'ExportPdfUtils', value => (
       value && typeof value.buildTerminalExportPdf === 'function'
@@ -389,6 +411,13 @@ let exportedLoadWatchersModal = null;
       closeFindingsBoard: boardModule?.closeFindingsBoard || null,
       isFindingsBoardOpen: boardModule?.isFindingsBoardOpen || null,
     };
+  }
+
+  async function loadFindingTriageEditor() {
+    const editorModule = await loadLazyAsset('finding_triage_editor');
+    return _requireLazyModuleExport(editorModule, 'DarklabFindingTriageEditor', value => (
+      value && typeof value.open === 'function' && typeof value.compactTriage === 'function'
+    ));
   }
 
   function _requireLazyModuleExport(moduleApi, exportName, predicate = value => !!value) {
@@ -827,6 +856,11 @@ let exportedLoadWatchersModal = null;
     };
   }
 
+  async function loadTourCliCommand() {
+    const tourModule = await loadLazyAsset('tour_cli');
+    return _requireLazyModuleExport(tourModule, 'handleTourCommand', value => typeof value === 'function');
+  }
+
   async function loadStatusMonitor() {
     const coreModule = await loadLazyAsset('status_monitor_core');
     const dataModule = await loadLazyAsset('status_monitor_data');
@@ -1222,9 +1256,11 @@ let exportedLoadWatchersModal = null;
   window.lazyAssetUrl = lazyAssetUrl;
   window.loadJsPdf = loadJsPdf;
   window.loadLazyClassicScripts = loadLazyClassicScripts;
+  window.loadExportHtmlUtils = loadExportHtmlUtils;
   window.loadExportPdfUtils = loadExportPdfUtils;
   window.loadAtlasOverlay = loadAtlasOverlay;
   window.loadFindingsBoard = loadFindingsBoard;
+  window.loadFindingTriageEditor = loadFindingTriageEditor;
   window.loadProjectActivity = loadProjectActivity;
   window.loadProjectOverview = loadProjectOverview;
   window.loadProjectMonitoring = loadProjectMonitoring;
@@ -1241,6 +1277,7 @@ let exportedLoadWatchersModal = null;
   window.loadPtyAttachController = loadPtyAttachController;
   window.loadWatchersModal = loadWatchersModal;
   window.loadSchedulesModal = loadSchedulesModal;
+  window.loadTourCliCommand = loadTourCliCommand;
   window.loadTourModal = loadTourModal;
   window.loadStatusMonitor = loadStatusMonitor;
   window.loadMobileRunningIndicator = loadMobileRunningIndicator;
@@ -1248,8 +1285,10 @@ let exportedLoadWatchersModal = null;
   exportedLoadAtlasOverlay = loadAtlasOverlay;
   exportedLoadCommandRegistry = loadCommandRegistry;
   exportedLoadFindingsBoard = loadFindingsBoard;
+  exportedLoadFindingTriageEditor = loadFindingTriageEditor;
   exportedLoadMobileRunningIndicator = loadMobileRunningIndicator;
   exportedLoadSchedulesModal = loadSchedulesModal;
+  exportedLoadTourCliCommand = loadTourCliCommand;
   exportedLoadWorkspaceSurface = loadWorkspaceSurface;
   exportedLoadWatchersModal = loadWatchersModal;
   if (typeof window.openAtlas !== 'function') window.openAtlas = lazyOpenAtlas;
@@ -1347,6 +1386,7 @@ let exportedLoadWatchersModal = null;
   if (typeof window.isInteractivePtyCommand !== 'function') window.isInteractivePtyCommand = lazyIsInteractivePtyCommand;
   if (typeof window.startInteractivePtyCommand !== 'function') window.startInteractivePtyCommand = lazyStartInteractivePtyCommand;
   if (typeof window.attachInteractivePtyCommand !== 'function') window.attachInteractivePtyCommand = lazyAttachInteractivePtyCommand;
+  exportedLoadExportHtmlUtils = loadExportHtmlUtils;
 })();
 
 function loadAtlasOverlay(...args) {
@@ -1367,6 +1407,18 @@ function loadFindingsBoard(...args) {
     : Promise.resolve(null);
 }
 
+function loadFindingTriageEditor(...args) {
+  return typeof exportedLoadFindingTriageEditor === 'function'
+    ? exportedLoadFindingTriageEditor(...args)
+    : Promise.resolve(null);
+}
+
+function loadExportHtmlUtils(...args) {
+  return typeof exportedLoadExportHtmlUtils === 'function'
+    ? exportedLoadExportHtmlUtils(...args)
+    : Promise.resolve(null);
+}
+
 function loadMobileRunningIndicator(...args) {
   return typeof exportedLoadMobileRunningIndicator === 'function'
     ? exportedLoadMobileRunningIndicator(...args)
@@ -1376,6 +1428,12 @@ function loadMobileRunningIndicator(...args) {
 function loadSchedulesModal(...args) {
   return typeof exportedLoadSchedulesModal === 'function'
     ? exportedLoadSchedulesModal(...args)
+    : Promise.resolve(null);
+}
+
+function loadTourCliCommand(...args) {
+  return typeof exportedLoadTourCliCommand === 'function'
+    ? exportedLoadTourCliCommand(...args)
     : Promise.resolve(null);
 }
 
@@ -1394,9 +1452,12 @@ function loadWorkspaceSurface(...args) {
 export {
   loadAtlasOverlay,
   loadCommandRegistry,
+  loadExportHtmlUtils,
   loadFindingsBoard,
+  loadFindingTriageEditor,
   loadMobileRunningIndicator,
   loadSchedulesModal,
+  loadTourCliCommand,
   loadWorkspaceSurface,
   loadWatchersModal,
 };

@@ -1,4 +1,5 @@
 import { formatPortEntityMetadata as importedFormatPortEntityMetadata } from './atlas_entity_row.js';
+import { verificationStatusLabel as importedVerificationStatusLabel } from '../findings/finding_triage_bridge.js';
 
 // Session Entity Atlas detail rendering helpers.
 
@@ -387,6 +388,9 @@ const _darklabGlobal = window;
 
   function verificationStatusLabel(value) {
     const normalized = text(value, 'not_started');
+    if (typeof importedVerificationStatusLabel === 'function') {
+      return importedVerificationStatusLabel(normalized);
+    }
     if (_darklabGlobal.DarklabFindingTriageEditor && typeof _darklabGlobal.DarklabFindingTriageEditor.verificationStatusLabel === 'function') {
       return _darklabGlobal.DarklabFindingTriageEditor.verificationStatusLabel(normalized);
     }

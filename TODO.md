@@ -30,10 +30,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Continue trimming the ESM initial shell graph.**
-  - Target the cold-load path that still sends a large shared ESM chunk, the shell bootstrap, the full app CSS bundle, and a large HTML document before the shell feels instant.
-  - Keep tightening the asset build split so lazy-only modal and feature code cannot be pulled into an initial shared chunk. Keep the shell graph small, and put Projects, Atlas, history details, comparisons, package views, and other modal-heavy code behind their own lazy boundaries.
-  - Re-measure bundle mode after the change with request count, transferred bytes, DOM-ready timing, and time to interactive shell prompt.
 - **Make source asset mode useful without bringing back pre-bundle request fan-out.**
   - Keep source mode opt-in and make it obvious in startup logs or diagnostics when it is active, since it can send more than a hundred direct module requests on first load.
   - Remove source-mode duplicate module fetches caused by loading some lazy modules with `?v=` while their relative ESM imports load the same files without the version query.

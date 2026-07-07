@@ -12,6 +12,10 @@
 {% include "theme_vars_script.html" %}
 <script defer src="{{ static_asset('/vendor/ansi_up.js') }}"></script>
 <script id="lazy-assets-json" type="application/json">{{ {
+  'export_html': {
+    'url': static_asset('/static/js/export_html.js'),
+    'type': 'module'
+  },
   'export_pdf': {
     'url': static_asset('/static/js/export_pdf.js'),
     'type': 'module'
@@ -42,6 +46,10 @@
   },
   'findings_board': {
     'url': static_asset('/static/js/features/findings/findings_board_modal.js'),
+    'type': 'module'
+  },
+  'finding_triage_editor': {
+    'url': static_asset('/static/js/features/findings/finding_triage_editor.js'),
     'type': 'module'
   },
   'project_activity': {
@@ -238,6 +246,10 @@
   },
   'workspace_drag_drop': {
     'url': static_asset('/static/js/features/workspace/workspace_drag_drop.js'),
+    'type': 'module'
+  },
+  'tour_cli': {
+    'url': static_asset('/static/js/features/tour/tour_cli.js'),
     'type': 'module'
   },
   'tour_modal': {
