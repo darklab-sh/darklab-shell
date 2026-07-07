@@ -51,6 +51,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Initial shell render path is lighter** — Feature-owned styles for Projects, Atlas, Command Registry, Run Comparison, Schedules, Status Monitor, Watchers, Workflows, and Files now load with their first-use modules instead of blocking the first shell paint.
+  - Schedules, Watchers, and Findings Board now create their modal shells when their feature modules load, then bind their own focus traps, dismissible behavior, and mobile sheet gestures.
+  - Core mobile shell layout rules stay on the initial CSS path, so lazy-loading the Status Monitor stylesheet no longer lets desktop chrome overlap the mobile transcript or steal taps from the mobile composer.
+  - **Tests:** updated index-route asset coverage, refreshed the committed build output, exercised the lazy source-mode smoke path plus focused browser unit coverage, and reran the full mobile Playwright spec in bundle mode.
 - API v1 team Project finding lists now include cross-member findings that are reachable through authorized team Project run/entity links, matching the Project count and finding-summary rollups.
 - Architecture guardrails now reflect the current static build route, post-baseline migration shape, and split-module baselines from the performance and index work.
 - Frontend module inventory now classifies the lazy Files bridge resolver helpers as the workspace bridge contract, so resolver-helper drift checks cover the new first-use Files boundary.

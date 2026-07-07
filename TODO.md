@@ -30,11 +30,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Move inactive modal markup and feature CSS off the initial shell path.**
-  - Split critical shell CSS from feature and modal CSS so the first render is not blocked by styles for Projects, Atlas, history details, comparisons, packages, schedules, watchers, and other closed surfaces.
-  - Lazy-render or template-load large inactive modal bodies instead of shipping all modal markup in the first HTML document.
+- **Move the remaining large inactive modal shells off the initial HTML path.**
+  - Lazy-render or template-load the remaining large Project and Atlas modal bodies instead of shipping their closed surfaces in the first HTML document.
+  - Keep the feature CSS lazy-load path aligned with any newly split modal markup so first-use surfaces still open with their final styling already applied.
   - Preserve the current visual design and interaction patterns when moving modal content so the change feels like a speedup, not a redesign.
-  - Re-measure HTML size, render-blocking CSS size, and first-open modal timing after the split.
+  - Re-measure HTML size and first-open Project/Atlas modal timing after the remaining markup split.
 - **Make the Projects modal populate immediately on first open.**
   - Split Projects into a small first-open core that can render the modal shell, list, details, and empty states quickly.
   - Defer tab-specific, board, findings, entity, target, run, package, editor, and mobile modules until the user opens those surfaces or the viewport needs them.

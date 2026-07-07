@@ -20,6 +20,46 @@
     'url': static_asset('/static/js/export_pdf.js'),
     'type': 'module'
   },
+  'projects_css': {
+    'url': static_asset('/static/css/features/projects.css'),
+    'type': 'style'
+  },
+  'atlas_css': {
+    'url': static_asset('/static/css/features/atlas.css'),
+    'type': 'style'
+  },
+  'atlas_mobile_css': {
+    'url': static_asset('/static/css/features/atlas-mobile.css'),
+    'type': 'style'
+  },
+  'command_registry_css': {
+    'url': static_asset('/static/css/features/command-registry.css'),
+    'type': 'style'
+  },
+  'run_comparison_css': {
+    'url': static_asset('/static/css/features/run-comparison.css'),
+    'type': 'style'
+  },
+  'schedules_css': {
+    'url': static_asset('/static/css/features/schedules.css'),
+    'type': 'style'
+  },
+  'status_monitor_css': {
+    'url': static_asset('/static/css/features/status-monitor.css'),
+    'type': 'style'
+  },
+  'watchers_css': {
+    'url': static_asset('/static/css/features/watchers.css'),
+    'type': 'style'
+  },
+  'workflows_css': {
+    'url': static_asset('/static/css/features/workflows.css'),
+    'type': 'style'
+  },
+  'workspace_css': {
+    'url': static_asset('/static/css/features/workspace.css'),
+    'type': 'style'
+  },
   'atlas_tabs': {
     'url': static_asset('/static/js/features/atlas/atlas_tabs.js'),
     'type': 'module'
@@ -1102,54 +1142,6 @@
   </form>
 </div>
 
-<!-- Schedules Modal -->
-<div id="schedules-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
-  <section id="schedules-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="schedules-title" tabindex="-1">
-    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close schedules"></div>
-    <div class="faq-header">
-      <span class="faq-title" id="schedules-title">SCHEDULES</span>
-      <div class="schedules-header-actions">
-        <button type="button" class="btn btn-secondary btn-compact" id="schedules-new-btn">New schedule</button>
-        <button type="button" class="close-btn schedules-close" aria-label="Close schedules">✕</button>
-      </div>
-    </div>
-    <div class="schedules-layout">
-      <aside class="schedules-sidebar">
-        <div class="schedules-sidebar-toolbar">
-          <button type="button" class="btn btn-secondary btn-compact" id="schedules-refresh-btn">Refresh</button>
-          <span class="schedules-count" id="schedules-count">0</span>
-        </div>
-        <div class="schedules-list nice-scroll" id="schedules-list" aria-live="polite"></div>
-      </aside>
-      <div class="schedules-detail nice-scroll" id="schedules-detail"></div>
-    </div>
-  </section>
-</div>
-
-<!-- Watchers Modal -->
-<div id="watchers-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
-  <section id="watchers-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="watchers-title" tabindex="-1">
-    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close watchers"></div>
-    <div class="faq-header">
-      <span class="faq-title" id="watchers-title">WATCHERS</span>
-      <div class="watchers-header-actions">
-        <button type="button" class="btn btn-secondary btn-compact" id="watchers-new-btn">New watcher</button>
-        <button type="button" class="close-btn watchers-close" aria-label="Close watchers">✕</button>
-      </div>
-    </div>
-    <div class="watchers-layout">
-      <aside class="watchers-sidebar">
-        <div class="watchers-sidebar-toolbar">
-          <button type="button" class="btn btn-secondary btn-compact" id="watchers-refresh-btn">Refresh</button>
-          <span class="watchers-count" id="watchers-count">0</span>
-        </div>
-        <div class="watchers-list nice-scroll" id="watchers-list" aria-live="polite"></div>
-      </aside>
-      <div class="watchers-detail nice-scroll" id="watchers-detail"></div>
-    </div>
-  </section>
-</div>
-
 <!-- FAQ Modal -->
 <div id="faq-overlay" class="mobile-sheet-overlay">
   <div id="faq-modal" class="mobile-sheet-surface">
@@ -1180,24 +1172,6 @@
     </div>
     <div id="command-registry-body" class="command-registry-body nice-scroll" aria-live="polite"></div>
   </div>
-</div>
-
-<div id="findings-board-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
-  <section id="findings-board-modal" class="modal-card mobile-sheet-surface findings-board-modal" role="dialog" aria-modal="true" aria-labelledby="findings-board-title">
-    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close findings board"></div>
-    <div class="faq-header">
-      <div>
-        <span class="faq-title" id="findings-board-title">FINDINGS BOARD</span>
-        <div class="findings-board-subtitle" id="findings-board-subtitle">All findings</div>
-      </div>
-      <div class="findings-board-header-actions">
-        <button type="button" class="btn btn-secondary btn-compact" id="findings-board-refresh-btn">Refresh</button>
-        <button type="button" class="close-btn findings-board-close" aria-label="Close findings board">✕</button>
-      </div>
-    </div>
-    <div id="findings-board-message" class="findings-board-message u-hidden" role="status" aria-live="polite"></div>
-    <div id="findings-board-body" class="findings-board-body nice-scroll" aria-live="polite"></div>
-  </section>
 </div>
 
 <div id="project-workspace-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">

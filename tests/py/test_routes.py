@@ -243,6 +243,18 @@ class TestIndexRoute:
             "tour_modal": "/static/js/tour_modal.js",
             "watchers_modal": "/static/js/features/watchers/watchers_modal.js",
         }
+        expected_styles = {
+            "projects_css": "/static/css/features/projects.css",
+            "atlas_css": "/static/css/features/atlas.css",
+            "atlas_mobile_css": "/static/css/features/atlas-mobile.css",
+            "command_registry_css": "/static/css/features/command-registry.css",
+            "run_comparison_css": "/static/css/features/run-comparison.css",
+            "schedules_css": "/static/css/features/schedules.css",
+            "status_monitor_css": "/static/css/features/status-monitor.css",
+            "watchers_css": "/static/css/features/watchers.css",
+            "workflows_css": "/static/css/features/workflows.css",
+            "workspace_css": "/static/css/features/workspace.css",
+        }
         normalized_assets = {
             name: self._normalize_lazy_asset_entry(entry)
             for name, entry in self._lazy_assets_from_body(body).items()
@@ -251,6 +263,10 @@ class TestIndexRoute:
             assert normalized_assets[name] == {"url": path, "type": "module"}
             assert f'<script src="{path}' not in body
             assert f'{path}?v=' not in body
+        for name, path in expected_styles.items():
+            assert normalized_assets[name]["url"].startswith(path + "?v=")
+            assert normalized_assets[name]["type"] == "style"
+            assert f'<link rel="stylesheet" href="{path}' not in body
         assert '<script src="/vendor/jspdf.umd.min.js?v=' not in body
         assert '"jspdf": "/vendor/jspdf.umd.min.js?v=' in body
         assert '<script src="/vendor/xterm.js?v=' not in body
@@ -290,11 +306,14 @@ class TestIndexRoute:
 
         for name, entry in normalized_assets.items():
             assert set(entry) == {"url", "type"}
-            assert entry["url"].startswith(("/static/js/", "/vendor/"))
+            assert entry["url"].startswith(("/static/js/", "/static/css/", "/vendor/"))
             path = self._asset_path_without_version(entry["url"])
             if path.startswith("/static/js/"):
                 assert entry["type"] == "module", name
                 assert "?v=" not in entry["url"], name
+            elif path.startswith("/static/css/"):
+                assert entry["type"] == "style", name
+                assert "?v=" in entry["url"], name
             else:
                 assert entry["type"] == "classic", name
                 assert "?v=" in entry["url"], name

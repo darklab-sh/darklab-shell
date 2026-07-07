@@ -75,11 +75,36 @@
   user-select: none;
 }
 
+/* Core mobile shell layout. These rules must stay on the initial CSS path so
+   the desktop rail and HUD cannot overlap the mobile transcript before any
+   optional feature stylesheet is loaded. */
+body.mobile-terminal-mode .rail,
+body.mobile-terminal-mode .hud,
+body.mobile-terminal-mode .tabbar-chrome {
+  display: none !important;
+}
+
+body.mobile-terminal-mode .shell-root,
+body.mobile-terminal-mode .main-col,
+body.mobile-terminal-mode .tabbar-scroll {
+  display: contents;
+}
+
 /* ── Mobile ── */
 @media (max-width: 600px) {
   /* 100svh = small (stable) viewport height. 100vh on Chrome/Safari iOS equals
      the *large* viewport (address bar hidden), making the body taller than the
      visible area on first load and pushing #mobile-composer below the fold. */
+  .shell-root,
+  .main-col,
+  .tabbar-scroll {
+    display: contents;
+  }
+  .rail,
+  .hud,
+  .tabbar-chrome {
+    display: none !important;
+  }
   body { padding: 12px; gap: 12px; position: relative; min-height: 100vh; min-height: 100svh; }
   header {
     position: sticky;

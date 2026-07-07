@@ -6,6 +6,8 @@ import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overl
 import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
 import { apiFetch as importedApiFetch } from '../../session.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
+import { bindFocusTrap as importedBindFocusTrap } from '../../ui/ui_focus_trap.js';
 import {
   blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
@@ -26,7 +28,33 @@ let exportedIsFindingsBoardOpen = null;
 
 (function findingsBoardModalModule(global) {
   'use strict';
+  function ensureFindingsBoardMarkup() {
+    if (typeof document === 'undefined' || document.getElementById('findings-board-overlay')) return;
+    document.body?.insertAdjacentHTML('beforeend', `
+<div id="findings-board-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="findings-board-modal" class="modal-card mobile-sheet-surface findings-board-modal" role="dialog" aria-modal="true" aria-labelledby="findings-board-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close findings board"></div>
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="findings-board-title">FINDINGS BOARD</span>
+        <div class="findings-board-subtitle" id="findings-board-subtitle">All findings</div>
+      </div>
+      <div class="findings-board-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="findings-board-refresh-btn">Refresh</button>
+        <button type="button" class="close-btn findings-board-close" aria-label="Close findings board">✕</button>
+      </div>
+    </div>
+    <div id="findings-board-message" class="findings-board-message u-hidden" role="status" aria-live="polite"></div>
+    <div id="findings-board-body" class="findings-board-body nice-scroll" aria-live="polite"></div>
+  </section>
+</div>`);
+  }
+
+  ensureFindingsBoardMarkup();
+
   const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const bindFocusTrap = (typeof importedBindFocusTrap !== 'undefined' && importedBindFocusTrap) || null;
+  const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
   const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
   const emitUiEvent = (typeof importedEmitUiEvent !== 'undefined' && importedEmitUiEvent) || null;
   const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
@@ -636,12 +664,16 @@ let exportedIsFindingsBoardOpen = null;
   }
 
   if (overlay && typeof bindDismissible === 'function') {
+    if (typeof bindFocusTrap === 'function') bindFocusTrap(modal);
     bindDismissible(overlay, {
       level: 'modal',
       isOpen,
       onClose: closeFindingsBoard,
       closeButtons: Array.from(overlay.querySelectorAll('.findings-board-close, .sheet-grab')),
     });
+    if (typeof bindMobileSheet === 'function') {
+      bindMobileSheet(modal, { onClose: closeFindingsBoard });
+    }
   } else {
     closeBtn?.addEventListener('click', () => closeFindingsBoard());
     grabHandle?.addEventListener('click', () => closeFindingsBoard());

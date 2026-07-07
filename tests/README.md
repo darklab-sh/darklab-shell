@@ -1692,7 +1692,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
 | `TestIndexRoute.test_html_response_uses_gzip_when_accepted` | Verifies the dynamic HTML shell is gzip-compressed when the browser advertises support. |
-| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest, with unversioned JS module URLs and versioned classic vendor URLs. |
+| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest, with unversioned JS module URLs plus versioned CSS and classic vendor URLs. |
 | `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
 | `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
 | `TestIndexRoute.test_esm_asset_bundle_uses_module_type_and_source_entries` | Verifies ESM asset bundles render module script tags, source mode emits only the entry module, and source JS modules keep one unversioned URL identity while classic vendor assets stay cache-busted. |

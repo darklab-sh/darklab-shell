@@ -68,7 +68,7 @@ let exportedLoadWatchersModal = null;
     if (typeof value === 'string' && value) return { url: value, type: 'classic' };
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const url = typeof value.url === 'string' ? value.url : '';
-      const type = value.type === 'module' ? 'module' : 'classic';
+      const type = value.type === 'module' || value.type === 'style' ? value.type : 'classic';
       if (url) return { url, type };
     }
     return { url: '', type: 'classic' };
@@ -80,6 +80,16 @@ let exportedLoadWatchersModal = null;
     if (normalized.url) return normalized;
     if (name === 'export_html') return { url: '/static/js/export_html.js', type: 'module' };
     if (name === 'export_pdf') return { url: '/static/js/export_pdf.js', type: 'module' };
+    if (name === 'projects_css') return { url: '/static/css/features/projects.css', type: 'style' };
+    if (name === 'atlas_css') return { url: '/static/css/features/atlas.css', type: 'style' };
+    if (name === 'atlas_mobile_css') return { url: '/static/css/features/atlas-mobile.css', type: 'style' };
+    if (name === 'command_registry_css') return { url: '/static/css/features/command-registry.css', type: 'style' };
+    if (name === 'run_comparison_css') return { url: '/static/css/features/run-comparison.css', type: 'style' };
+    if (name === 'schedules_css') return { url: '/static/css/features/schedules.css', type: 'style' };
+    if (name === 'status_monitor_css') return { url: '/static/css/features/status-monitor.css', type: 'style' };
+    if (name === 'watchers_css') return { url: '/static/css/features/watchers.css', type: 'style' };
+    if (name === 'workflows_css') return { url: '/static/css/features/workflows.css', type: 'style' };
+    if (name === 'workspace_css') return { url: '/static/css/features/workspace.css', type: 'style' };
     if (name === 'atlas_tabs') return { url: '/static/js/features/atlas/atlas_tabs.js', type: 'module' };
     if (name === 'atlas_entity_row') return { url: '/static/js/features/atlas/atlas_entity_row.js', type: 'module' };
     if (name === 'atlas_entity_detail') return { url: '/static/js/features/atlas/atlas_entity_detail.js', type: 'module' };
@@ -148,6 +158,12 @@ let exportedLoadWatchersModal = null;
     return { url: '', type: 'classic' };
   }
 
+  function _lazyAssetType(entry) {
+    if (entry && entry.type === 'module') return 'module';
+    if (entry && entry.type === 'style') return 'style';
+    return 'classic';
+  }
+
   function _lazyAssetUrl(name) {
     return _lazyAssetEntry(name).url;
   }
@@ -170,7 +186,7 @@ let exportedLoadWatchersModal = null;
       event: 'LAZY_ASSET_LOAD_FAILED',
       level: 'error',
       asset_name: String(name || '').slice(0, 120),
-      asset_type: entry && entry.type === 'module' ? 'module' : 'classic',
+      asset_type: _lazyAssetType(entry),
       src: _safeLazyAssetLogSrc(entry && entry.url),
       expected_global: typeof globalCheck === 'function',
     });
@@ -207,7 +223,7 @@ let exportedLoadWatchersModal = null;
     if (typeof log !== 'function') return;
     log.call(consoleApi, `[darklab] ${details.event || context}`, {
       asset_name: String(name || '').slice(0, 120),
-      asset_type: entry && entry.type === 'module' ? 'module' : 'classic',
+      asset_type: _lazyAssetType(entry),
       src: _safeLazyAssetLogSrc(entry && entry.url),
       ...details,
     });
@@ -357,14 +373,90 @@ let exportedLoadWatchersModal = null;
         delete _lazyAssetPromises[name];
         _logLazyAssetLoadFailed(name, entry, err, globalCheck);
         throw err;
+    });
+    return _lazyAssetPromises[name];
+  }
+
+  function _hrefsMatch(currentHref, targetHref) {
+    if (!currentHref || !targetHref) return false;
+    try {
+      const base = typeof window !== 'undefined' && window.location ? window.location.href : 'http://localhost/';
+      return new URL(currentHref, base).href === new URL(targetHref, base).href;
+    } catch (_) {
+      return String(currentHref) === String(targetHref);
+    }
+  }
+
+  function _findLazyStyleLink(name, src) {
+    if (typeof document === 'undefined' || !document.querySelectorAll) return null;
+    const links = document.querySelectorAll('link[rel="stylesheet"]');
+    for (const link of links) {
+      if (!link) continue;
+      if (link.dataset && link.dataset.lazyAsset === name) return link;
+      if (_hrefsMatch(link.href, src)) return link;
+    }
+    return null;
+  }
+
+  function _isSyntheticLazyStyleRuntime(link) {
+    const runtimeNavigator = (typeof window !== 'undefined' && window.navigator)
+      || (typeof globalThis !== 'undefined' && globalThis.navigator)
+      || null;
+    const userAgent = String(runtimeNavigator?.userAgent || '');
+    if (/\bjsdom\b/i.test(userAgent)) return true;
+    return !link || typeof link.addEventListener !== 'function';
+  }
+
+  function loadLazyStyle(name) {
+    const entry = _lazyAssetEntry(name);
+    if (_lazyAssetPromises[name]) {
+      _logLazyAssetLoadStarted(name, entry, true);
+      _lazyAssetPromises[name].then(() => _logLazyAssetLoaded(name, entry, null, true)).catch(() => {});
+      return _lazyAssetPromises[name];
+    }
+    const src = entry.url;
+    if (!src) {
+      const err = new Error(`Unknown lazy asset: ${name}`);
+      _logLazyAssetLoadFailed(name, entry, err, null);
+      return Promise.reject(err);
+    }
+    const existing = _findLazyStyleLink(name, src);
+    if (existing) {
+      _lazyAssetPromises[name] = Promise.resolve().then(() => {
+        _logLazyAssetLoaded(name, entry, null, true);
       });
+      return _lazyAssetPromises[name];
+    }
+    const startedAt = _lazyAssetTimestamp();
+    _logLazyAssetLoadStarted(name, entry, false);
+    _lazyAssetPromises[name] = new Promise((resolve, reject) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = src;
+      if (link.dataset) link.dataset.lazyAsset = name;
+      if (_isSyntheticLazyStyleRuntime(link)) {
+        resolve();
+        return;
+      }
+      link.onload = () => resolve();
+      link.onerror = () => reject(new Error(`Failed to load lazy stylesheet: ${src}`));
+      (document.head || document.documentElement).appendChild(link);
+    }).then((result) => {
+      _logLazyAssetLoaded(name, entry, startedAt, false);
+      return result;
+    }).catch((err) => {
+      delete _lazyAssetPromises[name];
+      _logLazyAssetLoadFailed(name, entry, err, null);
+      throw err;
+    });
     return _lazyAssetPromises[name];
   }
 
   function loadLazyAsset(name, globalCheck) {
-    return _lazyAssetEntry(name).type === 'module'
-      ? loadLazyModule(name, globalCheck)
-      : loadLazyClassicScript(name, globalCheck);
+    const entry = _lazyAssetEntry(name);
+    if (entry.type === 'module') return loadLazyModule(name, globalCheck);
+    if (entry.type === 'style') return loadLazyStyle(name);
+    return loadLazyClassicScript(name, globalCheck);
   }
 
   function loadLazyClassicScripts(items) {
@@ -403,7 +495,9 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadFindingsBoard() {
+    const cssReady = loadLazyAsset('projects_css');
     const boardModule = await loadLazyAsset('findings_board');
+    await cssReady;
     return {
       openFindingsBoard: _requireLazyModuleExport(boardModule, 'openFindingsBoard', value => (
         typeof value === 'function' && value !== lazyOpenFindingsBoard
@@ -414,7 +508,9 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadFindingTriageEditor() {
+    const cssReady = loadLazyAsset('projects_css');
     const editorModule = await loadLazyAsset('finding_triage_editor');
+    await cssReady;
     return _requireLazyModuleExport(editorModule, 'DarklabFindingTriageEditor', value => (
       value && typeof value.open === 'function' && typeof value.compactTriage === 'function'
     ));
@@ -429,13 +525,19 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadAtlasOverlay() {
+    const hasMobileAtlas = !!document.getElementById('atlas-mobile-root');
+    const cssReady = Promise.all([
+      loadLazyAsset('atlas_css'),
+      hasMobileAtlas ? loadLazyAsset('atlas_mobile_css') : Promise.resolve(),
+    ]);
     const tabsModule = await loadLazyAsset('atlas_tabs');
     const entityRowModule = await loadLazyAsset('atlas_entity_row');
     const detailModule = await loadLazyAsset('atlas_entity_detail');
     const overlayModule = await loadLazyAsset('atlas_overlay');
-    const mobileModule = document.getElementById('atlas-mobile-root')
+    const mobileModule = hasMobileAtlas
       ? await loadLazyAsset('atlas_mobile')
       : null;
+    await cssReady;
     const DarklabAtlasOverlay = _requireLazyModuleExport(overlayModule, 'DarklabAtlasOverlay');
     const atlasApi = {
       DarklabAtlasTabs: _requireLazyModuleExport(tabsModule, 'DarklabAtlasTabs'),
@@ -465,7 +567,9 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadWatchersModal() {
+    const cssReady = loadLazyAsset('watchers_css');
     const watchersModule = await loadLazyAsset('watchers_modal');
+    await cssReady;
     return {
       openWatchersModal: _requireLazyModuleExport(watchersModule, 'openWatchersModal', value => (
         typeof value === 'function' && value !== lazyOpenWatchersModal
@@ -476,42 +580,54 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadProjectReport() {
+    const cssReady = loadLazyAsset('projects_css');
     const reportModule = await loadLazyAsset('project_report');
+    await cssReady;
     return _requireLazyModuleExport(reportModule, 'DarklabProjectReport', value => (
       value && typeof value.createProjectReportController === 'function'
     ));
   }
 
   async function loadProjectActivity() {
+    const cssReady = loadLazyAsset('projects_css');
     const activityModule = await loadLazyAsset('project_activity');
+    await cssReady;
     return _requireLazyModuleExport(activityModule, 'DarklabProjectActivity', value => (
       value && typeof value.createProjectActivityController === 'function'
     ));
   }
 
   async function loadProjectOverview() {
+    const cssReady = loadLazyAsset('projects_css');
     const overviewModule = await loadLazyAsset('project_overview');
+    await cssReady;
     return _requireLazyModuleExport(overviewModule, 'DarklabProjectOverview', value => (
       value && typeof value.createProjectOverviewController === 'function'
     ));
   }
 
   async function loadProjectMonitoring() {
+    const cssReady = loadLazyAsset('projects_css');
     const monitoringModule = await loadLazyAsset('project_monitoring');
+    await cssReady;
     return _requireLazyModuleExport(monitoringModule, 'DarklabProjectMonitoring', value => (
       value && typeof value.createProjectMonitoringController === 'function'
     ));
   }
 
   async function loadProjectArtifacts() {
+    const cssReady = loadLazyAsset('projects_css');
     const artifactsModule = await loadLazyAsset('project_artifacts');
+    await cssReady;
     return _requireLazyModuleExport(artifactsModule, 'DarklabProjectArtifacts', value => (
       value && typeof value.createProjectArtifactsController === 'function'
     ));
   }
 
   async function loadProjectPackages() {
+    const cssReady = loadLazyAsset('projects_css');
     const packagesModule = await loadLazyAsset('project_packages');
+    await cssReady;
     const DarklabProjectPackages = _requireLazyModuleExport(packagesModule, 'DarklabProjectPackages', value => (
       value && typeof value.createProjectPackagesController === 'function'
     ));
@@ -520,6 +636,7 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadProjectWorkspace() {
+    const cssReady = loadLazyAsset('projects_css');
     const loadProjectNamespace = async (name, globalName, controllerName) => {
       const moduleApi = await loadLazyAsset(name);
       const namespace = moduleApi?.[globalName] || window[globalName];
@@ -665,6 +782,7 @@ let exportedLoadWatchersModal = null;
         'createProjectFindingsBoardController',
       ),
     ]);
+    await cssReady;
 
     return {
       DarklabProjectDetails,
@@ -732,7 +850,9 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadCommandRegistry() {
+    const cssReady = loadLazyAsset('command_registry_css');
     const registryModule = await loadLazyAsset('command_registry');
+    await cssReady;
     return {
       showCommandRegistryOverlay: registryModule?.showCommandRegistryOverlay || null,
       hideCommandRegistryOverlay: registryModule?.hideCommandRegistryOverlay || null,
@@ -753,7 +873,9 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadWorkflows() {
+    const cssReady = loadLazyAsset('workflows_css');
     const workflowsModule = await loadLazyAsset('workflows');
+    await cssReady;
     return {
       renderWorkflowItems: _requireLazyModuleExport(workflowsModule, 'renderWorkflowItems', value => (
         typeof value === 'function' && value !== lazyRenderWorkflowItems
@@ -784,12 +906,14 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadHistoryCompare() {
+    const cssReady = loadLazyAsset('run_comparison_css');
     const coreModule = await loadLazyAsset('history_compare_core');
     const overlayModule = await loadLazyAsset('history_compare_overlay');
     const controlsModule = await loadLazyAsset('history_compare_controls');
     const navigationModule = await loadLazyAsset('history_compare_navigation');
     const rendererModule = await loadLazyAsset('history_compare_renderer');
     const launcherModule = await loadLazyAsset('history_compare_launcher');
+    await cssReady;
     _requireLazyModuleExport(coreModule, 'DarklabHistoryCompareCore');
     _requireLazyModuleExport(controlsModule, '_closeHistoryCompareActionMenus', value => typeof value === 'function');
     _requireLazyModuleExport(navigationModule, '_historyCompareScrollToLine', value => typeof value === 'function');
@@ -834,7 +958,9 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadSchedulesModal() {
+    const cssReady = loadLazyAsset('schedules_css');
     const schedulesModule = await loadLazyAsset('schedules_modal');
+    await cssReady;
     return {
       openSchedulesModal: _requireLazyModuleExport(schedulesModule, 'openSchedulesModal', value => (
         typeof value === 'function' && value !== lazyOpenSchedulesModal
@@ -862,10 +988,12 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadStatusMonitor() {
+    const cssReady = loadLazyAsset('status_monitor_css');
     const coreModule = await loadLazyAsset('status_monitor_core');
     const dataModule = await loadLazyAsset('status_monitor_data');
     const resourcesModule = await loadLazyAsset('status_monitor_resources');
     const monitorModule = await loadLazyAsset('status_monitor');
+    await cssReady;
     return {
       DarklabStatusMonitorCore: _requireLazyModuleExport(coreModule, 'DarklabStatusMonitorCore'),
       DarklabStatusMonitorData: _requireLazyModuleExport(dataModule, 'DarklabStatusMonitorData'),
@@ -887,8 +1015,10 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadWorkspaceSurface() {
+    const cssReady = loadLazyAsset('workspace_css');
     const workspaceModule = await loadLazyAsset('workspace');
     await loadLazyAsset('workspace_drag_drop');
+    await cssReady;
     if (typeof importedSetWorkspaceHandlers === 'function') {
       importedSetWorkspaceHandlers(workspaceModule || {});
     }
