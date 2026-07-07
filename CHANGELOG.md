@@ -53,6 +53,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Initial shell render path is lighter** — Feature-owned styles for Projects, Atlas, Command Registry, Run Comparison, Schedules, Status Monitor, Watchers, Workflows, and Files now load with their first-use modules instead of blocking the first shell paint.
   - Schedules, Watchers, and Findings Board now create their modal shells when their feature modules load, then bind their own focus traps, dismissible behavior, and mobile sheet gestures.
+  - Atlas and Projects now mount their large modal shells from first-use HTML fragments before their lazy controllers bind, so the initial document no longer ships those closed surfaces.
+  - Project first-use focus trapping now uses the imported UI helper directly during fragment bootstrap, keeping the browser-boundary inventory unchanged while preserving keyboard containment after the modal mounts.
+  - Shortcut coverage now treats the Project workspace fragment as absent before first open, matching the lazy shell behavior while still verifying Alt+P toggles the mounted modal.
+  - Moving the Atlas and Projects shells drops the source `index.html` file from 107.7 KB to 84.9 KB in the current checkout, while a bundle-mode first-open timing probe keeps Projects at 72 ms to overlay and 112 ms to content, and Atlas at 67 ms to overlay and 70 ms to content on the local test run.
   - Core mobile shell layout rules stay on the initial CSS path, so lazy-loading the Status Monitor stylesheet no longer lets desktop chrome overlap the mobile transcript or steal taps from the mobile composer.
   - **Tests:** updated index-route asset coverage, refreshed the committed build output, exercised the lazy source-mode smoke path plus focused browser unit coverage, and reran the full mobile Playwright spec in bundle mode.
 - API v1 team Project finding lists now include cross-member findings that are reachable through authorized team Project run/entity links, matching the Project count and finding-summary rollups.

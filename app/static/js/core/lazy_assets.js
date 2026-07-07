@@ -30,7 +30,15 @@ let exportedLoadWatchersModal = null;
   const _lazyAssetPromises = {};
   const _lazyAssetLoadedLogged = new Set();
   const _lazyModuleAssetMeta = typeof WeakMap === 'function' ? new WeakMap() : null;
+  const _lazyDomFragmentPromises = {};
   let _lazyAssetConfigInvalidLogged = false;
+  const LAZY_DOM_FRAGMENTS = {
+    atlas_overlay: {
+      url: '/static/fragments/atlas_overlay.html',
+      requiredId: 'atlas-overlay',
+      beforeId: 'history-panel',
+    },
+  };
 
   function _logLazyAssetConfigInvalid(err) {
     if (_lazyAssetConfigInvalidLogged || typeof importedLogClientError !== 'function') return;
@@ -247,6 +255,71 @@ let exportedLoadWatchersModal = null;
       duration_ms: cacheHit ? 0 : _lazyAssetDurationMs(startedAt),
       cache_hit: cacheHit === true,
     });
+  }
+
+  function _logLazyDomFragmentLoadFailed(name, config, err) {
+    if (typeof importedLogClientError !== 'function') return;
+    importedLogClientError('lazy DOM fragment load failed', err, {
+      event: 'LAZY_DOM_FRAGMENT_LOAD_FAILED',
+      level: 'error',
+      fragment_name: String(name || '').slice(0, 120),
+      src: _safeLazyAssetLogSrc(config && config.url),
+    });
+  }
+
+  function _canMountLazyDomFragments() {
+    return typeof document !== 'undefined'
+      && !!document.body
+      && typeof document.createElement === 'function'
+      && typeof fetch === 'function';
+  }
+
+  function _mountLazyDomFragment(html, config) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '').trim();
+    if (!template.content || !template.content.childNodes.length) {
+      throw new Error(`Lazy DOM fragment is empty: ${config.url}`);
+    }
+    const anchor = config.beforeId ? document.getElementById(config.beforeId) : null;
+    if (anchor && anchor.parentNode) {
+      anchor.parentNode.insertBefore(template.content, anchor);
+    } else {
+      document.body.appendChild(template.content);
+    }
+  }
+
+  async function _ensureLazyDomFragment(name) {
+    const config = LAZY_DOM_FRAGMENTS[name];
+    if (!config || typeof document === 'undefined') return null;
+    if (document.getElementById(config.requiredId)) return document.getElementById(config.requiredId);
+    if (!_canMountLazyDomFragments()) return null;
+    if (!_lazyDomFragmentPromises[name]) {
+      _lazyDomFragmentPromises[name] = fetch(config.url, {
+        credentials: 'same-origin',
+        cache: 'force-cache',
+      })
+        .then((resp) => {
+          if (!resp || !resp.ok) {
+            const status = resp && typeof resp.status !== 'undefined' ? resp.status : 'unknown';
+            throw new Error(`Failed to load lazy DOM fragment ${config.url}: ${status}`);
+          }
+          return resp.text();
+        })
+        .then((html) => {
+          if (!document.getElementById(config.requiredId)) {
+            _mountLazyDomFragment(html, config);
+          }
+          const mounted = document.getElementById(config.requiredId);
+          if (!mounted) throw new Error(`Lazy DOM fragment missing required element: ${config.requiredId}`);
+          return mounted;
+        })
+        .catch((err) => {
+          _lazyDomFragmentPromises[name] = null;
+          _logLazyDomFragmentLoadFailed(name, config, err);
+          throw err;
+        });
+    }
+    return _lazyDomFragmentPromises[name];
   }
 
   function _rememberLazyModuleMeta(moduleApi, name, entry) {
@@ -525,6 +598,7 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadAtlasOverlay() {
+    await _ensureLazyDomFragment('atlas_overlay');
     const hasMobileAtlas = !!document.getElementById('atlas-mobile-root');
     const cssReady = Promise.all([
       loadLazyAsset('atlas_css'),

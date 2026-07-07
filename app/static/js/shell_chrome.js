@@ -82,6 +82,7 @@ import { ProjectTargetValidation as importedProjectTargetValidation } from './fe
 import { DarklabProjectWorkspaceConstants as importedProjectWorkspaceConstants } from './features/projects/project_workspace_constants.js';
 import { bindDisclosure as importedBindDisclosure } from './ui/ui_disclosure.js';
 import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from './ui/ui_focus_trap.js';
 import { bindMobileSheet as importedBindMobileSheet } from './ui/mobile_sheet.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
 import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
@@ -250,57 +251,163 @@ let importedProjectWorkspaceShell;
   const hudClockEl        = document.getElementById('hud-clock');
   const hudDbEl           = document.getElementById('hud-db');
   const hudRedisEl        = document.getElementById('hud-redis');
-  const projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
-  const projectWorkspaceModal = document.getElementById('project-workspace-modal');
-  const projectWorkspaceBody = document.getElementById('project-workspace-body');
-  const projectWorkspacePagination = document.getElementById('project-workspace-pagination');
-  const projectExplorerBody = document.getElementById('project-explorer-body');
-  const projectWorkspaceSubtitle = document.getElementById('project-workspace-subtitle');
-  const projectWorkspaceCreateForm = document.getElementById('project-workspace-create-form');
-  const projectWorkspaceNameInput = document.getElementById('project-workspace-name');
-  const projectMobileRoot = document.getElementById('project-mobile-root');
-  const projectMobileListView = document.getElementById('project-mobile-list-view');
-  const projectMobileBody = document.getElementById('project-mobile-body');
-  const projectMobilePagination = document.getElementById('project-mobile-pagination');
-  const projectMobileSummary = document.getElementById('project-mobile-summary');
-  const projectMobileCreateForm = document.getElementById('project-mobile-create-form');
-  const projectMobileNameInput = document.getElementById('project-mobile-name');
-  const projectMobileDetailView = document.getElementById('project-mobile-detail-view');
-  const projectMobileDetailTopbar = document.getElementById('project-mobile-detail-topbar');
-  const projectMobileTabs = document.getElementById('project-mobile-tabs');
-  const projectMobileDetailBody = document.getElementById('project-mobile-detail-body');
+  let projectWorkspaceOverlay = null;
+  let projectWorkspaceModal = null;
+  let projectWorkspaceBody = null;
+  let projectWorkspacePagination = null;
+  let projectExplorerBody = null;
+  let projectWorkspaceSubtitle = null;
+  let projectWorkspaceCreateForm = null;
+  let projectWorkspaceNameInput = null;
+  let projectMobileRoot = null;
+  let projectMobileListView = null;
+  let projectMobileBody = null;
+  let projectMobilePagination = null;
+  let projectMobileSummary = null;
+  let projectMobileCreateForm = null;
+  let projectMobileNameInput = null;
+  let projectMobileDetailView = null;
+  let projectMobileDetailTopbar = null;
+  let projectMobileTabs = null;
+  let projectMobileDetailBody = null;
   let projectWorkspaceOpenToken = 0;
-  const projectTargetEditorOverlay = document.getElementById('project-target-editor-overlay');
-  const projectTargetEditorTitle = document.getElementById('project-target-editor-title');
-  const projectTargetCreateForm = document.getElementById('project-target-create-form');
-  const projectTargetTypeSelect = document.getElementById('project-target-type');
-  const projectTargetValueInput = document.getElementById('project-target-value');
-  const projectTargetValueHelp = document.getElementById('project-target-value-help');
-  const projectTargetValueError = document.getElementById('project-target-value-error');
-  const projectTargetLabelInput = document.getElementById('project-target-label');
-  const projectTargetNotesInput = document.getElementById('project-target-notes');
-  const projectTargetSubmitButton = document.getElementById('project-target-submit');
-  const projectPackageManifestOverlay = document.getElementById('project-package-manifest-overlay');
-  const projectPackageManifestTitle = document.getElementById('project-package-manifest-title');
-  const projectPackageManifestSummary = document.getElementById('project-package-manifest-summary');
-  const projectPackageManifestJson = document.getElementById('project-package-manifest-json');
-  const projectPackageWizardOverlay = document.getElementById('project-package-wizard-overlay');
-  const projectPackageWizardBody = document.getElementById('project-package-wizard-body');
-  const projectEntityEditorOverlay = document.getElementById('project-entity-editor-overlay');
-  const projectEntityEditorTitle = document.getElementById('project-entity-editor-title');
-  const projectEntityEditorSubtitle = document.getElementById('project-entity-editor-subtitle');
-  const projectEntityEditorForm = document.getElementById('project-entity-editor-form');
-  const projectEntityLabelsInput = document.getElementById('project-entity-labels');
-  const projectEntityNoteInput = document.getElementById('project-entity-note');
-  const projectEntityActivityRoot = document.getElementById('project-entity-activity');
-  const projectEntitySubmitButton = document.getElementById('project-entity-submit');
-  const projectNotesForm = document.getElementById('project-notes-form');
-  const projectNotesInput = document.getElementById('project-notes-input');
-  const projectLabelsForm = document.getElementById('project-labels-form');
-  const projectLabelsInput = document.getElementById('project-labels-input');
-  const projectLabelsSaveButton = document.getElementById('project-labels-save-btn');
-  const projectWorkspaceMessage = document.getElementById('project-workspace-message');
+  let projectWorkspaceDomPromise = null;
+  let projectTargetEditorOverlay = null;
+  let projectTargetEditorTitle = null;
+  let projectTargetCreateForm = null;
+  let projectTargetTypeSelect = null;
+  let projectTargetValueInput = null;
+  let projectTargetValueHelp = null;
+  let projectTargetValueError = null;
+  let projectTargetLabelInput = null;
+  let projectTargetNotesInput = null;
+  let projectTargetSubmitButton = null;
+  let projectPackageManifestOverlay = null;
+  let projectPackageManifestTitle = null;
+  let projectPackageManifestSummary = null;
+  let projectPackageManifestJson = null;
+  let projectPackageWizardOverlay = null;
+  let projectPackageWizardBody = null;
+  let projectEntityEditorOverlay = null;
+  let projectEntityEditorTitle = null;
+  let projectEntityEditorSubtitle = null;
+  let projectEntityEditorForm = null;
+  let projectEntityLabelsInput = null;
+  let projectEntityNoteInput = null;
+  let projectEntityActivityRoot = null;
+  let projectEntitySubmitButton = null;
+  let projectNotesForm = null;
+  let projectNotesInput = null;
+  let projectLabelsForm = null;
+  let projectLabelsInput = null;
+  let projectLabelsSaveButton = null;
+  let projectWorkspaceMessage = null;
   const EntityMetadataClient = (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
+  const PROJECT_WORKSPACE_FRAGMENT_URL = '/static/fragments/project_workspace.html';
+
+  function _refreshProjectWorkspaceElements() {
+    projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
+    projectWorkspaceModal = document.getElementById('project-workspace-modal');
+    projectWorkspaceBody = document.getElementById('project-workspace-body');
+    projectWorkspacePagination = document.getElementById('project-workspace-pagination');
+    projectExplorerBody = document.getElementById('project-explorer-body');
+    projectWorkspaceSubtitle = document.getElementById('project-workspace-subtitle');
+    projectWorkspaceCreateForm = document.getElementById('project-workspace-create-form');
+    projectWorkspaceNameInput = document.getElementById('project-workspace-name');
+    projectMobileRoot = document.getElementById('project-mobile-root');
+    projectMobileListView = document.getElementById('project-mobile-list-view');
+    projectMobileBody = document.getElementById('project-mobile-body');
+    projectMobilePagination = document.getElementById('project-mobile-pagination');
+    projectMobileSummary = document.getElementById('project-mobile-summary');
+    projectMobileCreateForm = document.getElementById('project-mobile-create-form');
+    projectMobileNameInput = document.getElementById('project-mobile-name');
+    projectMobileDetailView = document.getElementById('project-mobile-detail-view');
+    projectMobileDetailTopbar = document.getElementById('project-mobile-detail-topbar');
+    projectMobileTabs = document.getElementById('project-mobile-tabs');
+    projectMobileDetailBody = document.getElementById('project-mobile-detail-body');
+    projectTargetEditorOverlay = document.getElementById('project-target-editor-overlay');
+    projectTargetEditorTitle = document.getElementById('project-target-editor-title');
+    projectTargetCreateForm = document.getElementById('project-target-create-form');
+    projectTargetTypeSelect = document.getElementById('project-target-type');
+    projectTargetValueInput = document.getElementById('project-target-value');
+    projectTargetValueHelp = document.getElementById('project-target-value-help');
+    projectTargetValueError = document.getElementById('project-target-value-error');
+    projectTargetLabelInput = document.getElementById('project-target-label');
+    projectTargetNotesInput = document.getElementById('project-target-notes');
+    projectTargetSubmitButton = document.getElementById('project-target-submit');
+    projectPackageManifestOverlay = document.getElementById('project-package-manifest-overlay');
+    projectPackageManifestTitle = document.getElementById('project-package-manifest-title');
+    projectPackageManifestSummary = document.getElementById('project-package-manifest-summary');
+    projectPackageManifestJson = document.getElementById('project-package-manifest-json');
+    projectPackageWizardOverlay = document.getElementById('project-package-wizard-overlay');
+    projectPackageWizardBody = document.getElementById('project-package-wizard-body');
+    projectEntityEditorOverlay = document.getElementById('project-entity-editor-overlay');
+    projectEntityEditorTitle = document.getElementById('project-entity-editor-title');
+    projectEntityEditorSubtitle = document.getElementById('project-entity-editor-subtitle');
+    projectEntityEditorForm = document.getElementById('project-entity-editor-form');
+    projectEntityLabelsInput = document.getElementById('project-entity-labels');
+    projectEntityNoteInput = document.getElementById('project-entity-note');
+    projectEntityActivityRoot = document.getElementById('project-entity-activity');
+    projectEntitySubmitButton = document.getElementById('project-entity-submit');
+    projectNotesForm = document.getElementById('project-notes-form');
+    projectNotesInput = document.getElementById('project-notes-input');
+    projectLabelsForm = document.getElementById('project-labels-form');
+    projectLabelsInput = document.getElementById('project-labels-input');
+    projectLabelsSaveButton = document.getElementById('project-labels-save-btn');
+    projectWorkspaceMessage = document.getElementById('project-workspace-message');
+  }
+
+  function _mountProjectWorkspaceFragment(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '').trim();
+    if (!template.content || !template.content.childNodes.length) {
+      throw new Error('Project workspace fragment is empty');
+    }
+    const anchor = document.getElementById('finding-triage-overlay') || document.getElementById('history-panel');
+    if (anchor && anchor.parentNode) {
+      anchor.parentNode.insertBefore(template.content, anchor);
+    } else {
+      document.body.appendChild(template.content);
+    }
+  }
+
+  async function _ensureProjectWorkspaceDom() {
+    _refreshProjectWorkspaceElements();
+    if (projectWorkspaceOverlay && projectWorkspaceModal && projectWorkspaceBody && projectExplorerBody) {
+      return projectWorkspaceOverlay;
+    }
+    if (typeof fetch !== 'function' || !document.body) return projectWorkspaceOverlay;
+    if (!projectWorkspaceDomPromise) {
+      projectWorkspaceDomPromise = fetch(PROJECT_WORKSPACE_FRAGMENT_URL, {
+        credentials: 'same-origin',
+        cache: 'force-cache',
+      })
+        .then((resp) => {
+          if (!resp || !resp.ok) {
+            const status = resp && typeof resp.status !== 'undefined' ? resp.status : 'unknown';
+            throw new Error(`Failed to load project workspace fragment: ${status}`);
+          }
+          return resp.text();
+        })
+        .then((html) => {
+          if (!document.getElementById('project-workspace-overlay')) {
+            _mountProjectWorkspaceFragment(html);
+          }
+          _refreshProjectWorkspaceElements();
+          if (!projectWorkspaceOverlay || !projectWorkspaceModal || !projectWorkspaceBody || !projectExplorerBody) {
+            throw new Error('Project workspace fragment missing required shell');
+          }
+          return projectWorkspaceOverlay;
+        })
+        .catch((err) => {
+          projectWorkspaceDomPromise = null;
+          throw err;
+        });
+    }
+    return projectWorkspaceDomPromise;
+  }
+
+  _refreshProjectWorkspaceElements();
 
   // ── Prefs (cookie-backed) ───────────────────────────────────────
   const PREF_COLLAPSED = 'pref_rail_collapsed';
@@ -380,6 +487,7 @@ let importedProjectWorkspaceShell;
   }
 
   function _projectWorkspaceOverlayOpenFallback() {
+    _refreshProjectWorkspaceElements();
     return !!(projectWorkspaceOverlay && projectWorkspaceOverlay.classList.contains('open'));
   }
 
@@ -390,6 +498,7 @@ let importedProjectWorkspaceShell;
   }
 
   async function _ensureProjectWorkspaceModules() {
+    await _ensureProjectWorkspaceDom();
     if (_projectWorkspaceModulesReady()) {
       _bindProjectWorkspaceIfNeeded();
       return;
@@ -2435,6 +2544,7 @@ let importedProjectWorkspaceShell;
     const bindMobileSheetFn = _shellFn('bindMobileSheet', importedBindMobileSheet);
     projectWorkspaceBootstrapController = factory({
       bindDismissible: bindDismissibleFn,
+      bindFocusTrap: importedBindFocusTrap,
       bindMobileSheet: bindMobileSheetFn,
       closeProjectEntityEditor: _closeProjectEntityEditor,
       closeProjectPackageManifest: _closeProjectPackageManifest,
@@ -4070,6 +4180,8 @@ let importedProjectWorkspaceShell;
 
   async function openProjectWorkspace() {
     const openToken = ++projectWorkspaceOpenToken;
+    await _ensureProjectWorkspaceDom();
+    if (openToken !== projectWorkspaceOpenToken) return false;
     if (!_projectWorkspaceModulesReady() && projectWorkspaceOverlay) {
       projectWorkspaceOverlay.classList.remove('u-hidden');
       projectWorkspaceOverlay.classList.add('open');
@@ -4170,6 +4282,7 @@ let importedProjectWorkspaceShell;
   function closeProjectWorkspace({ refocus = true } = {}) {
     projectWorkspaceOpenToken += 1;
     if (!_projectWorkspaceModulesReady()) {
+      _refreshProjectWorkspaceElements();
       if (!projectWorkspaceOverlay) return;
       projectWorkspaceOverlay.classList.add('u-hidden');
       projectWorkspaceOverlay.classList.remove('open');

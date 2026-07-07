@@ -954,6 +954,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── favicon.svg         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
+│   │   ├── fragments/
+│   │   │   ├── atlas_overlay.html # First-use Atlas modal shell
+│   │   │   └── project_workspace.html # First-use Projects modal shell and nested editors
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
 │   │       ├── autocomplete.js # Command autocomplete dropdown

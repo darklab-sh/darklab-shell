@@ -36,7 +36,6 @@ const EAGER_SHELL_OWNER_SNIPPETS = [
 
 const SHELL_IDS = [
   'ac-dropdown',
-  'atlas-surface',
   'cmd',
   'command-catalog-body',
   'command-catalog-overlay',
@@ -152,8 +151,6 @@ const SHELL_IDS = [
   'options-ts-select',
   'options-welcome-select',
   'permalink-toast',
-  'project-workspace-modal',
-  'project-workspace-overlay',
   'rail',
   'rail-collapse-btn',
   'rail-diag-btn',

@@ -541,13 +541,7 @@ describe('app helpers', () => {
     await loadAppFns()
 
     ;[
-      'project-workspace-modal',
-      'project-target-editor-modal',
-      'project-package-manifest-modal',
-      'project-package-wizard-modal',
-      'project-entity-editor-modal',
       'finding-triage-modal',
-      'atlas-import-modal',
       'schedules-modal',
       'watchers-modal',
       'team-scope-modal',

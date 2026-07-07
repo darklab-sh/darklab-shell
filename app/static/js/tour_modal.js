@@ -11,7 +11,7 @@ import {
   activateOptionsTab as importedActivateOptionsTab,
   recordTourOpened as importedRecordTourOpened,
 } from './features/preferences/preferences.js';
-import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_overlay.js';
+import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
 import { openProjectWorkspace as importedOpenProjectWorkspace } from './features/projects/project_context_bridge.js';
 import { openWorkspace as importedOpenWorkspace } from './workspace_bridge.js';

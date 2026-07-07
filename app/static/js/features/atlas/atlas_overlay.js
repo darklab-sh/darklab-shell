@@ -3,6 +3,7 @@ import { downloadBlobAsAttachment as importedDownloadBlobAsAttachment, showToast
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
 import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from '../../ui/ui_focus_trap.js';
 import {
   blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
   markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
@@ -66,6 +67,7 @@ let exportedCycleAtlasTab = null;
         || null,
     };
   const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const bindFocusTrap = (typeof importedBindFocusTrap !== 'undefined' && importedBindFocusTrap) || null;
   const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
   const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
   const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
@@ -3112,6 +3114,10 @@ let exportedCycleAtlasTab = null;
     }
     if (typeof bindMobileSheet === 'function' && importModal) {
       bindMobileSheet(importModal, { onClose: () => closeImportModal() });
+    }
+    if (typeof bindFocusTrap === 'function') {
+      if (surface) bindFocusTrap(surface);
+      if (importModal) bindFocusTrap(importModal);
     }
   }
 

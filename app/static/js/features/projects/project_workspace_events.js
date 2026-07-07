@@ -2,7 +2,7 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
-import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
 import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 import {
