@@ -115,6 +115,8 @@ const RESOLVER_HELPER_NAMES = new Set(Object.keys(RESOLVER_HELPER_REGISTRY));
 // the audited escape hatch). Each entry must still be discovered, or the
 // completeness meta-test reports it as a dead ignore entry.
 const RESOLVER_HELPER_IGNORE = Object.freeze({
+  _projectFactoryReady: 'Checks whether a Project namespace is already available before lazy-loading; controller construction still goes through the registered _projectModule resolver.',
+  _projectWorkspaceModuleReady: 'Checks whether a Project lazy module published its expected controller factory; it is a readiness guard, not an API resolver.',
   _sessionCallAsync: 'Dispatches a session-refresh task name against a local imported-function map, falling back to a SESSION_GLOBAL aliased lookup the literal-publish scanner cannot resolve.',
   _stateValue: 'Reads APP_STATE / search-state slots by key; the keys are internal state slots, not module-API global names.',
 });

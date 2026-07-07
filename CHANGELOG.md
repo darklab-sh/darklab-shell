@@ -86,6 +86,9 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** route coverage verifies Project list counts and finding summaries still match Project details, including direct-run findings that appear through more than one run-reference column.
 - First-open Projects lazy loading now starts the independent workspace controller imports in parallel, reducing the blank/loading gap between opening the modal and rendering the project list.
   - **Tests:** the lazy-asset contract now verifies the Projects controller cluster starts every module import before any individual import resolves.
+- Projects now races the first list and active-project requests against the first-use controller imports, then hands that in-flight data into the workspace controller instead of starting a second request after the code loads.
+  - The first-open Project core covers the shell, list, details, navigation, filters, targets, lifecycle, and renderer; entities, findings, run pages, board UI, editors, nested sheets, actions, and mobile-only controllers load when those tabs or actions need them.
+  - **Tests:** browser-unit coverage verifies core Project loading, targeted deferred controller loading, label saves through the deferred action controller, and the updated frontend inventory budgets for the narrower first-open boundary.
 - Atlas entity and finding pages now use `limit + 1` paging by default and defer exact totals/status buckets until a caller asks for them, so first-open Atlas can render rows without repeating the same full count work.
   - The Atlas pager now uses `has_more` for next-page navigation and marks lower-bound totals with a plus, while API v1 keeps exact totals and documents the paging metadata in the OpenAPI contract.
   - **Tests:** route and browser-module coverage verifies deferred totals, exact-total opt-in, status-count opt-in, and estimated pagination labels.

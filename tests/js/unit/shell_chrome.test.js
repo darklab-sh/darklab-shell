@@ -3151,7 +3151,7 @@ describe('shell chrome project workspace', () => {
         body: JSON.stringify({ label: 'retest' }),
       }))
       expect(input.value).toBe('important, retest')
-      expect(shell.showToast).toHaveBeenCalledWith('Project labels saved.', 'success')
+      await vi.waitFor(() => expect(shell.showToast).toHaveBeenCalledWith('Project labels saved.', 'success'))
       expect(document.querySelector('.project-label-chips')?.textContent).toContain('important')
       expect(document.querySelector('.project-workspace-label-chips')?.textContent).toContain('retest')
 
@@ -3159,7 +3159,7 @@ describe('shell chrome project workspace', () => {
       document.getElementById('project-labels-form')
         .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await flushLabelsSave()
-      expect(shell.showToast).toHaveBeenCalledWith('Project labels saved.', 'success')
+      await vi.waitFor(() => expect(shell.showToast).toHaveBeenCalledWith('Project labels saved.', 'success'))
 
       document.querySelector('[data-project-id="project-2"][data-project-action="select"]')
         .dispatchEvent(new Event('click', { bubbles: true, cancelable: true }))

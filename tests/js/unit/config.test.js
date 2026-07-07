@@ -479,7 +479,7 @@ describe('frontend config bootstrap', () => {
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/watchers/watchers_modal.js?v=watchers-hash')
   })
 
-  it('lazy-loads the project workspace controller cluster in parallel', async () => {
+  it('lazy-loads the project workspace core and targeted deferred controllers in parallel', async () => {
     const appended = []
     const projectWorkspaceScripts = [
       ['project_details', 'DarklabProjectDetails', 'createProjectDetailsController'],
@@ -504,6 +504,21 @@ describe('frontend config bootstrap', () => {
       ['project_findings', 'DarklabProjectFindings', 'createProjectFindingsController'],
       ['project_findings_board', 'DarklabProjectFindingsBoard', 'createProjectFindingsBoardController'],
     ]
+    const projectWorkspaceCoreNames = [
+      'project_details',
+      'project_list',
+      'project_navigation',
+      'project_workspace_shell',
+      'project_workspace_lifecycle',
+      'project_workspace_renderer',
+      'project_workspace_bootstrap',
+      'project_workspace_events',
+      'project_filters',
+      'project_targets',
+    ]
+    const projectWorkspaceCoreScripts = projectWorkspaceCoreNames.map(name => (
+      projectWorkspaceScripts.find(([scriptName]) => scriptName === name)
+    ))
     const document = {
       documentElement: {},
       head: {
@@ -568,11 +583,11 @@ describe('frontend config bootstrap', () => {
 
     const loadPromise = window.loadProjectWorkspace()
     await vi.waitFor(() => {
-      expect(imported).toEqual(projectWorkspaceScripts.map(([name]) => (
+      expect(imported).toEqual(projectWorkspaceCoreScripts.map(([name]) => (
         `/static/js/features/projects/${name}.js?v=${name}-hash`
       )))
     })
-    projectWorkspaceScripts.forEach(([name]) => {
+    projectWorkspaceCoreScripts.forEach(([name]) => {
       pendingProjectImports.get(name)?.()
     })
     const workspaceApi = await loadPromise
@@ -580,24 +595,31 @@ describe('frontend config bootstrap', () => {
       DarklabProjectDetails: window.DarklabProjectDetails,
       DarklabProjectList: window.DarklabProjectList,
       DarklabProjectNavigation: window.DarklabProjectNavigation,
-      DarklabProjectEntityEditor: window.DarklabProjectEntityEditor,
-      DarklabProjectWorkspaceActions: window.DarklabProjectWorkspaceActions,
       DarklabProjectWorkspaceShell: window.DarklabProjectWorkspaceShell,
       DarklabProjectWorkspaceLifecycle: window.DarklabProjectWorkspaceLifecycle,
       DarklabProjectWorkspaceRenderer: window.DarklabProjectWorkspaceRenderer,
       DarklabProjectWorkspaceBootstrap: window.DarklabProjectWorkspaceBootstrap,
-      DarklabProjectNestedSheets: window.DarklabProjectNestedSheets,
       DarklabProjectWorkspaceEvents: window.DarklabProjectWorkspaceEvents,
       DarklabProjectTargets: window.DarklabProjectTargets,
-      DarklabProjectRuns: window.DarklabProjectRuns,
-      DarklabProjectMobileCompare: window.DarklabProjectMobileCompare,
-      DarklabProjectMobileShell: window.DarklabProjectMobileShell,
-      DarklabProjectMobileDetail: window.DarklabProjectMobileDetail,
-      DarklabProjectFindingsData: window.DarklabProjectFindingsData,
       DarklabProjectFilters: window.DarklabProjectFilters,
+    }))
+    expect(workspaceApi).not.toHaveProperty('DarklabProjectRuns')
+    expect(workspaceApi).not.toHaveProperty('DarklabProjectEntities')
+
+    const deferredPromise = window.loadProjectWorkspace({ modules: ['project_runs', 'project_entities'] })
+    await vi.waitFor(() => {
+      expect(imported).toEqual([
+        ...projectWorkspaceCoreScripts.map(([name]) => `/static/js/features/projects/${name}.js?v=${name}-hash`),
+        '/static/js/features/projects/project_runs.js?v=project_runs-hash',
+        '/static/js/features/projects/project_entities.js?v=project_entities-hash',
+      ])
+    })
+    pendingProjectImports.get('project_runs')?.()
+    pendingProjectImports.get('project_entities')?.()
+    const deferredApi = await deferredPromise
+    expect(deferredApi).toEqual(expect.objectContaining({
+      DarklabProjectRuns: window.DarklabProjectRuns,
       DarklabProjectEntities: window.DarklabProjectEntities,
-      DarklabProjectFindings: window.DarklabProjectFindings,
-      DarklabProjectFindingsBoard: window.DarklabProjectFindingsBoard,
     }))
     expect(appended).toEqual([])
 

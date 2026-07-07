@@ -2977,7 +2977,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
 | `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
 | `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
-| `lazy-loads the project workspace controller cluster in parallel` | Verifies that the Projects workspace controllers start loading together only when the workspace opens. |
+| `lazy-loads the project workspace core and targeted deferred controllers in parallel` | Verifies that the Projects modal first loads only the workspace core, then loads deferred Project controllers when a tab or action asks for them. |
 | `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
 | `logs lazy module load and export-contract failures with safe asset context` | Verifies failed lazy module imports and missing lazy module exports send client logs with asset name, type, sanitized asset path, and export-contract details. |
 | `logs invalid lazy asset config without including the raw JSON body` | Verifies malformed lazy asset JSON logs a warning once while falling back to built-in lazy asset paths. |

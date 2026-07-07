@@ -110,7 +110,7 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
       }
     }
 
-    async function refreshProjectWorkspace() {
+    async function refreshProjectWorkspace(options = {}) {
       if (!ctx.projectWorkspaceBody || typeof ctx.apiFetch !== 'function') return;
       ctx.setProjectWorkspaceLoading(true);
       ctx.renderProjectWorkspace();
@@ -124,9 +124,24 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
           limit: String(limit),
           offset: String(offset),
         });
+        const initialLoad = options && options.initialLoad && typeof options.initialLoad === 'object'
+          ? options.initialLoad
+          : null;
+        const canUseInitialLoad = !!(
+          initialLoad
+          && Number(initialLoad.limit) === limit
+          && Number(initialLoad.offset) === offset
+          && initialLoad.projectsResp
+        );
+        const projectsRequest = canUseInitialLoad
+          ? initialLoad.projectsResp
+          : ctx.apiFetch(`/projects?${query.toString()}`, { cache: 'no-store' });
+        const activeProjectRequest = canUseInitialLoad && initialLoad.activeContext
+          ? initialLoad.activeContext
+          : ctx.loadActiveProjectContext();
         const [projectsResp] = await Promise.all([
-          ctx.apiFetch(`/projects?${query.toString()}`, { cache: 'no-store' }),
-          ctx.loadActiveProjectContext(),
+          projectsRequest,
+          activeProjectRequest,
         ]);
         if (!projectsResp.ok) throw new Error(`HTTP ${projectsResp.status}`);
         const data = await projectsResp.json();

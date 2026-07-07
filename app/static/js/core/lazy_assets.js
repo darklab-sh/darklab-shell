@@ -709,178 +709,181 @@ let exportedLoadWatchersModal = null;
     return DarklabProjectPackages;
   }
 
-  async function loadProjectWorkspace() {
+  async function loadProjectNamespace(name, globalName, controllerName) {
+    const moduleApi = await loadLazyAsset(name);
+    const namespace = moduleApi?.[globalName] || window[globalName];
+    if (!namespace || typeof namespace[controllerName] !== 'function') {
+      const err = new Error(`Lazy module ${name} did not expose ${globalName}.${controllerName}`);
+      _logLazyModuleExportMissing(moduleApi, err, {
+        assetName: name,
+        exportName: globalName,
+        controllerName,
+      });
+      throw err;
+    }
+    window[globalName] = namespace;
+    return namespace;
+  }
+
+  const PROJECT_WORKSPACE_MODULE_LOADERS = Object.freeze({
+    project_details: () => loadProjectNamespace(
+      'project_details',
+      'DarklabProjectDetails',
+      'createProjectDetailsController',
+    ),
+    project_list: () => loadProjectNamespace(
+      'project_list',
+      'DarklabProjectList',
+      'createProjectListController',
+    ),
+    project_navigation: () => loadProjectNamespace(
+      'project_navigation',
+      'DarklabProjectNavigation',
+      'createProjectNavigationController',
+    ),
+    project_entity_editor: () => loadProjectNamespace(
+      'project_entity_editor',
+      'DarklabProjectEntityEditor',
+      'createProjectEntityEditorController',
+    ),
+    project_workspace_actions: () => loadProjectNamespace(
+      'project_workspace_actions',
+      'DarklabProjectWorkspaceActions',
+      'createProjectWorkspaceActionsController',
+    ),
+    project_workspace_shell: () => loadProjectNamespace(
+      'project_workspace_shell',
+      'DarklabProjectWorkspaceShell',
+      'createProjectWorkspaceShellController',
+    ),
+    project_workspace_lifecycle: () => loadProjectNamespace(
+      'project_workspace_lifecycle',
+      'DarklabProjectWorkspaceLifecycle',
+      'createProjectWorkspaceLifecycleController',
+    ),
+    project_workspace_renderer: () => loadProjectNamespace(
+      'project_workspace_renderer',
+      'DarklabProjectWorkspaceRenderer',
+      'createProjectWorkspaceRendererController',
+    ),
+    project_workspace_bootstrap: () => loadProjectNamespace(
+      'project_workspace_bootstrap',
+      'DarklabProjectWorkspaceBootstrap',
+      'createProjectWorkspaceBootstrapController',
+    ),
+    project_nested_sheets: () => loadProjectNamespace(
+      'project_nested_sheets',
+      'DarklabProjectNestedSheets',
+      'createProjectNestedSheetsController',
+    ),
+    project_workspace_events: () => loadProjectNamespace(
+      'project_workspace_events',
+      'DarklabProjectWorkspaceEvents',
+      'createProjectWorkspaceEventsController',
+    ),
+    project_targets: () => loadProjectNamespace(
+      'project_targets',
+      'DarklabProjectTargets',
+      'createProjectTargetsController',
+    ),
+    project_runs: () => loadProjectNamespace(
+      'project_runs',
+      'DarklabProjectRuns',
+      'createProjectRunsController',
+    ),
+    project_mobile_compare: () => loadProjectNamespace(
+      'project_mobile_compare',
+      'DarklabProjectMobileCompare',
+      'createProjectMobileCompareController',
+    ),
+    project_mobile_shell: () => loadProjectNamespace(
+      'project_mobile_shell',
+      'DarklabProjectMobileShell',
+      'createProjectMobileShellController',
+    ),
+    project_mobile_detail: () => loadProjectNamespace(
+      'project_mobile_detail',
+      'DarklabProjectMobileDetail',
+      'createProjectMobileDetailController',
+    ),
+    project_findings_data: () => loadProjectNamespace(
+      'project_findings_data',
+      'DarklabProjectFindingsData',
+      'createProjectFindingsDataController',
+    ),
+    project_filters: () => loadProjectNamespace(
+      'project_filters',
+      'DarklabProjectFilters',
+      'createProjectFiltersController',
+    ),
+    project_entities: () => loadProjectNamespace(
+      'project_entities',
+      'DarklabProjectEntities',
+      'createProjectEntitiesController',
+    ),
+    project_findings: () => loadProjectNamespace(
+      'project_findings',
+      'DarklabProjectFindings',
+      'createProjectFindingsController',
+    ),
+    project_findings_board: () => loadProjectNamespace(
+      'project_findings_board',
+      'DarklabProjectFindingsBoard',
+      'createProjectFindingsBoardController',
+    ),
+  });
+  const PROJECT_WORKSPACE_MODULE_GLOBALS = Object.freeze({
+    project_details: 'DarklabProjectDetails',
+    project_list: 'DarklabProjectList',
+    project_navigation: 'DarklabProjectNavigation',
+    project_entity_editor: 'DarklabProjectEntityEditor',
+    project_workspace_actions: 'DarklabProjectWorkspaceActions',
+    project_workspace_shell: 'DarklabProjectWorkspaceShell',
+    project_workspace_lifecycle: 'DarklabProjectWorkspaceLifecycle',
+    project_workspace_renderer: 'DarklabProjectWorkspaceRenderer',
+    project_workspace_bootstrap: 'DarklabProjectWorkspaceBootstrap',
+    project_nested_sheets: 'DarklabProjectNestedSheets',
+    project_workspace_events: 'DarklabProjectWorkspaceEvents',
+    project_targets: 'DarklabProjectTargets',
+    project_runs: 'DarklabProjectRuns',
+    project_mobile_compare: 'DarklabProjectMobileCompare',
+    project_mobile_shell: 'DarklabProjectMobileShell',
+    project_mobile_detail: 'DarklabProjectMobileDetail',
+    project_findings_data: 'DarklabProjectFindingsData',
+    project_filters: 'DarklabProjectFilters',
+    project_entities: 'DarklabProjectEntities',
+    project_findings: 'DarklabProjectFindings',
+    project_findings_board: 'DarklabProjectFindingsBoard',
+  });
+  const PROJECT_WORKSPACE_CORE_MODULES = Object.freeze([
+    'project_details',
+    'project_list',
+    'project_navigation',
+    'project_workspace_shell',
+    'project_workspace_lifecycle',
+    'project_workspace_renderer',
+    'project_workspace_bootstrap',
+    'project_workspace_events',
+    'project_filters',
+    'project_targets',
+  ]);
+  const PROJECT_WORKSPACE_ALL_MODULES = Object.freeze(Object.keys(PROJECT_WORKSPACE_MODULE_LOADERS));
+
+  async function loadProjectWorkspace(options = {}) {
     const cssReady = loadLazyAsset('projects_css');
-    const loadProjectNamespace = async (name, globalName, controllerName) => {
-      const moduleApi = await loadLazyAsset(name);
-      const namespace = moduleApi?.[globalName] || window[globalName];
-      if (!namespace || typeof namespace[controllerName] !== 'function') {
-        const err = new Error(`Lazy module ${name} did not expose ${globalName}.${controllerName}`);
-        _logLazyModuleExportMissing(moduleApi, err, {
-          assetName: name,
-          exportName: globalName,
-          controllerName,
-        });
-        throw err;
-      }
-      window[globalName] = namespace;
-      return namespace;
-    };
-
-    const [
-      DarklabProjectDetails,
-      DarklabProjectList,
-      DarklabProjectNavigation,
-      DarklabProjectEntityEditor,
-      DarklabProjectWorkspaceActions,
-      DarklabProjectWorkspaceShell,
-      DarklabProjectWorkspaceLifecycle,
-      DarklabProjectWorkspaceRenderer,
-      DarklabProjectWorkspaceBootstrap,
-      DarklabProjectNestedSheets,
-      DarklabProjectWorkspaceEvents,
-      DarklabProjectTargets,
-      DarklabProjectRuns,
-      DarklabProjectMobileCompare,
-      DarklabProjectMobileShell,
-      DarklabProjectMobileDetail,
-      DarklabProjectFindingsData,
-      DarklabProjectFilters,
-      DarklabProjectEntities,
-      DarklabProjectFindings,
-      DarklabProjectFindingsBoard,
-    ] = await Promise.all([
-      loadProjectNamespace(
-        'project_details',
-        'DarklabProjectDetails',
-        'createProjectDetailsController',
-      ),
-      loadProjectNamespace(
-        'project_list',
-        'DarklabProjectList',
-        'createProjectListController',
-      ),
-      loadProjectNamespace(
-        'project_navigation',
-        'DarklabProjectNavigation',
-        'createProjectNavigationController',
-      ),
-      loadProjectNamespace(
-        'project_entity_editor',
-        'DarklabProjectEntityEditor',
-        'createProjectEntityEditorController',
-      ),
-      loadProjectNamespace(
-        'project_workspace_actions',
-        'DarklabProjectWorkspaceActions',
-        'createProjectWorkspaceActionsController',
-      ),
-      loadProjectNamespace(
-        'project_workspace_shell',
-        'DarklabProjectWorkspaceShell',
-        'createProjectWorkspaceShellController',
-      ),
-      loadProjectNamespace(
-        'project_workspace_lifecycle',
-        'DarklabProjectWorkspaceLifecycle',
-        'createProjectWorkspaceLifecycleController',
-      ),
-      loadProjectNamespace(
-        'project_workspace_renderer',
-        'DarklabProjectWorkspaceRenderer',
-        'createProjectWorkspaceRendererController',
-      ),
-      loadProjectNamespace(
-        'project_workspace_bootstrap',
-        'DarklabProjectWorkspaceBootstrap',
-        'createProjectWorkspaceBootstrapController',
-      ),
-      loadProjectNamespace(
-        'project_nested_sheets',
-        'DarklabProjectNestedSheets',
-        'createProjectNestedSheetsController',
-      ),
-      loadProjectNamespace(
-        'project_workspace_events',
-        'DarklabProjectWorkspaceEvents',
-        'createProjectWorkspaceEventsController',
-      ),
-      loadProjectNamespace(
-        'project_targets',
-        'DarklabProjectTargets',
-        'createProjectTargetsController',
-      ),
-      loadProjectNamespace(
-        'project_runs',
-        'DarklabProjectRuns',
-        'createProjectRunsController',
-      ),
-      loadProjectNamespace(
-        'project_mobile_compare',
-        'DarklabProjectMobileCompare',
-        'createProjectMobileCompareController',
-      ),
-      loadProjectNamespace(
-        'project_mobile_shell',
-        'DarklabProjectMobileShell',
-        'createProjectMobileShellController',
-      ),
-      loadProjectNamespace(
-        'project_mobile_detail',
-        'DarklabProjectMobileDetail',
-        'createProjectMobileDetailController',
-      ),
-      loadProjectNamespace(
-        'project_findings_data',
-        'DarklabProjectFindingsData',
-        'createProjectFindingsDataController',
-      ),
-      loadProjectNamespace(
-        'project_filters',
-        'DarklabProjectFilters',
-        'createProjectFiltersController',
-      ),
-      loadProjectNamespace(
-        'project_entities',
-        'DarklabProjectEntities',
-        'createProjectEntitiesController',
-      ),
-      loadProjectNamespace(
-        'project_findings',
-        'DarklabProjectFindings',
-        'createProjectFindingsController',
-      ),
-      loadProjectNamespace(
-        'project_findings_board',
-        'DarklabProjectFindingsBoard',
-        'createProjectFindingsBoardController',
-      ),
-    ]);
+    const requestedModules = Array.isArray(options.modules) && options.modules.length
+      ? options.modules
+      : (options.includeDeferred === true ? PROJECT_WORKSPACE_ALL_MODULES : PROJECT_WORKSPACE_CORE_MODULES);
+    const moduleNames = Array.from(new Set(requestedModules.map(name => String(name || '').trim()).filter(Boolean)));
+    const namespaces = await Promise.all(moduleNames.map(async (name) => {
+      const loader = PROJECT_WORKSPACE_MODULE_LOADERS[name];
+      if (!loader) throw new Error(`Unknown Project workspace module: ${name}`);
+      const namespace = await loader();
+      const globalName = PROJECT_WORKSPACE_MODULE_GLOBALS[name];
+      return [globalName, namespace];
+    }));
     await cssReady;
-
-    return {
-      DarklabProjectDetails,
-      DarklabProjectList,
-      DarklabProjectNavigation,
-      DarklabProjectEntityEditor,
-      DarklabProjectWorkspaceActions,
-      DarklabProjectWorkspaceShell,
-      DarklabProjectWorkspaceLifecycle,
-      DarklabProjectWorkspaceRenderer,
-      DarklabProjectWorkspaceBootstrap,
-      DarklabProjectNestedSheets,
-      DarklabProjectWorkspaceEvents,
-      DarklabProjectTargets,
-      DarklabProjectRuns,
-      DarklabProjectMobileCompare,
-      DarklabProjectMobileShell,
-      DarklabProjectMobileDetail,
-      DarklabProjectFindingsData,
-      DarklabProjectFilters,
-      DarklabProjectEntities,
-      DarklabProjectFindings,
-      DarklabProjectFindingsBoard,
-    };
+    return Object.fromEntries(namespaces);
   }
 
   async function loadHistoryRunDetails() {

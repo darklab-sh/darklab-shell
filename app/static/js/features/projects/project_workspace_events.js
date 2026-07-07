@@ -31,6 +31,14 @@ let exportedDarklabProjectWorkspaceEvents = null;
       return String(ctx.mobileView?.() || 'list');
     }
 
+    function entitiesController() {
+      return ctx.entitiesController?.() || null;
+    }
+
+    function filtersController() {
+      return ctx.filtersController?.() || null;
+    }
+
     function projectRows() {
       const rows = ctx.projectRows?.();
       return Array.isArray(rows) ? rows : [];
@@ -192,7 +200,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleInput(event) {
-      if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
+      if (entitiesController()?.handleAutoPromoteInput(event)) return;
       const reportController = ctx.reportController?.();
       if (reportController && reportController.handleInput(event)) return;
       const packagesController = ctx.packagesController?.();
@@ -200,7 +208,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleChange(event) {
-      if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
+      if (entitiesController()?.handleAutoPromoteChange(event)) return;
       const monitoringController = ctx.monitoringController?.();
       if (monitoringController && monitoringController.handleChange(event)) return;
       const reportController = ctx.reportController?.();
@@ -238,7 +246,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const projectId = String(sortControl.dataset.projectId || selectedProjectId() || '');
         if (!projectId) return;
-        ctx.filtersController?.().setFindingSort(projectId, String(sortControl.value || 'run'));
+        filtersController()?.setFindingSort(projectId, String(sortControl.value || 'run'));
         ctx.renderProjectExplorer();
         return;
       }
@@ -331,7 +339,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const projectId = String(noteStateControl.dataset.projectId || selectedProjectId() || '');
         if (!projectId) return;
-        ctx.filtersController?.().setFindingNoteState(projectId, noteStateControl.value);
+        filtersController()?.setFindingNoteState(projectId, noteStateControl.value);
         ctx.renderProjectExplorer();
         return;
       }
@@ -340,7 +348,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const projectId = String(orphanControl.dataset.projectId || selectedProjectId() || '');
         if (!projectId) return;
-        ctx.filtersController?.().setFindingOrphanFilter(projectId, orphanControl.value);
+        filtersController()?.setFindingOrphanFilter(projectId, orphanControl.value);
         ctx.renderProjectExplorer();
         return;
       }
@@ -423,15 +431,15 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleDocumentPickerClick(event) {
-      await ctx.entitiesController?.().handlePickerClick(event);
+      await entitiesController()?.handlePickerClick(event);
     }
 
     function handleDocumentPickerInput(event) {
-      ctx.entitiesController?.().handlePickerInput(event);
+      entitiesController()?.handlePickerInput(event);
     }
 
     function handleDocumentPickerChange(event) {
-      ctx.entitiesController?.().handlePickerChange(event);
+      entitiesController()?.handlePickerChange(event);
     }
 
     function handleDocumentFilterMenuClick(event) {
@@ -544,7 +552,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         else ctx.renderProjectExplorer();
         return;
       }
-      if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
+      if (await entitiesController()?.handleAutoPromoteClick(event)) return;
       const activityController = ctx.activityController?.();
       if (
         event.target.closest?.('[data-project-activity-action]')
@@ -714,7 +722,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(noteStateClear.dataset.projectId || selectedProjectId() || '');
-        ctx.filtersController?.().setFindingNoteState(projectId, 'all');
+        filtersController()?.setFindingNoteState(projectId, 'all');
         ctx.renderProjectExplorer();
         return;
       }
@@ -723,7 +731,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(orphanClear.dataset.projectId || selectedProjectId() || '');
-        ctx.filtersController?.().setFindingOrphanFilter(projectId, 'hide');
+        filtersController()?.setFindingOrphanFilter(projectId, 'hide');
         ctx.renderProjectExplorer();
         return;
       }
@@ -732,7 +740,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(allFilterClear.dataset.projectId || selectedProjectId() || '');
-        ctx.filtersController?.().clearAllFilters(projectId);
+        filtersController()?.clearAllFilters(projectId);
         ctx.renderProjectExplorer();
         return;
       }
@@ -758,8 +766,8 @@ let exportedDarklabProjectWorkspaceEvents = null;
         if (nextTab !== 'details') ctx.closeProjectTargetEditor();
         ctx.closeProjectEntityEditor();
         if (nextTab !== 'entities') {
-          ctx.entitiesController?.().setSelectMode(false);
-          ctx.entitiesController?.().clearSelection();
+          entitiesController()?.setSelectMode(false);
+          entitiesController()?.clearSelection();
         }
         if (nextTab !== 'findings') {
           ctx.setFindingSelectMode(false);
@@ -778,9 +786,9 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(entityTabBtn.dataset.projectId || selectedProjectId() || '');
-        ctx.entitiesController?.().setActiveTab(entityTabBtn.dataset.projectEntityTab || 'ip');
-        ctx.entitiesController?.().clearSelection();
-        await Promise.resolve(ctx.entitiesController?.().ensureFilteredCounts(projectId));
+        entitiesController()?.setActiveTab(entityTabBtn.dataset.projectEntityTab || 'ip');
+        entitiesController()?.clearSelection();
+        await Promise.resolve(entitiesController()?.ensureFilteredCounts(projectId));
         ctx.renderProjectExplorer();
         if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
         return;
@@ -791,12 +799,12 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         if (entityPageBtn.disabled) return;
         const projectId = String(entityPageBtn.dataset.projectId || selectedProjectId() || '');
-        const page = ctx.entitiesController?.().page(projectId) || { limit: 50, offset: 0 };
+        const page = entitiesController()?.page(projectId) || { limit: 50, offset: 0 };
         const nextOffset = projectPageOffset(page, entityPageBtn.dataset.projectEntitiesPage);
-        ctx.entitiesController?.().setPageOffset(projectId, nextOffset);
-        ctx.entitiesController?.().clearSelection();
+        entitiesController()?.setPageOffset(projectId, nextOffset);
+        entitiesController()?.clearSelection();
         await runProjectPager(entityPageBtn, () => (
-          ctx.entitiesController?.().load(projectId, { offset: nextOffset, skipFinalRender: true })
+          entitiesController()?.load(projectId, { offset: nextOffset, skipFinalRender: true })
         ));
         return;
       }
@@ -804,7 +812,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
       if (entityCheckbox) {
         event.stopPropagation();
         const entityId = String(entityCheckbox.dataset.projectEntitySelect || '');
-        ctx.entitiesController?.().toggleSelected(entityId, !!entityCheckbox.checked);
+        entitiesController()?.toggleSelected(entityId, !!entityCheckbox.checked);
         ctx.renderProjectExplorer();
         return;
       }
@@ -963,7 +971,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         } else if (action === 'open-project-entity') {
           const summary = ctx.projectSummary?.(projectId);
           const entityId = String(btn.dataset.entityId || '');
-          const entity = ctx.entitiesController?.().byId(summary, entityId) || {
+          const entity = entitiesController()?.byId(summary, entityId) || {
             id: entityId,
             type: String(btn.dataset.entityType || ''),
             canonical_value: String(btn.dataset.entityValue || ''),
@@ -989,7 +997,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
           return;
         } else if (action === 'toggle-project-entity-row') {
           const entityId = String(btn.dataset.entityId || '');
-          ctx.entitiesController?.().toggleSelected(entityId);
+          entitiesController()?.toggleSelected(entityId);
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'toggle-project-entity-select') {
@@ -998,8 +1006,8 @@ let exportedDarklabProjectWorkspaceEvents = null;
             denyTeamScopeAction('change team projects');
             return;
           }
-          ctx.entitiesController?.().setSelectMode(nextMode);
-          if (!nextMode) ctx.entitiesController?.().clearSelection();
+          entitiesController()?.setSelectMode(nextMode);
+          if (!nextMode) entitiesController()?.clearSelection();
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'select-all-project-entities') {
@@ -1007,11 +1015,11 @@ let exportedDarklabProjectWorkspaceEvents = null;
             denyTeamScopeAction('change team projects');
             return;
           }
-          ctx.entitiesController?.().selectAllForActiveTab(ctx.projectSummary?.(projectId));
+          entitiesController()?.selectAllForActiveTab(ctx.projectSummary?.(projectId));
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'clear-project-entities') {
-          ctx.entitiesController?.().clearSelection();
+          entitiesController()?.clearSelection();
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'bulk-unlink-project-entities') {
@@ -1029,7 +1037,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
             body: JSON.stringify({ entity_type: 'atlas_entity', entity_ids: [...selectedEntityIds()] }),
           });
           selectedEntityIds().clear();
-          ctx.entitiesController?.().setSelectMode(false);
+          entitiesController()?.setSelectMode(false);
           await ctx.refreshProjectWorkspace();
           ctx.setProjectWorkspaceMessage('Entities unlinked from project.');
           return;
@@ -1052,7 +1060,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
           return;
         } else if (action === 'export-project-entities-csv' || action === 'export-project-entities-jsonl') {
           const format = action === 'export-project-entities-jsonl' ? 'jsonl' : 'csv';
-          await ctx.entitiesController?.().exportEntities(projectId, format);
+          await entitiesController()?.exportEntities(projectId, format);
           return;
         } else if (action === 'open-entity-picker') {
           ctx.openProjectEntityPicker(projectId);
