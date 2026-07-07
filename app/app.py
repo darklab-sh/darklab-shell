@@ -148,10 +148,20 @@ def _static_asset_url(path: str) -> str:
     if not asset_path.startswith(("/static/", "/vendor/")):
         return asset_path
     if _asset_bundle_mode() != "bundle":
+        if _is_source_module_asset(asset_path):
+            return asset_path
         return _versioned_asset_url(asset_path)
     if asset_path not in _STATIC_ASSET_URL_CACHE:
         _STATIC_ASSET_URL_CACHE[asset_path] = _hashed_static_asset_url(asset_path)
     return _STATIC_ASSET_URL_CACHE[asset_path]
+
+
+def _is_source_module_asset(path: str) -> bool:
+    asset_path = str(path or "")
+    return (
+        asset_path.startswith("/static/js/")
+        and asset_path.split("?", 1)[0].endswith(".js")
+    )
 
 
 def _hashed_static_asset_url(path: str) -> str:
@@ -202,7 +212,13 @@ def _asset_bundle_mode() -> str:
     if mode in _VALID_ASSET_BUNDLE_MODES:
         if mode not in _LOGGED_ASSET_BUNDLE_MODES:
             _LOGGED_ASSET_BUNDLE_MODES.add(mode)
-            log.info("ASSET_BUNDLE_MODE_SELECTED", extra={"asset_bundle_mode": mode})
+            extra = {"asset_bundle_mode": mode}
+            if mode == "source":
+                extra.update({
+                    "source_request_profile": "direct-esm-import-graph",
+                    "source_js_module_urls": "unversioned",
+                })
+            log.info("ASSET_BUNDLE_MODE_SELECTED", extra=extra)
         return mode
     if mode not in _WARNED_INVALID_ASSET_BUNDLE_MODES:
         _WARNED_INVALID_ASSET_BUNDLE_MODES.add(mode)
@@ -295,6 +311,8 @@ def _asset_bundle(logical_name: str) -> list[str]:
             mode=mode,
         )
         raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no sources")
+    if bundle_type == "esm":
+        return [str(source) for source in sources]
     return [_versioned_asset_url(str(source)) for source in sources]
 
 

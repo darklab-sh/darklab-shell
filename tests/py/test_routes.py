@@ -186,14 +186,16 @@ class TestIndexRoute:
         assert '<script defer src="/vendor/ansi_up.js?v=' in body
         assert '<script src="/static/js/export_pdf.js?v=' not in body
         assert '"export_pdf": {' in body
-        assert '"url": "/static/js/export_pdf.js?v=' in body
+        assert '"url": "/static/js/export_pdf.js"' in body
+        assert '"url": "/static/js/export_pdf.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_tabs.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_entity_detail.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_entity_row.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_overlay.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_mobile.js?v=' not in body
         assert '"atlas_tabs": {' in body
-        assert '"url": "/static/js/features/atlas/atlas_tabs.js?v=' in body
+        assert '"url": "/static/js/features/atlas/atlas_tabs.js"' in body
+        assert '"url": "/static/js/features/atlas/atlas_tabs.js?v=' not in body
 
     def test_html_response_uses_gzip_when_accepted(self):
         client = get_client()
@@ -204,97 +206,51 @@ class TestIndexRoute:
         assert "immutable" not in resp.headers.get("Cache-Control", "")
         body = gzip.decompress(resp.data).decode("utf-8")
         assert "<!DOCTYPE html>" in body
-        assert '"url": "/static/js/features/atlas/atlas_tabs.js?v=' in body
-        assert '"type": "module"' in body
-        assert body.count('"type": "module"') >= 3
-        assert '"atlas_entity_row": {' in body
-        assert '"url": "/static/js/features/atlas/atlas_entity_row.js?v=' in body
-        assert '"atlas_entity_detail": {' in body
-        assert '"url": "/static/js/features/atlas/atlas_entity_detail.js?v=' in body
-        assert '"atlas_overlay": {' in body
-        assert '"url": "/static/js/features/atlas/atlas_overlay.js?v=' in body
-        assert '"atlas_mobile": {' in body
-        assert '"url": "/static/js/features/atlas/atlas_mobile.js?v=' in body
-        assert '<script src="/static/js/features/findings/findings_board_modal.js?v=' not in body
-        assert '"findings_board": {' in body
-        assert '"url": "/static/js/features/findings/findings_board_modal.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_activity.js?v=' not in body
-        assert '"project_activity": {' in body
-        assert '"url": "/static/js/features/projects/project_activity.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_artifacts.js?v=' not in body
-        assert '"project_artifacts": {' in body
-        assert '"url": "/static/js/features/projects/project_artifacts.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_workspace_shell.js?v=' not in body
-        assert '"project_workspace_shell": {' in body
-        assert '"url": "/static/js/features/projects/project_workspace_shell.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_workspace_events.js?v=' not in body
-        assert '"project_workspace_events": {' in body
-        assert '"url": "/static/js/features/projects/project_workspace_events.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_entities.js?v=' not in body
-        assert '"project_entities": {' in body
-        assert '"url": "/static/js/features/projects/project_entities.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_packages.js?v=' not in body
-        assert '"project_packages": {' in body
-        assert '"url": "/static/js/features/projects/project_packages.js?v=' in body
-        assert '<script src="/static/js/features/projects/project_report.js?v=' not in body
-        assert '"project_report": {' in body
-        assert '"url": "/static/js/features/projects/project_report.js?v=' in body
-        assert '<script src="/static/js/features/run-comparison/history_compare_renderer.js?v=' not in body
-        assert '"history_compare_core": {' in body
-        assert '"url": "/static/js/features/run-comparison/history_compare_core.js?v=' in body
-        assert '"history_compare_overlay": {' in body
-        assert '"url": "/static/js/features/run-comparison/history_compare_overlay.js?v=' in body
-        assert '"history_compare_controls": {' in body
-        assert '"url": "/static/js/features/run-comparison/history_compare_controls.js?v=' in body
-        assert '"history_compare_navigation": {' in body
-        assert '"url": "/static/js/features/run-comparison/history_compare_navigation.js?v=' in body
-        assert '"history_compare_renderer": {' in body
-        assert '"url": "/static/js/features/run-comparison/history_compare_renderer.js?v=' in body
-        assert '"history_compare_launcher": {' in body
-        assert '"url": "/static/js/features/run-comparison/history_compare_launcher.js?v=' in body
-        assert '<script src="/static/js/features/history/history_run_details.js?v=' not in body
-        assert '"history_run_details": {' in body
-        assert '"url": "/static/js/features/history/history_run_details.js?v=' in body
-        assert '<script src="/static/js/features/preferences/teams_panel.js?v=' not in body
-        assert '"options_session_token_controls": {' in body
-        assert '"url": "/static/js/features/preferences/session_token_controls.js?v=' in body
-        assert '"options_secrets_panel": {' in body
-        assert '"url": "/static/js/features/preferences/secrets_panel.js?v=' in body
-        assert '"options_teams_panel": {' in body
-        assert '"url": "/static/js/features/preferences/teams_panel.js?v=' in body
-        assert '"options_notification_channels": {' in body
-        assert '"url": "/static/js/features/preferences/notification_channels.js?v=' in body
-        assert '<script src="/static/js/features/command-registry/command_registry.js?v=' not in body
-        assert '"command_registry": {' in body
-        assert '"url": "/static/js/features/command-registry/command_registry.js?v=' in body
-        assert '<script src="/static/js/features/workflows/workflows.js?v=' not in body
-        assert '"workflows": {' in body
-        assert '"url": "/static/js/features/workflows/workflows.js?v=' in body
-        assert '<script src="/static/js/pty.js?v=' not in body
-        assert '"pty_controller": {' in body
-        assert '"url": "/static/js/pty.js?v=' in body
-        assert '<script src="/static/js/features/schedules/schedules_modal.js?v=' not in body
-        assert '"schedules_modal": {' in body
-        assert '"url": "/static/js/features/schedules/schedules_modal.js?v=' in body
-        assert '<script src="/static/js/features/status-monitor/status_monitor_core.js?v=' not in body
-        assert '<script src="/static/js/status_monitor.js?v=' not in body
-        assert '"status_monitor_core": {' in body
-        assert '"url": "/static/js/features/status-monitor/status_monitor_core.js?v=' in body
-        assert '"status_monitor_data": {' in body
-        assert '"url": "/static/js/features/status-monitor/status_monitor_data.js?v=' in body
-        assert '"status_monitor_resources": {' in body
-        assert '"url": "/static/js/features/status-monitor/status_monitor_resources.js?v=' in body
-        assert '"status_monitor": {' in body
-        assert '"url": "/static/js/status_monitor.js?v=' in body
-        assert '<script src="/static/js/features/mobile/mobile_running_indicator.js?v=' not in body
-        assert '"mobile_running_indicator": {' in body
-        assert '"url": "/static/js/features/mobile/mobile_running_indicator.js?v=' in body
-        assert '<script src="/static/js/tour_modal.js?v=' not in body
-        assert '"tour_modal": {' in body
-        assert '"url": "/static/js/tour_modal.js?v=' in body
-        assert '<script src="/static/js/features/watchers/watchers_modal.js?v=' not in body
-        assert '"watchers_modal": {' in body
-        assert '"url": "/static/js/features/watchers/watchers_modal.js?v=' in body
+        expected_modules = {
+            "atlas_tabs": "/static/js/features/atlas/atlas_tabs.js",
+            "atlas_entity_row": "/static/js/features/atlas/atlas_entity_row.js",
+            "atlas_entity_detail": "/static/js/features/atlas/atlas_entity_detail.js",
+            "atlas_overlay": "/static/js/features/atlas/atlas_overlay.js",
+            "atlas_mobile": "/static/js/features/atlas/atlas_mobile.js",
+            "findings_board": "/static/js/features/findings/findings_board_modal.js",
+            "project_activity": "/static/js/features/projects/project_activity.js",
+            "project_artifacts": "/static/js/features/projects/project_artifacts.js",
+            "project_workspace_shell": "/static/js/features/projects/project_workspace_shell.js",
+            "project_workspace_events": "/static/js/features/projects/project_workspace_events.js",
+            "project_entities": "/static/js/features/projects/project_entities.js",
+            "project_packages": "/static/js/features/projects/project_packages.js",
+            "project_report": "/static/js/features/projects/project_report.js",
+            "history_compare_core": "/static/js/features/run-comparison/history_compare_core.js",
+            "history_compare_overlay": "/static/js/features/run-comparison/history_compare_overlay.js",
+            "history_compare_controls": "/static/js/features/run-comparison/history_compare_controls.js",
+            "history_compare_navigation": "/static/js/features/run-comparison/history_compare_navigation.js",
+            "history_compare_renderer": "/static/js/features/run-comparison/history_compare_renderer.js",
+            "history_compare_launcher": "/static/js/features/run-comparison/history_compare_launcher.js",
+            "history_run_details": "/static/js/features/history/history_run_details.js",
+            "options_session_token_controls": "/static/js/features/preferences/session_token_controls.js",
+            "options_secrets_panel": "/static/js/features/preferences/secrets_panel.js",
+            "options_teams_panel": "/static/js/features/preferences/teams_panel.js",
+            "options_notification_channels": "/static/js/features/preferences/notification_channels.js",
+            "command_registry": "/static/js/features/command-registry/command_registry.js",
+            "workflows": "/static/js/features/workflows/workflows.js",
+            "pty_controller": "/static/js/pty.js",
+            "schedules_modal": "/static/js/features/schedules/schedules_modal.js",
+            "status_monitor_core": "/static/js/features/status-monitor/status_monitor_core.js",
+            "status_monitor_data": "/static/js/features/status-monitor/status_monitor_data.js",
+            "status_monitor_resources": "/static/js/features/status-monitor/status_monitor_resources.js",
+            "status_monitor": "/static/js/status_monitor.js",
+            "mobile_running_indicator": "/static/js/features/mobile/mobile_running_indicator.js",
+            "tour_modal": "/static/js/tour_modal.js",
+            "watchers_modal": "/static/js/features/watchers/watchers_modal.js",
+        }
+        normalized_assets = {
+            name: self._normalize_lazy_asset_entry(entry)
+            for name, entry in self._lazy_assets_from_body(body).items()
+        }
+        for name, path in expected_modules.items():
+            assert normalized_assets[name] == {"url": path, "type": "module"}
+            assert f'<script src="{path}' not in body
+            assert f'{path}?v=' not in body
         assert '<script src="/vendor/jspdf.umd.min.js?v=' not in body
         assert '"jspdf": "/vendor/jspdf.umd.min.js?v=' in body
         assert '<script src="/vendor/xterm.js?v=' not in body
@@ -303,7 +259,8 @@ class TestIndexRoute:
         assert '"xterm_css": "/vendor/xterm.css?v=' in body
         assert '/static/js/core/run_output_model.js?v=' not in body
         assert '/static/js/core/config.js?v=' not in body
-        assert 'type="module" src="/static/js/shell_bootstrap.entry.js?v=' in body
+        assert 'type="module" src="/static/js/shell_bootstrap.entry.js"' in body
+        assert '/static/js/shell_bootstrap.entry.js?v=' not in body
         assert "__darklabBootstrapAsset" in body
         assert "ESM_BOOTSTRAP_LOAD_FAILED" in body
         assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
@@ -334,12 +291,13 @@ class TestIndexRoute:
         for name, entry in normalized_assets.items():
             assert set(entry) == {"url", "type"}
             assert entry["url"].startswith(("/static/js/", "/vendor/"))
-            assert "?v=" in entry["url"]
             path = self._asset_path_without_version(entry["url"])
             if path.startswith("/static/js/"):
                 assert entry["type"] == "module", name
+                assert "?v=" not in entry["url"], name
             else:
                 assert entry["type"] == "classic", name
+                assert "?v=" in entry["url"], name
 
     def test_bundle_mode_renders_built_asset_bundles(self):
         client = get_client()
@@ -437,8 +395,10 @@ class TestIndexRoute:
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
             sources = shell_app_module._asset_bundle("module-fixture")
             vendor_url = shell_app_module._static_asset_url("/vendor/jspdf.umd.min.js")
+            lazy_module_url = shell_app_module._static_asset_url("/static/js/features/projects/project_report.js")
         assert len(sources) == 1
-        assert sources[0].startswith("/static/js/core/utils.js?v=")
+        assert sources[0] == "/static/js/core/utils.js"
+        assert lazy_module_url == "/static/js/features/projects/project_report.js"
         assert vendor_url.startswith("/vendor/jspdf.umd.min.js?v=")
 
     def test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back(self):
@@ -463,7 +423,11 @@ class TestIndexRoute:
                 assert shell_app_module._asset_bundle_mode() == "source"
         mock_info.assert_called_once()
         assert mock_info.call_args[0][0] == "ASSET_BUNDLE_MODE_SELECTED"
-        assert mock_info.call_args.kwargs["extra"] == {"asset_bundle_mode": "source"}
+        assert mock_info.call_args.kwargs["extra"] == {
+            "asset_bundle_mode": "source",
+            "source_request_profile": "direct-esm-import-graph",
+            "source_js_module_urls": "unversioned",
+        }
         shell_app_module._LOGGED_ASSET_BUNDLE_MODES.clear()
 
     def test_asset_version_fallback_logs_warning(self):
@@ -20776,7 +20740,8 @@ class TestShareRoute:
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/features/history.css?v=' in body
         assert '/static/css/terminal_export.css?v=' in body
-        assert 'type="module" src="/static/js/permalink.entry.js?v=' in body
+        assert 'type="module" src="/static/js/permalink.entry.js"' in body
+        assert '/static/js/permalink.entry.js?v=' not in body
         assert "__darklabBootstrapAsset" in body
         assert "ESM_BOOTSTRAP_LOAD_FAILED" in body
         assert "window.__darklabBootstrapAsset.start('permalink', 'permalink'," in body

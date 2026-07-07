@@ -1692,10 +1692,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
 | `TestIndexRoute.test_html_response_uses_gzip_when_accepted` | Verifies the dynamic HTML shell is gzip-compressed when the browser advertises support. |
-| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest with module/classic types and versioned URLs. |
+| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest, with unversioned JS module URLs and versioned classic vendor URLs. |
 | `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
 | `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
-| `TestIndexRoute.test_esm_asset_bundle_uses_module_type_and_source_entries` | Verifies ESM asset bundles render module script tags and source mode emits only the entry module. |
+| `TestIndexRoute.test_esm_asset_bundle_uses_module_type_and_source_entries` | Verifies ESM asset bundles render module script tags, source mode emits only the entry module, and source JS modules keep one unversioned URL identity while classic vendor assets stay cache-busted. |
 | `TestIndexRoute.test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back` | Verifies invalid asset bundle modes warn once and fall back to bundle mode. |
 | `TestIndexRoute.test_asset_bundle_mode_selection_logs_info_once_per_mode` | Verifies valid asset bundle modes log the selected mode once per process. |
 | `TestIndexRoute.test_asset_version_fallback_logs_warning` | Verifies asset URL version fallback logs the missing source path before using `APP_VERSION`. |
@@ -4582,7 +4582,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 
 | Test | Description |
 | --- | --- |
-| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects including the lazy Overview tab, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls. |
+| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects including the lazy Overview tab, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls without loading a source JS module under both plain and versioned URLs. |
 | `does not publish Playwright-only hooks when webdriver is unavailable` | Verifies a normal browser context does not receive Playwright-only helper globals. |
 
 #### `tabs.spec.js`

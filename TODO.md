@@ -30,11 +30,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Make source asset mode useful without bringing back pre-bundle request fan-out.**
-  - Keep source mode opt-in and make it obvious in startup logs or diagnostics when it is active, since it can send more than a hundred direct module requests on first load.
-  - Remove source-mode duplicate module fetches caused by loading some lazy modules with `?v=` while their relative ESM imports load the same files without the version query.
-  - Use one URL identity per source module, either by keeping lazy manifest URLs unversioned in source mode, versioning relative imports consistently, or avoiding independent lazy loads for modules that another lazy entry already imports.
-  - Re-measure source mode separately from bundle mode so local development ergonomics and production-like bundle performance do not get mixed together.
 - **Move inactive modal markup and feature CSS off the initial shell path.**
   - Split critical shell CSS from feature and modal CSS so the first render is not blocked by styles for Projects, Atlas, history details, comparisons, packages, schedules, watchers, and other closed surfaces.
   - Lazy-render or template-load large inactive modal bodies instead of shipping all modal markup in the first HTML document.
