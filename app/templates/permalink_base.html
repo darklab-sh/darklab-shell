@@ -5,14 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ page_title }}</title>
-<link rel="icon" type="image/x-icon" href="{{ static_asset('/static/favicon.ico') }}">
+<link rel="icon" type="image/svg+xml" href="{{ static_asset('/static/favicon.svg') }}">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="{{ static_asset('/vendor/fonts/JetBrainsMono-400.woff2') }}">
 {% include "app_stylesheets.html" %}
 {% for href in asset_bundle('terminal-export') %}
 <link rel="stylesheet" href="{{ href }}">
 {% endfor %}
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
-<script src="{{ static_asset('/vendor/ansi_up.js') }}"></script>
+<script defer src="{{ static_asset('/vendor/ansi_up.js') }}"></script>
 <script id="lazy-assets-json" type="application/json">{{ {'export_pdf': static_asset('/static/js/export_pdf.js'), 'jspdf': static_asset('/vendor/jspdf.umd.min.js'), 'xterm_css': static_asset('/vendor/xterm.css'), 'xterm_js': static_asset('/vendor/xterm.js'), 'xterm_fit_js': static_asset('/vendor/xterm-addon-fit.js')}|tojson }}</script>
 {% block extra_head %}{% endblock %}
 </head>

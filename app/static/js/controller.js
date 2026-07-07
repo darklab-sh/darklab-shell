@@ -250,7 +250,7 @@ import {
   closeWorkspace,
   hideWorkspaceEditor,
   hideWorkspaceViewer,
-} from './workspace.js';
+} from './workspace_bridge.js';
 import {
   closeWorkflowEditor as importedCloseWorkflowEditor,
   ensureWorkflowCatalogLoaded as importedEnsureWorkflowCatalogLoaded,
@@ -980,10 +980,13 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
   logClientError('failed to load /shortcuts', err);
 });
 
-const workflowsLoad = apiFetch('/workflows').then(r => r.json()).then(data => {
-  const items = data.items || [];
-  if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
-});
+const workflowsLoad = typeof ensureWorkflowCatalogLoaded === 'function'
+  ? ensureWorkflowCatalogLoaded()
+  : apiFetch('/workflows').then(r => r.json()).then(data => {
+    const items = data.items || [];
+    if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
+    return items;
+  });
 workflowsLoad.catch(err => {
   logClientError('failed to load /workflows', err);
 });

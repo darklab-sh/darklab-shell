@@ -1223,6 +1223,31 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-refresh-btn').getAttribute('aria-label')).toBe('Refresh files')
   })
 
+  it('shares the in-flight workspace file request between cache refreshes and modal opens', async () => {
+    let resolveFiles
+    const apiFetch = vi.fn(() => new Promise(resolve => {
+      resolveFiles = resolve
+    }))
+    const { refreshWorkspaceFiles, refreshWorkspaceFileCache } = setupWorkspace(apiFetch, {
+      setTimeout: vi.fn(() => 0),
+    })
+
+    const cacheLoad = refreshWorkspaceFileCache()
+    const modalLoad = refreshWorkspaceFiles()
+
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+
+    resolveFiles(responseJson({
+      files: [{ path: 'urls.txt', size: 18 }],
+      usage: { bytes_used: 18, file_count: 1 },
+      limits: { quota_bytes: 2048, max_files: 5 },
+    }))
+    await Promise.all([cacheLoad, modalLoad])
+
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('.workspace-file-name').textContent).toBe('urls.txt')
+  })
+
   it('saves editor contents through the workspace route', async () => {
     const apiFetch = vi.fn(() => Promise.resolve(responseJson({
       file: { path: 'targets.txt', size: 11 },

@@ -1433,17 +1433,25 @@ describe('Atlas overlay', () => {
       const target = String(url)
       if (target === '/atlas' || target.startsWith('/atlas?')) {
         return Promise.resolve(jsonResponse({
-          total: 436,
-          counts: { ip: 0, domain: 30, hash: 0, cve: 0, url: 0 },
+          total: 51,
+          counts: { ip: 0, domain: 51, hash: 0, cve: 0, url: 0 },
           findings: 0,
         }))
       }
       if (target.startsWith('/atlas/entities?')) {
+        const entities = Array.from({ length: 50 }, (_, index) => ({
+          ...ENTITY,
+          id: index === 0 ? 'ent_domain' : `ent_domain_${index}`,
+          type: 'domain',
+          canonical_value: index === 0 ? 'darklab.sh' : `host-${index}.darklab.sh`,
+        }))
         return Promise.resolve(jsonResponse({
-          entities: [{ ...ENTITY, id: 'ent_domain', type: 'domain', canonical_value: 'darklab.sh' }],
-          total: 436,
+          entities,
+          total: 51,
           limit: 50,
           offset: 0,
+          has_more: true,
+          total_exact: false,
         }))
       }
       if (target === '/atlas/entities/ent_domain') {
@@ -1457,7 +1465,7 @@ describe('Atlas overlay', () => {
     void openAtlas({ source: 'test', tab: 'domain' })
 
     await vi.waitFor(() => {
-      expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 436')
+      expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 51+')
     })
     expect(detailRequested).toBe(true)
     expect(document.getElementById('atlas-next-btn')?.disabled).toBe(false)

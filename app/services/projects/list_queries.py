@@ -22,13 +22,16 @@ from services.projects.utils import page_payload as _page_payload
 from services.projects.utils import trim_text as _trim_text
 
 
-def _project_list_order_sql():
-    return (
-        "ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, "
-        "CASE WHEN status = 'archived' THEN 1 ELSE 0 END, "
-        + dialect_for_backend(get_db_backend()).case_insensitive_order("name")
-        + ", updated DESC, created DESC"
-    )
+def _project_sort_order_sql(*, include_archived=False):
+    parts = []
+    if include_archived:
+        parts.append("CASE WHEN status = 'archived' THEN 1 ELSE 0 END")
+    parts.extend((
+        dialect_for_backend(get_db_backend()).case_insensitive_order("name"),
+        "updated DESC",
+        "created DESC",
+    ))
+    return "ORDER BY " + ", ".join(parts)
 
 
 def _project_list_where_sql(session_id, *, team_id="", include_archived=False):
@@ -62,24 +65,43 @@ def _project_rows_to_list_projects(conn, session_id, rows, *, include_counts=Fal
     return projects
 
 
+def _active_project_row(conn, active_project_id, where_sql, where_params):
+    if not active_project_id:
+        return None
+    return conn.execute(
+        "SELECT " + project_select_columns() + " "  # nosec
+        "FROM projects "
+        + where_sql
+        + " AND id = ?",
+        (*where_params, active_project_id),
+    ).fetchone()
+
+
 def list_projects(session_id, *, include_archived=False, team_id=""):
     with get_db_connect()() as conn:
         where_sql, where_params = _project_list_where_sql(session_id, team_id=team_id, include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id, team_id=team_id)
+        active_row = _active_project_row(conn, active_project_id, where_sql, where_params)
+        active_exclusion_sql = " AND id != ?" if active_row else ""
+        active_exclusion_params = (active_project_id,) if active_row else ()
         rows = conn.execute(
             "SELECT " + project_select_columns() + " "  # nosec
             "FROM projects "
             + where_sql
+            + active_exclusion_sql
             + " "
-            + _project_list_order_sql(),
-            (*where_params, active_project_id),
+            + _project_sort_order_sql(include_archived=include_archived),
+            (*where_params, *active_exclusion_params),
         ).fetchall()
+        if active_row:
+            rows = [active_row, *rows]
         projects = _project_rows_to_list_projects(conn, session_id, rows, team_id=team_id)
     return projects
 
 
 def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0, include_counts=False, team_id=""):
     safe_limit, safe_offset = _normalize_page_window(limit, offset, maximum=100)
+    assert safe_limit is not None
     with get_db_connect()() as conn:
         where_sql, where_params = _project_list_where_sql(session_id, team_id=team_id, include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id, team_id=team_id)
@@ -88,15 +110,32 @@ def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0
             where_params,
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0
-        rows = conn.execute(
-            "SELECT " + project_select_columns() + " "  # nosec
-            "FROM projects "
-            + where_sql
-            + " "
-            + _project_list_order_sql()
-            + " LIMIT ? OFFSET ?",
-            (*where_params, active_project_id, safe_limit, safe_offset),
-        ).fetchall()
+        active_row = _active_project_row(conn, active_project_id, where_sql, where_params)
+        rows = []
+        active_exclusion_sql = ""
+        active_exclusion_params: tuple[str, ...] = ()
+        remaining_limit = safe_limit
+        remaining_offset = safe_offset
+        if active_row:
+            active_exclusion_sql = " AND id != ?"
+            active_exclusion_params = (active_project_id,)
+            if safe_offset == 0:
+                rows.append(active_row)
+                remaining_limit = max(0, safe_limit - 1)
+                remaining_offset = 0
+            else:
+                remaining_offset = max(0, safe_offset - 1)
+        if remaining_limit:
+            rows.extend(conn.execute(
+                "SELECT " + project_select_columns() + " "  # nosec
+                "FROM projects "
+                + where_sql
+                + active_exclusion_sql
+                + " "
+                + _project_sort_order_sql(include_archived=include_archived)
+                + " LIMIT ? OFFSET ?",
+                (*where_params, *active_exclusion_params, remaining_limit, remaining_offset),
+            ).fetchall())
         projects = _project_rows_to_list_projects(conn, session_id, rows, include_counts=include_counts, team_id=team_id)
     return _page_payload("projects", projects, total, safe_limit, safe_offset)
 
@@ -202,8 +241,8 @@ def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
                 + where_sql
                 + exclude_sql
                 + " ORDER BY "
-                + dialect_for_backend(get_db_backend()).case_insensitive_order("name")
-                + ", updated DESC, created DESC "
+                + _project_sort_order_sql(include_archived=False).removeprefix("ORDER BY ")
+                + " "
                 "LIMIT ?",
                 (*where_params, *exclude_params, remaining_limit),
             ).fetchall())

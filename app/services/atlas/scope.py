@@ -22,7 +22,7 @@ def metadata_owner_sql(alias: str, team_id: str = "") -> str:
             f"({prefix}team_id = ? OR "
             f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))"
         )
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?"
+    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
 
 
 def metadata_owner_params(session_id: str, team_id: str = "") -> list[str]:
@@ -35,8 +35,8 @@ def metadata_owner_params(session_id: str, team_id: str = "") -> list[str]:
 def run_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     if normalize_team_id(team_id):
-        return f"{prefix}team_id = ?"
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')"
+        return f"{prefix}team_id = ? AND {prefix}team_id != ''"
+    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
 
 
 def run_scope_params(session_id: str, team_id: str = "") -> list[str]:
@@ -47,8 +47,8 @@ def run_scope_params(session_id: str, team_id: str = "") -> list[str]:
 def project_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     if normalize_team_id(team_id):
-        return f"{prefix}team_id = ?"
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')"
+        return f"{prefix}team_id = ? AND {prefix}team_id != ''"
+    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
 
 
 def project_scope_params(session_id: str, team_id: str = "") -> list[str]:
@@ -63,7 +63,7 @@ def entity_scope_sql(alias: str, team_id: str = "") -> str:
         import_sql = project_scope_sql("scope_import_batch", normalized_team_id)
         return _sql_join((
             "(",
-            f"{prefix}team_id = ? OR EXISTS (",
+            f"({prefix}team_id = ? AND {prefix}team_id != '') OR EXISTS (",
             "SELECT 1 FROM entity_run_links scope_erl ",
             "JOIN runs scope_run ON scope_run.id = scope_erl.run_id ",
             f"WHERE scope_erl.entity_id = {prefix}id AND ",
@@ -75,7 +75,7 @@ def entity_scope_sql(alias: str, team_id: str = "") -> str:
             import_sql,
             "))",
         ))
-    return f"{prefix}session_id = ?"
+    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
 
 
 def entity_scope_params(session_id: str, team_id: str = "") -> list[str]:
@@ -147,11 +147,11 @@ def finding_import_exists_sql(finding_alias: str, batch_alias: str, team_id: str
 def finding_source_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     if not normalize_team_id(team_id):
-        return f"{prefix}session_id = ?"
+        return f"{prefix}session_id = ? AND {prefix}team_id = ''"
     run_sql = run_scope_sql("source_run", team_id)
     return _sql_join((
         "(",
-        f"{prefix}team_id = ? OR ",
+        f"({prefix}team_id = ? AND {prefix}team_id != '') OR ",
         finding_run_exists_sql(alias, "source_occurrence_run", team_id),
         " OR EXISTS (SELECT 1 FROM runs source_run WHERE source_run.id = ",
         f"{prefix}run_id AND ",

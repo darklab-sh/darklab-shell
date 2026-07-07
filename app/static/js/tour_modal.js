@@ -14,7 +14,7 @@ import {
 import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_overlay.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
 import { openProjectWorkspace as importedOpenProjectWorkspace } from './features/projects/project_context_bridge.js';
-import { openWorkspace as importedOpenWorkspace } from './workspace.js';
+import { openWorkspace as importedOpenWorkspace } from './workspace_bridge.js';
 import {
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,

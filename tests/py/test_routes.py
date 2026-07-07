@@ -7,6 +7,7 @@ Run with: pytest tests/ (from the repo root)
 import errno
 import base64
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -182,7 +183,7 @@ class TestIndexRoute:
         assert '/static/css/styles.css' not in body
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/mobile-chrome.css?v=' in body
-        assert '/vendor/ansi_up.js?v=' in body
+        assert '<script defer src="/vendor/ansi_up.js?v=' in body
         assert '<script src="/static/js/export_pdf.js?v=' not in body
         assert '"export_pdf": {' in body
         assert '"url": "/static/js/export_pdf.js?v=' in body
@@ -192,6 +193,17 @@ class TestIndexRoute:
         assert '<script src="/static/js/features/atlas/atlas_overlay.js?v=' not in body
         assert '<script src="/static/js/features/atlas/atlas_mobile.js?v=' not in body
         assert '"atlas_tabs": {' in body
+        assert '"url": "/static/js/features/atlas/atlas_tabs.js?v=' in body
+
+    def test_html_response_uses_gzip_when_accepted(self):
+        client = get_client()
+        resp = client.get("/", headers={"Accept-Encoding": "gzip"})
+        assert resp.status_code == 200
+        assert resp.headers.get("Content-Encoding") == "gzip"
+        assert "Accept-Encoding" in resp.headers.get("Vary", "")
+        assert "immutable" not in resp.headers.get("Cache-Control", "")
+        body = gzip.decompress(resp.data).decode("utf-8")
+        assert "<!DOCTYPE html>" in body
         assert '"url": "/static/js/features/atlas/atlas_tabs.js?v=' in body
         assert '"type": "module"' in body
         assert body.count('"type": "module"') >= 3
@@ -337,7 +349,7 @@ class TestIndexRoute:
             body = client.get("/").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'type="module" src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
-        assert re.search(r'href="/static/build/static-favicon\.[a-f0-9]{12}\.ico"', body)
+        assert re.search(r'href="/static/build/static-favicon\.[a-f0-9]{12}\.svg"', body)
         assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
         assert (
             "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
@@ -362,7 +374,7 @@ class TestIndexRoute:
             assert "?v=" not in entry["url"], name
         assert manifest["static_assets"]["/vendor/jspdf.umd.min.js"]["path"] in body
         assert manifest["static_assets"]["/vendor/xterm.css"]["path"] in body
-        assert manifest["static_assets"]["/vendor/ansi_up.js"]["path"] in body
+        assert f'<script defer src="{manifest["static_assets"]["/vendor/ansi_up.js"]["path"]}">' in body
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/mobile-chrome.css?v=' not in body
         assert '/static/js/core/run_output_model.js?v=' not in body
@@ -8437,9 +8449,11 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
-                "VALUES (?, ?, ?, 'finding', 'direct run finding', '8080/tcp open http-proxy', 1, ?, datetime('now'))",
-                (f"fnd_direct_{run_id}", session_id, run_id, f"fp-direct-{run_id}"),
+                "(id, session_id, run_id, first_run_id, last_run_id, scope, title, raw_line, "
+                "line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, ?, ?, 'finding', 'direct run finding', '8080/tcp open http-proxy', "
+                "1, ?, datetime('now'))",
+                (f"fnd_direct_{run_id}", session_id, run_id, run_id, run_id, f"fp-direct-{run_id}"),
             )
             conn.execute(
                 "INSERT INTO findings "
@@ -12251,9 +12265,10 @@ class TestVendorAssets:
         body = resp.get_data(as_text=True)
         assert "/vendor/fonts/" not in body
         assert re.search(
-            r"url\('/static/build/font-jetbrainsmono-400\.[a-f0-9]{12}\.ttf'\)",
+            r"url\('/static/build/font-jetbrainsmono-400\.[a-f0-9]{12}\.woff2'\)",
             body,
         )
+        assert "font-jetbrainsmono-300" not in body
         self._assert_immutable_asset_cache(resp)
         vendor_path = shell_app_module._load_asset_manifest()["static_assets"]["/vendor/jspdf.umd.min.js"]["path"]
         vendor_resp = client.get(vendor_path)
@@ -12261,17 +12276,50 @@ class TestVendorAssets:
         assert "javascript" in vendor_resp.content_type
         self._assert_immutable_asset_cache(vendor_resp)
 
+    def test_built_assets_use_precompressed_variants_when_accepted(self):
+        client = get_client()
+        built_path = shell_app_module._asset_bundle_entry("app")["path"]
+        local_path = Path(__file__).resolve().parents[2] / "app" / "static" / built_path.removeprefix("/static/")
+
+        raw_resp = client.get(built_path)
+        assert raw_resp.status_code == 200
+        assert raw_resp.headers.get("Content-Encoding") is None
+        assert "Accept-Encoding" in raw_resp.headers.get("Vary", "")
+
+        gzip_resp = client.get(built_path, headers={"Accept-Encoding": "gzip"})
+        assert gzip_resp.status_code == 200
+        assert gzip_resp.headers.get("Content-Encoding") == "gzip"
+        assert gzip.decompress(gzip_resp.data) == raw_resp.data
+        assert gzip_resp.data == Path(f"{local_path}.gz").read_bytes()
+        assert "Accept-Encoding" in gzip_resp.headers.get("Vary", "")
+        self._assert_immutable_asset_cache(gzip_resp)
+
+        br_resp = client.get(built_path, headers={"Accept-Encoding": "br, gzip"})
+        assert br_resp.status_code == 200
+        assert br_resp.headers.get("Content-Encoding") == "br"
+        assert br_resp.data == Path(f"{local_path}.br").read_bytes()
+        assert "Accept-Encoding" in br_resp.headers.get("Vary", "")
+        self._assert_immutable_asset_cache(br_resp)
+
+        direct_compressed_resp = client.get(f"{built_path}.gz")
+        assert direct_compressed_resp.status_code == 404
+
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()
         font_dir = tmp_path / "fonts"
         font_dir.mkdir()
-        (font_dir / "JetBrainsMono-400.ttf").write_bytes(b"font bytes")
+        (font_dir / "JetBrainsMono-400.ttf").write_bytes(b"ttf font bytes")
+        (font_dir / "JetBrainsMono-400.woff2").write_bytes(b"woff2 font bytes")
         monkeypatch.setattr(shell_assets, "_FONT_DIR", font_dir)
 
-        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
-        assert resp.status_code == 200
-        assert resp.data == b"font bytes"
-        self._assert_immutable_asset_cache(resp)
+        for filename, expected in (
+            ("JetBrainsMono-400.ttf", b"ttf font bytes"),
+            ("JetBrainsMono-400.woff2", b"woff2 font bytes"),
+        ):
+            resp = client.get(f"/vendor/fonts/{filename}")
+            assert resp.status_code == 200
+            assert resp.data == expected
+            self._assert_immutable_asset_cache(resp)
 
     def test_font_route_rejects_unknown_or_traversal_paths(self):
         client = get_client()
@@ -14330,6 +14378,16 @@ class TestAtlasRoutes:
         other_session_run_id, _ = self._seed_domain_finding_run(self._session_id(), "other.darklab.sh")
 
         all_resp = client.get("/atlas/findings", headers={"X-Session-ID": session_id})
+        paged_entities_resp = client.get("/atlas/entities?type=domain&limit=1", headers={"X-Session-ID": session_id})
+        exact_entities_resp = client.get(
+            "/atlas/entities?type=domain&limit=1&include_total=1",
+            headers={"X-Session-ID": session_id},
+        )
+        paged_findings_resp = client.get("/atlas/findings?limit=1", headers={"X-Session-ID": session_id})
+        exact_findings_resp = client.get(
+            "/atlas/findings?limit=1&include_total=1",
+            headers={"X-Session-ID": session_id},
+        )
         summary_resp = client.get(f"/atlas?run_id={quote(first_run_id)}", headers={"X-Session-ID": session_id})
         entity_resp = client.get(
             f"/atlas/entities?type=domain&run_id={quote(first_run_id)}",
@@ -14356,9 +14414,36 @@ class TestAtlasRoutes:
         assert first_resp.status_code == 200
         assert second_resp.status_code == 200
         assert other_resp.status_code == 200
+        assert paged_entities_resp.status_code == 200
+        assert exact_entities_resp.status_code == 200
+        assert paged_findings_resp.status_code == 200
+        assert exact_findings_resp.status_code == 200
         assert runs_resp.status_code == 200
         assert searched_runs_resp.status_code == 200
-        assert json.loads(all_resp.data)["total"] == 2
+        all_data = json.loads(all_resp.data)
+        assert all_data["total"] == 2
+        assert all_data["has_more"] is False
+        assert all_data["total_exact"] is True
+        assert all_data["counts_exact"] is False
+        paged_entities_data = json.loads(paged_entities_resp.data)
+        assert paged_entities_data["total"] == 2
+        assert paged_entities_data["has_more"] is True
+        assert paged_entities_data["total_exact"] is False
+        exact_entities_data = json.loads(exact_entities_resp.data)
+        assert exact_entities_data["total"] == 2
+        assert exact_entities_data["has_more"] is True
+        assert exact_entities_data["total_exact"] is True
+        paged_findings_data = json.loads(paged_findings_resp.data)
+        assert paged_findings_data["total"] == 2
+        assert paged_findings_data["has_more"] is True
+        assert paged_findings_data["total_exact"] is False
+        assert paged_findings_data["counts_exact"] is False
+        exact_findings_data = json.loads(exact_findings_resp.data)
+        assert exact_findings_data["total"] == 2
+        assert exact_findings_data["has_more"] is True
+        assert exact_findings_data["total_exact"] is True
+        assert exact_findings_data["counts_exact"] is True
+        assert exact_findings_data["counts"]["new"] == 2
         assert json.loads(summary_resp.data)["counts"]["domain"] == 1
         assert json.loads(summary_resp.data)["findings"] == 1
         entity_data = json.loads(entity_resp.data)

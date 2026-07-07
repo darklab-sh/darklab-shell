@@ -13,12 +13,14 @@ import {
 } from '../runtime_bridge.js';
 import { setHistoryRunModalStateHandlers as importedSetHistoryRunModalStateHandlers } from '../features/history/history_run_modal_state_bridge.js';
 import { setSecretsHandlers as importedSetSecretsHandlers } from '../features/preferences/secrets_bridge.js';
+import { setWorkspaceHandlers as importedSetWorkspaceHandlers } from '../workspace_bridge.js';
 
 let exportedLoadAtlasOverlay = null;
 let exportedLoadCommandRegistry = null;
 let exportedLoadFindingsBoard = null;
 let exportedLoadMobileRunningIndicator = null;
 let exportedLoadSchedulesModal = null;
+let exportedLoadWorkspaceSurface = null;
 let exportedLoadWatchersModal = null;
 
 (function () {
@@ -131,6 +133,8 @@ let exportedLoadWatchersModal = null;
     if (name === 'status_monitor_data') return { url: '/static/js/features/status-monitor/status_monitor_data.js', type: 'module' };
     if (name === 'status_monitor_resources') return { url: '/static/js/features/status-monitor/status_monitor_resources.js', type: 'module' };
     if (name === 'status_monitor') return { url: '/static/js/status_monitor.js', type: 'module' };
+    if (name === 'workspace') return { url: '/static/js/workspace.js', type: 'module' };
+    if (name === 'workspace_drag_drop') return { url: '/static/js/features/workspace/workspace_drag_drop.js', type: 'module' };
     if (name === 'jspdf') return { url: '/vendor/jspdf.umd.min.js', type: 'classic' };
     if (name === 'xterm_css') return { url: '/vendor/xterm.css', type: 'classic' };
     if (name === 'xterm_js') return { url: '/vendor/xterm.js', type: 'classic' };
@@ -503,111 +507,135 @@ let exportedLoadWatchersModal = null;
       return namespace;
     };
 
-    const DarklabProjectDetails = await loadProjectNamespace(
-      'project_details',
-      'DarklabProjectDetails',
-      'createProjectDetailsController',
-    );
-    const DarklabProjectList = await loadProjectNamespace(
-      'project_list',
-      'DarklabProjectList',
-      'createProjectListController',
-    );
-    const DarklabProjectNavigation = await loadProjectNamespace(
-      'project_navigation',
-      'DarklabProjectNavigation',
-      'createProjectNavigationController',
-    );
-    const DarklabProjectEntityEditor = await loadProjectNamespace(
-      'project_entity_editor',
-      'DarklabProjectEntityEditor',
-      'createProjectEntityEditorController',
-    );
-    const DarklabProjectWorkspaceActions = await loadProjectNamespace(
-      'project_workspace_actions',
-      'DarklabProjectWorkspaceActions',
-      'createProjectWorkspaceActionsController',
-    );
-    const DarklabProjectWorkspaceShell = await loadProjectNamespace(
-      'project_workspace_shell',
-      'DarklabProjectWorkspaceShell',
-      'createProjectWorkspaceShellController',
-    );
-    const DarklabProjectWorkspaceLifecycle = await loadProjectNamespace(
-      'project_workspace_lifecycle',
-      'DarklabProjectWorkspaceLifecycle',
-      'createProjectWorkspaceLifecycleController',
-    );
-    const DarklabProjectWorkspaceRenderer = await loadProjectNamespace(
-      'project_workspace_renderer',
-      'DarklabProjectWorkspaceRenderer',
-      'createProjectWorkspaceRendererController',
-    );
-    const DarklabProjectWorkspaceBootstrap = await loadProjectNamespace(
-      'project_workspace_bootstrap',
-      'DarklabProjectWorkspaceBootstrap',
-      'createProjectWorkspaceBootstrapController',
-    );
-    const DarklabProjectNestedSheets = await loadProjectNamespace(
-      'project_nested_sheets',
-      'DarklabProjectNestedSheets',
-      'createProjectNestedSheetsController',
-    );
-    const DarklabProjectWorkspaceEvents = await loadProjectNamespace(
-      'project_workspace_events',
-      'DarklabProjectWorkspaceEvents',
-      'createProjectWorkspaceEventsController',
-    );
-    const DarklabProjectTargets = await loadProjectNamespace(
-      'project_targets',
-      'DarklabProjectTargets',
-      'createProjectTargetsController',
-    );
-    const DarklabProjectRuns = await loadProjectNamespace(
-      'project_runs',
-      'DarklabProjectRuns',
-      'createProjectRunsController',
-    );
-    const DarklabProjectMobileCompare = await loadProjectNamespace(
-      'project_mobile_compare',
-      'DarklabProjectMobileCompare',
-      'createProjectMobileCompareController',
-    );
-    const DarklabProjectMobileShell = await loadProjectNamespace(
-      'project_mobile_shell',
-      'DarklabProjectMobileShell',
-      'createProjectMobileShellController',
-    );
-    const DarklabProjectMobileDetail = await loadProjectNamespace(
-      'project_mobile_detail',
-      'DarklabProjectMobileDetail',
-      'createProjectMobileDetailController',
-    );
-    const DarklabProjectFindingsData = await loadProjectNamespace(
-      'project_findings_data',
-      'DarklabProjectFindingsData',
-      'createProjectFindingsDataController',
-    );
-    const DarklabProjectFilters = await loadProjectNamespace(
-      'project_filters',
-      'DarklabProjectFilters',
-      'createProjectFiltersController',
-    );
-    const DarklabProjectEntities = await loadProjectNamespace(
-      'project_entities',
-      'DarklabProjectEntities',
-      'createProjectEntitiesController',
-    );
-    const DarklabProjectFindings = await loadProjectNamespace(
-      'project_findings',
-      'DarklabProjectFindings',
-      'createProjectFindingsController',
-    );
-    const DarklabProjectFindingsBoard = await loadProjectNamespace(
-      'project_findings_board',
-      'DarklabProjectFindingsBoard',
-      'createProjectFindingsBoardController',
-    );
+    const [
+      DarklabProjectDetails,
+      DarklabProjectList,
+      DarklabProjectNavigation,
+      DarklabProjectEntityEditor,
+      DarklabProjectWorkspaceActions,
+      DarklabProjectWorkspaceShell,
+      DarklabProjectWorkspaceLifecycle,
+      DarklabProjectWorkspaceRenderer,
+      DarklabProjectWorkspaceBootstrap,
+      DarklabProjectNestedSheets,
+      DarklabProjectWorkspaceEvents,
+      DarklabProjectTargets,
+      DarklabProjectRuns,
+      DarklabProjectMobileCompare,
+      DarklabProjectMobileShell,
+      DarklabProjectMobileDetail,
+      DarklabProjectFindingsData,
+      DarklabProjectFilters,
+      DarklabProjectEntities,
+      DarklabProjectFindings,
+      DarklabProjectFindingsBoard,
+    ] = await Promise.all([
+      loadProjectNamespace(
+        'project_details',
+        'DarklabProjectDetails',
+        'createProjectDetailsController',
+      ),
+      loadProjectNamespace(
+        'project_list',
+        'DarklabProjectList',
+        'createProjectListController',
+      ),
+      loadProjectNamespace(
+        'project_navigation',
+        'DarklabProjectNavigation',
+        'createProjectNavigationController',
+      ),
+      loadProjectNamespace(
+        'project_entity_editor',
+        'DarklabProjectEntityEditor',
+        'createProjectEntityEditorController',
+      ),
+      loadProjectNamespace(
+        'project_workspace_actions',
+        'DarklabProjectWorkspaceActions',
+        'createProjectWorkspaceActionsController',
+      ),
+      loadProjectNamespace(
+        'project_workspace_shell',
+        'DarklabProjectWorkspaceShell',
+        'createProjectWorkspaceShellController',
+      ),
+      loadProjectNamespace(
+        'project_workspace_lifecycle',
+        'DarklabProjectWorkspaceLifecycle',
+        'createProjectWorkspaceLifecycleController',
+      ),
+      loadProjectNamespace(
+        'project_workspace_renderer',
+        'DarklabProjectWorkspaceRenderer',
+        'createProjectWorkspaceRendererController',
+      ),
+      loadProjectNamespace(
+        'project_workspace_bootstrap',
+        'DarklabProjectWorkspaceBootstrap',
+        'createProjectWorkspaceBootstrapController',
+      ),
+      loadProjectNamespace(
+        'project_nested_sheets',
+        'DarklabProjectNestedSheets',
+        'createProjectNestedSheetsController',
+      ),
+      loadProjectNamespace(
+        'project_workspace_events',
+        'DarklabProjectWorkspaceEvents',
+        'createProjectWorkspaceEventsController',
+      ),
+      loadProjectNamespace(
+        'project_targets',
+        'DarklabProjectTargets',
+        'createProjectTargetsController',
+      ),
+      loadProjectNamespace(
+        'project_runs',
+        'DarklabProjectRuns',
+        'createProjectRunsController',
+      ),
+      loadProjectNamespace(
+        'project_mobile_compare',
+        'DarklabProjectMobileCompare',
+        'createProjectMobileCompareController',
+      ),
+      loadProjectNamespace(
+        'project_mobile_shell',
+        'DarklabProjectMobileShell',
+        'createProjectMobileShellController',
+      ),
+      loadProjectNamespace(
+        'project_mobile_detail',
+        'DarklabProjectMobileDetail',
+        'createProjectMobileDetailController',
+      ),
+      loadProjectNamespace(
+        'project_findings_data',
+        'DarklabProjectFindingsData',
+        'createProjectFindingsDataController',
+      ),
+      loadProjectNamespace(
+        'project_filters',
+        'DarklabProjectFilters',
+        'createProjectFiltersController',
+      ),
+      loadProjectNamespace(
+        'project_entities',
+        'DarklabProjectEntities',
+        'createProjectEntitiesController',
+      ),
+      loadProjectNamespace(
+        'project_findings',
+        'DarklabProjectFindings',
+        'createProjectFindingsController',
+      ),
+      loadProjectNamespace(
+        'project_findings_board',
+        'DarklabProjectFindingsBoard',
+        'createProjectFindingsBoardController',
+      ),
+    ]);
 
     return {
       DarklabProjectDetails,
@@ -822,6 +850,15 @@ let exportedLoadWatchersModal = null;
     return moduleApi && typeof moduleApi.createMobileRunningIndicator === 'function'
       ? { create: moduleApi.createMobileRunningIndicator }
       : null;
+  }
+
+  async function loadWorkspaceSurface() {
+    const workspaceModule = await loadLazyAsset('workspace');
+    await loadLazyAsset('workspace_drag_drop');
+    if (typeof importedSetWorkspaceHandlers === 'function') {
+      importedSetWorkspaceHandlers(workspaceModule || {});
+    }
+    return workspaceModule;
   }
 
   async function lazyOpenFindingsBoard(options = {}) {
@@ -1207,11 +1244,13 @@ let exportedLoadWatchersModal = null;
   window.loadTourModal = loadTourModal;
   window.loadStatusMonitor = loadStatusMonitor;
   window.loadMobileRunningIndicator = loadMobileRunningIndicator;
+  window.loadWorkspaceSurface = loadWorkspaceSurface;
   exportedLoadAtlasOverlay = loadAtlasOverlay;
   exportedLoadCommandRegistry = loadCommandRegistry;
   exportedLoadFindingsBoard = loadFindingsBoard;
   exportedLoadMobileRunningIndicator = loadMobileRunningIndicator;
   exportedLoadSchedulesModal = loadSchedulesModal;
+  exportedLoadWorkspaceSurface = loadWorkspaceSurface;
   exportedLoadWatchersModal = loadWatchersModal;
   if (typeof window.openAtlas !== 'function') window.openAtlas = lazyOpenAtlas;
   if (typeof window.closeAtlas !== 'function') window.closeAtlas = lazyCloseAtlas;
@@ -1346,11 +1385,18 @@ function loadWatchersModal(...args) {
     : Promise.resolve(null);
 }
 
+function loadWorkspaceSurface(...args) {
+  return typeof exportedLoadWorkspaceSurface === 'function'
+    ? exportedLoadWorkspaceSurface(...args)
+    : Promise.resolve(null);
+}
+
 export {
   loadAtlasOverlay,
   loadCommandRegistry,
   loadFindingsBoard,
   loadMobileRunningIndicator,
   loadSchedulesModal,
+  loadWorkspaceSurface,
   loadWatchersModal,
 };

@@ -84,6 +84,14 @@ let DarklabTeamScope = null;
     return `${STORAGE_PREFIX}${sessionId || 'anonymous'}`;
   }
 
+  function hasStoredTeamScope() {
+    return !!localStorageValue(storageKey());
+  }
+
+  function shouldRefreshTeamScopesOnBoot() {
+    return !!localStorageValue('session_token') || hasStoredTeamScope();
+  }
+
   function storageKeySuffix(key = storageKey()) {
     const value = String(key || '');
     const suffix = value.startsWith(STORAGE_PREFIX) ? value.slice(STORAGE_PREFIX.length) : value;
@@ -677,7 +685,13 @@ let DarklabTeamScope = null;
   window.addEventListener('resize', positionScopeMenu);
   document.addEventListener('DOMContentLoaded', () => {
     bindModalDismissal();
-    refreshTeamScopes().catch(() => {});
+    if (shouldRefreshTeamScopesOnBoot()) {
+      refreshTeamScopes().catch(() => {});
+      return;
+    }
+    teamScopesResolved = true;
+    scopeLoadError = false;
+    render();
   });
 })(window);
 

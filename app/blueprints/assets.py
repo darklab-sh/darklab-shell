@@ -3,6 +3,7 @@ Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 """
 
 import logging
+import mimetypes
 import os
 import shutil  # noqa: F401 - compatibility seam for diagnostics tests.
 import time
@@ -10,6 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from flask import Blueprint, abort, jsonify, request, send_file
+from werkzeug.security import safe_join
 
 from services.assets.diagnostics import (
     fmt_diag_duration_ms,
@@ -21,6 +23,7 @@ from services.audit.queries import iter_event_pages  # noqa: F401 - compatibilit
 from services.ai.diagnostics import run_test_prompt as ai_run_test_prompt  # noqa: F401
 from core.helpers import (
     FONT_FILES,
+    WEB_FONT_FILES,
     get_client_ip,
     get_log_session_id,
 )
@@ -58,7 +61,13 @@ _XTERM_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" 
 _XTERM_FIT_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm-addon-fit.js"
 _XTERM_CSS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm.css"
 _FONT_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
-_VENDOR_FONT_FILES = frozenset(filename for _, _, filename in FONT_FILES)
+_BUILD_DIR = Path(__file__).resolve().parent.parent / "static" / "build"
+_VENDOR_FONT_FILES = frozenset(
+    filename
+    for _, _, filename in [*FONT_FILES, *WEB_FONT_FILES]
+)
+_PRECOMPRESSED_BUILD_SUFFIXES = (("br", ".br"), ("gzip", ".gz"))
+_PRECOMPRESSED_BUILD_EXTENSIONS = frozenset({".css", ".js", ".json", ".svg"})
 _APP_BOOT_TIME = time.time()
 
 # Bounds for the /diag Redis snapshot: SCAN with COUNT=500 chunks the work,
@@ -239,6 +248,43 @@ def _sanitize_client_asset_src(value) -> str:
     return f"{path[:300]}{suffix}"
 
 
+def _build_asset_path(filename: str) -> Path:
+    if filename.endswith((".br", ".gz")):
+        abort(404)
+    safe_path = safe_join(str(_BUILD_DIR), filename)
+    if not safe_path:
+        abort(404)
+    path = Path(safe_path)
+    if not path.is_file():
+        abort(404)
+    return path
+
+
+def _selected_precompressed_build_asset(path: Path) -> tuple[Path, str]:
+    if path.suffix not in _PRECOMPRESSED_BUILD_EXTENSIONS:
+        return path, ""
+    for encoding, suffix in _PRECOMPRESSED_BUILD_SUFFIXES:
+        if request.accept_encodings.quality(encoding) <= 0:
+            continue
+        compressed = Path(f"{path}{suffix}")
+        if compressed.is_file():
+            return compressed, encoding
+    return path, ""
+
+
+@assets_bp.route("/static/build/<path:filename>")
+def static_build_asset(filename):
+    path = _build_asset_path(filename)
+    selected_path, encoding = _selected_precompressed_build_asset(path)
+    mimetype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    response = send_file(selected_path, mimetype=mimetype, conditional=True)
+    if path.suffix in _PRECOMPRESSED_BUILD_EXTENSIONS:
+        response.vary.add("Accept-Encoding")
+    if encoding:
+        response.headers["Content-Encoding"] = encoding
+    return response
+
+
 @assets_bp.route("/vendor/ansi_up.js")
 def vendor_ansi_up_js():
     return send_file(_ANSI_UP_JS, mimetype="application/javascript")
@@ -275,8 +321,8 @@ def vendor_fonts(filename):
 @assets_bp.route("/favicon.ico")
 def favicon():
     return send_file(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "favicon.ico"),
-        mimetype="image/x-icon",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "favicon.svg"),
+        mimetype="image/svg+xml",
     )
 
 

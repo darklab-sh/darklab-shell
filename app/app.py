@@ -5,6 +5,7 @@ Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
+import gzip
 import logging
 import os
 from pathlib import Path
@@ -55,6 +56,8 @@ _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
 _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
+_DYNAMIC_GZIP_MIN_BYTES = 1024
+_DYNAMIC_GZIP_MIMETYPES = frozenset({"text/html"})
 _ASSET_VERSION_CACHE: dict[str, str] = {}
 _STATIC_ASSET_URL_CACHE: dict[str, str] = {}
 _ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "manifest.json"
@@ -104,6 +107,28 @@ def _apply_immutable_asset_cache_headers(response):
     path = request.path or ""
     if path.startswith(_IMMUTABLE_ASSET_PREFIXES):
         response.headers["Cache-Control"] = _IMMUTABLE_ASSET_CACHE_CONTROL
+    return response
+
+
+def _gzip_dynamic_response(response):
+    if request.method not in {"GET", "HEAD"} or response.status_code != 200:
+        return response
+    if response.direct_passthrough or response.headers.get("Content-Encoding"):
+        return response
+    if response.mimetype not in _DYNAMIC_GZIP_MIMETYPES:
+        return response
+    response.vary.add("Accept-Encoding")
+    if request.accept_encodings.quality("gzip") <= 0:
+        return response
+    data = response.get_data()
+    if len(data) < _DYNAMIC_GZIP_MIN_BYTES:
+        return response
+    compressed = gzip.compress(data, compresslevel=6)
+    if len(compressed) >= len(data):
+        return response
+    response.set_data(compressed)
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(compressed))
     return response
 
 
@@ -408,6 +433,7 @@ def _log_request():
 
 def _log_response(response):
     response = _apply_immutable_asset_cache_headers(response)
+    response = _gzip_dynamic_response(response)
     started = request.environ.get("darklab_metrics_start")
     try:
         elapsed = time.perf_counter() - float(started) if started else 0.0

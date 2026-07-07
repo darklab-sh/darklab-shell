@@ -9,7 +9,7 @@ from flask import abort, current_app, jsonify, render_template, request
 
 from blueprints import assets as assets_routes
 from config import APP_VERSION, CFG, get_theme_entry
-from core.helpers import FONT_FILES, current_theme_name, get_client_ip, ip_is_in_cidrs
+from core.helpers import FONT_FILES, WEB_FONT_FILES, current_theme_name, get_client_ip, ip_is_in_cidrs
 from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from core.process import fallback_pid_snapshot
 from services.assets.diagnostics import (
@@ -522,7 +522,8 @@ def diag():
     # own would miss a route that has been accidentally unregistered or a
     # wrong-path bind mount whose symlink resolves locally but breaks under
     # send_file. Fonts probe a single representative file from the manifest.
-    font_probe_url = f"/vendor/fonts/{FONT_FILES[0][2]}" if FONT_FILES else ""
+    font_probe_files = WEB_FONT_FILES or FONT_FILES
+    font_probe_url = f"/vendor/fonts/{font_probe_files[0][2]}" if font_probe_files else ""
     result["assets"] = {
         "ansi_up": _diag_vendor_probe("/vendor/ansi_up.js"),
         "jspdf":   _diag_vendor_probe("/vendor/jspdf.umd.min.js"),

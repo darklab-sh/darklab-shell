@@ -548,12 +548,14 @@ OPENAPI_SPEC: dict = {
             },
             "AtlasEntityPage": {
                 "type": "object",
-                "required": ["entities", "total", "limit", "offset"],
+                "required": ["entities", "total", "limit", "offset", "has_more", "total_exact"],
                 "properties": {
                     "entities": {"type": "array", "items": _ref("AtlasEntity")},
                     "total": {"type": "integer"},
                     "limit": {"type": "integer"},
                     "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                    "total_exact": {"type": "boolean"},
                 },
             },
             "AtlasFinding": {
@@ -588,13 +590,25 @@ OPENAPI_SPEC: dict = {
             },
             "AtlasFindingPage": {
                 "type": "object",
-                "required": ["findings", "total", "limit", "offset", "counts"],
+                "required": [
+                    "findings",
+                    "total",
+                    "limit",
+                    "offset",
+                    "has_more",
+                    "total_exact",
+                    "counts",
+                    "counts_exact",
+                ],
                 "properties": {
                     "findings": {"type": "array", "items": _ref("AtlasFinding")},
                     "total": {"type": "integer"},
                     "limit": {"type": "integer"},
                     "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                    "total_exact": {"type": "boolean"},
                     "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+                    "counts_exact": {"type": "boolean"},
                 },
             },
             "AtlasEntityDetail": {

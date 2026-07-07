@@ -194,6 +194,8 @@ let exportedCycleAtlasTab = null;
     orphanFilter: 'hide',
     suppressionFilter: 'hide',
     total: 0,
+    totalExact: true,
+    hasMore: false,
     limit: 50,
     offset: 0,
     query: '',
@@ -1791,7 +1793,10 @@ let exportedCycleAtlasTab = null;
 
   function renderPagination() {
     if (!pagination || !paginationSummary || !prevBtn || !nextBtn) return;
-    const showPager = state.total > state.limit || state.offset > 0;
+    const items = currentTab().id === 'findings' ? state.findings : state.entities;
+    const shown = Array.isArray(items) ? items.length : 0;
+    const hasMore = !!state.hasMore;
+    const showPager = state.total > state.limit || state.offset > 0 || hasMore;
     pagination.classList.toggle('u-hidden', !showPager);
     if (!showPager) {
       paginationSummary.textContent = '';
@@ -1799,11 +1804,15 @@ let exportedCycleAtlasTab = null;
       nextBtn.disabled = true;
       return;
     }
-    const start = state.total ? state.offset + 1 : 0;
-    const end = Math.min(state.offset + state.limit, state.total);
-    paginationSummary.textContent = `${start}-${end} of ${state.total.toLocaleString()}`;
+    const start = state.total || shown ? state.offset + 1 : 0;
+    const end = state.totalExact
+      ? Math.min(state.offset + state.limit, Math.max(Number(state.total || 0), shown))
+      : (shown ? state.offset + shown : 0);
+    const total = Math.max(Number(state.total || 0), end);
+    const totalText = state.totalExact ? total.toLocaleString() : `${total.toLocaleString()}+`;
+    paginationSummary.textContent = `${start}-${end} of ${totalText}`;
     prevBtn.disabled = state.offset <= 0 || state.loading;
-    nextBtn.disabled = state.offset + state.limit >= state.total || state.loading;
+    nextBtn.disabled = !hasMore || state.loading;
   }
 
   function renderDetail() {
@@ -2006,6 +2015,14 @@ let exportedCycleAtlasTab = null;
     return formatTabCount(filtered);
   }
 
+  function pageHasMore(data, itemCount) {
+    if (data && Object.prototype.hasOwnProperty.call(data, 'has_more')) return !!data.has_more;
+    const total = Math.max(0, Number(data?.total || 0));
+    const limit = Math.max(1, Number(data?.limit || state.limit || 50));
+    const offset = Math.max(0, Number(data?.offset || state.offset || 0));
+    return offset + limit < total;
+  }
+
   function renderRunFilterChip() {
     if (!runFilterChip) return;
     runFilterChip.replaceChildren();
@@ -2108,6 +2125,8 @@ let exportedCycleAtlasTab = null;
         state.findings = Array.isArray(data.findings) ? data.findings : [];
         state.findingCounts = data.counts && typeof data.counts === 'object' ? data.counts : {};
         state.total = Number(data.total || 0);
+        state.totalExact = data.total_exact !== false;
+        state.hasMore = pageHasMore(data, state.findings.length);
         state.selectedFindingIds.forEach((findingId) => {
           if (!state.findings.some(finding => String(finding.id || '') === findingId)) {
             state.selectedFindingIds.delete(findingId);
@@ -2148,6 +2167,8 @@ let exportedCycleAtlasTab = null;
         if (isStale()) return;
         state.entities = Array.isArray(data.entities) ? data.entities : [];
         state.total = Number(data.total || 0);
+        state.totalExact = data.total_exact !== false;
+        state.hasMore = pageHasMore(data, state.entities.length);
         if (!state.selectedId && state.requestedEntityValue) {
           const requested = state.requestedEntityValue.toLowerCase();
           const match = state.entities.find(entity => (

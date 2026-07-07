@@ -479,7 +479,7 @@ describe('frontend config bootstrap', () => {
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/watchers/watchers_modal.js?v=watchers-hash')
   })
 
-  it('lazy-loads the project workspace controller cluster in order', async () => {
+  it('lazy-loads the project workspace controller cluster in parallel', async () => {
     const appended = []
     const projectWorkspaceScripts = [
       ['project_details', 'DarklabProjectDetails', 'createProjectDetailsController'],
@@ -539,16 +539,24 @@ describe('frontend config bootstrap', () => {
         : null,
     }
     const imported = []
+    const pendingProjectImports = new Map()
     const window = {
       logClientError: vi.fn(),
-      __darklabImportModule: vi.fn(async (url) => {
+      __darklabImportModule: vi.fn((url) => {
         imported.push(url)
         const script = projectWorkspaceScripts.find(([name]) => url.includes(`/${name}.js`))
-        if (!script) return
+        if (!script) return Promise.resolve()
         const [, globalName, factoryName] = script
-        const api = { [factoryName]: vi.fn() }
-        window[globalName] = api
-        return { [globalName]: api }
+        let resolveImport
+        const promise = new Promise((resolve) => {
+          resolveImport = resolve
+        }).then(() => {
+          const api = { [factoryName]: vi.fn() }
+          window[globalName] = api
+          return { [globalName]: api }
+        })
+        pendingProjectImports.set(script[0], resolveImport)
+        return promise
       }),
     }
 
@@ -559,6 +567,14 @@ describe('frontend config bootstrap', () => {
     )
 
     const loadPromise = window.loadProjectWorkspace()
+    await vi.waitFor(() => {
+      expect(imported).toEqual(projectWorkspaceScripts.map(([name]) => (
+        `/static/js/features/projects/${name}.js?v=${name}-hash`
+      )))
+    })
+    projectWorkspaceScripts.forEach(([name]) => {
+      pendingProjectImports.get(name)?.()
+    })
     const workspaceApi = await loadPromise
     expect(workspaceApi).toEqual(expect.objectContaining({
       DarklabProjectDetails: window.DarklabProjectDetails,
@@ -583,9 +599,6 @@ describe('frontend config bootstrap', () => {
       DarklabProjectFindings: window.DarklabProjectFindings,
       DarklabProjectFindingsBoard: window.DarklabProjectFindingsBoard,
     }))
-    expect(imported).toEqual(projectWorkspaceScripts.map(([name]) => (
-      `/static/js/features/projects/${name}.js?v=${name}-hash`
-    )))
     expect(appended).toEqual([])
 
     const failureDocument = {
@@ -969,6 +982,62 @@ describe('frontend config bootstrap', () => {
     await expect(openPromise).resolves.toEqual({ opened: true })
     expect(window.openCommandRegistry).toHaveBeenCalledTimes(1)
     expect(imported).toEqual(['/static/js/features/command-registry/command_registry.js?v=registry-hash'])
+    expect(appended).toEqual([])
+  })
+
+  it('lazy-loads the Files surface and drag-drop helper together', async () => {
+    const appended = []
+    const document = {
+      documentElement: {},
+      head: {
+        appendChild: (node) => {
+          appended.push(node)
+        },
+      },
+      createElement: (tagName) => ({ tagName, dataset: {} }),
+      getElementById: (id) => id === 'lazy-assets-json'
+        ? {
+            textContent: JSON.stringify({
+              workspace: {
+                url: '/static/js/workspace.js?v=workspace-hash',
+                type: 'module',
+              },
+              workspace_drag_drop: {
+                url: '/static/js/features/workspace/workspace_drag_drop.js?v=drag-hash',
+                type: 'module',
+              },
+            }),
+          }
+        : null,
+    }
+    const imported = []
+    const workspaceModule = {
+      openWorkspace: vi.fn(async () => true),
+      closeWorkspace: vi.fn(),
+    }
+    const setWorkspaceHandlers = vi.fn()
+    const window = {
+      setWorkspaceHandlers,
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        if (url.includes('/workspace.js')) return workspaceModule
+        return { _workspaceDragSourceFromEvent: vi.fn() }
+      }),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      { document, window, setWorkspaceHandlers },
+      'window',
+    )
+
+    await expect(window.loadWorkspaceSurface()).resolves.toBe(workspaceModule)
+
+    expect(imported).toEqual([
+      '/static/js/workspace.js?v=workspace-hash',
+      '/static/js/features/workspace/workspace_drag_drop.js?v=drag-hash',
+    ])
+    expect(setWorkspaceHandlers).toHaveBeenCalledWith(workspaceModule)
     expect(appended).toEqual([])
   })
 

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,994
+- behavior tests: 4,003
 - docs/inventory meta-tests: 63
-- `pytest`: 2314 (2264 behavior + 50 meta)
-- `vitest`: 1474 (1461 behavior + 13 meta)
+- `pytest`: 2319 (2269 behavior + 50 meta)
+- `vitest`: 1478 (1465 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,057
+- total: 4,066
 
 This document is organized in two parts:
 
@@ -1128,6 +1128,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_scoped_events_team_viewer_reads_project_activity_only_for_own_team` | Verifies team viewers can read safe project activity for their team but cannot read foreign projects or broad team activity. |
 | `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
+| `TestDatabaseInit.test_personal_scope_predicates_use_sqlite_partial_indexes` | Verifies representative personal Atlas and Project predicates, sort paths, and artifact lookups use SQLite indexes. |
+| `TestDatabaseInit.test_personal_scope_team_id_normalization_migration_updates_legacy_nulls` | Verifies the personal-scope team-id normalization migration updates legacy `NULL` personal rows without changing team-owned rows. |
 | `TestDatabaseInit.test_atlas_lookup_split_modules_read_shared_backend_accessor` | Verifies split Atlas lookup helper modules observe backend changes through the shared database accessor. |
 | `TestDatabaseInit.test_split_query_modules_read_shared_db_connect_accessor` | Verifies split project and history query modules observe connection changes through the shared database accessor. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
@@ -1583,6 +1585,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
 | `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_personal_scope_predicates_use_postgres_partial_indexes` | Verifies representative personal Atlas and Project predicates, sort paths, and artifact lookups use Postgres indexes. |
 | `test_postgres_legacy_0038_ledger_refuses_unified_marker_when_head_drifted` | Verifies an isolated Postgres schema with only legacy `0001`-`0038` ledger rows but missing head tables refuses the `0039` marker and leaves the ledger unchanged. |
 | `test_postgres_watcher_monitoring_migration_backfills_legacy_rows` | Verifies the Postgres watcher-monitoring migration backfills legacy watcher Project ids and watcher-fire state/kind rows. |
 | `test_team_mode_routes_use_postgres_scope_paths` | Verifies Postgres-backed team creation, invite redemption, recovery rotation, team-scoped API history/run reads, outsider denial, and personal/team Project slug isolation. |
@@ -1688,6 +1691,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
+| `TestIndexRoute.test_html_response_uses_gzip_when_accepted` | Verifies the dynamic HTML shell is gzip-compressed when the browser advertises support. |
 | `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest with module/classic types and versioned URLs. |
 | `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
 | `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
@@ -1862,6 +1866,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
 | `TestVendorAssets.test_built_css_bundle_is_served_with_immutable_cache_header` | Verifies generated CSS bundles are served with the immutable static-asset cache header. |
+| `TestVendorAssets.test_built_assets_use_precompressed_variants_when_accepted` | Verifies generated build assets negotiate committed Brotli/gzip siblings while keeping direct compressed-sibling URLs hidden. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
@@ -2972,12 +2977,13 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
 | `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
 | `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
-| `lazy-loads the project workspace controller cluster in order` | Verifies that the Projects workspace controllers load in manifest order only when the workspace opens. |
+| `lazy-loads the project workspace controller cluster in parallel` | Verifies that the Projects workspace controllers start loading together only when the workspace opens. |
 | `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
 | `logs lazy module load and export-contract failures with safe asset context` | Verifies failed lazy module imports and missing lazy module exports send client logs with asset name, type, sanitized asset path, and export-contract details. |
 | `logs invalid lazy asset config without including the raw JSON body` | Verifies malformed lazy asset JSON logs a warning once while falling back to built-in lazy asset paths. |
 | `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens and return a loaded Options API object. |
 | `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens and returns a loaded registry API object. |
+| `lazy-loads the Files surface and drag-drop helper together` | Verifies that the Files panel and drag/drop helper load through manifest URLs only when the Files surface is needed. |
 | `lazy-loads workflow controllers while keeping the catalog cache eager` | Verifies that workflow catalog data can render the rail eagerly while terminal workflow commands lazy-load the heavier workflow controller and return a loaded workflow API object. |
 
 #### `core_esm_exports.test.js`
@@ -3364,6 +3370,12 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | Test | Description |
 | --- | --- |
 | `loads the source-mode import graph and renders output` | Verifies that the permalink module entry loads its source-mode import graph and renders transcript output. |
+
+#### `project_active_context.test.js`
+
+| Test | Description |
+| --- | --- |
+| `shares concurrent active project loads and refreshes again after the request settles` | Verifies that concurrent active Project context refreshes share one request while later refreshes still fetch fresh state. |
 
 #### `project_activity.test.js`
 
@@ -3915,6 +3927,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 
 | Test | Description |
 | --- | --- |
+| `does not refresh team scopes on boot for anonymous personal sessions` | Verifies that anonymous personal startup skips the team-scope route until a team-aware surface needs it. |
 | `clears a stale stored team id after a successful team refresh` | Verifies that a stored team id that is no longer returned by `/session/teams` is removed and the selector falls back to Personal. |
 | `exposes active team capabilities for write affordance guards` | Verifies that the active team scope exposes server-granted capabilities for browser write-action guards. |
 | `restores token-scoped team selection before runtime session handlers are ready` | Verifies that reload startup restores a token-scoped team selection even before runtime session handlers are available. |
@@ -4271,6 +4284,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `uses large-search mode for short files with very long lines` | Verifies that large-search protections also apply when a workspace file is large by byte/character size even if it has few rendered lines. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
 | `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
+| `shares the in-flight workspace file request between cache refreshes and modal opens` | Verifies that passive Files cache refreshes and first-open file-list loads share an in-flight `/workspace/files` request. |
 | `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
 | `creates folders through the workspace directory route` | Verifies that New Folder posts to the directory route, refreshes the browser, and enters the created folder. |
 | `opens an app-native folder prompt instead of the browser prompt` | Verifies that New Folder uses the shared themed dialog instead of `window.prompt`. |

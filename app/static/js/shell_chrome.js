@@ -14,7 +14,7 @@ import {
   openWorkflows as importedOpenWorkflows,
   toggleHistoryPanelSurface as importedToggleHistoryPanelSurface,
 } from './controller.js';
-import { openWorkspace as importedOpenWorkspace } from './workspace.js';
+import { openWorkspace as importedOpenWorkspace } from './workspace_bridge.js';
 import {
   loadAtlasOverlay as importedLoadAtlasOverlay,
   loadCommandRegistry as importedLoadCommandRegistry,
@@ -803,7 +803,7 @@ let importedProjectWorkspaceShell;
       return;
     }
     if (action === 'workspace' && typeof importedOpenWorkspace === 'function') {
-      importedOpenWorkspace();
+      void importedOpenWorkspace();
       return;
     }
     if (action === 'faq' && typeof importedOpenFaq === 'function') {

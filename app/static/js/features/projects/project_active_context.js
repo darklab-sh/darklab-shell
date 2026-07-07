@@ -9,6 +9,7 @@ let exportedDarklabProjectActiveContext = null;
   function createProjectActiveContextController(context) {
     const ctx = context || {};
     let activeProject = null;
+    let activeProjectLoadPromise = null;
 
     function project() {
       return activeProject;
@@ -36,21 +37,30 @@ let exportedDarklabProjectActiveContext = null;
       }
     }
 
-    async function load() {
+    async function load(options = {}) {
       if (typeof ctx.apiFetch !== 'function') return null;
+      if (activeProjectLoadPromise && options.force !== true) return activeProjectLoadPromise;
+      const request = (async () => {
+        try {
+          const resp = await ctx.apiFetch('/projects/active', { cache: 'no-store' });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          activeProject = data && data.project && typeof data.project === 'object' ? data.project : null;
+        } catch (err) {
+          activeProject = null;
+          ctx.logClientError?.('failed to load /projects/active', err);
+        }
+        render();
+        ctx.syncProjectNotesForm?.();
+        ctx.emitUiEvent?.('app:active-project-changed', { project: activeProject });
+        return activeProject;
+      })();
+      activeProjectLoadPromise = request;
       try {
-        const resp = await ctx.apiFetch('/projects/active', { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        activeProject = data && data.project && typeof data.project === 'object' ? data.project : null;
-      } catch (err) {
-        activeProject = null;
-        ctx.logClientError?.('failed to load /projects/active', err);
+        return await request;
+      } finally {
+        if (activeProjectLoadPromise === request) activeProjectLoadPromise = null;
       }
-      render();
-      ctx.syncProjectNotesForm?.();
-      ctx.emitUiEvent?.('app:active-project-changed', { project: activeProject });
-      return activeProject;
     }
 
     function targetDiscoveryMessage(count) {

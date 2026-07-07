@@ -47,6 +47,9 @@ from . import (
     v0037_scan_target_observations,
     v0038_url_host_entity_links,
     v0039_unified_schema_baseline,
+    v0040_personal_scope_team_id_normalization,
+    v0041_project_atlas_sort_indexes,
+    v0042_run_artifact_lookup_indexes,
 )
 
 _ = baseline
@@ -91,4 +94,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0037_scan_target_observations.MIGRATION,
     v0038_url_host_entity_links.MIGRATION,
     v0039_unified_schema_baseline.MIGRATION,
+    v0040_personal_scope_team_id_normalization.MIGRATION,
+    v0041_project_atlas_sort_indexes.MIGRATION,
+    v0042_run_artifact_lookup_indexes.MIGRATION,
 )

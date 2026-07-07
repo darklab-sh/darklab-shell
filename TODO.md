@@ -30,7 +30,31 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+- **Continue trimming the ESM initial shell graph.**
+  - Target the cold-load path that still sends a large shared ESM chunk, the shell bootstrap, the full app CSS bundle, and a large HTML document before the shell feels instant.
+  - Keep tightening the asset build split so lazy-only modal and feature code cannot be pulled into an initial shared chunk. Keep the shell graph small, and put Projects, Atlas, history details, comparisons, package views, and other modal-heavy code behind their own lazy boundaries.
+  - Re-measure bundle mode after the change with request count, transferred bytes, DOM-ready timing, and time to interactive shell prompt.
+- **Make source asset mode useful without bringing back pre-bundle request fan-out.**
+  - Keep source mode opt-in and make it obvious in startup logs or diagnostics when it is active, since it can send more than a hundred direct module requests on first load.
+  - Remove source-mode duplicate module fetches caused by loading some lazy modules with `?v=` while their relative ESM imports load the same files without the version query.
+  - Use one URL identity per source module, either by keeping lazy manifest URLs unversioned in source mode, versioning relative imports consistently, or avoiding independent lazy loads for modules that another lazy entry already imports.
+  - Re-measure source mode separately from bundle mode so local development ergonomics and production-like bundle performance do not get mixed together.
+- **Move inactive modal markup and feature CSS off the initial shell path.**
+  - Split critical shell CSS from feature and modal CSS so the first render is not blocked by styles for Projects, Atlas, history details, comparisons, packages, schedules, watchers, and other closed surfaces.
+  - Lazy-render or template-load large inactive modal bodies instead of shipping all modal markup in the first HTML document.
+  - Preserve the current visual design and interaction patterns when moving modal content so the change feels like a speedup, not a redesign.
+  - Re-measure HTML size, render-blocking CSS size, and first-open modal timing after the split.
+- **Make the Projects modal populate immediately on first open.**
+  - Split Projects into a small first-open core that can render the modal shell, list, details, and empty states quickly.
+  - Defer tab-specific, board, findings, entity, target, run, package, editor, and mobile modules until the user opens those surfaces or the viewport needs them.
+  - Start the initial Projects data fetch at the same time as module loading, then hand the resolved data into the workspace controller instead of waiting for all code before starting the request.
+  - Re-measure first open with cold cache and warm cache, including click-to-overlay, click-to-content, requests, and bytes.
+- **Make the Atlas modal populate immediately on first open.**
+  - Load the minimum overlay, tabs, and list code needed for the first visible Atlas view before loading detail-heavy modules.
+  - Defer entity detail, history/run-comparison helpers, and mobile Atlas code until the user selects an entity or the viewport is actually mobile.
+  - Import first-open Atlas modules in parallel where they do not depend on one another.
+  - Show the modal skeleton before lazy imports finish so opening the modal always gives immediate visual feedback.
+  - Re-measure first open with cold cache and warm cache, including click-to-overlay, click-to-content, requests, and bytes.
 
 ---
 

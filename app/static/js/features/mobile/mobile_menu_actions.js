@@ -16,7 +16,7 @@ import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
 import { openTeamScopeSelector } from '../team_scope.js';
 import { openWorkflows as importedOpenWorkflows } from '../../controller_action_bridge.js';
 import { openProjectWorkspace as importedOpenProjectWorkspace } from '../projects/project_context_bridge.js';
-import { openWorkspace as importedOpenWorkspace } from '../../workspace.js';
+import { openWorkspace as importedOpenWorkspace } from '../../workspace_bridge.js';
 import { openStatusMonitor as importedOpenStatusMonitor } from '../../runtime_bridge.js';
 import { openCommandRegistry as importedOpenCommandRegistry } from '../command-registry/command_registry_bridge.js';
 import { openFaq as importedOpenFaq } from '../../controller_action_bridge.js';
@@ -131,7 +131,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'schedules') void _mobileMenuCall('openSchedulesModal');
   if (action === 'watchers') void _mobileMenuCall('openWatchersModal');
   if (action === 'findings-board') void _mobileMenuCall('openFindingsBoard', { source: 'mobile-menu' });
-  if (action === 'workspace') _mobileMenuImportedCall(importedOpenWorkspace, 'openWorkspace');
+  if (action === 'workspace') void _mobileMenuImportedCall(importedOpenWorkspace, 'openWorkspace');
   if (action === 'faq') _mobileMenuImportedCall(importedOpenFaq, 'openFaq');
   if (action === 'diag') MOBILE_MENU_ACTIONS_GLOBAL.location.href = '/diag';
 }

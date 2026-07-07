@@ -44,6 +44,7 @@ def atlas_entities_list():
     assert owner_scope is not None
     limit = atlas_routes._parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = atlas_routes._parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
+    include_total = atlas_routes._parse_bool(request.args.get("include_total"))
     return jsonify(atlas_routes.run_atlas_read(lambda conn: list_entities(
             conn,
             session_id,
@@ -56,6 +57,7 @@ def atlas_entities_list():
             suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
             offset=offset,
+            include_total=include_total,
         )))
 
 
@@ -114,6 +116,7 @@ def atlas_findings_list():
     assert owner_scope is not None
     limit = atlas_routes._parse_int(request.args.get("limit"), 50, minimum=1, maximum=200)
     offset = atlas_routes._parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
+    include_total = atlas_routes._parse_bool(request.args.get("include_total"))
     try:
         return jsonify(atlas_routes.run_atlas_read(lambda conn: list_findings(
                 conn,
@@ -128,6 +131,8 @@ def atlas_findings_list():
                 suppression_filter=request.args.get("suppression_filter") or "hide",
                 limit=limit,
                 offset=offset,
+                include_total=include_total,
+                include_counts=include_total,
             )))
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400

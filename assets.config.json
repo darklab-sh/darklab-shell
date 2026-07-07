@@ -136,6 +136,8 @@
     "/static/js/features/status-monitor/status_monitor_data.js",
     "/static/js/features/status-monitor/status_monitor_resources.js",
     "/static/js/status_monitor.js",
+    "/static/js/workspace.js",
+    "/static/js/features/workspace/workspace_drag_drop.js",
     "/static/js/tour_modal.js",
     "/static/js/features/watchers/watchers_modal.js",
     "/vendor/jspdf.umd.min.js",
@@ -145,6 +147,7 @@
   ],
   "excluded": [
     "/static/css/styles.css",
+    "/static/js/features/workspace/workspace_viewer_formats.js",
     "/vendor/ansi_up.js"
   ]
 }

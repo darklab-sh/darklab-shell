@@ -40,7 +40,7 @@ describe('frontend browser global boundary inventory', () => {
   const EXPECTED_BOUNDARY_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
       intentional_bootstrap: 4,
-      lazy_placeholder: 95,
+      lazy_placeholder: 96,
       module_api_bridge: 60,
       bridge_internal: 10,
       test_hook: 3,
@@ -67,14 +67,14 @@ describe('frontend browser global boundary inventory', () => {
       compatibility_read: 0,
     }),
     resolver_helper_calls_by_class: Object.freeze({
-      bridge_dispatch: 76,
-      global_only: 556,
+      bridge_dispatch: 93,
+      global_only: 557,
       import_first: 578,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
       allowlisted_global: 55,
-      bridge_dispatch_report_only: 75,
-      dynamic_or_non_literal: 22,
+      bridge_dispatch_report_only: 89,
+      dynamic_or_non_literal: 26,
       fallback_imported_binding: 369,
       fallback_local_binding: 11,
       global_publish: 77,
@@ -83,9 +83,9 @@ describe('frontend browser global boundary inventory', () => {
       unresolved_report_only: 0,
     }),
     bridge_dispatch: Object.freeze({
-      declaration_count: 68,
-      registration_count: 73,
-      dispatch_count: 75,
+      declaration_count: 82,
+      registration_count: 87,
+      dispatch_count: 89,
       dispatched_missing_declaration_count: 0,
       dispatched_missing_registration_count: 0,
       declared_not_dispatched_count: 0,
@@ -95,6 +95,7 @@ describe('frontend browser global boundary inventory', () => {
         output: Object.freeze({ declared_count: 12, registered_count: 12, dispatched_count: 12 }),
         runner: Object.freeze({ declared_count: 25, registered_count: 25, dispatched_count: 25 }),
         tabs: Object.freeze({ declared_count: 18, registered_count: 18, dispatched_count: 18 }),
+        workspace: Object.freeze({ declared_count: 14, registered_count: 14, dispatched_count: 14 }),
         workflows: Object.freeze({ declared_count: 7, registered_count: 7, dispatched_count: 7 }),
       }),
     }),

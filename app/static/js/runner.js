@@ -85,7 +85,7 @@ import {
   readWorkspaceFile as importedReadWorkspaceFile,
   refreshWorkspaceFiles as importedRefreshWorkspaceFiles,
   workspaceCanWrite as importedWorkspaceCanWrite,
-} from './workspace.js';
+} from './workspace_bridge.js';
 import {
   getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
   getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,

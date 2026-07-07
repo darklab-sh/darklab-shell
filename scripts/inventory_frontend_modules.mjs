@@ -40,6 +40,8 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _callOutputHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _callRunnerHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _callTabHandler: { class: 'bridge_dispatch', name_arg: 0 },
+  _callLoadedWorkspace: { class: 'bridge_dispatch', name_arg: 0 },
+  _callWorkspace: { class: 'bridge_dispatch', name_arg: 0 },
   _callWorkflowHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _callTabGlobal: { class: 'global_only', name_arg: 0 },
   _cliGlobalFunction: { class: 'global_only', name_arg: 0 },
@@ -48,6 +50,7 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _composerValue: { class: 'global_only', name_arg: 0 },
   _controllerFn: { class: 'import_first', name_arg: 0, fallback_arg: 1 },
   _faqGlobalFunction: { class: 'global_only', name_arg: 0 },
+  hasWorkspaceHandler: { class: 'bridge_dispatch', name_arg: 0 },
   hasOutputHandler: { class: 'bridge_dispatch', name_arg: 0 },
   hasRunnerHandler: { class: 'bridge_dispatch', name_arg: 0 },
   hasTabHandler: { class: 'bridge_dispatch', name_arg: 0 },
@@ -95,6 +98,8 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _welcomeApi: { class: 'global_only', name_arg: 0 },
   _welcomeGlobalFunction: { class: 'global_only', name_arg: 0 },
   _welcomeGlobalValue: { class: 'global_only', name_arg: 0 },
+  _workspaceBridgeFallback: { class: 'global_only', name_arg: 0 },
+  _workspaceHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _workflowGlobalFunction: { class: 'global_only', name_arg: 0 },
   shortcutCall: { class: 'global_only', name_arg: 0 },
   shortcutFunction: { class: 'global_only', name_arg: 0 },
@@ -135,6 +140,16 @@ const BRIDGE_DISPATCH_REGISTRY = Object.freeze({
     handler_store: 'tabHandlers',
     setter: 'setTabHandlers',
   },
+  _callLoadedWorkspace: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
+  },
+  _callWorkspace: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
+  },
   _callWorkflowHandler: {
     bridge: 'workflows',
     handler_store: 'workflowHandlers',
@@ -159,6 +174,16 @@ const BRIDGE_DISPATCH_REGISTRY = Object.freeze({
     bridge: 'workflows',
     handler_store: 'workflowHandlers',
     setter: 'setWorkflowHandlers',
+  },
+  hasWorkspaceHandler: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
+  },
+  _workspaceHandler: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
   },
 });
 const BRIDGE_SETTER_NAMES = new Set(Object.values(BRIDGE_DISPATCH_REGISTRY).map((entry) => entry.setter));

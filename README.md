@@ -590,7 +590,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
 │   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
 │   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
-│   │   │   └── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   │   ├── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   │   ├── v0040_personal_scope_team_id_normalization.py # Personal-scope team-id normalization for partial indexes
+│   │   │   ├── v0041_project_atlas_sort_indexes.py # Project and Atlas sort-order indexes
+│   │   │   └── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
 │   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
 │   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
 │   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
@@ -921,7 +924,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── paths.py        # Workspace directory, validation, symlink, and path-resolution helpers
 │   │       └── settings.py     # Workspace settings and owner directory naming helpers
 │   ├── static/
-│   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
+│   │   ├── build/             # Committed generated bundles, precompressed siblings, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/
 │   │   │   ├── core/
 │   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
@@ -949,7 +952,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── styles.css      # Compatibility CSS entrypoint; templates link modular CSS files directly
 │   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
-│   │   ├── favicon.ico         # Site favicon
+│   │   ├── favicon.svg         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
@@ -1144,7 +1147,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
 │   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
 │   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
-│   │       └── workspace_bridge.js # Files panel ESM bridge for lightweight shell close actions
+│   │       └── workspace_bridge.js # Files panel ESM bridge for lazy open/close and file actions
 │   ├── templates/
 │       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
@@ -1182,7 +1185,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
 ├── scripts/
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
-│   ├── build_assets.mjs       # Generates committed frontend bundles in app/static/build/ (run via npm run assets:sync)
+│   ├── build_assets.mjs       # Generates committed minified frontend bundles in app/static/build/ (run via npm run assets:sync)
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
@@ -1275,6 +1278,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
 │   │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
 │   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
+│   │       ├── project_active_context.test.js # Active Project context request sharing and reload behavior
 │   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
 │   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
 │   │       ├── project_overview.test.js # Project Overview rollups, provider caveats, tempo, deliverables, activity, cert badges, and deep-link coverage

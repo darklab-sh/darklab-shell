@@ -2,10 +2,10 @@
 /**
  * Build committed app CSS/JS bundles from assets.config.json.
  *
- * The build is deliberately unminified: preserve configured CSS source order,
- * inline ESM import graphs with pinned esbuild settings, write content-hashed
- * filenames, and record enough manifest metadata for Flask source/bundle
- * rendering plus CI drift checks.
+ * The build preserves configured CSS source order, minifies generated ESM
+ * graphs with pinned esbuild settings, writes content-hashed filenames, and
+ * records enough manifest metadata for Flask source/bundle rendering plus CI
+ * drift checks.
  */
 
 import {
@@ -15,12 +15,16 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  copyFileSync,
   writeFileSync,
 } from 'fs';
 import { createHash } from 'crypto';
 import { basename, dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  brotliCompressSync,
+  constants as zlibConstants,
+  gzipSync,
+} from 'zlib';
 import { build as esbuild } from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -44,6 +48,7 @@ for (let i = 0; i < args.length; i += 1) {
 
 const configPath = resolve(ROOT, 'assets.config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
+const PRECOMPRESSIBLE_EXTENSIONS = new Set(['css', 'js', 'json', 'svg']);
 
 function sha256(bufferOrText) {
   return createHash('sha256').update(bufferOrText).digest('hex');
@@ -116,6 +121,33 @@ function outputExtension(type) {
   if (type === 'css') return 'css';
   if (type === 'esm') return 'js';
   throw new Error(`Unsupported bundle type: ${type}`);
+}
+
+function shouldPrecompress(filename) {
+  return PRECOMPRESSIBLE_EXTENSIONS.has(sourceExtension(filename));
+}
+
+function precompressedVariants(content) {
+  const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  return {
+    br: brotliCompressSync(buffer, {
+      params: {
+        [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+      },
+    }),
+    gz: gzipSync(buffer, { level: 9 }),
+  };
+}
+
+function writeBuildAsset(filename, content) {
+  const outputPath = resolve(outDir, filename);
+  const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  writeFileSync(outputPath, content);
+  if (!shouldPrecompress(filename)) return;
+  for (const [suffix, compressed] of Object.entries(precompressedVariants(buffer))) {
+    if (compressed.length >= buffer.length) continue;
+    writeFileSync(`${outputPath}.${suffix}`, compressed);
+  }
 }
 
 function normalizeBundles(rawBundles) {
@@ -246,9 +278,10 @@ function configuredStandaloneSources() {
     ...((Array.isArray(config.lazy) ? config.lazy : [])),
     ...((Array.isArray(config.excluded) ? config.excluded : [])),
   ]);
-  sources.add('/static/favicon.ico');
+  sources.add('/static/favicon.svg');
   const fontRoot = resolve(ROOT, 'app/static/fonts');
   for (const rel of collectStaticFiles(fontRoot)) {
+    if (!rel.endsWith('.woff2')) continue;
     sources.add(`/vendor/fonts/${rel}`);
   }
   return Array.from(sources).sort();
@@ -276,7 +309,7 @@ async function buildEsmBundle(bundle) {
       target: 'es2022',
       charset: 'utf8',
       platform: 'browser',
-      minify: false,
+      minify: true,
       sourcemap: false,
       legalComments: 'none',
       metafile: true,
@@ -371,7 +404,7 @@ async function buildAppEsmGraph(shellBundle, lazySources) {
       target: 'es2022',
       charset: 'utf8',
       platform: 'browser',
-      minify: false,
+      minify: true,
       sourcemap: false,
       legalComments: 'none',
       metafile: true,
@@ -546,7 +579,7 @@ if (!shellEsmBundle) {
 }
 const appEsmGraph = await buildAppEsmGraph(shellEsmBundle, appLazyEsmSources());
 for (const file of appEsmGraph.files) {
-  writeFileSync(resolve(outDir, file.filename), file.content);
+  writeBuildAsset(file.filename, file.content);
 }
 Object.assign(staticAssetEntries, appEsmGraph.lazyEntries);
 
@@ -555,7 +588,7 @@ for (const source of configuredStandaloneSources()) {
   const file = assertSourceExists(source);
   const content = readFileSync(file);
   const filename = hashedStaticAssetBasename(source, content);
-  copyFileSync(file, resolve(outDir, filename));
+  writeBuildAsset(filename, content);
   staticAssetEntries[source] = {
     path: `/static/build/${filename}`,
     hash: sha256(content),
@@ -602,7 +635,7 @@ for (const bundle of bundles) {
   const hash = sha256(output);
   const ext = outputExtension(bundle.type);
   const filename = `${bundle.name}.${hash.slice(0, 12)}.${ext}`;
-  writeFileSync(resolve(outDir, filename), output);
+  writeBuildAsset(filename, output);
   const entry = {
     type: bundle.type,
     path: `/static/build/${filename}`,

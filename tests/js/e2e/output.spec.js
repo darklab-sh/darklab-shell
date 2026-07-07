@@ -104,7 +104,7 @@ test.describe('output actions', () => {
     const html = Buffer.concat(chunks).toString('utf8')
 
     expect(html).toContain(CMD)
-    expect(html).toContain('data:font/ttf;base64,')
+    expect(html).toContain('data:font/woff2;base64,')
     expect(html).not.toContain('/vendor/fonts/')
     expect(html).not.toContain('fonts.googleapis.com')
     expect(html).not.toContain('fonts.gstatic.com')
