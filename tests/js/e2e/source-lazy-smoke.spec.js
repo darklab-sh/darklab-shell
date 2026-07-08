@@ -7,15 +7,40 @@ import {
   runCommand,
 } from './helpers.js'
 
+function trackSourceJsRequests(page) {
+  const requests = []
+  page.on('request', (request) => {
+    try {
+      const url = new URL(request.url())
+      if (!url.pathname.startsWith('/static/js/') || !url.pathname.endsWith('.js')) return
+      requests.push({ path: url.pathname, versioned: url.searchParams.has('v') })
+    } catch (_) {}
+  })
+  return requests
+}
+
+function duplicateSourceModuleIdentities(requests) {
+  const byPath = new Map()
+  requests.forEach(({ path, versioned }) => {
+    if (!byPath.has(path)) byPath.set(path, new Set())
+    byPath.get(path).add(versioned ? 'versioned' : 'plain')
+  })
+  return Array.from(byPath.entries())
+    .filter(([, variants]) => variants.has('versioned') && variants.has('plain'))
+    .map(([path]) => path)
+    .sort()
+}
+
 test.describe('source-mode lazy ESM surfaces', () => {
   test.setTimeout(90_000)
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    testInfo.sourceJsRequests = trackSourceJsRequests(page)
     await page.goto('/')
     await ensurePromptReady(page)
   })
 
-  test('opens high-risk lazy app surfaces through user controls', async ({ page }) => {
+  test('opens high-risk lazy app surfaces through user controls', async ({ page }, testInfo) => {
     const overviewProjectId = await page.evaluate(async () => {
       const resp = await apiFetch('/projects', {
         method: 'POST',
@@ -106,6 +131,7 @@ test.describe('source-mode lazy ESM surfaces', () => {
     const pdfDownload = await download
     expect(pdfDownload.suggestedFilename()).toMatch(/\.pdf$/)
     await pdfDownload.delete().catch(() => {})
+    expect(duplicateSourceModuleIdentities(testInfo.sourceJsRequests)).toEqual([])
   })
 
   test('does not publish Playwright-only hooks when webdriver is unavailable', async ({ browser }) => {

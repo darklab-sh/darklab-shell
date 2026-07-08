@@ -3,6 +3,7 @@ import { resolve } from 'path'
 import { fromDomScript, fromDomScripts } from './helpers/extract.js'
 
 const CONFIG_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/config.js'), 'utf8')
+const LAZY_ASSETS_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/lazy_assets.js'), 'utf8')
 
 describe('frontend config bootstrap', () => {
   it('reads APP_CONFIG from the server-rendered bootstrap JSON', () => {
@@ -164,6 +165,10 @@ describe('frontend config bootstrap', () => {
               },
               atlas_mobile: {
                 url: '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
+                type: 'module',
+              },
+              findings_board_bridge: {
+                url: '/static/js/features/findings/findings_board_bridge.js?v=board-bridge-hash',
                 type: 'module',
               },
               project_activity: {
@@ -378,14 +383,12 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/findings/findings_board_modal.js?v=board-hash',
       '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
       '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
-      '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
       '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
-      '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
     ]))
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash')
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash')
-    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash')
-    await vi.waitFor(() => expect(imported).toContain('/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash'))
+    expect(window.__darklabImportModule).not.toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash')
+    expect(window.__darklabImportModule).not.toHaveBeenCalledWith('/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash')
     expect(appended).toHaveLength(0)
 
     await expect(atlasPromise).resolves.toEqual({ atlas: 'rail' })
@@ -454,9 +457,7 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/findings/findings_board_modal.js?v=board-hash',
       '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
       '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
-      '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
       '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
-      '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
       '/static/js/features/projects/project_report.js?v=report-hash',
       '/static/js/features/projects/project_activity.js?v=activity-hash',
       '/static/js/features/projects/project_overview.js?v=overview-hash',
@@ -477,9 +478,68 @@ describe('frontend config bootstrap', () => {
     await expect(watchersPromise).resolves.toEqual({ watcher: 'wat_1' })
     expect(window.openWatchersModal).toHaveBeenCalledWith({ watcherId: 'wat_1' })
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/watchers/watchers_modal.js?v=watchers-hash')
+
+    const failureDocument = {
+      documentElement: {},
+      head: { appendChild: vi.fn() },
+      createElement: (tagName) => ({ tagName, dataset: {} }),
+      getElementById: (id) => id === 'lazy-assets-json'
+        ? {
+            textContent: JSON.stringify({
+              atlas_tabs: {
+                url: '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
+                type: 'module',
+              },
+              atlas_entity_row: {
+                url: '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
+                type: 'module',
+              },
+              atlas_overlay: {
+                url: '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
+                type: 'module',
+              },
+            }),
+          }
+        : null,
+    }
+    const atlasInitialRequests = []
+    const failureApiFetch = vi.fn(() => {
+      const request = {
+        catch: vi.fn(() => request),
+      }
+      atlasInitialRequests.push(request)
+      return request
+    })
+    const failureWindow = {
+      logClientError: vi.fn(),
+      __darklabImportModule: vi.fn(async (url) => {
+        if (url.includes('/atlas_tabs.js')) return { DarklabAtlasTabs: {} }
+        if (url.includes('/atlas_entity_row.js')) return { DarklabAtlasEntityRow: {} }
+        if (url.includes('/atlas_overlay.js')) throw new Error('atlas overlay failed')
+        return {}
+      }),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      {
+        document: failureDocument,
+        window: failureWindow,
+        apiFetch: failureApiFetch,
+        hasRuntimeHandler: name => name === 'apiFetch',
+      },
+      'window',
+    )
+
+    await expect(failureWindow.openAtlas({ source: 'rail' })).rejects.toThrow('atlas overlay failed')
+    expect(failureApiFetch).toHaveBeenCalledTimes(2)
+    atlasInitialRequests.forEach((request) => {
+      expect(request.catch).toHaveBeenCalledWith(expect.any(Function))
+    })
+    expect(LAZY_ASSETS_SRC).toContain("cache: 'no-cache'")
   })
 
-  it('lazy-loads the project workspace controller cluster in order', async () => {
+  it('lazy-loads the project workspace core and targeted deferred controllers in parallel', async () => {
     const appended = []
     const projectWorkspaceScripts = [
       ['project_details', 'DarklabProjectDetails', 'createProjectDetailsController'],
@@ -504,6 +564,21 @@ describe('frontend config bootstrap', () => {
       ['project_findings', 'DarklabProjectFindings', 'createProjectFindingsController'],
       ['project_findings_board', 'DarklabProjectFindingsBoard', 'createProjectFindingsBoardController'],
     ]
+    const projectWorkspaceCoreNames = [
+      'project_details',
+      'project_list',
+      'project_navigation',
+      'project_workspace_shell',
+      'project_workspace_lifecycle',
+      'project_workspace_renderer',
+      'project_workspace_bootstrap',
+      'project_workspace_events',
+      'project_filters',
+      'project_targets',
+    ]
+    const projectWorkspaceCoreScripts = projectWorkspaceCoreNames.map(name => (
+      projectWorkspaceScripts.find(([scriptName]) => scriptName === name)
+    ))
     const document = {
       documentElement: {},
       head: {
@@ -539,16 +614,24 @@ describe('frontend config bootstrap', () => {
         : null,
     }
     const imported = []
+    const pendingProjectImports = new Map()
     const window = {
       logClientError: vi.fn(),
-      __darklabImportModule: vi.fn(async (url) => {
+      __darklabImportModule: vi.fn((url) => {
         imported.push(url)
         const script = projectWorkspaceScripts.find(([name]) => url.includes(`/${name}.js`))
-        if (!script) return
+        if (!script) return Promise.resolve()
         const [, globalName, factoryName] = script
-        const api = { [factoryName]: vi.fn() }
-        window[globalName] = api
-        return { [globalName]: api }
+        let resolveImport
+        const promise = new Promise((resolve) => {
+          resolveImport = resolve
+        }).then(() => {
+          const api = { [factoryName]: vi.fn() }
+          window[globalName] = api
+          return { [globalName]: api }
+        })
+        pendingProjectImports.set(script[0], resolveImport)
+        return promise
       }),
     }
 
@@ -559,33 +642,45 @@ describe('frontend config bootstrap', () => {
     )
 
     const loadPromise = window.loadProjectWorkspace()
+    await vi.waitFor(() => {
+      expect(imported).toEqual(projectWorkspaceCoreScripts.map(([name]) => (
+        `/static/js/features/projects/${name}.js?v=${name}-hash`
+      )))
+    })
+    projectWorkspaceCoreScripts.forEach(([name]) => {
+      pendingProjectImports.get(name)?.()
+    })
     const workspaceApi = await loadPromise
     expect(workspaceApi).toEqual(expect.objectContaining({
       DarklabProjectDetails: window.DarklabProjectDetails,
       DarklabProjectList: window.DarklabProjectList,
       DarklabProjectNavigation: window.DarklabProjectNavigation,
-      DarklabProjectEntityEditor: window.DarklabProjectEntityEditor,
-      DarklabProjectWorkspaceActions: window.DarklabProjectWorkspaceActions,
       DarklabProjectWorkspaceShell: window.DarklabProjectWorkspaceShell,
       DarklabProjectWorkspaceLifecycle: window.DarklabProjectWorkspaceLifecycle,
       DarklabProjectWorkspaceRenderer: window.DarklabProjectWorkspaceRenderer,
       DarklabProjectWorkspaceBootstrap: window.DarklabProjectWorkspaceBootstrap,
-      DarklabProjectNestedSheets: window.DarklabProjectNestedSheets,
       DarklabProjectWorkspaceEvents: window.DarklabProjectWorkspaceEvents,
       DarklabProjectTargets: window.DarklabProjectTargets,
-      DarklabProjectRuns: window.DarklabProjectRuns,
-      DarklabProjectMobileCompare: window.DarklabProjectMobileCompare,
-      DarklabProjectMobileShell: window.DarklabProjectMobileShell,
-      DarklabProjectMobileDetail: window.DarklabProjectMobileDetail,
-      DarklabProjectFindingsData: window.DarklabProjectFindingsData,
       DarklabProjectFilters: window.DarklabProjectFilters,
-      DarklabProjectEntities: window.DarklabProjectEntities,
-      DarklabProjectFindings: window.DarklabProjectFindings,
-      DarklabProjectFindingsBoard: window.DarklabProjectFindingsBoard,
     }))
-    expect(imported).toEqual(projectWorkspaceScripts.map(([name]) => (
-      `/static/js/features/projects/${name}.js?v=${name}-hash`
-    )))
+    expect(workspaceApi).not.toHaveProperty('DarklabProjectRuns')
+    expect(workspaceApi).not.toHaveProperty('DarklabProjectEntities')
+
+    const deferredPromise = window.loadProjectWorkspace({ modules: ['project_runs', 'project_entities'] })
+    await vi.waitFor(() => {
+      expect(imported).toEqual([
+        ...projectWorkspaceCoreScripts.map(([name]) => `/static/js/features/projects/${name}.js?v=${name}-hash`),
+        '/static/js/features/projects/project_runs.js?v=project_runs-hash',
+        '/static/js/features/projects/project_entities.js?v=project_entities-hash',
+      ])
+    })
+    pendingProjectImports.get('project_runs')?.()
+    pendingProjectImports.get('project_entities')?.()
+    const deferredApi = await deferredPromise
+    expect(deferredApi).toEqual(expect.objectContaining({
+      DarklabProjectRuns: window.DarklabProjectRuns,
+      DarklabProjectEntities: window.DarklabProjectEntities,
+    }))
     expect(appended).toEqual([])
 
     const failureDocument = {
@@ -969,6 +1064,62 @@ describe('frontend config bootstrap', () => {
     await expect(openPromise).resolves.toEqual({ opened: true })
     expect(window.openCommandRegistry).toHaveBeenCalledTimes(1)
     expect(imported).toEqual(['/static/js/features/command-registry/command_registry.js?v=registry-hash'])
+    expect(appended).toEqual([])
+  })
+
+  it('lazy-loads the Files surface and drag-drop helper together', async () => {
+    const appended = []
+    const document = {
+      documentElement: {},
+      head: {
+        appendChild: (node) => {
+          appended.push(node)
+        },
+      },
+      createElement: (tagName) => ({ tagName, dataset: {} }),
+      getElementById: (id) => id === 'lazy-assets-json'
+        ? {
+            textContent: JSON.stringify({
+              workspace: {
+                url: '/static/js/workspace.js?v=workspace-hash',
+                type: 'module',
+              },
+              workspace_drag_drop: {
+                url: '/static/js/features/workspace/workspace_drag_drop.js?v=drag-hash',
+                type: 'module',
+              },
+            }),
+          }
+        : null,
+    }
+    const imported = []
+    const workspaceModule = {
+      openWorkspace: vi.fn(async () => true),
+      closeWorkspace: vi.fn(),
+    }
+    const setWorkspaceHandlers = vi.fn()
+    const window = {
+      setWorkspaceHandlers,
+      __darklabImportModule: vi.fn(async (url) => {
+        imported.push(url)
+        if (url.includes('/workspace.js')) return workspaceModule
+        return { _workspaceDragSourceFromEvent: vi.fn() }
+      }),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      { document, window, setWorkspaceHandlers },
+      'window',
+    )
+
+    await expect(window.loadWorkspaceSurface()).resolves.toBe(workspaceModule)
+
+    expect(imported).toEqual([
+      '/static/js/workspace.js?v=workspace-hash',
+      '/static/js/features/workspace/workspace_drag_drop.js?v=drag-hash',
+    ])
+    expect(setWorkspaceHandlers).toHaveBeenCalledWith(workspaceModule)
     expect(appended).toEqual([])
   })
 

@@ -1,7 +1,7 @@
 // Project workspace navigation controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
-import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
 import {
   bindTabStripEdgeListener as importedBindTabStripEdgeListener,
   syncActiveTabStripScroll as importedSyncActiveTabStripScroll,

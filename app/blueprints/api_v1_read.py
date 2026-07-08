@@ -146,6 +146,7 @@ def api_atlas_entities():
         suppression_filter=request.args.get("suppression_filter") or "hide",
         limit=limit,
         offset=offset,
+        include_total=True,
     ))
 
 
@@ -185,6 +186,7 @@ def api_atlas_findings():
         suppression_filter=request.args.get("suppression_filter") or "hide",
         limit=limit,
         offset=offset,
+        include_total=True,
     ))
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 
+# Personal-scope predicates intentionally use team_id = '' so they match the
+# partial indexes; schema and migration tests guard that team_id never stays NULL.
 def normalize_team_id(team_id: str | None) -> str:
     return str(team_id or "").strip()
 
@@ -18,10 +20,9 @@ def shared_owner_where(
     prefix = f"{table_alias}." if table_alias else ""
     normalized_team_id = normalize_team_id(team_id)
     if normalized_team_id:
-        return f"{prefix}{team_column} = ?", (normalized_team_id,)
+        return f"{prefix}{team_column} = ? AND {prefix}{team_column} != ''", (normalized_team_id,)
     return (
-        f"({prefix}{team_column} IS NULL OR {prefix}{team_column} = '') "
-        f"AND {prefix}{session_column} = ?",
+        f"{prefix}{session_column} = ? AND {prefix}{team_column} = ''",
         (str(session_id or "").strip(),),
     )
 

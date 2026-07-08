@@ -117,14 +117,14 @@ let exportedDarklabProjectWorkspaceShell = null;
       } catch (_) {}
     }
 
-    async function open() {
+    async function open(options = {}) {
       if (!ctx.projectWorkspaceOverlay || !ctx.projectWorkspaceBody) return;
       ctx.closeMajorOverlays?.({ skipProjectWorkspace: true });
       ctx.blurVisibleComposerInputIfMobile?.();
       ctx.setProjectWorkspaceTab?.('details');
       showOverlay();
       ctx.markInteractionSurfaceReady?.('projects', ctx.projectWorkspaceOverlay, ctx.projectWorkspaceModal);
-      await ctx.refreshProjectWorkspace?.();
+      await ctx.refreshProjectWorkspace?.(options.refreshOptions || {});
       const mobileMode = document.body && document.body.classList.contains('mobile-terminal-mode');
       if (!mobileMode && ctx.projectWorkspaceNameInput) {
         window.setTimeout(() => ctx.projectWorkspaceNameInput.focus(), 0);
@@ -135,7 +135,7 @@ let exportedDarklabProjectWorkspaceShell = null;
       Promise.resolve(ctx.flushProjectNotesAutosave?.()).catch(() => {});
       ctx.closeProjectTargetEditor?.();
       ctx.closeProjectEntityEditor?.();
-      ctx.projectEntitiesController?.().closePicker();
+      ctx.projectEntitiesController?.()?.closePicker?.();
       ctx.closeProjectPackageManifest?.();
       ctx.closeProjectPackageWizard?.({ render: false });
       ctx.closeProjectMobileActionSheet?.({ restoreFocus: false });

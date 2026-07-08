@@ -29,7 +29,7 @@ export function responseJson(body, status = 200) {
 }
 
 export async function flushWorkspacePromises() {
-  for (let i = 0; i < 6; i += 1) await Promise.resolve()
+  for (let i = 0; i < 12; i += 1) await Promise.resolve()
 }
 
 export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {

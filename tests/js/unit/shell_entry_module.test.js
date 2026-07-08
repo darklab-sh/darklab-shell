@@ -36,7 +36,6 @@ const EAGER_SHELL_OWNER_SNIPPETS = [
 
 const SHELL_IDS = [
   'ac-dropdown',
-  'atlas-surface',
   'cmd',
   'command-catalog-body',
   'command-catalog-overlay',
@@ -152,8 +151,6 @@ const SHELL_IDS = [
   'options-ts-select',
   'options-welcome-select',
   'permalink-toast',
-  'project-workspace-modal',
-  'project-workspace-overlay',
   'rail',
   'rail-collapse-btn',
   'rail-diag-btn',
@@ -439,15 +436,6 @@ describe('shell module entry', () => {
         expect(text, `${source} should not contain ${snippet}`).not.toContain(snippet)
       })
     }
-
-    const atlasOverlayChunks = importedBuildChunks(lazyEntries[0].text)
-    const atlasMobileChunks = importedBuildChunks(lazyEntries[1].text)
-    const atlasBridgeChunks = importedBuildChunks(
-      readBuildAsset(manifest.static_assets['/static/js/features/atlas/atlas_mobile_bridge.js'].path),
-    )
-    const sharedAtlasBridgeChunks = [...atlasBridgeChunks]
-      .filter(chunk => atlasOverlayChunks.has(chunk) && atlasMobileChunks.has(chunk))
-
-    expect(sharedAtlasBridgeChunks.length).toBeGreaterThan(0)
+    expect(manifest.static_assets['/static/js/features/atlas/atlas_mobile_bridge.js']).toBeUndefined()
   })
 })

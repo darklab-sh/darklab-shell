@@ -954,7 +954,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
-**Related files:** `app/services/workspace/files.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/services/commands/builtins.py` (`file` built-in), `app/services/commands/registry.py` (workspace flag validation and rewrite).
+**Related files:** `app/services/workspace/files.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` and `app/static/js/workspace_bridge.js` (Files panel and first-use browser bridge), `app/services/commands/builtins.py` (`file` built-in), `app/services/commands/registry.py` (workspace flag validation and rewrite).
 
 ---
 

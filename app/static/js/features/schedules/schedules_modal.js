@@ -16,6 +16,8 @@ import {
   hasHistoryPanelHandler as importedHasHistoryPanelHandler,
   refreshHistoryPanel as importedRefreshHistoryPanel,
 } from '../history/history_panel_bridge.js';
+import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
+import { bindFocusTrap as importedBindFocusTrap } from '../../ui/ui_focus_trap.js';
 import {
   apiFetch as importedRuntimeApiFetch,
   hasRuntimeHandler as importedHasRuntimeHandler,
@@ -48,6 +50,35 @@ const SCHEDULES_COMMON_TIMEZONES = [
 ];
 
 const SCHEDULES_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _ensureSchedulesModalMarkup() {
+  if (typeof document === 'undefined' || document.getElementById('schedules-overlay')) return;
+  document.body?.insertAdjacentHTML('beforeend', `
+<div id="schedules-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="schedules-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="schedules-title" tabindex="-1">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close schedules"></div>
+    <div class="faq-header">
+      <span class="faq-title" id="schedules-title">SCHEDULES</span>
+      <div class="schedules-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="schedules-new-btn">New schedule</button>
+        <button type="button" class="close-btn schedules-close" aria-label="Close schedules">&times;</button>
+      </div>
+    </div>
+    <div class="schedules-layout">
+      <aside class="schedules-sidebar">
+        <div class="schedules-sidebar-toolbar">
+          <button type="button" class="btn btn-secondary btn-compact" id="schedules-refresh-btn">Refresh</button>
+          <span class="schedules-count" id="schedules-count">0</span>
+        </div>
+        <div class="schedules-list nice-scroll" id="schedules-list" aria-live="polite"></div>
+      </aside>
+      <div class="schedules-detail nice-scroll" id="schedules-detail"></div>
+    </div>
+  </section>
+</div>`);
+}
+
+_ensureSchedulesModalMarkup();
 
 let _schedulesState = {
   schedules: [],
@@ -1211,6 +1242,13 @@ function _bindSchedulesModal() {
   if (!overlay) return;
   if (overlay.dataset.schedulesModalBound === '1') return;
   overlay.dataset.schedulesModalBound = '1';
+  const modal = document.getElementById('schedules-modal');
+  if (typeof importedBindFocusTrap === 'function') importedBindFocusTrap(modal);
+  if (typeof importedBindMobileSheet === 'function') {
+    importedBindMobileSheet(modal, {
+      onClose: () => closeSchedulesModal(),
+    });
+  }
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
       closeSchedulesModal();

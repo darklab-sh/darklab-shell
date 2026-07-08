@@ -590,7 +590,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
 │   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
 │   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
-│   │   │   └── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   │   ├── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   │   ├── v0040_personal_scope_team_id_normalization.py # Personal-scope team-id normalization for partial indexes
+│   │   │   ├── v0041_project_atlas_sort_indexes.py # Project and Atlas sort-order indexes
+│   │   │   └── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
 │   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
 │   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
 │   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
@@ -628,6 +631,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
 │   │   ├── assets/
 │   │   │   ├── __init__.py     # Asset service package marker
+│   │   │   ├── client_log.py   # Browser log sanitizing and detail allowlist helpers
 │   │   │   └── diagnostics.py  # Asset manifest and frontend bundle diagnostics helpers
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
@@ -795,7 +799,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
 │   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
 │   │   │   ├── list_metrics.py # Project list count and finding-summary query helpers
-│   │   │   ├── list_queries.py # Project list and switcher query helpers
+│   │   │   ├── list_queries.py # Project list and paged-list query helpers
+│   │   │   ├── list_switcher.py # Project switcher query helpers
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
@@ -803,6 +808,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── overview.py     # Project overview payload assembly, target identity, and status helpers
 │   │   │   ├── overview_app.py # Project overview app-scan, app-port, URL-host, and provenance helpers
 │   │   │   ├── overview_intel.py # Project overview intel extraction and certificate status helpers
+│   │   │   ├── owner_clauses.py # Shared project owner predicates for list and summary queries
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
@@ -827,6 +833,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── state.py        # Redis-backed PTY metadata, cleanup, scope, and snapshot reload helpers
 │   │   │   ├── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
 │   │   │   └── wire.py         # PTY Redis key, event-id, and payload decode helpers
+│   │   ├── query_debug.py      # Debug-only query timing log helper
 │   │   ├── reports/
 │   │   │   ├── __init__.py     # Public report helper exports
 │   │   │   ├── composition.py  # Report composition context helpers
@@ -921,7 +928,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── paths.py        # Workspace directory, validation, symlink, and path-resolution helpers
 │   │       └── settings.py     # Workspace settings and owner directory naming helpers
 │   ├── static/
-│   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
+│   │   ├── build/             # Committed generated bundles, precompressed siblings, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/
 │   │   │   ├── core/
 │   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
@@ -951,6 +958,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── favicon.ico         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
+│   │   ├── fragments/
+│   │   │   ├── atlas_overlay.html # First-use Atlas modal shell
+│   │   │   └── project_workspace.html # First-use Projects modal shell and nested editors
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
 │   │       ├── autocomplete.js # Command autocomplete dropdown
@@ -972,7 +982,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
 │   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
 │   │       ├── e2e_test_hooks.js # Test-only browser hooks used by Playwright and unit harnesses
+│   │       ├── e2e_test_hooks_loader.js # Tiny Playwright-only hook loader that keeps test globals out of normal startup
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
+│   │       ├── export_html_bridge.js # Lightweight export HTML bridge for lazy styled HTML/PDF exports
 │   │       ├── export_pdf.js   # Lazy-loaded shared PDF export module
 │   │       ├── features/
 │   │       │   ├── atlas/
@@ -991,7 +1003,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── command_registry_bridge.js # Command registry ESM bridge for lazy command catalog UI
 │   │       │   │   └── faq_helpers.js # FAQ command chips, allowed-command summary, and limits rendering
 │   │       │   ├── findings/
+│   │       │   │   ├── finding_triage_bridge.js # Lightweight finding-triage bridge for lazy remediation controls
 │   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
+│   │       │   │   ├── findings_board_bridge.js # Lightweight Findings Board bridge for Atlas and lazy modal launches
 │   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
 │   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
@@ -1092,7 +1106,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── theme/
 │   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
 │   │       │   ├── tour/
-│   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   │   ├── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   │   └── tour_cli_bridge.js # Lightweight terminal tour bridge that loads the full tour command on first use
 │   │       │   ├── watchers/
 │   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
@@ -1144,7 +1159,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
 │   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
 │   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
-│   │       └── workspace_bridge.js # Files panel ESM bridge for lightweight shell close actions
+│   │       └── workspace_bridge.js # Files panel ESM bridge for lazy open/close and file actions
 │   ├── templates/
 │       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
@@ -1182,7 +1197,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
 ├── scripts/
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
-│   ├── build_assets.mjs       # Generates committed frontend bundles in app/static/build/ (run via npm run assets:sync)
+│   ├── build_assets.mjs       # Generates committed minified frontend bundles in app/static/build/ (run via npm run assets:sync)
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
@@ -1275,6 +1290,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
 │   │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
 │   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
+│   │       ├── project_active_context.test.js # Active Project context request sharing and reload behavior
 │   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
 │   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
 │   │       ├── project_overview.test.js # Project Overview rollups, provider caveats, tempo, deliverables, activity, cert badges, and deep-link coverage

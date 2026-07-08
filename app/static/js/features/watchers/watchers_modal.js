@@ -17,6 +17,8 @@ import {
   hasHistoryPanelHandler as importedHasHistoryPanelHandler,
   refreshHistoryPanel as importedRefreshHistoryPanel,
 } from '../history/history_panel_bridge.js';
+import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
+import { bindFocusTrap as importedBindFocusTrap } from '../../ui/ui_focus_trap.js';
 import {
   apiFetch as importedRuntimeApiFetch,
   hasRuntimeHandler as importedHasRuntimeHandler,
@@ -49,6 +51,35 @@ const WATCHERS_COMMON_TIMEZONES = [
 ];
 
 const WATCHERS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+
+function _ensureWatchersModalMarkup() {
+  if (typeof document === 'undefined' || document.getElementById('watchers-overlay')) return;
+  document.body?.insertAdjacentHTML('beforeend', `
+<div id="watchers-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="watchers-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="watchers-title" tabindex="-1">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close watchers"></div>
+    <div class="faq-header">
+      <span class="faq-title" id="watchers-title">WATCHERS</span>
+      <div class="watchers-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="watchers-new-btn">New watcher</button>
+        <button type="button" class="close-btn watchers-close" aria-label="Close watchers">&times;</button>
+      </div>
+    </div>
+    <div class="watchers-layout">
+      <aside class="watchers-sidebar">
+        <div class="watchers-sidebar-toolbar">
+          <button type="button" class="btn btn-secondary btn-compact" id="watchers-refresh-btn">Refresh</button>
+          <span class="watchers-count" id="watchers-count">0</span>
+        </div>
+        <div class="watchers-list nice-scroll" id="watchers-list" aria-live="polite"></div>
+      </aside>
+      <div class="watchers-detail nice-scroll" id="watchers-detail"></div>
+    </div>
+  </section>
+</div>`);
+}
+
+_ensureWatchersModalMarkup();
 
 let _watchersState = {
   watchers: [],
@@ -1722,6 +1753,13 @@ function _bindWatchersModal() {
   if (!overlay) return;
   if (overlay.dataset.watchersModalBound === '1') return;
   overlay.dataset.watchersModalBound = '1';
+  const modal = document.getElementById('watchers-modal');
+  if (typeof importedBindFocusTrap === 'function') importedBindFocusTrap(modal);
+  if (typeof importedBindMobileSheet === 'function') {
+    importedBindMobileSheet(modal, {
+      onClose: () => closeWatchersModal(),
+    });
+  }
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
       closeWatchersModal();

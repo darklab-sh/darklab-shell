@@ -3,6 +3,7 @@ import { downloadBlobAsAttachment as importedDownloadBlobAsAttachment, showToast
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
 import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from '../../ui/ui_focus_trap.js';
 import {
   blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
   markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
@@ -17,25 +18,31 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from '../../ui
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
 import { apiFetch as importedApiFetch, logClientError as importedLogClientError } from '../../session.js';
-import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
-import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_details.js';
-import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_bridge.js';
+import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_modal_state_bridge.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 import {
   DarklabTeamScope as importedTeamScope,
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
-import { DarklabAtlasDetail as importedAtlasDetail } from './atlas_entity_detail.js';
 import { DarklabAtlasEntityRow as importedAtlasEntityRow } from './atlas_entity_row.js';
 import { DarklabAtlasTabs as importedAtlasTabs } from './atlas_tabs.js';
-import { resetAtlasMobileTransientState as importedResetAtlasMobileTransientState } from './atlas_mobile_bridge.js';
+import {
+  loadAtlasMobile as importedLoadAtlasMobile,
+  resetAtlasMobileTransientState as importedResetAtlasMobileTransientState,
+} from './atlas_mobile_bridge.js';
 import {
   getActiveProjectContext as importedGetActiveProjectContext,
   openProjectAutoPromoteRuleFromAtlas as importedOpenProjectAutoPromoteRuleFromAtlas,
   refreshActiveProjectContext as importedRefreshActiveProjectContext,
 } from '../projects/project_context_bridge.js';
 
-import { setAtlasHandlers as importedSetAtlasHandlers } from './atlas_bridge.js';
+import {
+  getAtlasDetailController as importedGetAtlasDetailController,
+  loadAtlasDetail as importedLoadAtlasDetail,
+  setAtlasHandlers as importedSetAtlasHandlers,
+} from './atlas_bridge.js';
 
 let exportedDarklabAtlasOverlay = null;
 let exportedOpenAtlas = null;
@@ -54,7 +61,7 @@ let exportedCycleAtlasTab = null;
     { id: 'cve', type: 'cve', label: 'CVEs' },
     { id: 'url', type: 'url', label: 'URLs' },
   ];
-  const detailApi = (typeof importedAtlasDetail !== 'undefined' && importedAtlasDetail) || {};
+  const detailApi = {};
   const entityRowApi = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow) || {};
   const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
   const metadataApi = (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
@@ -66,6 +73,7 @@ let exportedCycleAtlasTab = null;
         || null,
     };
   const bindDismissible = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible) || null;
+  const bindFocusTrap = (typeof importedBindFocusTrap !== 'undefined' && importedBindFocusTrap) || null;
   const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
   const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
   const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
@@ -194,6 +202,8 @@ let exportedCycleAtlasTab = null;
     orphanFilter: 'hide',
     suppressionFilter: 'hide',
     total: 0,
+    totalExact: true,
+    hasMore: false,
     limit: 50,
     offset: 0,
     query: '',
@@ -249,6 +259,9 @@ let exportedCycleAtlasTab = null;
 
   let atlasLoadController = null;
   let detailLoadController = null;
+  let detailApiPromise = null;
+  let detailApiErrorLogged = false;
+  let mobileApiPromise = null;
 
   function isAbortError(err) {
     return err && (err.name === 'AbortError' || err.code === 20);
@@ -262,6 +275,77 @@ let exportedCycleAtlasTab = null;
   function requestOptions(controller, extra = {}) {
     if (controller && controller.signal) return { ...extra, signal: controller.signal };
     return extra;
+  }
+
+  function mergeDetailApi(api) {
+    const next = (api && api.DarklabAtlasDetail) || api || null;
+    if (!next || typeof next !== 'object') return detailApi;
+    Object.keys(next).forEach((key) => {
+      detailApi[key] = next[key];
+    });
+    return detailApi;
+  }
+
+  function currentDetailApi() {
+    if (typeof importedGetAtlasDetailController === 'function') {
+      mergeDetailApi(importedGetAtlasDetailController());
+    }
+    return detailApi;
+  }
+
+  function ensureDetailApi({ renderOnReady = true } = {}) {
+    if (currentDetailApi().renderDetail && currentDetailApi().renderFindingDetail) {
+      return Promise.resolve(detailApi);
+    }
+    if (!detailApiPromise) {
+      detailApiPromise = Promise.resolve()
+        .then(() => (typeof importedLoadAtlasDetail === 'function' ? importedLoadAtlasDetail() : null))
+        .then((api) => mergeDetailApi(api))
+        .catch((err) => {
+          if (!detailApiErrorLogged) {
+            detailApiErrorLogged = true;
+            logImportClientError('failed to load atlas detail renderer', err);
+          }
+          throw err;
+        })
+        .finally(() => {
+          detailApiPromise = null;
+        });
+    }
+    if (renderOnReady) {
+      detailApiPromise
+        .then(() => {
+          if (isOpen()) renderDetail();
+        })
+        .catch(() => {});
+    }
+    return detailApiPromise;
+  }
+
+  function renderDetailMessage(message) {
+    if (!detailHost) return;
+    const empty = document.createElement('div');
+    empty.className = 'atlas-empty-inline';
+    empty.textContent = message;
+    detailHost.replaceChildren(empty);
+  }
+
+  function isAtlasMobileMode() {
+    return !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  }
+
+  function ensureMobileAtlasIfNeeded() {
+    if (!isOpen() || !isAtlasMobileMode() || typeof importedLoadAtlasMobile !== 'function') return;
+    if (!mobileApiPromise) {
+      mobileApiPromise = importedLoadAtlasMobile()
+        .catch((err) => {
+          logImportClientError('failed to load atlas mobile controller', err);
+          throw err;
+        })
+        .finally(() => {
+          mobileApiPromise = null;
+        });
+    }
   }
 
   function abortAtlasLoad() {
@@ -460,7 +544,7 @@ let exportedCycleAtlasTab = null;
   }
 
   async function openAtlas(options = {}) {
-    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays({ skipAtlas: true });
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     if (options && options.tab) state.activeTab = tabsApi.tabById?.(options.tab)?.id || state.activeTab;
     state.projectId = String(options && options.projectId || '');
@@ -495,6 +579,7 @@ let exportedCycleAtlasTab = null;
     if (typeof markInteractionSurfaceReady === 'function') {
       markInteractionSurfaceReady('atlas', overlay, surface);
     }
+    ensureMobileAtlasIfNeeded();
     render();
     loadSavedViews().catch((err) => {
       logImportClientError('failed to load atlas saved views', err);
@@ -505,7 +590,7 @@ let exportedCycleAtlasTab = null;
     loadProjectOptions().catch((err) => {
       logImportClientError('failed to load atlas project filters', err);
     });
-    await refreshAtlas({ resetOffset: true });
+    await refreshAtlas({ resetOffset: true, initialLoad: options.initialLoad });
   }
 
   function closeAtlas(options = {}) {
@@ -1791,7 +1876,10 @@ let exportedCycleAtlasTab = null;
 
   function renderPagination() {
     if (!pagination || !paginationSummary || !prevBtn || !nextBtn) return;
-    const showPager = state.total > state.limit || state.offset > 0;
+    const items = currentTab().id === 'findings' ? state.findings : state.entities;
+    const shown = Array.isArray(items) ? items.length : 0;
+    const hasMore = !!state.hasMore;
+    const showPager = state.total > state.limit || state.offset > 0 || hasMore;
     pagination.classList.toggle('u-hidden', !showPager);
     if (!showPager) {
       paginationSummary.textContent = '';
@@ -1799,11 +1887,15 @@ let exportedCycleAtlasTab = null;
       nextBtn.disabled = true;
       return;
     }
-    const start = state.total ? state.offset + 1 : 0;
-    const end = Math.min(state.offset + state.limit, state.total);
-    paginationSummary.textContent = `${start}-${end} of ${state.total.toLocaleString()}`;
+    const start = state.total || shown ? state.offset + 1 : 0;
+    const end = state.totalExact
+      ? Math.min(state.offset + state.limit, Math.max(Number(state.total || 0), shown))
+      : (shown ? state.offset + shown : 0);
+    const total = Math.max(Number(state.total || 0), end);
+    const totalText = state.totalExact ? total.toLocaleString() : `${total.toLocaleString()}+`;
+    paginationSummary.textContent = `${start}-${end} of ${totalText}`;
     prevBtn.disabled = state.offset <= 0 || state.loading;
-    nextBtn.disabled = state.offset + state.limit >= state.total || state.loading;
+    nextBtn.disabled = !hasMore || state.loading;
   }
 
   function renderDetail() {
@@ -1814,6 +1906,15 @@ let exportedCycleAtlasTab = null;
     }
     if (currentTab().id === 'findings') {
       const finding = state.findings.find(item => String(item.id || '') === state.selectedFindingId);
+      if (!finding || !finding.id) {
+        renderDetailMessage('Select a finding');
+        return;
+      }
+      if (typeof currentDetailApi().renderFindingDetail !== 'function') {
+        renderDetailMessage('Loading finding...');
+        ensureDetailApi();
+        return;
+      }
       detailApi.renderFindingDetail?.(detailHost, finding, {
         canTriageAtlasRows: canTriageAtlasRows(),
         triageDisabledReason: teamScopeDeniedMessage('triage Atlas findings'),
@@ -1831,6 +1932,15 @@ let exportedCycleAtlasTab = null;
         onEditTriage: (item) => openFindingTriageEditor(item),
         onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
       });
+      return;
+    }
+    if (!state.selectedId || !state.detail) {
+      renderDetailMessage('Select an entity');
+      return;
+    }
+    if (typeof currentDetailApi().renderDetail !== 'function') {
+      renderDetailMessage('Loading entity...');
+      ensureDetailApi();
       return;
     }
     const activeProject = typeof importedGetActiveProjectContext === 'function'
@@ -1873,6 +1983,7 @@ let exportedCycleAtlasTab = null;
   }
 
   function render() {
+    ensureMobileAtlasIfNeeded();
     renderShellMode();
     renderSubtitle();
     renderFindingControls();
@@ -1937,7 +2048,7 @@ let exportedCycleAtlasTab = null;
     loadProjectOptions({ force: true }).catch((err) => {
       logImportClientError('failed to load atlas project filters', err);
     });
-    refreshAtlas({ resetOffset: true });
+    refreshAtlas({ resetOffset: true, force: true });
   }
 
   function applyRunFilter(runId, runLabel = '') {
@@ -2006,6 +2117,14 @@ let exportedCycleAtlasTab = null;
     return formatTabCount(filtered);
   }
 
+  function pageHasMore(data, itemCount) {
+    if (data && Object.prototype.hasOwnProperty.call(data, 'has_more')) return !!data.has_more;
+    const total = Math.max(0, Number(data?.total || 0));
+    const limit = Math.max(1, Number(data?.limit || state.limit || 50));
+    const offset = Math.max(0, Number(data?.offset || state.offset || 0));
+    return offset + limit < total;
+  }
+
   function renderRunFilterChip() {
     if (!runFilterChip) return;
     runFilterChip.replaceChildren();
@@ -2036,7 +2155,7 @@ let exportedCycleAtlasTab = null;
     projectFilterChip.appendChild(chip);
   }
 
-  async function refreshAtlas({ resetOffset = false, force = false } = {}) {
+  async function refreshAtlas({ resetOffset = false, force = false, initialLoad = null } = {}) {
     if (!overlay || (!force && !isOpen())) return;
     if (resetOffset) state.offset = 0;
     const requestId = state.refreshSeq + 1;
@@ -2059,32 +2178,43 @@ let exportedCycleAtlasTab = null;
       });
       if (state.runId) summaryParams.set('run_id', state.runId);
       if (state.projectId) summaryParams.set('project_id', state.projectId);
-      const summaryResp = await api()(
-        `/atlas?${summaryParams.toString()}`,
-        requestOptions(controller, { cache: 'no-store' }),
+      const tab = requestedTab;
+      const initial = initialLoad && typeof initialLoad === 'object' ? initialLoad : null;
+      const canUseInitialLoad = !!(
+        initial
+        && initial.tabId === tab.id
+        && String(initial.projectId || '') === String(state.projectId || '')
+        && String(initial.runId || '') === String(state.runId || '')
+        && String(initial.query || '') === String(state.query || '')
+        && String(initial.findingStatus || '') === String(state.findingStatus || '')
+        && String(initial.orphanFilter || '') === String(state.orphanFilter || '')
+        && String(initial.suppressionFilter || '') === String(state.suppressionFilter || '')
+        && Number(initial.limit) === Number(state.limit)
+        && Number(initial.offset) === Number(state.offset)
+        && initial.summaryResp
+        && initial.listResp
       );
-      if (!summaryResp.ok) throw new Error(`HTTP ${summaryResp.status}`);
-      if (isStale()) return;
-      state.summary = await summaryResp.json();
-      if (isStale()) return;
+      const summaryRequest = canUseInitialLoad
+        ? initial.summaryResp
+        : api()(
+            `/atlas?${summaryParams.toString()}`,
+            requestOptions(controller, { cache: 'no-store' }),
+          );
+      let baseSummaryRequest = null;
       if (state.runId) {
         const baseSummaryParams = new URLSearchParams({
           orphan_filter: state.orphanFilter,
           suppression_filter: state.suppressionFilter,
         });
         if (state.projectId) baseSummaryParams.set('project_id', state.projectId);
-        const baseSummaryResp = await api()(
-          `/atlas?${baseSummaryParams.toString()}`,
-          requestOptions(controller, { cache: 'no-store' }),
-        );
-        if (!baseSummaryResp.ok) throw new Error(`HTTP ${baseSummaryResp.status}`);
-        if (isStale()) return;
-        state.baseSummary = await baseSummaryResp.json();
-        if (isStale()) return;
-      } else {
-        state.baseSummary = state.summary;
+        baseSummaryRequest = canUseInitialLoad && initial.baseSummaryResp
+          ? initial.baseSummaryResp
+          : api()(
+              `/atlas?${baseSummaryParams.toString()}`,
+              requestOptions(controller, { cache: 'no-store' }),
+            );
       }
-      const tab = requestedTab;
+      let listRequest = null;
       if (tab.id === 'findings') {
         const params = new URLSearchParams({
           limit: String(state.limit),
@@ -2096,18 +2226,55 @@ let exportedCycleAtlasTab = null;
         if (state.findingStatus) params.append('review_state', state.findingStatus);
         params.set('orphan_filter', state.orphanFilter);
         params.set('suppression_filter', state.suppressionFilter);
-        const listResp = await api()(
-          `/atlas/findings?${params.toString()}`,
-          requestOptions(controller, { cache: 'no-store' }),
-        );
-        if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
-        if (isStale()) return;
-        const data = await listResp.json();
-        if (isStale()) return;
+        listRequest = canUseInitialLoad
+          ? initial.listResp
+          : api()(
+              `/atlas/findings?${params.toString()}`,
+              requestOptions(controller, { cache: 'no-store' }),
+            );
+      } else {
+        const params = new URLSearchParams({
+          type: tab.type,
+          limit: String(state.limit),
+          offset: String(state.offset),
+        });
+        if (state.query) params.set('q', state.query);
+        if (state.projectId) params.set('project_id', state.projectId);
+        if (state.runId) params.set('run_id', state.runId);
+        params.set('orphan_filter', state.orphanFilter);
+        params.set('suppression_filter', state.suppressionFilter);
+        listRequest = canUseInitialLoad
+          ? initial.listResp
+          : api()(
+              `/atlas/entities?${params.toString()}`,
+              requestOptions(controller, { cache: 'no-store' }),
+            );
+      }
+      const [summaryResp, baseSummaryResp, listResp] = await Promise.all([
+        summaryRequest,
+        baseSummaryRequest,
+        listRequest,
+      ]);
+      if (!summaryResp.ok) throw new Error(`HTTP ${summaryResp.status}`);
+      if (baseSummaryResp && !baseSummaryResp.ok) throw new Error(`HTTP ${baseSummaryResp.status}`);
+      if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
+      if (isStale()) return;
+      const [summaryData, baseSummaryData, listData] = await Promise.all([
+        summaryResp.json(),
+        baseSummaryResp ? baseSummaryResp.json() : Promise.resolve(null),
+        listResp.json(),
+      ]);
+      if (isStale()) return;
+      state.summary = summaryData;
+      state.baseSummary = baseSummaryData || state.summary;
+      if (tab.id === 'findings') {
+        const data = listData;
         state.entities = [];
         state.findings = Array.isArray(data.findings) ? data.findings : [];
         state.findingCounts = data.counts && typeof data.counts === 'object' ? data.counts : {};
         state.total = Number(data.total || 0);
+        state.totalExact = data.total_exact !== false;
+        state.hasMore = pageHasMore(data, state.findings.length);
         state.selectedFindingIds.forEach((findingId) => {
           if (!state.findings.some(finding => String(finding.id || '') === findingId)) {
             state.selectedFindingIds.delete(findingId);
@@ -2123,31 +2290,17 @@ let exportedCycleAtlasTab = null;
         if (state.selectedFindingId && !state.findings.some(item => String(item.id || '') === state.selectedFindingId)) {
           state.selectedFindingId = state.findings[0]?.id || '';
         }
+        if (state.selectedFindingId) ensureDetailApi({ renderOnReady: false }).catch(() => {});
         state.detail = null;
       } else {
         state.findings = [];
         state.selectedFindingId = '';
         state.selectedFindingIds.clear();
-        const params = new URLSearchParams({
-          type: tab.type,
-          limit: String(state.limit),
-          offset: String(state.offset),
-        });
-        if (state.query) params.set('q', state.query);
-        if (state.projectId) params.set('project_id', state.projectId);
-        if (state.runId) params.set('run_id', state.runId);
-        params.set('orphan_filter', state.orphanFilter);
-        params.set('suppression_filter', state.suppressionFilter);
-        const listResp = await api()(
-          `/atlas/entities?${params.toString()}`,
-          requestOptions(controller, { cache: 'no-store' }),
-        );
-        if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
-        if (isStale()) return;
-        const data = await listResp.json();
-        if (isStale()) return;
+        const data = listData;
         state.entities = Array.isArray(data.entities) ? data.entities : [];
         state.total = Number(data.total || 0);
+        state.totalExact = data.total_exact !== false;
+        state.hasMore = pageHasMore(data, state.entities.length);
         if (!state.selectedId && state.requestedEntityValue) {
           const requested = state.requestedEntityValue.toLowerCase();
           const match = state.entities.find(entity => (
@@ -2278,6 +2431,9 @@ let exportedCycleAtlasTab = null;
       reviewState: state.findingStatus,
       orphanFilter: state.orphanFilter,
       suppressionFilter: state.suppressionFilter,
+    }).catch((err) => {
+      logImportClientError('failed to open atlas findings board', err);
+      showToastSafe('Failed to open Findings Board', 'error');
     });
   }
 
@@ -2486,6 +2642,7 @@ let exportedCycleAtlasTab = null;
   async function loadDetail(entityId, { renderLoading = true } = {}) {
     if (!entityId) return;
     abortDetailLoad();
+    ensureDetailApi({ renderOnReady: false }).catch(() => {});
     const controller = newAbortController();
     detailLoadController = controller;
     state.detailLoading = !!renderLoading;
@@ -3091,6 +3248,10 @@ let exportedCycleAtlasTab = null;
     }
     if (typeof bindMobileSheet === 'function' && importModal) {
       bindMobileSheet(importModal, { onClose: () => closeImportModal() });
+    }
+    if (typeof bindFocusTrap === 'function') {
+      if (surface) bindFocusTrap(surface);
+      if (importModal) bindFocusTrap(importModal);
     }
   }
 

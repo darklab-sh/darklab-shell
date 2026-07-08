@@ -701,6 +701,14 @@ body.mobile-terminal-mode .output-follow-btn {
 #shortcuts-overlay.open,
 #theme-overlay.open { display: flex; }
 
+#theme-overlay {
+  align-items: stretch;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--theme-overlay-backdrop-bg) 24%, transparent);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+}
+
 .modal-card,
 .mobile-sheet-surface,
 #shortcuts-modal,
@@ -2280,6 +2288,29 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--border-bright);
   letter-spacing: 0.04em;
   margin: 6px 0;
+}
+.chip.atlas-entity-token {
+  display: inline;
+  gap: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--green-glow);
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.chip.atlas-entity-token:hover,
+.chip.atlas-entity-token:focus-visible {
+  background: var(--theme-button-ghost-hover-bg);
+  outline: 1px solid var(--green-dim);
+  outline-offset: 1px;
+}
+.atlas-output-entity-menu {
+  position: fixed;
+  z-index: 650;
+  min-width: 150px;
 }
 .line.command-outcome-summary-title {
   color: var(--blue);

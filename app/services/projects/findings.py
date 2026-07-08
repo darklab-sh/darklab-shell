@@ -183,6 +183,13 @@ def _project_finding_page_payload(
 log = logging.getLogger("shell")
 
 
+def _project_finding_owner_clause(session_id, team_id="", *, table_alias="f"):
+    if team_id:
+        return "1 = 1", ()
+    prefix = f"{table_alias}." if table_alias else ""
+    return f"{prefix}session_id = ? AND {prefix}team_id = ''", (session_id,)
+
+
 def _project_finding_source_exists_sql():
     return (
         "("
@@ -337,6 +344,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
         if not project:
             return None
         placeholders = ",".join("?" for _ in finding_ids)
+        finding_owner_sql, finding_owner_params = _project_finding_owner_clause(session_id, team_id)
         found_rows = conn.execute(  # nosec
             "WITH project_runs AS ("  # nosec
             "  SELECT l.entity_id AS run_id FROM project_links l "
@@ -348,7 +356,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
             "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity'"
             ") "
             "SELECT f.id FROM findings f "
-            "WHERE 1 = 1 "
+            "WHERE " + finding_owner_sql + " "
             f"AND f.id IN ({placeholders}) " # nosec
             "AND ("
             "  EXISTS ("
@@ -365,7 +373,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
             "    WHERE pe.entity_id = COALESCE(f.entity_id, f.target_id)"
             "  )"
             ")",
-            (project_id, *run_owner_params, project_id, *finding_ids),
+            (project_id, *run_owner_params, project_id, *finding_owner_params, *finding_ids),
         ).fetchall()
         found_ids = {str(row["id"] or "") for row in found_rows if row["id"]}
         if found_ids:
@@ -456,6 +464,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         query = _trim_text(filters.get("q"), 128).lower()
         command_filters = _metadata_filter_values(filters, "command_root", 128, lower=True)
         source_exists_sql = _project_finding_source_exists_sql()
+        finding_owner_sql, finding_owner_params = _project_finding_owner_clause(session_id, team_id)
         source_run_expr = (
             "COALESCE(NULLIF(f.last_run_id, ''), NULLIF(f.run_id, ''), NULLIF(f.first_run_id, ''))"
         )
@@ -480,6 +489,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         )
         group_label_expr = "COALESCE(NULLIF(r.command, ''), " + source_run_expr + ")"
         where_clauses = [
+            finding_owner_sql,
             "COALESCE(f.suppressed, FALSE) = FALSE",
             "("
             "EXISTS ("
@@ -497,7 +507,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             ")"
             ")",
         ]
-        params = [project_id, *run_owner_params, project_id]
+        params = [project_id, *run_owner_params, project_id, *finding_owner_params]
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
             where_clauses.append(
@@ -1149,7 +1159,7 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
         ).fetchone()
     else:
         run = conn.execute(
-            "SELECT command, run_kind FROM runs WHERE session_id = ? AND (team_id IS NULL OR team_id = '') AND id = ?",
+            "SELECT command, run_kind FROM runs WHERE session_id = ? AND team_id = '' AND id = ?",
             (session_id, run_id),
         ).fetchone()
     if not run:

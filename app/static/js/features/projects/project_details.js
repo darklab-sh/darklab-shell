@@ -171,10 +171,10 @@ let exportedDarklabProjectDetails = null;
       const labelText = labels.join(', ');
       if (labelText === String(ctx.projectLabelsInput.dataset.savedLabels || '')) return;
       if (ctx.projectLabelsSaveButton) ctx.projectLabelsSaveButton.disabled = true;
+      ctx.projectLabelsInput.value = labelText;
       hideLabelsSavedIndicator();
       try {
         await ctx.syncEntityLabels('project', projectId, labels);
-        ctx.projectLabelsInput.value = labelText;
         ctx.projectLabelsInput.dataset.savedLabels = labelText;
         cacheLabels(projectId, labels);
         ctx.renderProjectList();

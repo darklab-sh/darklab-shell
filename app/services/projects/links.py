@@ -20,7 +20,10 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
 )
-from services.projects.models import row_to_link as _row_to_link
+from services.projects.models import (
+    PROJECT_TARGET_SOURCE_DETAIL_FLAG,
+    row_to_link as _row_to_link,
+)
 from services.projects.preferences import (
     clear_active_project_preference as _clear_active_project_preference,
     load_session_preferences as _load_session_preferences,
@@ -468,6 +471,34 @@ def preview_project_run_entity_links(session_id, project_id, data, *, team_id=""
     return stats
 
 
+def _source_detail_flag_enabled(source_detail, key):
+    detail = dialect_for_backend(get_db_backend()).decode_json_dict(source_detail)
+    value = detail.get(key)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _project_run_entity_link_is_disposable(row):
+    source = str(row["source"] or "")
+    review_state = str(row["review_state"] or "confirmed")
+    confidence = float(row["confidence"] or 1.0)
+    source_detail = row["source_detail"]
+    has_default_project_link = (
+        abs(confidence - 1.0) < 0.0001
+        and review_state == "confirmed"
+        and dialect_for_backend(get_db_backend()).decode_json_dict(source_detail) == {}
+    )
+    if has_default_project_link:
+        return True
+    return (
+        source == "auto_command"
+        and abs(confidence - 1.0) < 0.0001
+        and review_state == "pending"
+        and _source_detail_flag_enabled(source_detail, PROJECT_TARGET_SOURCE_DETAIL_FLAG)
+    )
+
+
 def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids, *, include_curated=False):
     stats = {
         "available": 0,
@@ -486,7 +517,7 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         return stats, []
     placeholders = ",".join("?" for _ in run_ids)
     rows = conn.execute(
-        "SELECT DISTINCT e.id, l.confidence, l.review_state, l.source_detail, "
+        "SELECT DISTINCT e.id, l.source, l.confidence, l.review_state, l.source_detail, "
         "EXISTS ("
         "  SELECT 1 FROM entity_run_links other_erl "
         "  WHERE other_erl.entity_id = e.id "
@@ -558,19 +589,13 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
     curated_ids = []
     for row in rows:
         stats["available"] += 1
-        source_detail = str(row["source_detail"] or "").strip()
-        has_default_project_link = (
-            abs(float(row["confidence"] or 1.0) - 1.0) < 0.0001
-            and str(row["review_state"] or "confirmed") == "confirmed"
-            and source_detail in {"", "{}", "null"}
-        )
         is_curated = any((
             int(row["has_other_runs"] or 0) > 0,
             int(row["has_other_projects"] or 0) > 0,
             int(row["has_labels"] or 0) > 0,
             int(row["has_note"] or 0) > 0,
             int(row["has_curated_findings"] or 0) > 0,
-            not has_default_project_link,
+            not _project_run_entity_link_is_disposable(row),
         ))
         if is_curated:
             curated_ids.append(str(row["id"]))

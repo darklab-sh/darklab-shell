@@ -85,7 +85,7 @@ import {
   readWorkspaceFile as importedReadWorkspaceFile,
   refreshWorkspaceFiles as importedRefreshWorkspaceFiles,
   workspaceCanWrite as importedWorkspaceCanWrite,
-} from './workspace.js';
+} from './workspace_bridge.js';
 import {
   getWorkspaceAutocompleteDirectoryHints as importedGetWorkspaceAutocompleteDirectoryHints,
   getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
@@ -144,7 +144,7 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from './features/team_scope.js';
-import { handleTourCommand as importedHandleTourCommand } from './features/tour/tour_cli.js';
+import { handleTourCommand as importedHandleTourCommand } from './features/tour/tour_cli_bridge.js';
 import {
   hasComposerPromptHandler as importedHasComposerPromptHandler,
   setComposerPromptMode as importedSetComposerPromptMode,

@@ -281,7 +281,7 @@ test.describe('permalink / share', () => {
     expect(html).toContain('hostname')
     expect(html).toContain('perm-prefix')
     expect(html).toContain('+')
-    expect(html).toContain('data:font/ttf;base64,')
+    expect(html).toContain('data:font/woff2;base64,')
     expect(html).not.toContain('/vendor/fonts/')
   })
 

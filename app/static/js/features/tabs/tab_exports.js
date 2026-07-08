@@ -26,6 +26,10 @@ import {
   confirmPermalinkRedactionChoice as importedConfirmPermalinkRedactionChoice,
   hasShareRedactionHandler as importedHasShareRedactionHandler,
 } from './share_redaction_bridge.js';
+import {
+  ExportHtmlUtils as importedExportHtmlUtils,
+  loadExportHtmlUtils as importedLoadExportHtmlUtils,
+} from '../../export_html_bridge.js';
 
 const TAB_EXPORT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -34,10 +38,32 @@ function _tabExportGlobalFunction(name) {
   return typeof fn === 'function' ? fn : null;
 }
 
-var ExportHtmlUtils = TAB_EXPORT_GLOBAL.ExportHtmlUtils || null;
+var ExportHtmlUtils = (typeof importedExportHtmlUtils !== 'undefined' && importedExportHtmlUtils)
+  || TAB_EXPORT_GLOBAL.ExportHtmlUtils
+  || null;
 
 function _refreshTabExportHtmlUtils() {
-  ExportHtmlUtils = TAB_EXPORT_GLOBAL.ExportHtmlUtils || ExportHtmlUtils || null;
+  ExportHtmlUtils = (typeof importedExportHtmlUtils !== 'undefined' && importedExportHtmlUtils)
+    || TAB_EXPORT_GLOBAL.ExportHtmlUtils
+    || ExportHtmlUtils
+    || null;
+  return ExportHtmlUtils;
+}
+
+async function _ensureTabExportHtmlUtils() {
+  const current = _refreshTabExportHtmlUtils();
+  if (
+    current
+    && current.isLazyExportHtmlBridge !== true
+    && typeof current.buildTerminalExportHtml === 'function'
+  ) {
+    return current;
+  }
+  const load = (typeof importedLoadExportHtmlUtils !== 'undefined' && importedLoadExportHtmlUtils)
+    || _tabExportGlobalFunction('loadExportHtmlUtils');
+  if (typeof load !== 'function') return null;
+  const loaded = await load();
+  ExportHtmlUtils = loaded && loaded.ExportHtmlUtils ? loaded.ExportHtmlUtils : loaded;
   return ExportHtmlUtils;
 }
 
@@ -351,30 +377,28 @@ function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } =
 }
 
 async function exportTabHtml(id) {
-  _refreshTabExportHtmlUtils();
   const t = _tabExportGetTab(id);
   if (!t || !t.rawLines.length) {
     _tabExportShowToast('No output to export');
     _refocusAfterTabAction();
     return;
   }
-  if (!ExportHtmlUtils) {
-    _tabExportShowToast('Failed to export html', 'error');
-    _refocusAfterTabAction();
-    return;
-  }
   try {
+    const htmlUtils = await _ensureTabExportHtmlUtils();
+    if (!htmlUtils || typeof htmlUtils.buildTerminalExportHtml !== 'function') {
+      throw new Error('ExportHtmlUtils unavailable');
+    }
     const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
     const ansiRenderer = _tabExportCreateAnsiUpRenderer();
-    const { linesHtml, prefixWidth, summaryHtml } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+    const { linesHtml, prefixWidth, summaryHtml } = htmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: (line, i) => _exportPrefix(line, i),
       ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : _tabExportEscapeHtml(String(text ?? '')),
     });
     const [fontFacesCss, exportCss] = await Promise.all([
-      ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
-      ExportHtmlUtils.fetchTerminalExportCss().catch(() => ''),
+      htmlUtils.fetchVendorFontFacesCss().catch(() => ''),
+      htmlUtils.fetchTerminalExportCss().catch(() => ''),
     ]);
-    const html = ExportHtmlUtils.buildTerminalExportHtml({
+    const html = htmlUtils.buildTerminalExportHtml({
       appName: exportModel.appName,
       title: exportModel.title,
       metaLine: exportModel.metaLine,
@@ -386,7 +410,7 @@ async function exportTabHtml(id) {
       exportCss,
     });
     const blob = new Blob([html], { type: 'text/html' });
-    _tabExportDownloadBlobAsAttachment(blob, `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`);
+    _tabExportDownloadBlobAsAttachment(blob, `${exportModel.appName}-${htmlUtils.exportTimestamp()}.html`);
   } catch {
     _tabExportShowToast('Failed to export html', 'error');
   } finally {
@@ -395,7 +419,6 @@ async function exportTabHtml(id) {
 }
 
 async function exportTabPdf(id) {
-  _refreshTabExportHtmlUtils();
   const t = _tabExportGetTab(id);
   if (!t || !t.rawLines.length) {
     _tabExportShowToast('No output to export');
@@ -409,6 +432,7 @@ async function exportTabPdf(id) {
     return;
   }
   try {
+    await _ensureTabExportHtmlUtils();
     const pdfUtils = await loadPdfUtils();
     const loadJsPdf = _tabExportGlobalFunction('loadJsPdf');
     const jsPDF = loadJsPdf

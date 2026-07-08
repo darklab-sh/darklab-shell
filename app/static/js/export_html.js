@@ -12,11 +12,11 @@ let ExportHtmlUtils = null;
   // HTML export deliberately inlines the runtime theme variables so downloaded
   // files preserve the active palette without depending on the live app shell.
   const EXPORT_FONT_FILES = [
-    { family: 'JetBrains Mono', weight: 300, filename: 'JetBrainsMono-300.ttf' },
-    { family: 'JetBrains Mono', weight: 400, filename: 'JetBrainsMono-400.ttf' },
-    { family: 'JetBrains Mono', weight: 700, filename: 'JetBrainsMono-700.ttf' },
-    { family: 'Syne', weight: 700, filename: 'Syne-700.ttf' },
-    { family: 'Syne', weight: 800, filename: 'Syne-800.ttf' },
+    { family: 'JetBrains Mono', weight: 300, filename: 'JetBrainsMono-300.woff2' },
+    { family: 'JetBrains Mono', weight: 400, filename: 'JetBrainsMono-400.woff2' },
+    { family: 'JetBrains Mono', weight: 700, filename: 'JetBrainsMono-700.woff2' },
+    { family: 'Syne', weight: 700, filename: 'Syne-700.woff2' },
+    { family: 'Syne', weight: 800, filename: 'Syne-800.woff2' },
   ];
   const EXPORT_THEME_VAR_NAMES = [
     '--bg',
@@ -578,7 +578,7 @@ ${includeHighlightToggle ? buildTerminalExportScript() : ''}
       for (let i = 0; i < bytes.length; i += chunkSize) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
       }
-      const dataUrl = `url(data:font/ttf;base64,${btoa(binary)}) format('truetype')`;
+      const dataUrl = `url(data:font/woff2;base64,${btoa(binary)}) format('woff2')`;
       chunks.push(
         "@font-face {"
         + ` font-family: '${font.family}';`

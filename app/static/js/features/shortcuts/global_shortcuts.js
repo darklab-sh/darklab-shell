@@ -57,7 +57,7 @@ import {
 import {
   closeWorkspace as importedCloseWorkspace,
   openWorkspace as importedOpenWorkspace,
-} from '../../workspace.js';
+} from '../../workspace_bridge.js';
 
 const SHORTCUT_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 

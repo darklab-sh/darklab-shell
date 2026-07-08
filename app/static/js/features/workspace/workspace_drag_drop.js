@@ -20,6 +20,15 @@ function _workspaceDragShowConfirm() {
     || (typeof _workspaceDragApi().showConfirm === 'function' ? _workspaceDragApi().showConfirm : null);
 }
 
+function _workspaceDragCanWrite(action) {
+  const api = _workspaceDragApi();
+  const state = api.DarklabWorkspaceState || {};
+  const canWrite = typeof state.canWrite === 'function'
+    ? state.canWrite
+    : (typeof api.workspaceCanWrite === 'function' ? api.workspaceCanWrite : null);
+  return typeof canWrite !== 'function' || canWrite(action, { toast: true });
+}
+
 function _workspaceDragSourceFromEvent(event) {
   const list = _workspaceDragFileListRef();
   const row = event.target && event.target.closest ? event.target.closest('.workspace-file-row[draggable="true"]') : null;
@@ -45,7 +54,7 @@ function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
 async function _handleWorkspaceDropMove(event) {
   const api = _workspaceDragApi();
   const state = api.DarklabWorkspaceState || {};
-  if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) return;
+  if (!_workspaceDragCanWrite('move Files')) return;
   const target = _workspaceDropTargetFromEvent(event);
   if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
   event.preventDefault();
@@ -84,8 +93,7 @@ async function _handleWorkspaceDropMove(event) {
 const _workspaceDragFileList = _workspaceDragFileListRef();
 
 _workspaceDragFileList?.addEventListener('dragstart', event => {
-  const api = _workspaceDragApi();
-  if (typeof api.workspaceCanWrite === 'function' && !api.workspaceCanWrite('move Files', { toast: true })) {
+  if (!_workspaceDragCanWrite('move Files')) {
     event.preventDefault();
     return;
   }
@@ -133,6 +141,7 @@ if (typeof window !== 'undefined') {
 
 export {
   _handleWorkspaceDropMove,
+  _workspaceDragCanWrite,
   _workspaceCanDropOnFolder,
   _workspaceDropTargetFromEvent,
   _workspaceDragSourceFromEvent,

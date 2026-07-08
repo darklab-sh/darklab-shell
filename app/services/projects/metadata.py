@@ -140,7 +140,7 @@ def _metadata_owner_where(session_id, team_id="", *, table_alias=""):
             (normalized_team_id, legacy_session_id),
         )
     return (
-        f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?",
+        f"{prefix}session_id = ? AND {prefix}team_id = ''",
         (str(session_id or "").strip(),),
     )
 

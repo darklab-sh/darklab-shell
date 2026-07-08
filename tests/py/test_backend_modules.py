@@ -6106,6 +6106,7 @@ class TestPostgresMigrations:
 
     def test_baseline_migration_covers_current_app_schema(self):
         from core.migrations import MIGRATIONS
+        from core.migrations import v0040_personal_scope_team_id_normalization as personal_scope_migration
 
         baseline = MIGRATIONS[0]
         sql = "\n".join(baseline.statements)
@@ -6151,6 +6152,9 @@ class TestPostgresMigrations:
             "0037",
             "0038",
             "0039",
+            "0040",
+            "0041",
+            "0042",
         ]
         for table_name in (
             "runs",
@@ -6206,6 +6210,20 @@ class TestPostgresMigrations:
         assert "suppressed_reason TEXT NOT NULL DEFAULT ''" in sql
         assert "suppressed_at TEXT NOT NULL DEFAULT ''" in sql
         assert "runs_fts" not in sql
+        for table_name in personal_scope_migration._PERSONAL_SCOPE_TEAM_ID_TABLES:
+            create_re = re.compile(rf"CREATE TABLE IF NOT EXISTS {re.escape(table_name)}\s*\(", re.I)
+            statement = next((item for item in baseline.statements if create_re.search(item)), "")
+            assert statement, table_name
+            body = statement[statement.find("(") + 1:statement.rfind(")")]
+            team_id_definition = next(
+                (
+                    line.strip().rstrip(",")
+                    for line in body.splitlines()
+                    if line.strip().startswith("team_id ")
+                ),
+                "",
+            )
+            assert team_id_definition == "team_id TEXT NOT NULL DEFAULT ''"
 
     def test_watcher_monitoring_incremental_migration_adds_enum_constraints(self):
         from core.migrations import MIGRATIONS
@@ -6232,7 +6250,11 @@ class TestPostgresMigrations:
     def test_sqlite_schema_matches_postgres_migration_core_shape(self):
         from core.migrations import MIGRATIONS
 
-        postgres_statements = [statement for migration in MIGRATIONS for statement in migration.statements]
+        postgres_statements = [
+            statement
+            for migration in MIGRATIONS
+            for statement in migration.statements_for(database_backend.DatabaseBackend.POSTGRES)
+        ]
         postgres_columns = {
             table: self._postgres_table_columns(postgres_statements, table)
             for table in self.CORE_SCHEMA_TABLES
@@ -6874,7 +6896,7 @@ class TestPostgresMigrations:
     def test_unified_baseline_migration_marks_reconciliation_boundary(self):
         from core.migrations import MIGRATIONS
 
-        unified = MIGRATIONS[-1]
+        unified = next(migration for migration in MIGRATIONS if migration.version == "0039")
 
         assert unified.version == "0039"
         assert unified.name == "unified_schema_baseline"
@@ -6920,7 +6942,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0040",
+            "0043",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -6972,7 +6994,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0039"
+        assert rows[-1]["version"] == "0042"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7172,14 +7194,14 @@ class TestPostgresMigrations:
                 "backend": backend,
                 "kwargs": kwargs,
             })
-            return ["0040"]
+            return ["0042"]
 
         conn = object()
         monkeypatch.setattr(runner, "run_migrations", run_migrations)
 
         applied = database._run_schema_migrations(conn, database_backend.DatabaseBackend.SQLITE)
 
-        assert applied == ["0040"]
+        assert applied == ["0042"]
         assert calls[0]["conn"] is conn
         assert calls[0]["backend"] == database_backend.DatabaseBackend.SQLITE
         assert "commit_each" not in calls[0]["kwargs"]
@@ -7335,7 +7357,7 @@ class TestPostgresMigrations:
 
         class FakeConnection:
             def __init__(self):
-                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version != "0039"}
+                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version < "0039"}
                 self.calls = []
                 self.commit_count = 0
 
@@ -7361,10 +7383,13 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039"]
+        assert applied == ["0039", "0040", "0041", "0042"]
         assert applied_again == []
         assert "0039" in conn.applied_versions
-        assert conn.commit_count == 1
+        assert "0040" in conn.applied_versions
+        assert "0041" in conn.applied_versions
+        assert "0042" in conn.applied_versions
+        assert conn.commit_count == 4
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -7375,7 +7400,7 @@ class TestPostgresMigrations:
 
         class FakeConnection:
             def __init__(self):
-                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version != "0039"}
+                self.applied_versions = {migration.version for migration in MIGRATIONS if migration.version < "0039"}
                 self.calls: list[tuple[str, tuple[object, ...]]] = []
 
             def execute(self, sql, params=()):
@@ -7426,6 +7451,9 @@ class TestPostgresMigrations:
             run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
         assert "0039" not in conn.applied_versions
+        assert "0040" not in conn.applied_versions
+        assert "0041" not in conn.applied_versions
+        assert "0042" not in conn.applied_versions
         assert not any(
             str(call[0]).startswith("INSERT INTO schema_migrations") and call[1][0] == "0039"
             for call in conn.calls
@@ -7475,7 +7503,7 @@ class TestPostgresMigrations:
         original_statements_for = Migration.statements_for
 
         def fail_if_legacy_statement_stream_is_replayed(self, backend):
-            if self.version != "0039":
+            if self.version < "0039":
                 raise AssertionError(f"legacy migration {self.version} DDL was replayed")
             return original_statements_for(self, backend)
 
@@ -7514,7 +7542,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0040",
+            "0043",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -7538,9 +7566,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0040"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0043"]
         assert table_exists is not None
-        assert "0040" in versions
+        assert "0043" in versions
 
     def test_migration_failure_logs_statement_context(self):
         from core.migrations.runner import Migration, apply_migration
@@ -23945,6 +23973,256 @@ class TestDatabaseInit:
             with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
 
+    @staticmethod
+    def _sqlite_query_plan(conn, sql, params=()):
+        rows = conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
+        return "\n".join(str(row["detail"]) for row in rows)
+
+    def test_personal_scope_predicates_use_sqlite_partial_indexes(self):
+        from services.atlas.scope import (
+            entity_scope_params,
+            entity_scope_sql,
+            finding_source_scope_params,
+            finding_source_scope_sql,
+        )
+        from services.projects.list_metrics import (
+            project_entity_owner_clause,
+            project_finding_owner_clause,
+        )
+        from services.projects.scope import shared_owner_where
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                atlas_entity_sql = (
+                    "SELECT e.id FROM entities e WHERE "
+                    + entity_scope_sql("e")
+                    + " AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?"
+                )
+                atlas_entity_plan = self._sqlite_query_plan(
+                    conn,
+                    atlas_entity_sql,
+                    (*entity_scope_params("scope-session"), "domain", 10),
+                )
+
+                atlas_finding_sql = (
+                    "SELECT f.id FROM findings f WHERE "
+                    + finding_source_scope_sql("f")
+                    + " AND f.run_id = ? ORDER BY f.last_seen_at DESC LIMIT ?"
+                )
+                atlas_finding_plan = self._sqlite_query_plan(
+                    conn,
+                    atlas_finding_sql,
+                    (*finding_source_scope_params("scope-session"), "run-1", 10),
+                )
+
+                project_owner_sql, project_owner_params = shared_owner_where("scope-session")
+                project_slug_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM projects WHERE " + project_owner_sql + " AND slug = ?",
+                    (*project_owner_params, "project-one"),
+                )
+
+                project_entity_owner_sql, project_entity_owner_params = project_entity_owner_clause("scope-session")
+                project_entity_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT e.id FROM entities e WHERE 1 = 1 "
+                    + project_entity_owner_sql
+                    + "AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?",
+                    (*project_entity_owner_params, "domain", 10),
+                )
+
+                project_finding_owner_sql, project_finding_owner_params = project_finding_owner_clause("scope-session")
+                project_finding_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT f.id FROM findings f WHERE 1 = 1 "
+                    + project_finding_owner_sql
+                    + "AND f.run_id = ? ORDER BY f.last_seen_at DESC LIMIT ?",
+                    (*project_finding_owner_params, "run-1", 10),
+                )
+
+                atlas_entity_sort_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT e.id FROM entities e WHERE "
+                    + entity_scope_sql("e")
+                    + " ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
+                    (*entity_scope_params("scope-session"), 10),
+                )
+                project_visible_sort_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM projects WHERE "
+                    + project_owner_sql
+                    + " AND status != 'archived' AND id != ? "
+                    "ORDER BY name COLLATE NOCASE ASC, updated DESC, created DESC LIMIT ? OFFSET ?",
+                    (*project_owner_params, "active-project", 10, 0),
+                )
+                project_archive_sort_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM projects WHERE "
+                    + project_owner_sql
+                    + " AND id != ? "
+                    "ORDER BY CASE WHEN status = 'archived' THEN 1 ELSE 0 END, "
+                    "name COLLATE NOCASE ASC, updated DESC, created DESC LIMIT ? OFFSET ?",
+                    (*project_owner_params, "active-project", 10, 0),
+                )
+                atlas_finding_status_sort_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT f.id FROM findings f WHERE "
+                    + finding_source_scope_sql("f")
+                    + " ORDER BY CASE f.status "
+                    "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
+                    "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
+                    "f.last_seen_at DESC, f.created DESC LIMIT ?",
+                    (*finding_source_scope_params("scope-session"), 10),
+                )
+                team_first_run_finding_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM findings WHERE team_id = ? AND team_id != '' AND first_run_id = ? "
+                    "ORDER BY last_seen_at DESC LIMIT ?",
+                    ("team-one", "run-1", 10),
+                )
+                team_last_run_finding_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM findings WHERE team_id = ? AND team_id != '' AND last_run_id = ? "
+                    "ORDER BY last_seen_at DESC LIMIT ?",
+                    ("team-one", "run-1", 10),
+                )
+                artifact_created_path_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM run_file_artifacts WHERE run_id = ? "
+                    "ORDER BY created ASC, workspace_path ASC LIMIT ?",
+                    ("run-artifact-1", 10),
+                )
+                artifact_created_id_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT id FROM run_file_artifacts WHERE run_id = ? "
+                    "ORDER BY created DESC, id DESC LIMIT ?",
+                    ("run-artifact-1", 10),
+                )
+                output_artifact_plan = self._sqlite_query_plan(
+                    conn,
+                    "SELECT rel_path FROM run_output_artifacts WHERE run_id = ?",
+                    ("run-artifact-1",),
+                )
+            finally:
+                conn.close()
+
+        assert entity_scope_sql("e") == "e.session_id = ? AND e.team_id = ''"
+        assert finding_source_scope_sql("f") == "f.session_id = ? AND f.team_id = ''"
+        assert project_owner_sql == "session_id = ? AND team_id = ''"
+        assert project_entity_owner_sql == "AND e.session_id = ? AND e.team_id = '' "
+        assert project_finding_owner_sql == "AND f.session_id = ? AND f.team_id = '' "
+        assert (
+            "idx_entities_session_type_last_seen" in atlas_entity_plan
+            or "idx_entities_session_last_seen_value" in atlas_entity_plan
+        )
+        assert "idx_findings_session_run_seen" in atlas_finding_plan
+        assert "idx_projects_personal_slug_unique" in project_slug_plan
+        assert (
+            "idx_entities_session_type_last_seen" in project_entity_plan
+            or "idx_entities_session_last_seen_value" in project_entity_plan
+        )
+        assert "idx_findings_session_run_seen" in project_finding_plan
+        assert "idx_entities_session_last_seen_value" in atlas_entity_sort_plan
+        assert "idx_projects_personal_visible_name_sort" in project_visible_sort_plan
+        assert "idx_projects_personal_archive_name_sort" in project_archive_sort_plan
+        assert "idx_findings_session_status_sort_seen" in atlas_finding_status_sort_plan
+        assert "idx_findings_team_first_run_seen" in team_first_run_finding_plan
+        assert "idx_findings_team_last_run_seen" in team_last_run_finding_plan
+        assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
+        assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
+        assert "sqlite_autoindex_run_output_artifacts_1" in output_artifact_plan
+
+    def test_personal_scope_team_id_normalization_guards_strict_predicates(self):
+        from core.migrations import v0040_personal_scope_team_id_normalization as migration
+        from core.migrations.runner import apply_migration, ensure_migration_table
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            ensure_migration_table(conn, backend=database_backend.DatabaseBackend.SQLITE)
+            for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES:
+                conn.execute(f"CREATE TABLE {table_name} (id TEXT PRIMARY KEY, team_id TEXT)")  # nosec
+                conn.execute(
+                    f"INSERT INTO {table_name} (id, team_id) VALUES (?, NULL)",  # nosec
+                    (f"{table_name}-personal",),
+                )
+                conn.execute(
+                    f"INSERT INTO {table_name} (id, team_id) VALUES (?, ?)",  # nosec
+                    (f"{table_name}-team", "team-one"),
+                )
+
+            apply_migration(
+                conn,
+                migration.MIGRATION,
+                backend=database_backend.DatabaseBackend.SQLITE,
+            )
+
+            def team_value(table_name: str, row_id: str) -> str:
+                row = conn.execute(
+                    f"SELECT team_id FROM {table_name} WHERE id = ?",  # nosec
+                    (row_id,),
+                ).fetchone()
+                return str(row["team_id"])
+
+            null_counts = {
+                table_name: int(conn.execute(
+                    f"SELECT COUNT(*) AS count FROM {table_name} WHERE team_id IS NULL"  # nosec
+                ).fetchone()["count"] or 0)
+                for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES
+            }
+            personal_values = {
+                table_name: team_value(table_name, f"{table_name}-personal")
+                for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES
+            }
+            team_values = {
+                table_name: team_value(table_name, f"{table_name}-team")
+                for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES
+            }
+        finally:
+            conn.close()
+
+        assert null_counts == {table_name: 0 for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES}
+        assert personal_values == {table_name: "" for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES}
+        assert team_values == {table_name: "team-one" for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            schema_conn = sqlite3.connect(db_path)
+            schema_conn.row_factory = sqlite3.Row
+            try:
+                team_id_columns = {}
+                for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES:
+                    columns = schema_conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()  # nosec
+                    column = next((dict(row) for row in columns if row["name"] == "team_id"), None)
+                    team_id_columns[table_name] = column
+            finally:
+                schema_conn.close()
+
+        missing_columns = [
+            table_name
+            for table_name, column in team_id_columns.items()
+            if column is None
+        ]
+        nullable_columns = [
+            table_name
+            for table_name, column in team_id_columns.items()
+            if column is not None and int(column["notnull"] or 0) != 1
+        ]
+        non_empty_defaults = [
+            table_name
+            for table_name, column in team_id_columns.items()
+            if column is not None and str(column["dflt_value"] or "").strip() != "''"
+        ]
+
+        assert missing_columns == []
+        assert nullable_columns == []
+        assert non_empty_defaults == []
+
     def test_atlas_lookup_split_modules_read_shared_backend_accessor(self, monkeypatch):
         from services.atlas import lookup_metadata, lookup_search
 
@@ -27468,6 +27746,8 @@ SQL syntax error near q</response>
         assert "idx_project_auto_promote_rules_project_updated" in auto_promote_indexes
         assert "idx_project_auto_promote_rules_run_scan" in auto_promote_indexes
         assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
+        assert "idx_run_file_artifacts_run_created_path" in artifact_indexes
+        assert "idx_run_file_artifacts_run_created_id" in artifact_indexes
         assert "idx_findings_personal_signature" in finding_indexes
         assert "idx_findings_team_signature" in finding_indexes
         assert "idx_findings_session_status" in finding_indexes

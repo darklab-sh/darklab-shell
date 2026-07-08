@@ -620,7 +620,7 @@ test.describe('desktop chrome keyboard shortcuts', () => {
 
   test('Alt+P toggles Projects and Alt+Tab cycles Atlas modal tabs', async ({ page }) => {
     const projects = page.locator('#project-workspace-overlay')
-    await expect(projects).not.toHaveClass(/\bopen\b/)
+    await expect(projects).toHaveCount(0)
     await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
     await expect(projects).toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')

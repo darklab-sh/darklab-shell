@@ -26,7 +26,7 @@ def allocate_slug(conn, session_id, name, *, project_id=None, team_id=""):
         else:
             row = conn.execute(
                 "SELECT id FROM projects "
-                "WHERE (team_id IS NULL OR team_id = '') AND session_id = ? AND slug = ?",
+                "WHERE session_id = ? AND team_id = '' AND slug = ?",
                 (session_id, candidate),
             ).fetchone()
         if not row or row["id"] == project_id:

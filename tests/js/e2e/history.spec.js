@@ -7,6 +7,7 @@ import {
   openHistory,
   openHistoryWithEntries,
   waitForHistoryRuns,
+  waitForHistoryCommands,
   closeHistory,
   createShareSnapshot,
   clickHistoryRunMenuAction,
@@ -438,15 +439,24 @@ test.describe('history drawer', () => {
         return
       }
       if (url.pathname === '/atlas') {
-        await json({ total: 0, counts: {} })
+        await json({ total: 1, counts: { ip: 1 } })
         return
       }
       if (url.pathname === '/atlas/entities') {
         await json({
-          entities: [],
+          entities: [
+            {
+              id: 'ent-run-details-ip-e2e',
+              type: 'ip',
+              canonical_value: '203.0.113.44',
+              occurrence_count: 40,
+              run_count: 5,
+              project_link_count: 1,
+            },
+          ],
           limit: 50,
           offset: 0,
-          total: 0,
+          total: 1,
           has_more: false,
         })
         return
@@ -560,6 +570,36 @@ test.describe('history drawer', () => {
     await expect(page.locator('#history-run-subtitle')).toContainText(command)
     await expect(body).toContainText('No AI summary has been generated for this run.')
     await expect(body).toContainText('No AI next-command suggestions have been generated for this run.')
+
+    await page.locator('[data-history-run-tab="entities"]').click()
+    const entityRow = page.locator('[data-history-run-entity-id="ent-run-details-ip-e2e"]')
+    await expect(entityRow).toBeVisible()
+    await expect(entityRow.locator('.atlas-entity-value')).toHaveText('203.0.113.44')
+    await expect(entityRow.locator('.atlas-entity-badges')).toContainText('1 projects')
+    const entityLayout = await entityRow.evaluate((row) => {
+      const main = row.querySelector('.atlas-entity-main')
+      const badges = row.querySelector('.atlas-entity-badges')
+      const rowRect = row.getBoundingClientRect()
+      const mainRect = main?.getBoundingClientRect()
+      const badgeRect = badges?.getBoundingClientRect()
+      const styles = getComputedStyle(row)
+      return {
+        display: styles.display,
+        alignItems: styles.alignItems,
+        mainRight: mainRect?.right || 0,
+        badgeLeft: badgeRect?.left || 0,
+        badgeTop: badgeRect?.top || 0,
+        rowBottom: rowRect.bottom,
+      }
+    })
+    expect(entityLayout.display).toBe('flex')
+    expect(entityLayout.alignItems).toBe('center')
+    expect(entityLayout.badgeLeft).toBeGreaterThan(entityLayout.mainRight - 1)
+    expect(entityLayout.badgeTop).toBeLessThan(entityLayout.rowBottom)
+    await expect.poll(() => page.evaluate(() => (
+      [...document.styleSheets].some(sheet => String(sheet.href || '').includes('/static/css/features/atlas.css'))
+    ))).toBe(false)
+    await page.locator('[data-history-run-tab="summary"]').click()
 
     await page.locator('[data-history-run-action="ai-summary"]').click()
     await expect(body).toContainText('HTTPS is open on darklab.sh.')
@@ -814,7 +854,7 @@ test.describe('history drawer', () => {
     ]
     const sessionId = await browserSessionId(page)
     seedExternalHistoryRuns(testInfo, { sessionId, commands: bulkCommands })
-    const runs = await waitForHistoryRuns(page, 2)
+    const runs = await waitForHistoryCommands(page, bulkCommands)
     const selectedRunIds = runs
       .filter(run => bulkCommands.includes(run.command))
       .map(run => String(run.id))
@@ -874,11 +914,7 @@ test.describe('history drawer', () => {
 
   test('run comparison split view works from history and project entry points', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
-    const sessionId = await page.evaluate(() => (
-      typeof SESSION_ID === 'string' && SESSION_ID
-        ? SESSION_ID
-        : localStorage.getItem('session_id')
-    ))
+    const sessionId = await browserSessionId(page)
     const fixture = seedCompareFixture(testInfo, { sessionId })
 
     await openHistoryWithEntries(page)

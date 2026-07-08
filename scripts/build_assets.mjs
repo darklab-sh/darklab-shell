@@ -2,10 +2,10 @@
 /**
  * Build committed app CSS/JS bundles from assets.config.json.
  *
- * The build is deliberately unminified: preserve configured CSS source order,
- * inline ESM import graphs with pinned esbuild settings, write content-hashed
- * filenames, and record enough manifest metadata for Flask source/bundle
- * rendering plus CI drift checks.
+ * The build preserves configured CSS source order, minifies generated ESM
+ * graphs with pinned esbuild settings, writes content-hashed filenames, and
+ * records enough manifest metadata for Flask source/bundle rendering plus CI
+ * drift checks.
  */
 
 import {
@@ -15,12 +15,18 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  copyFileSync,
   writeFileSync,
 } from 'fs';
 import { createHash } from 'crypto';
 import { basename, dirname, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  brotliCompressSync,
+  brotliDecompressSync,
+  constants as zlibConstants,
+  gunzipSync,
+  gzipSync,
+} from 'zlib';
 import { build as esbuild } from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +35,7 @@ const ESBUILD_WORKING_DIR = ROOT;
 const args = process.argv.slice(2);
 let outDir = resolve(ROOT, 'app/static/build');
 let checkOnly = false;
+const buildStartedAt = Date.now();
 
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
@@ -44,6 +51,9 @@ for (let i = 0; i < args.length; i += 1) {
 
 const configPath = resolve(ROOT, 'assets.config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
+const PRECOMPRESSIBLE_EXTENSIONS = new Set(['css', 'js', 'json', 'map', 'svg']);
+const MIN_PRECOMPRESSED_BYTES = 100;
+const SOURCE_MAPPING_URL_RE = /(?:\n)?\/\/# sourceMappingURL=[^\n]*\s*$/;
 
 function sha256(bufferOrText) {
   return createHash('sha256').update(bufferOrText).digest('hex');
@@ -80,7 +90,7 @@ function sourceExtension(source) {
   return index > 0 ? basename.slice(index + 1) : 'asset';
 }
 
-function hashedStaticAssetBasename(source, content) {
+function hashedStaticAssetBasenameFromHash(source, contentHash) {
   const basename = source.split('/').pop() || 'asset';
   const extension = sourceExtension(source);
   const stem = basename.endsWith(`.${extension}`)
@@ -96,26 +106,106 @@ function hashedStaticAssetBasename(source, content) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     || 'asset';
-  return `${prefix}-${safeStem}.${sha256(content).slice(0, 12)}.${extension}`;
+  return `${prefix}-${safeStem}.${contentHash.slice(0, 12)}.${extension}`;
+}
+
+function hashedStaticAssetBasename(source, content) {
+  return hashedStaticAssetBasenameFromHash(source, sha256(content));
+}
+
+function hashedBundleBasenameFromHash(name, extension, contentHash) {
+  return `${name}.${contentHash.slice(0, 12)}.${extension}`;
 }
 
 function hashedBundleBasename(name, extension, content) {
-  return `${name}.${sha256(content).slice(0, 12)}.${extension}`;
+  return hashedBundleBasenameFromHash(name, extension, sha256(content));
 }
 
-function hashedEsmChunkBasename(outputPath, content) {
-  const stem = basename(outputPath).replace(/\.js$/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    || 'chunk';
-  return `static-${stem}.${sha256(content).slice(0, 12)}.js`;
+function hashedEsmChunkBasename(contentHash) {
+  return `static-chunk-${contentHash.slice(0, 12)}.js`;
+}
+
+function stripSourceMappingUrl(text) {
+  return String(text || '').replace(SOURCE_MAPPING_URL_RE, '').replace(/\s*$/, '');
+}
+
+function jsContentWithSourceMap(code, mapFilename) {
+  return `${stripSourceMappingUrl(code)}\n//# sourceMappingURL=${mapFilename}\n`;
+}
+
+function sourceMapContent(mapFile, fileName) {
+  const sourceMap = JSON.parse(String(mapFile?.text || '{}'));
+  sourceMap.file = fileName;
+  sourceMap.sources = (Array.isArray(sourceMap.sources) ? sourceMap.sources : []).map((source) => {
+    const rawSource = String(source || '');
+    if (!rawSource || /^[a-z][a-z0-9+.-]*:/i.test(rawSource)) return rawSource;
+    return relative(
+      resolve(ROOT, 'app/static/build'),
+      resolve(dirname(mapFile.path), rawSource),
+    ).split('\\').join('/');
+  });
+  return `${JSON.stringify(sourceMap)}\n`;
 }
 
 function outputExtension(type) {
   if (type === 'css') return 'css';
   if (type === 'esm') return 'js';
   throw new Error(`Unsupported bundle type: ${type}`);
+}
+
+function shouldPrecompress(filename) {
+  return PRECOMPRESSIBLE_EXTENSIONS.has(sourceExtension(filename));
+}
+
+function shouldWritePrecompressedVariant(buffer) {
+  // Keep sidecar presence stable across zlib patch versions for tiny files.
+  return buffer.length >= MIN_PRECOMPRESSED_BYTES;
+}
+
+function precompressedVariants(content) {
+  const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  return {
+    br: brotliCompressSync(buffer, {
+      params: {
+        [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+      },
+    }),
+    gz: gzipSync(buffer, { level: 9 }),
+  };
+}
+
+// Compressed sidecars are not byte-reproducible across zlib/brotli versions:
+// the same input yields different (but equally valid) output under different
+// Node runtimes. Comparing the decompressed payloads keeps the staleness gate
+// version-independent, so it flags genuinely changed content rather than
+// harmless compressor drift between the build host and CI runners.
+const SIDECAR_DECOMPRESSORS = {
+  gz: gunzipSync,
+  br: brotliDecompressSync,
+};
+
+function buildOutputContentDiffers(filename, expectedPath, committedPath) {
+  const decompress = SIDECAR_DECOMPRESSORS[filename.split('.').pop()];
+  if (!decompress) {
+    return sha256(readFileSync(expectedPath)) !== sha256(readFileSync(committedPath));
+  }
+  try {
+    return sha256(decompress(readFileSync(expectedPath)))
+      !== sha256(decompress(readFileSync(committedPath)));
+  } catch {
+    return true;
+  }
+}
+
+function writeBuildAsset(filename, content) {
+  const outputPath = resolve(outDir, filename);
+  const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  writeFileSync(outputPath, content);
+  if (!shouldPrecompress(filename)) return;
+  for (const [suffix, compressed] of Object.entries(precompressedVariants(buffer))) {
+    if (!shouldWritePrecompressedVariant(buffer)) continue;
+    writeFileSync(`${outputPath}.${suffix}`, compressed);
+  }
 }
 
 function normalizeBundles(rawBundles) {
@@ -249,6 +339,7 @@ function configuredStandaloneSources() {
   sources.add('/static/favicon.ico');
   const fontRoot = resolve(ROOT, 'app/static/fonts');
   for (const rel of collectStaticFiles(fontRoot)) {
+    if (!rel.endsWith('.woff2')) continue;
     sources.add(`/vendor/fonts/${rel}`);
   }
   return Array.from(sources).sort();
@@ -276,8 +367,9 @@ async function buildEsmBundle(bundle) {
       target: 'es2022',
       charset: 'utf8',
       platform: 'browser',
-      minify: false,
-      sourcemap: false,
+      minify: true,
+      sourcemap: 'external',
+      outfile: resolve(outDir, `${bundle.name}.js`),
       legalComments: 'none',
       metafile: true,
       absWorkingDir: ESBUILD_WORKING_DIR,
@@ -293,14 +385,17 @@ async function buildEsmBundle(bundle) {
     });
     throw err;
   }
-  if (!result.outputFiles || result.outputFiles.length !== 1) {
-    throw new Error(`ESM bundle ${bundle.name} must produce exactly one output file`);
+  const jsFile = (result.outputFiles || []).find((file) => file.path.endsWith(`${bundle.name}.js`));
+  const mapFile = (result.outputFiles || []).find((file) => file.path === `${jsFile?.path || ''}.map`);
+  if (!jsFile || !mapFile) {
+    throw new Error(`ESM bundle ${bundle.name} must produce JS and source-map output files`);
   }
   const reachedSources = Object.keys(result.metafile?.inputs || {})
     .map((input) => fileToAppSource(resolve(ESBUILD_WORKING_DIR, input)))
     .sort();
   return {
-    output: `${result.outputFiles[0].text.replace(/\s*$/, '')}\n`,
+    output: `${stripSourceMappingUrl(jsFile.text)}\n`,
+    sourceMap: mapFile,
     sourceHashes: sourceHashMap(reachedSources),
     sources: reachedSources,
   };
@@ -353,6 +448,61 @@ function collectReachableInputSources(outputKey, outputs) {
   return Array.from(sources).sort();
 }
 
+function outputDirectSourceHashes(outputKey, outputs) {
+  const inputs = Object.keys(outputs[outputKey]?.inputs || {})
+    .map((input) => fileToAppSource(resolve(ESBUILD_WORKING_DIR, input)))
+    .sort();
+  return Object.fromEntries(inputs.map((source) => [
+    source,
+    sha256(readFileSync(assertSourceExists(source))),
+  ]));
+}
+
+function stableEsmOutputDigest(outputKey, outputs, outputFilesByKey, memo = new Map(), stack = new Set()) {
+  if (memo.has(outputKey)) return memo.get(outputKey);
+  const output = outputs[outputKey] || {};
+  const directSourceHashes = outputDirectSourceHashes(outputKey, outputs);
+  if (stack.has(outputKey)) {
+    return sha256(JSON.stringify({
+      cycle: true,
+      sources: directSourceHashes,
+      exports: [...(output.exports || [])].sort(),
+    }));
+  }
+  stack.add(outputKey);
+  const imports = (output.imports || [])
+    .filter((importRecord) => outputs[importRecord.path])
+    .map((importRecord) => ({
+      kind: importRecord.kind || '',
+      path: stableEsmOutputDigest(importRecord.path, outputs, outputFilesByKey, memo, stack),
+    }))
+    .sort((a, b) => `${a.kind}:${a.path}`.localeCompare(`${b.kind}:${b.path}`));
+  const importReplacements = new Map();
+  for (const importRecord of output.imports || []) {
+    if (!outputs[importRecord.path]) continue;
+    importReplacements.set(
+      relativeImportSpecifier(outputKey, importRecord.path),
+      `./${stableEsmOutputDigest(importRecord.path, outputs, outputFilesByKey, memo, stack).slice(0, 12)}`,
+    );
+  }
+  const file = outputFilesByKey.get(outputKey);
+  const normalizedOutput = file
+    ? replaceAllLiteralImports(stripSourceMappingUrl(file.text), importReplacements)
+    : '';
+  stack.delete(outputKey);
+  const digest = sha256(JSON.stringify({
+    entryPoint: output.entryPoint
+      ? fileToAppSource(resolve(ESBUILD_WORKING_DIR, output.entryPoint))
+      : '',
+    sources: directSourceHashes,
+    imports,
+    exports: [...(output.exports || [])].sort(),
+    output: normalizedOutput,
+  }));
+  memo.set(outputKey, digest);
+  return digest;
+}
+
 async function buildAppEsmGraph(shellBundle, lazySources) {
   const entrySources = [...shellBundle.entries, ...lazySources];
   const entryPoints = entrySources.map((source) => assertSourceExists(source));
@@ -371,8 +521,8 @@ async function buildAppEsmGraph(shellBundle, lazySources) {
       target: 'es2022',
       charset: 'utf8',
       platform: 'browser',
-      minify: false,
-      sourcemap: false,
+      minify: true,
+      sourcemap: 'external',
       legalComments: 'none',
       metafile: true,
       absWorkingDir: ESBUILD_WORKING_DIR,
@@ -405,24 +555,29 @@ async function buildAppEsmGraph(shellBundle, lazySources) {
   }
 
   const finalBasenameByOutputKey = new Map();
-  for (const outputKey of Object.keys(outputs).sort()) {
-    const file = outputFilesByKey.get(outputKey);
-    if (!file) throw new Error(`App ESM graph missing output file for ${outputKey}`);
+  const jsOutputKeys = Object.keys(outputs).filter((outputKey) => outputKey.endsWith('.js')).sort();
+  const stableDigestByOutputKey = new Map(jsOutputKeys.map((outputKey) => [
+    outputKey,
+    stableEsmOutputDigest(outputKey, outputs, outputFilesByKey),
+  ]));
+  for (const outputKey of jsOutputKeys) {
     const source = Array.from(entryOutputBySource.entries())
       .find(([, entryOutputKey]) => entryOutputKey === outputKey)?.[0] || '';
-    const content = `${file.text.replace(/\s*$/, '')}\n`;
+    const digest = stableDigestByOutputKey.get(outputKey) || '';
     if (source === shellBundle.entries[0]) {
-      finalBasenameByOutputKey.set(outputKey, hashedBundleBasename(shellBundle.name, 'js', content));
+      finalBasenameByOutputKey.set(outputKey, hashedBundleBasenameFromHash(shellBundle.name, 'js', digest));
     } else if (source) {
-      finalBasenameByOutputKey.set(outputKey, hashedStaticAssetBasename(source, content));
+      finalBasenameByOutputKey.set(outputKey, hashedStaticAssetBasenameFromHash(source, digest));
     } else {
-      finalBasenameByOutputKey.set(outputKey, hashedEsmChunkBasename(outputKey, content));
+      finalBasenameByOutputKey.set(outputKey, hashedEsmChunkBasename(digest));
     }
   }
 
   const builtFiles = [];
-  for (const outputKey of Object.keys(outputs).sort()) {
+  for (const outputKey of jsOutputKeys) {
     const file = outputFilesByKey.get(outputKey);
+    const mapFile = outputFilesByKey.get(`${outputKey}.map`);
+    if (!mapFile) throw new Error(`App ESM graph missing source map for ${outputKey}`);
     const importReplacements = new Map();
     for (const importRecord of outputs[outputKey]?.imports || []) {
       const finalImportBasename = finalBasenameByOutputKey.get(importRecord.path);
@@ -432,15 +587,17 @@ async function buildAppEsmGraph(shellBundle, lazySources) {
         `./${finalImportBasename}`,
       );
     }
-    const content = `${replaceAllLiteralImports(
-      file.text.replace(/\s*$/, ''),
-      importReplacements,
-    )}\n`;
     const finalBasename = finalBasenameByOutputKey.get(outputKey);
+    const content = jsContentWithSourceMap(replaceAllLiteralImports(
+      stripSourceMappingUrl(file.text),
+      importReplacements,
+    ), `${finalBasename}.map`);
     builtFiles.push({
       outputKey,
       filename: finalBasename,
       content,
+      sourceMapFilename: `${finalBasename}.map`,
+      sourceMapContent: sourceMapContent(mapFile, finalBasename),
       hash: sha256(content),
     });
   }
@@ -451,14 +608,14 @@ async function buildAppEsmGraph(shellBundle, lazySources) {
     const outputKey = entryOutputBySource.get(source);
     const builtFile = builtFiles.find((file) => file.outputKey === outputKey);
     const inputSources = collectReachableInputSources(outputKey, outputs);
-    console.info('[assets] standalone ESM asset built', {
-      source,
-      output: `/static/build/${builtFile.filename}`,
-      input_count: inputSources.length,
-      bytes: Buffer.byteLength(builtFile.content, 'utf8'),
-      check_only: checkOnly,
-    });
     if (process.env.DARKLAB_ASSET_BUILD_DEBUG === '1') {
+      console.debug('[assets] standalone ESM asset built', {
+        source,
+        output: `/static/build/${builtFile.filename}`,
+        input_count: inputSources.length,
+        bytes: Buffer.byteLength(builtFile.content, 'utf8'),
+        check_only: checkOnly,
+      });
       console.debug('[assets] standalone ESM asset branch', {
         source,
         should_bundle_standalone_esm: true,
@@ -544,9 +701,11 @@ const shellEsmBundle = bundles.find((bundle) => bundle.name === 'shell-bootstrap
 if (!shellEsmBundle) {
   throw new Error('assets.config.json must define the shell-bootstrap ESM bundle');
 }
-const appEsmGraph = await buildAppEsmGraph(shellEsmBundle, appLazyEsmSources());
+const appLazySources = appLazyEsmSources();
+const appEsmGraph = await buildAppEsmGraph(shellEsmBundle, appLazySources);
 for (const file of appEsmGraph.files) {
-  writeFileSync(resolve(outDir, file.filename), file.content);
+  writeBuildAsset(file.filename, file.content);
+  writeBuildAsset(file.sourceMapFilename, file.sourceMapContent);
 }
 Object.assign(staticAssetEntries, appEsmGraph.lazyEntries);
 
@@ -555,7 +714,7 @@ for (const source of configuredStandaloneSources()) {
   const file = assertSourceExists(source);
   const content = readFileSync(file);
   const filename = hashedStaticAssetBasename(source, content);
-  copyFileSync(file, resolve(outDir, filename));
+  writeBuildAsset(filename, content);
   staticAssetEntries[source] = {
     path: `/static/build/${filename}`,
     hash: sha256(content),
@@ -566,6 +725,7 @@ for (const bundle of bundles) {
   let sourceHashes = {};
   let output = '';
   let manifestSources = bundle.sources;
+  let builtEsm = null;
   const parts = [];
   if (bundle.type === 'esm') {
     if (bundle.name === shellEsmBundle.name) {
@@ -584,7 +744,7 @@ for (const bundle of bundles) {
       assertLazySourcesStayOutOfEsmBundle(bundle.name, appEsmGraph.shell.sources);
       continue;
     }
-    const builtEsm = await buildEsmBundle(bundle);
+    builtEsm = await buildEsmBundle(bundle);
     output = builtEsm.output;
     sourceHashes = builtEsm.sourceHashes;
     manifestSources = builtEsm.sources;
@@ -602,7 +762,13 @@ for (const bundle of bundles) {
   const hash = sha256(output);
   const ext = outputExtension(bundle.type);
   const filename = `${bundle.name}.${hash.slice(0, 12)}.${ext}`;
-  writeFileSync(resolve(outDir, filename), output);
+  if (bundle.type === 'esm') {
+    output = jsContentWithSourceMap(output, `${filename}.map`);
+  }
+  writeBuildAsset(filename, output);
+  if (bundle.type === 'esm') {
+    writeBuildAsset(`${filename}.map`, sourceMapContent(builtEsm.sourceMap, filename));
+  }
   const entry = {
     type: bundle.type,
     path: `/static/build/${filename}`,
@@ -658,7 +824,7 @@ if (checkOnly) {
     const committedPath = resolve(committedDir, file);
     return existsSync(committedPath)
       && statSync(expectedPath).isFile()
-      && sha256(readFileSync(expectedPath)) !== sha256(readFileSync(committedPath));
+      && buildOutputContentDiffers(file, expectedPath, committedPath);
   });
   if (staleSources.length || missing.length || extra.length || changed.length) {
     const details = [
@@ -671,4 +837,10 @@ if (checkOnly) {
   }
 }
 
-console.log(`Built ${bundles.length} asset bundle${bundles.length === 1 ? '' : 's'} into ${relative(ROOT, outDir)}`);
+console.info('[assets] build completed', {
+  bundle_count: bundles.length,
+  lazy_esm_count: appLazySources.length,
+  output_dir: relative(ROOT, outDir),
+  check_only: checkOnly,
+  duration_ms: Date.now() - buildStartedAt,
+});

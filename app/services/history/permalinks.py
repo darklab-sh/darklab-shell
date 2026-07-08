@@ -16,7 +16,7 @@ from config import (
     resolve_effective_cfg,
     theme_runtime_css_vars,
 )
-from core.helpers import FONT_FILES, current_theme_name
+from core.helpers import WEB_FONT_FILES, current_theme_name
 from services.runs.output_model import LineRole, line_event_from_legacy, to_legacy_entry
 
 _FONT_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
@@ -26,16 +26,16 @@ def _font_face_css(*, embed: bool = False) -> str:
     # Downloaded HTML can either reference app-hosted font files or embed them
     # directly so the export stays portable offline.
     rules = []
-    for family, weight, filename in FONT_FILES:
+    for family, weight, filename in WEB_FONT_FILES:
         font_path = _FONT_DIR / filename
         if embed:
             try:
                 data = base64.b64encode(font_path.read_bytes()).decode("ascii")
-                src = f"url(data:font/ttf;base64,{data}) format('truetype')"
+                src = f"url(data:font/woff2;base64,{data}) format('woff2')"
             except OSError:
                 continue
         else:
-            src = f"url('/vendor/fonts/{filename}') format('truetype')"
+            src = f"url('/vendor/fonts/{filename}') format('woff2')"
         rules.append(
             "@font-face {"
             f" font-family: '{family}';"

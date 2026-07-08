@@ -17,7 +17,7 @@ let exportedDarklabProjectRuns = null;
     let loadingPromise = null;
 
     function defaultPage() {
-      return { runs: [], limit: pageLimit, offset: 0, total: 0, has_more: false, loaded: false, loading: false };
+      return { runs: [], limit: pageLimit, offset: 0, total: 0, has_more: false, loaded: false, loading: false, count_hint: 0 };
     }
 
     function page(projectId) {
@@ -41,10 +41,11 @@ let exportedDarklabProjectRuns = null;
       const normalized = String(projectId || '');
       if (!normalized || typeof ctx.apiFetch !== 'function') return;
       const current = page(normalized);
+      const countHint = Math.max(0, Number(options.countHint || 0) || 0);
       const offset = Math.max(0, Number(
         Object.prototype.hasOwnProperty.call(options, 'offset') ? options.offset : current.offset,
       ) || 0);
-      if (current.loaded && current.offset === offset) return;
+      if (!options.force && current.loaded && current.offset === offset) return;
       if (loadingProjectId === normalized && loadingPromise) return loadingPromise;
       loadingProjectId = normalized;
       loadingPromise = Promise.resolve().then(async () => {
@@ -61,9 +62,10 @@ let exportedDarklabProjectRuns = null;
             has_more: !!data.has_more,
             loaded: true,
             loading: false,
+            count_hint: countHint,
           });
         } catch (err) {
-          runPages.set(normalized, { runs: [], limit: pageLimit, offset, total: 0, has_more: false, loaded: true, loading: false });
+          runPages.set(normalized, { runs: [], limit: pageLimit, offset, total: 0, has_more: false, loaded: true, loading: false, count_hint: countHint });
           ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not load project runs.', { error: true });
           ctx.logClientError?.('failed to load project runs', err);
         } finally {
@@ -367,17 +369,31 @@ let exportedDarklabProjectRuns = null;
 
     function renderRuns(container, projectId, summary) {
       const allRuns = ctx.projectRunItems(summary);
+      const summaryRunCount = Math.max(0, Number(summary?.counts?.runs || 0) || 0);
       const filterActive = ctx.projectTargetFilterActive(projectId, summary);
       const runFilterActive = ctx.projectRunFilterActive?.(projectId, summary);
       const useServerPage = !filterActive && !runFilterActive;
       const pagination = page(projectId);
-      if (useServerPage && !pagination.loaded) {
-        load(projectId).catch(() => {});
+      const pageRuns = Array.isArray(pagination.runs) ? pagination.runs : [];
+      const needsCountHintRefresh = useServerPage
+        && pagination.loaded
+        && summaryRunCount > 0
+        && !Number(pagination.total || 0)
+        && !pageRuns.length
+        && Number(pagination.count_hint || 0) !== summaryRunCount;
+      if (useServerPage && (!pagination.loaded || needsCountHintRefresh)) {
+        load(projectId, {
+          force: needsCountHintRefresh,
+          countHint: summaryRunCount,
+        }).catch(() => {});
       }
       const canUseLoadedPage = pagination.loaded && (pagination.total || (pagination.runs || []).length || !allRuns.length);
       const runs = useServerPage && canUseLoadedPage
         ? pagination.runs
         : ctx.filteredProjectRuns(projectId, summary);
+      const hasLoadedServerRuns = useServerPage
+        && pagination.loaded
+        && (Number(pagination.total || 0) > 0 || pageRuns.length > 0);
       const comparableRuns = useServerPage && canUseLoadedPage
         ? runs.filter(run => run && run.id)
         : ctx.projectComparableRuns(summary);
@@ -405,12 +421,12 @@ let exportedDarklabProjectRuns = null;
         container.appendChild(ctx.emptyProjectPanel('Loading target associations...'));
         return;
       }
-      if (!allRuns.length) {
-        container.appendChild(ctx.emptyProjectPanel('No linked runs yet.'));
+      if (useServerPage && (!pagination.loaded || needsCountHintRefresh)) {
+        container.appendChild(ctx.emptyProjectPanel('Loading runs...'));
         return;
       }
-      if (useServerPage && !pagination.loaded) {
-        container.appendChild(ctx.emptyProjectPanel('Loading runs...'));
+      if (!allRuns.length && !hasLoadedServerRuns) {
+        container.appendChild(ctx.emptyProjectPanel('No linked runs yet.'));
         return;
       }
       if (!runs.length) {

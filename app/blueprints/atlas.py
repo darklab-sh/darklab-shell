@@ -57,6 +57,10 @@ def _parse_int(value, default, *, minimum=0, maximum=200):
     return max(minimum, min(parsed, maximum))
 
 
+def _parse_bool(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _atlas_import_max_upload_bytes() -> int:
     try:
         configured_mb = int(CFG.get("atlas_import_max_upload_mb", 10))

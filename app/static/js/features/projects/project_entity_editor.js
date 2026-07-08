@@ -10,6 +10,7 @@ let exportedDarklabProjectEntityEditor = null;
     const ctx = context || {};
     let editingEntity = null;
     let activityRequestId = 0;
+    let formEventsBound = false;
 
     function titleize(value) {
       return String(value || 'Activity')
@@ -233,6 +234,8 @@ let exportedDarklabProjectEntityEditor = null;
     }
 
     function bindFormEvents() {
+      if (formEventsBound) return;
+      formEventsBound = true;
       ctx.form?.addEventListener('submit', async (event) => {
         event.preventDefault();
         try {
