@@ -6106,6 +6106,7 @@ class TestPostgresMigrations:
 
     def test_baseline_migration_covers_current_app_schema(self):
         from core.migrations import MIGRATIONS
+        from core.migrations import v0040_personal_scope_team_id_normalization as personal_scope_migration
 
         baseline = MIGRATIONS[0]
         sql = "\n".join(baseline.statements)
@@ -6209,6 +6210,20 @@ class TestPostgresMigrations:
         assert "suppressed_reason TEXT NOT NULL DEFAULT ''" in sql
         assert "suppressed_at TEXT NOT NULL DEFAULT ''" in sql
         assert "runs_fts" not in sql
+        for table_name in personal_scope_migration._PERSONAL_SCOPE_TEAM_ID_TABLES:
+            create_re = re.compile(rf"CREATE TABLE IF NOT EXISTS {re.escape(table_name)}\s*\(", re.I)
+            statement = next((item for item in baseline.statements if create_re.search(item)), "")
+            assert statement, table_name
+            body = statement[statement.find("(") + 1:statement.rfind(")")]
+            team_id_definition = next(
+                (
+                    line.strip().rstrip(",")
+                    for line in body.splitlines()
+                    if line.strip().startswith("team_id ")
+                ),
+                "",
+            )
+            assert team_id_definition == "team_id TEXT NOT NULL DEFAULT ''"
 
     def test_watcher_monitoring_incremental_migration_adds_enum_constraints(self):
         from core.migrations import MIGRATIONS
@@ -24121,7 +24136,7 @@ class TestDatabaseInit:
         assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
         assert "sqlite_autoindex_run_output_artifacts_1" in output_artifact_plan
 
-    def test_personal_scope_team_id_normalization_migration_updates_legacy_nulls(self):
+    def test_personal_scope_team_id_normalization_guards_strict_predicates(self):
         from core.migrations import v0040_personal_scope_team_id_normalization as migration
         from core.migrations.runner import apply_migration, ensure_migration_table
 
@@ -24173,6 +24188,40 @@ class TestDatabaseInit:
         assert null_counts == {table_name: 0 for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES}
         assert personal_values == {table_name: "" for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES}
         assert team_values == {table_name: "team-one" for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            schema_conn = sqlite3.connect(db_path)
+            schema_conn.row_factory = sqlite3.Row
+            try:
+                team_id_columns = {}
+                for table_name in migration._PERSONAL_SCOPE_TEAM_ID_TABLES:
+                    columns = schema_conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()  # nosec
+                    column = next((dict(row) for row in columns if row["name"] == "team_id"), None)
+                    team_id_columns[table_name] = column
+            finally:
+                schema_conn.close()
+
+        missing_columns = [
+            table_name
+            for table_name, column in team_id_columns.items()
+            if column is None
+        ]
+        nullable_columns = [
+            table_name
+            for table_name, column in team_id_columns.items()
+            if column is not None and int(column["notnull"] or 0) != 1
+        ]
+        non_empty_defaults = [
+            table_name
+            for table_name, column in team_id_columns.items()
+            if column is not None and str(column["dflt_value"] or "").strip() != "''"
+        ]
+
+        assert missing_columns == []
+        assert nullable_columns == []
+        assert non_empty_defaults == []
 
     def test_atlas_lookup_split_modules_read_shared_backend_accessor(self, monkeypatch):
         from services.atlas import lookup_metadata, lookup_search

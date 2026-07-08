@@ -631,6 +631,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
 │   │   ├── assets/
 │   │   │   ├── __init__.py     # Asset service package marker
+│   │   │   ├── client_log.py   # Browser log sanitizing and detail allowlist helpers
 │   │   │   └── diagnostics.py  # Asset manifest and frontend bundle diagnostics helpers
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
@@ -798,7 +799,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
 │   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
 │   │   │   ├── list_metrics.py # Project list count and finding-summary query helpers
-│   │   │   ├── list_queries.py # Project list and switcher query helpers
+│   │   │   ├── list_queries.py # Project list and paged-list query helpers
+│   │   │   ├── list_switcher.py # Project switcher query helpers
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
@@ -806,6 +808,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── overview.py     # Project overview payload assembly, target identity, and status helpers
 │   │   │   ├── overview_app.py # Project overview app-scan, app-port, URL-host, and provenance helpers
 │   │   │   ├── overview_intel.py # Project overview intel extraction and certificate status helpers
+│   │   │   ├── owner_clauses.py # Shared project owner predicates for list and summary queries
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
@@ -830,6 +833,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── state.py        # Redis-backed PTY metadata, cleanup, scope, and snapshot reload helpers
 │   │   │   ├── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
 │   │   │   └── wire.py         # PTY Redis key, event-id, and payload decode helpers
+│   │   ├── query_debug.py      # Debug-only query timing log helper
 │   │   ├── reports/
 │   │   │   ├── __init__.py     # Public report helper exports
 │   │   │   ├── composition.py  # Report composition context helpers

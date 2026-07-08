@@ -25,6 +25,7 @@ from services.projects.list_metrics import (
     project_finding_owner_clause as _project_finding_owner_clause,
 )
 from services.projects import list_queries as _list_queries
+from services.projects.list_switcher import list_projects_switcher as _list_projects_switcher_impl
 from services.projects.models import (
     row_to_link as _row_to_link,
     row_to_project as _row_to_project,
@@ -72,7 +73,7 @@ def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0
 
 
 def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
-    return _list_queries.list_projects_switcher(session_id, query=query, limit=limit, team_id=team_id)
+    return _list_projects_switcher_impl(session_id, query=query, limit=limit, team_id=team_id)
 
 
 def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, offset=0, team_id=""):

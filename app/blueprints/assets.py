@@ -8,11 +8,12 @@ import os  # noqa: F401 - compatibility seam for diagnostics tests.
 import shutil  # noqa: F401 - compatibility seam for diagnostics tests.
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlsplit
 
+from config import resolve_effective_cfg
 from flask import Blueprint, abort, jsonify, request, send_file
 from werkzeug.security import safe_join
 
+from services.assets.client_log import sanitized_client_log_details, sanitize_client_log_text
 from services.assets.diagnostics import (
     fmt_diag_duration_ms,
     fmt_elapsed,
@@ -67,7 +68,7 @@ _VENDOR_FONT_FILES = frozenset(
     for _, _, filename in [*FONT_FILES, *WEB_FONT_FILES]
 )
 _PRECOMPRESSED_BUILD_SUFFIXES = (("br", ".br"), ("gzip", ".gz"))
-_PRECOMPRESSED_BUILD_EXTENSIONS = frozenset({".css", ".js", ".json", ".svg"})
+_PRECOMPRESSED_BUILD_EXTENSIONS = frozenset({".css", ".js", ".json", ".map", ".svg"})
 _APP_BOOT_TIME = time.time()
 
 # Bounds for the /diag Redis snapshot: SCAN with COUNT=500 chunks the work,
@@ -173,8 +174,8 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 def client_log():
     """Receive client-side reports and emit them as server log entries."""
     data = request.get_json(silent=True) or {}
-    context = str(data.get("context") or "")[:200]
-    message = str(data.get("message") or "")[:500]
+    context = sanitize_client_log_text(data.get("context"), 200)
+    message = sanitize_client_log_text(data.get("message"), 500)
     event = str(data.get("event") or "CLIENT_ERROR").strip().upper()[:80]
     if not event.replace("_", "").isalnum():
         event = "CLIENT_ERROR"
@@ -185,43 +186,9 @@ def client_log():
         "context": context,
         "client_message": message,
     }
-    details = data.get("details")
-    if isinstance(details, dict):
-        client_details: dict[str, object] = {}
-        selection_key = str(details.get("selection_key") or "")[:80]
-        if selection_key:
-            client_details["selection_key"] = selection_key
-        for key in ("offset", "limit"):
-            if key in details:
-                try:
-                    client_details[key] = max(0, int(details.get(key) or 0))
-                except (TypeError, ValueError):
-                    client_details[key] = 0
-        if isinstance(details.get("filter_fields"), list):
-            client_details["filter_fields"] = [
-                str(value or "")[:80]
-                for value in details["filter_fields"][:20]
-                if str(value or "").strip()
-            ]
-        if isinstance(details.get("filter_active"), dict):
-            client_details["filter_active"] = {
-                str(key or "")[:80]: bool(value)
-                for key, value in list(details["filter_active"].items())[:20]
-                if str(key or "").strip()
-            }
-        if "has_active_filter" in details:
-            client_details["has_active_filter"] = bool(details.get("has_active_filter"))
-        for key in ("asset_name", "asset_type", "bundle", "page", "phase", "source"):
-            value = str(details.get(key) or "").strip()[:120]
-            if value:
-                client_details[key] = value
-        src = _sanitize_client_asset_src(details.get("src"))
-        if src:
-            client_details["src"] = src
-        if "expected_global" in details:
-            client_details["expected_global"] = bool(details.get("expected_global"))
-        if client_details:
-            extra["client_details"] = client_details
+    client_details = sanitized_client_log_details(data.get("details"))
+    if client_details:
+        extra["client_details"] = client_details
     if level == "debug":
         log.debug(event, extra=extra)
     elif level == "error":
@@ -233,29 +200,33 @@ def client_log():
     return jsonify({"ok": True})
 
 
-def _sanitize_client_asset_src(value) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    try:
-        parsed = urlsplit(raw)
-    except ValueError:
-        return raw.split("?", 1)[0][:300]
-    path = parsed.path or raw.split("?", 1)[0]
-    query = parse_qs(parsed.query, keep_blank_values=False)
-    version = str((query.get("v") or [""])[0] or "")[:80]
-    suffix = f"?{urlencode({'v': version})}" if version else ""
-    return f"{path[:300]}{suffix}"
+def _current_request_id() -> str:
+    return str(request.environ.get("darklab_request_id") or "")[:128]
+
+
+def _log_static_build_asset_missing(filename: str, path_status: str) -> None:
+    log.warning("STATIC_BUILD_ASSET_MISSING", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(),
+        "request_id": _current_request_id(),
+        "asset_filename": str(filename or "")[:300],
+        "path_status": path_status,
+        "accept_encoding": str(request.headers.get("Accept-Encoding") or "")[:160],
+        "asset_bundle_mode": str(resolve_effective_cfg().get("asset_bundle_mode") or "bundle")[:40],
+    })
 
 
 def _build_asset_path(filename: str) -> Path:
     if filename.endswith((".br", ".gz")):
+        _log_static_build_asset_missing(filename, "precompressed_direct_request")
         abort(404)
     safe_path = safe_join(str(_BUILD_DIR), filename)
     if not safe_path:
+        _log_static_build_asset_missing(filename, "invalid_path")
         abort(404)
     path = Path(safe_path)
     if not path.is_file():
+        _log_static_build_asset_missing(filename, "missing_file")
         abort(404)
     return path
 
@@ -276,7 +247,8 @@ def _selected_precompressed_build_asset(path: Path) -> tuple[Path, str]:
 def static_build_asset(filename):
     path = _build_asset_path(filename)
     selected_path, encoding = _selected_precompressed_build_asset(path)
-    mimetype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    mimetype = "application/json" if path.suffix == ".map" else mimetypes.guess_type(path.name)[0]
+    mimetype = mimetype or "application/octet-stream"
     response = send_file(selected_path, mimetype=mimetype, conditional=True)
     if path.suffix in _PRECOMPRESSED_BUILD_EXTENSIONS:
         response.vary.add("Accept-Encoding")

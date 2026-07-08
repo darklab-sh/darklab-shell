@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,006
+- behavior tests: 4,010
 - docs/inventory meta-tests: 63
-- `pytest`: 2320 (2270 behavior + 50 meta)
-- `vitest`: 1480 (1467 behavior + 13 meta)
-- `playwright`: 269 behavior
-- total: 4,069
+- `pytest`: 2322 (2272 behavior + 50 meta)
+- `vitest`: 1481 (1468 behavior + 13 meta)
+- `playwright`: 270 behavior
+- total: 4,073
 
 This document is organized in two parts:
 
@@ -590,7 +590,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
 | `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
-| `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, personal-scope `team_id` defaults, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
 | `TestPostgresMigrations.test_watcher_monitoring_incremental_migration_adds_enum_constraints` | Verifies the incremental watcher-monitoring Postgres migration normalizes legacy watcher-fire enum values and adds fire-kind and acknowledgement-state CHECK constraints. |
 | `TestPostgresMigrations.test_url_host_entity_link_migration_defers_to_startup_backfill` | Verifies the URL host-link migration is a no-op marker because startup backfill owns URL-host repair. |
 | `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
@@ -1129,7 +1129,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
 | `TestDatabaseInit.test_personal_scope_predicates_use_sqlite_partial_indexes` | Verifies representative personal Atlas and Project predicates, sort paths, and artifact lookups use SQLite indexes. |
-| `TestDatabaseInit.test_personal_scope_team_id_normalization_migration_updates_legacy_nulls` | Verifies the personal-scope team-id normalization migration updates legacy `NULL` personal rows without changing team-owned rows. |
+| `TestDatabaseInit.test_personal_scope_team_id_normalization_guards_strict_predicates` | Verifies the personal-scope team-id normalization migration updates legacy `NULL` personal rows and fresh SQLite schema keeps strict-predicate tables on `team_id NOT NULL DEFAULT ''`. |
 | `TestDatabaseInit.test_atlas_lookup_split_modules_read_shared_backend_accessor` | Verifies split Atlas lookup helper modules observe backend changes through the shared database accessor. |
 | `TestDatabaseInit.test_split_query_modules_read_shared_db_connect_accessor` | Verifies split project and history query modules observe connection changes through the shared database accessor. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
@@ -1860,6 +1860,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestThemesRoute.test_default_theme_filename_selects_variant` | Checks that default theme filename selects variant. |
 | `TestThemesRoute.test_pref_theme_name_cookie_selects_variant` | Checks that pref theme name cookie selects variant. |
 | `TestThemesRoute.test_empty_registry_falls_back_to_built_in_dark_theme` | Checks that empty registry falls back to built in dark theme. |
+| `TestVendorAssets.test_unhashed_source_assets_are_not_served_with_immutable_cache_header` | Verifies source-mode JS modules and lazy HTML fragments avoid immutable cache headers while hashed build assets keep immutable caching. |
 | `TestVendorAssets.test_ansi_up_js_is_served` | Checks that ansi_up.js is served with correct content type. |
 | `TestVendorAssets.test_jspdf_js_is_served` | Checks that jspdf.umd.min.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
@@ -1867,7 +1868,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
 | `TestVendorAssets.test_favicon_ico_is_served` | Verifies the browser favicon route serves the restored ICO asset. |
 | `TestVendorAssets.test_built_css_bundle_is_served_with_immutable_cache_header` | Verifies generated CSS bundles are served with the immutable static-asset cache header. |
-| `TestVendorAssets.test_built_assets_use_precompressed_variants_when_accepted` | Verifies generated build assets negotiate committed Brotli/gzip siblings while keeping direct compressed-sibling URLs hidden. |
+| `TestVendorAssets.test_built_assets_use_precompressed_variants_when_accepted` | Verifies generated build assets negotiate committed Brotli/gzip siblings, JS bundles link to source maps, and direct compressed-sibling URLs stay hidden. |
+| `TestVendorAssets.test_missing_built_asset_logs_warning_with_safe_context` | Verifies missing generated build assets emit a bounded warning without query-string values. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
@@ -2779,6 +2781,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `saves and applies named Atlas views` | Verifies that Atlas saves the current tab/filter state as a named view and applies it back to the surface. |
 | `syncs populated filter selects and enhances dynamic detail selects` | Verifies that Atlas syncs populated Findings filters and enhances the finding review-state picker after it renders. |
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
+| `does not close its own fallback shell while finishing a first open` | Verifies that Atlas skips closing its own fallback shell while the first-use controller finishes opening. |
 | `previews and applies an Atlas import from a project-scoped Atlas surface` | Verifies that the Atlas import modal previews a file, applies selected options, and refreshes project-scoped Atlas state. |
 | `requires a file before previewing an Atlas import` | Verifies that the Atlas import modal rejects preview without a selected file before calling the backend. |
 | `disables unavailable Atlas import apply options after preview` | Verifies that unavailable Atlas import apply options render disabled and keep apply unavailable. |
@@ -3749,7 +3752,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
-| `keeps inactive project list pagination visually hidden` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability. |
+| `keeps inactive project list pagination visually hidden and settles abandoned first-open prefetches` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability, and that canceled first-open prefetches are settled. |
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `pages and filters the project Details targets browser` | Verifies that the Project Details target browser paginates, filters, keeps target counts stable, and updates target rows without a full modal reload. |
 | `renders Project auto-promote rules with preview, save, apply, and source detail chips` | Verifies that the Project Entities Rules panel previews and saves a rule, applies it after confirmation, and labels auto-promoted entity rows with the matching rule name. |
@@ -4351,6 +4354,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `permalink shows a failure toast when /share returns invalid JSON` | Verifies that permalink shows a failure toast when /share returns invalid JSON. |
 | `deleting a history entry shows a failure toast when the delete request fails` | Verifies that deleting a history entry shows a failure toast when the delete request fails. |
 | `clearing history shows a failure toast when the delete request fails` | Verifies that clearing history shows a failure toast when the delete request fails. |
+| `lazy modal fragments show a failure toast and retry on the next open` | Verifies Projects and Atlas first-open fragment failures show a retryable toast, emit bounded client logs, and recover on the next open. |
 
 #### `history.spec.js`
 

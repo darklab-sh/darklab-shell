@@ -3,6 +3,7 @@ import { resolve } from 'path'
 import { fromDomScript, fromDomScripts } from './helpers/extract.js'
 
 const CONFIG_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/config.js'), 'utf8')
+const LAZY_ASSETS_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/lazy_assets.js'), 'utf8')
 
 describe('frontend config bootstrap', () => {
   it('reads APP_CONFIG from the server-rendered bootstrap JSON', () => {
@@ -477,6 +478,65 @@ describe('frontend config bootstrap', () => {
     await expect(watchersPromise).resolves.toEqual({ watcher: 'wat_1' })
     expect(window.openWatchersModal).toHaveBeenCalledWith({ watcherId: 'wat_1' })
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/watchers/watchers_modal.js?v=watchers-hash')
+
+    const failureDocument = {
+      documentElement: {},
+      head: { appendChild: vi.fn() },
+      createElement: (tagName) => ({ tagName, dataset: {} }),
+      getElementById: (id) => id === 'lazy-assets-json'
+        ? {
+            textContent: JSON.stringify({
+              atlas_tabs: {
+                url: '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
+                type: 'module',
+              },
+              atlas_entity_row: {
+                url: '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
+                type: 'module',
+              },
+              atlas_overlay: {
+                url: '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
+                type: 'module',
+              },
+            }),
+          }
+        : null,
+    }
+    const atlasInitialRequests = []
+    const failureApiFetch = vi.fn(() => {
+      const request = {
+        catch: vi.fn(() => request),
+      }
+      atlasInitialRequests.push(request)
+      return request
+    })
+    const failureWindow = {
+      logClientError: vi.fn(),
+      __darklabImportModule: vi.fn(async (url) => {
+        if (url.includes('/atlas_tabs.js')) return { DarklabAtlasTabs: {} }
+        if (url.includes('/atlas_entity_row.js')) return { DarklabAtlasEntityRow: {} }
+        if (url.includes('/atlas_overlay.js')) throw new Error('atlas overlay failed')
+        return {}
+      }),
+    }
+
+    fromDomScripts(
+      ['app/static/js/core/lazy_assets.js'],
+      {
+        document: failureDocument,
+        window: failureWindow,
+        apiFetch: failureApiFetch,
+        hasRuntimeHandler: name => name === 'apiFetch',
+      },
+      'window',
+    )
+
+    await expect(failureWindow.openAtlas({ source: 'rail' })).rejects.toThrow('atlas overlay failed')
+    expect(failureApiFetch).toHaveBeenCalledTimes(2)
+    atlasInitialRequests.forEach((request) => {
+      expect(request.catch).toHaveBeenCalledWith(expect.any(Function))
+    })
+    expect(LAZY_ASSETS_SRC).toContain("cache: 'no-cache'")
   })
 
   it('lazy-loads the project workspace core and targeted deferred controllers in parallel', async () => {

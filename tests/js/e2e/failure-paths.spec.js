@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, waitForHistoryRuns } from './helpers.js'
+import { runCommand, openHistoryWithEntries, openRailAction, waitForHistoryRuns } from './helpers.js'
 
 const CMD = 'hostname'
 
@@ -124,5 +124,62 @@ test.describe('failure paths', () => {
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to clear history')
     await expect(page.locator('.hist-chip')).toHaveCount(2)
+  })
+
+  test('lazy modal fragments show a failure toast and retry on the next open', async ({ page }) => {
+    const pageErrors = []
+    const clientLogs = []
+    page.on('pageerror', (err) => pageErrors.push(err.message))
+    await page.route('**/log', (route) => {
+      try {
+        clientLogs.push(JSON.parse(route.request().postData() || '{}'))
+      } catch (_) {}
+      route.fulfill({ status: 204, body: '' })
+    })
+
+    let projectFragmentAttempts = 0
+    await page.route('**/static/fragments/project_workspace.html', (route) => {
+      projectFragmentAttempts += 1
+      if (projectFragmentAttempts === 1) {
+        route.fulfill({ status: 404, contentType: 'text/html', body: 'missing project fragment' })
+        return
+      }
+      route.continue()
+    })
+
+    await openRailAction(page, 'projects')
+    await expect(page.locator('#permalink-toast')).toContainText('Failed to open Projects')
+    await expect(page.locator('#project-workspace-overlay')).toHaveCount(0)
+    await expect.poll(() => clientLogs.map((entry) => entry.event)).toContain('PROJECT_WORKSPACE_OPEN_FAILED')
+
+    await openRailAction(page, 'projects')
+    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+
+    let atlasFragmentAttempts = 0
+    await page.route('**/static/fragments/atlas_overlay.html', (route) => {
+      atlasFragmentAttempts += 1
+      if (atlasFragmentAttempts === 1) {
+        route.fulfill({ status: 404, contentType: 'text/html', body: 'missing atlas fragment' })
+        return
+      }
+      route.continue()
+    })
+
+    await openRailAction(page, 'atlas')
+    await expect(page.locator('#permalink-toast')).toContainText('Failed to open Atlas')
+    await expect(page.locator('#atlas-overlay')).toHaveCount(0)
+    await expect.poll(() => clientLogs.map((entry) => entry.event)).toContain('ATLAS_OPEN_FAILED')
+    expect(clientLogs).toContainEqual(expect.objectContaining({
+      event: 'LAZY_DOM_FRAGMENT_LOAD_FAILED',
+      details: expect.objectContaining({ fragment_name: 'atlas_overlay' }),
+    }))
+
+    await openRailAction(page, 'atlas')
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-overlay')).toContainText(/ATLAS|No findings queued/i)
+    expect(pageErrors).toEqual([])
   })
 })

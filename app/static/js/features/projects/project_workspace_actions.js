@@ -42,6 +42,22 @@ let exportedDarklabProjectWorkspaceActions = null;
       return data && data.preview ? data.preview : null;
     }
 
+    async function previewRunEntitiesForUnlink(projectId, runIds) {
+      const normalizedProjectId = String(projectId || '').trim();
+      const ids = (Array.isArray(runIds) ? runIds : [runIds])
+        .map(runId => String(runId || '').trim())
+        .filter(Boolean);
+      if (!normalizedProjectId || !ids.length) return null;
+      const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalizedProjectId)}/links/run-entities/remove-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_ids: ids }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      return data && data.preview ? data.preview : null;
+    }
+
     function runEntityLinkOption(preview) {
       const count = Number(preview && preview.linkable || 0);
       if (count <= 0) return null;
@@ -60,6 +76,113 @@ let exportedDarklabProjectWorkspaceActions = null;
       label.append(checkbox, text);
       wrap.appendChild(label);
       return { wrap, checkbox };
+    }
+
+    function setNodeHidden(node, hidden) {
+      if (!node) return;
+      node.classList.toggle('u-hidden', hidden);
+      node.hidden = hidden;
+    }
+
+    function runEntityUnlinkOption() {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-run-entities-option u-hidden';
+
+      const runFindingsNote = document.createElement('div');
+      runFindingsNote.className = 'project-run-entities-note u-hidden';
+      wrap.appendChild(runFindingsNote);
+
+      const label = document.createElement('label');
+      label.className = 'form-check u-hidden';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = false;
+      const text = document.createElement('span');
+      label.append(checkbox, text);
+      wrap.appendChild(label);
+
+      const note = document.createElement('div');
+      note.className = 'project-run-entities-note u-hidden';
+      wrap.appendChild(note);
+
+      const curatedLabel = document.createElement('label');
+      curatedLabel.className = 'form-check u-hidden';
+      const curatedCheckbox = document.createElement('input');
+      curatedCheckbox.type = 'checkbox';
+      curatedCheckbox.checked = false;
+      const curatedText = document.createElement('span');
+      curatedLabel.append(curatedCheckbox, curatedText);
+      wrap.appendChild(curatedLabel);
+
+      const curatedNote = document.createElement('div');
+      curatedNote.className = 'project-run-entities-note u-hidden';
+      wrap.appendChild(curatedNote);
+
+      return {
+        wrap,
+        checkbox,
+        curatedCheckbox,
+        includeEntities() {
+          return !!checkbox.checked && !checkbox.disabled;
+        },
+        includeCuratedEntities() {
+          return !!curatedCheckbox.checked && !curatedCheckbox.disabled;
+        },
+        includeAnyEntities() {
+          return this.includeEntities() || this.includeCuratedEntities();
+        },
+        setPreview(preview) {
+          const runCount = Number(preview && preview.run_count || 0);
+          const removable = Number(preview && preview.removable || 0);
+          const curated = Number(preview && (preview.curated ?? preview.kept_curated) || 0);
+          const runFindings = Number(preview && preview.run_findings || 0);
+          const removableFindings = Number(preview && preview.removable_findings || 0);
+          const curatedFindings = Number(preview && (preview.curated_findings ?? preview.kept_curated_findings) || 0);
+          const entityLabel = removable === 1 ? 'entity' : 'entities';
+          const curatedEntityLabel = curated === 1 ? 'entity' : 'entities';
+          const runFindingLabel = runFindings === 1 ? 'finding' : 'findings';
+          const removableFindingLabel = removableFindings === 1 ? 'finding' : 'findings';
+          const curatedFindingLabel = curatedFindings === 1 ? 'finding' : 'findings';
+
+          checkbox.checked = false;
+          checkbox.disabled = removable <= 0;
+          curatedCheckbox.checked = false;
+          curatedCheckbox.disabled = curated <= 0;
+
+          setNodeHidden(wrap, removable <= 0 && curated <= 0 && runFindings <= 0);
+          setNodeHidden(runFindingsNote, runFindings <= 0);
+          runFindingsNote.textContent = runFindings > 0
+            ? `Removing the run link will remove ${runFindings.toLocaleString()} ${runFindingLabel} from this project's Findings tab.`
+            : '';
+
+          setNodeHidden(label, removable <= 0);
+          text.textContent = removable > 0
+            ? 'Also remove disposable same-run Atlas entities from this project'
+            : '';
+          setNodeHidden(note, removable <= 0);
+          note.textContent = removable > 0
+            ? [
+              `This will unlink ${removable.toLocaleString()} ${entityLabel} found only in ${runCount > 1 ? 'these runs' : 'this run'}.`,
+              removableFindings > 0
+                ? `${removableFindings.toLocaleString()} related ${removableFindingLabel} will no longer appear in this project.`
+                : '',
+            ].filter(Boolean).join(' ')
+            : '';
+
+          setNodeHidden(curatedLabel, curated <= 0);
+          curatedText.textContent = curated > 0
+            ? `${removable > 0 ? 'Also remove' : 'Remove'} curated same-run Atlas entities from this project`
+            : '';
+          setNodeHidden(curatedNote, curated <= 0);
+          curatedNote.textContent = curated > 0
+            ? [
+              `${curated.toLocaleString()} curated ${curatedEntityLabel}`,
+              curatedFindings > 0 ? `and ${curatedFindings.toLocaleString()} related ${curatedFindingLabel}` : '',
+              `will stay in this project unless this is checked. Curated means project-linked elsewhere, labeled, noted, reviewed, or carrying project target metadata.`,
+            ].filter(Boolean).join(' ')
+            : '';
+        },
+      };
     }
 
     async function confirmRunLink(projectId, runIds, label) {
@@ -140,13 +263,32 @@ let exportedDarklabProjectWorkspaceActions = null;
       });
     }
 
-    function confirmRunUnlink(runCommand) {
+    async function confirmRunUnlink(projectId, runId, runCommand) {
+      const confirmFn = projectShowConfirm();
+      if (!confirmFn) {
+        throw new Error('Project destructive confirmations require showConfirm.');
+      }
       const label = String(runCommand || 'this run');
-      return confirmDestructive({
+      const option = runEntityUnlinkOption();
+      try {
+        option.setPreview(await previewRunEntitiesForUnlink(projectId, [runId]));
+      } catch (_) {
+        option.setPreview(null);
+      }
+      const choice = await confirmFn({
         body: `Remove run from project: ${label}?`,
-        actionLabel: 'Remove',
-        actionId: 'remove',
+        content: option.wrap.classList.contains('u-hidden') ? null : option.wrap,
+        tone: 'danger',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'remove', label: 'Remove', role: 'destructive' },
+        ],
       });
+      if (choice !== 'remove') return null;
+      return {
+        includeEntities: option.includeEntities(),
+        includeCuratedEntities: option.includeCuratedEntities(),
+      };
     }
 
     function confirmPackageDelete(packageName) {
@@ -176,6 +318,7 @@ let exportedDarklabProjectWorkspaceActions = null;
       confirmRunUnlink,
       confirmTargetDelete,
       linkLastRunToProject,
+      previewRunEntitiesForUnlink,
       previewRunEntitiesForLink,
       syncEntityLabels,
       syncEntityNote,

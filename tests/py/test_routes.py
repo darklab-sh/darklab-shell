@@ -7224,7 +7224,7 @@ class TestProjectRoutes:
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert first.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+        assert first.headers.get("Cache-Control") == "no-cache"
 
     def test_create_list_get_update_archive_and_delete_project(self):
         client = get_client()
@@ -11862,7 +11862,10 @@ class TestClientLogRoute:
                 "event": "ESM_BOOTSTRAP_LOAD_FAILED",
                 "level": "error",
                 "context": "ESM_BOOTSTRAP_LOAD_FAILED",
-                "message": "failed to load module",
+                "message": (
+                    "failed to load "
+                    "http://localhost/static/build/shell-bootstrap.123456789abc.js?v=abc123&token=secret"
+                ),
                 "details": {
                     "page": "index",
                     "bundle": "shell-bootstrap",
@@ -11870,6 +11873,13 @@ class TestClientLogRoute:
                     "phase": "load",
                     "asset_name": "shell-bootstrap",
                     "asset_type": "module",
+                    "error_name": "TypeError",
+                    "export_name": "DarklabProjectWorkspaceShell",
+                    "controller_name": "createProjectWorkspaceShellController",
+                    "module_keys": ["DarklabProjectWorkspaceShell", "helper"],
+                    "operation": "loadProjectWorkspace",
+                    "route": "/projects",
+                    "status": 404,
                     "expected_global": True,
                 },
             })
@@ -11877,13 +11887,23 @@ class TestClientLogRoute:
         mock_error.assert_called_once()
         assert mock_error.call_args[0][0] == "ESM_BOOTSTRAP_LOAD_FAILED"
         extra = mock_error.call_args.kwargs["extra"]
+        assert extra["client_message"] == (
+            "failed to load /static/build/shell-bootstrap.123456789abc.js?v=abc123"
+        )
         assert extra["client_details"] == {
             "asset_name": "shell-bootstrap",
             "asset_type": "module",
             "bundle": "shell-bootstrap",
+            "controller_name": "createProjectWorkspaceShellController",
+            "error_name": "TypeError",
+            "export_name": "DarklabProjectWorkspaceShell",
+            "module_keys": ["DarklabProjectWorkspaceShell", "helper"],
+            "operation": "loadProjectWorkspace",
             "page": "index",
             "phase": "load",
+            "route": "/projects",
             "src": "/static/build/shell-bootstrap.123456789abc.js?v=abc123",
+            "status": 404,
             "expected_global": True,
         }
         assert "secret" not in json.dumps(extra)
@@ -12278,6 +12298,37 @@ class TestVendorAssets:
     def _assert_immutable_asset_cache(resp):
         assert resp.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
 
+    def test_unhashed_source_assets_are_not_served_with_immutable_cache_header(self):
+        client = get_client()
+
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "source"}):
+            source_resp = client.get("/static/js/core/utils.js")
+
+        assert source_resp.status_code == 200
+        assert "javascript" in source_resp.content_type
+        assert "immutable" not in source_resp.headers.get("Cache-Control", "")
+
+        for fragment_path in (
+            "/static/fragments/atlas_overlay.html",
+            "/static/fragments/project_workspace.html",
+        ):
+            fragment_resp = client.get(fragment_path)
+            assert fragment_resp.status_code == 200
+            assert fragment_resp.headers.get("Cache-Control") == "no-cache"
+            fragment_body = fragment_resp.get_data(as_text=True)
+            if fragment_path.endswith("atlas_overlay.html"):
+                assert 'id="atlas-overlay"' in fragment_body
+                assert 'id="atlas-surface"' in fragment_body
+            else:
+                assert 'id="project-workspace-overlay"' in fragment_body
+                assert 'id="project-workspace-body"' in fragment_body
+
+        with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
+            built_resp = client.get(shell_app_module._asset_bundle_entry("app")["path"])
+
+        assert built_resp.status_code == 200
+        self._assert_immutable_asset_cache(built_resp)
+
     def test_ansi_up_js_is_served(self):
         client = get_client()
         resp = client.get("/vendor/ansi_up.js")
@@ -12368,6 +12419,51 @@ class TestVendorAssets:
 
         direct_compressed_resp = client.get(f"{built_path}.gz")
         assert direct_compressed_resp.status_code == 404
+
+        shell_path = shell_app_module._asset_bundle_entry("shell-bootstrap")["path"]
+        shell_resp = client.get(shell_path)
+        assert shell_resp.status_code == 200
+        source_map_match = re.search(r"//# sourceMappingURL=([^\s]+\.js\.map)\s*$", shell_resp.get_data(as_text=True))
+        assert source_map_match
+        source_map_path = f"/static/build/{source_map_match.group(1)}"
+
+        source_map_resp = client.get(source_map_path)
+        assert source_map_resp.status_code == 200
+        assert source_map_resp.mimetype == "application/json"
+        source_map_payload = json.loads(source_map_resp.data)
+        assert source_map_payload["version"] == 3
+        assert source_map_payload["file"] == Path(shell_path).name
+        assert any(source.endswith("shell_chrome.js") for source in source_map_payload["sources"])
+        assert "Accept-Encoding" in source_map_resp.headers.get("Vary", "")
+        self._assert_immutable_asset_cache(source_map_resp)
+
+        source_map_gzip_resp = client.get(source_map_path, headers={"Accept-Encoding": "gzip"})
+        assert source_map_gzip_resp.status_code == 200
+        assert source_map_gzip_resp.headers.get("Content-Encoding") == "gzip"
+        assert gzip.decompress(source_map_gzip_resp.data) == source_map_resp.data
+        assert "Accept-Encoding" in source_map_gzip_resp.headers.get("Vary", "")
+
+        direct_source_map_compressed_resp = client.get(f"{source_map_path}.gz")
+        assert direct_source_map_compressed_resp.status_code == 404
+
+    def test_missing_built_asset_logs_warning_with_safe_context(self):
+        client = get_client()
+
+        with mock.patch.object(shell_assets.log, "warning") as mock_warning:
+            resp = client.get(
+                "/static/build/missing.123456789abc.js?token=drop-me",
+                headers={"Accept-Encoding": "br, gzip"},
+            )
+
+        assert resp.status_code == 404
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args[0][0] == "STATIC_BUILD_ASSET_MISSING"
+        extra = mock_warning.call_args.kwargs["extra"]
+        assert extra["asset_filename"] == "missing.123456789abc.js"
+        assert extra["path_status"] == "missing_file"
+        assert extra["accept_encoding"] == "br, gzip"
+        assert extra["asset_bundle_mode"] in {"source", "bundle"}
+        assert "drop-me" not in json.dumps(extra)
 
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()

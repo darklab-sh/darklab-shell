@@ -77,7 +77,7 @@ describe('session.js', () => {
     const { logClientError, fetchCalls } = loadSession({
       storageData: { session_id: 'session-log', client_id: 'client-log' },
     })
-    const err = new Error('lazy module failed')
+    const err = new Error('lazy module failed /static/build/project-report.123456789abc.js?v=abc123&token=secret')
 
     logClientError('lazy asset load failed', err, {
       event: 'LAZY_ASSET_LOAD_FAILED',
@@ -90,15 +90,17 @@ describe('session.js', () => {
     expect(fetchCalls[0][0]).toBe('/log')
     expect(JSON.parse(fetchCalls[0][1].body)).toEqual({
       context: 'lazy asset load failed',
-      message: 'lazy module failed',
+      message: 'lazy module failed /static/build/project-report.123456789abc.js?v=abc123',
       event: 'LAZY_ASSET_LOAD_FAILED',
       level: 'error',
       details: {
         event: 'LAZY_ASSET_LOAD_FAILED',
         level: 'error',
         asset_name: 'project_report',
+        error_name: 'Error',
       },
     })
+    expect(fetchCalls[0][1].body).not.toContain('secret')
   })
 
   it('describeFetchError returns a friendly offline message for network failures', () => {

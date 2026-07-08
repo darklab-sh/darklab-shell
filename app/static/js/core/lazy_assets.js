@@ -306,7 +306,7 @@ let exportedLoadWatchersModal = null;
     if (!_lazyDomFragmentPromises[name]) {
       _lazyDomFragmentPromises[name] = fetch(config.url, {
         credentials: 'same-origin',
-        cache: 'force-cache',
+        cache: 'no-cache',
       })
         .then((resp) => {
           if (!resp || !resp.ok) {
@@ -758,14 +758,56 @@ let exportedLoadWatchersModal = null;
     overlay.setAttribute('aria-hidden', 'true');
   }
 
-  function _settleAtlasInitialLoad(initialLoad) {
+  function _atlasInitialLoadLogDetails(initialLoad, role, event, level, extras = {}) {
+    return {
+      event,
+      level,
+      role,
+      tab: String(initialLoad?.tabId || ''),
+      project_id: String(initialLoad?.projectId || '').slice(0, 160),
+      run_id: String(initialLoad?.runId || '').slice(0, 160),
+      query_active: !!String(initialLoad?.query || '').trim(),
+      limit: Number(initialLoad?.limit || 0),
+      offset: Number(initialLoad?.offset || 0),
+      ...extras,
+    };
+  }
+
+  function _logAtlasInitialPreloadFailed(initialLoad, role, err) {
+    if (typeof importedLogClientError !== 'function') return;
+    importedLogClientError('atlas initial preload failed', err, _atlasInitialLoadLogDetails(
+      initialLoad,
+      role,
+      'ATLAS_INITIAL_PRELOAD_FAILED',
+      'warning',
+      { status: Number(err?.status || 0) },
+    ));
+  }
+
+  function _logAtlasInitialPreloadAbandoned(initialLoad, reason) {
+    if (typeof importedLogClientError !== 'function') return;
+    importedLogClientError('atlas initial preload abandoned', null, _atlasInitialLoadLogDetails(
+      initialLoad,
+      'all',
+      'ATLAS_INITIAL_PRELOAD_ABANDONED',
+      'debug',
+      { reason: String(reason || 'unused').slice(0, 120) },
+    ));
+  }
+
+  function _settleAtlasInitialLoad(initialLoad, reason = '') {
     if (!initialLoad || typeof initialLoad !== 'object') return;
+    if (reason) _logAtlasInitialPreloadAbandoned(initialLoad, reason);
     [
-      initialLoad.summaryResp,
-      initialLoad.baseSummaryResp,
-      initialLoad.listResp,
-    ].forEach((promise) => {
-      if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+      ['summary', initialLoad.summaryResp],
+      ['base_summary', initialLoad.baseSummaryResp],
+      ['list', initialLoad.listResp],
+    ].forEach(([role, promise]) => {
+      if (promise && typeof promise.catch === 'function') {
+        promise.catch((err) => {
+          _logAtlasInitialPreloadFailed(initialLoad, role, err);
+        });
+      }
     });
   }
 
@@ -1305,17 +1347,28 @@ let exportedLoadWatchersModal = null;
 
   async function lazyOpenAtlas(options = {}) {
     const initialLoad = _createAtlasInitialLoad(options);
-    const shellFallback = await _openAtlasShellFallback();
-    const atlas = await loadAtlasOverlay();
-    if (shellFallback && typeof shellFallback.cancelled === 'function' && shellFallback.cancelled()) {
-      _settleAtlasInitialLoad(initialLoad);
-      if (typeof shellFallback.dispose === 'function') shellFallback.dispose();
-      return false;
+    let shellFallback = null;
+    try {
+      shellFallback = await _openAtlasShellFallback();
+      const atlas = await loadAtlasOverlay();
+      if (shellFallback && typeof shellFallback.cancelled === 'function' && shellFallback.cancelled()) {
+        _settleAtlasInitialLoad(initialLoad, 'fallback_cancelled');
+        if (typeof shellFallback.dispose === 'function') shellFallback.dispose();
+        return false;
+      }
+      if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
+      shellFallback = null;
+      const open = atlas?.openAtlas;
+      if (typeof open !== 'function' || open === lazyOpenAtlas) {
+        _settleAtlasInitialLoad(initialLoad, 'controller_unavailable');
+        return false;
+      }
+      return initialLoad ? open({ ...options, initialLoad }) : open(options);
+    } catch (err) {
+      _settleAtlasInitialLoad(initialLoad, 'open_failed');
+      if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
+      throw err;
     }
-    if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
-    const open = atlas?.openAtlas;
-    if (typeof open !== 'function' || open === lazyOpenAtlas) return false;
-    return initialLoad ? open({ ...options, initialLoad }) : open(options);
   }
 
   function lazyCloseAtlas(options = {}) {

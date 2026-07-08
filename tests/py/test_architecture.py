@@ -147,6 +147,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/projects/package_queries.py", 71, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/list_queries.py", 256, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/list_metrics.py", 268, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/list_switcher.py", 138, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/queries.py", 777, "split-target-phase4"),
     ModuleSizeBudget("app/services/atlas/import_analysis.py", 265, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_helpers.py", 131, "split-package-ratchet"),

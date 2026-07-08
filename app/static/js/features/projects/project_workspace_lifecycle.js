@@ -17,6 +17,30 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
       return ctx.projectRows().find(project => String(project.id || '') === selectedId) || null;
     }
 
+    function timestampMs() {
+      if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
+      return Date.now();
+    }
+
+    function durationMs(startedAt) {
+      return Math.max(0, Math.round(timestampMs() - Number(startedAt || 0)));
+    }
+
+    function logWorkspaceEvent(context, err, details = {}) {
+      if (typeof ctx.logClientError !== 'function') return;
+      ctx.logClientError(context, err, details);
+    }
+
+    function logProjectSummaryLoadFailed(projectId, err, details = {}) {
+      logWorkspaceEvent('project summary load failed', err, {
+        event: 'PROJECT_SUMMARY_LOAD_FAILED',
+        level: 'warning',
+        project_id: String(projectId || '').slice(0, 160),
+        partial_summary_present: !!projectSummary(projectId)?.partial,
+        ...details,
+      });
+    }
+
     function projectSummary(projectId = ctx.selectedProjectId()) {
       return ctx.projectSummaries().get(String(projectId || '')) || null;
     }
@@ -76,10 +100,16 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
         if (!projectId) return;
         try {
           const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(projectId)}/summary`, { cache: 'no-store' });
-          if (!resp.ok) return;
+          if (!resp.ok) {
+            logProjectSummaryLoadFailed(projectId, new Error(`HTTP ${resp.status}`), {
+              status: Number(resp.status || 0),
+              source: 'list_summaries',
+            });
+            return;
+          }
           setSummary(projectId, await resp.json());
         } catch (err) {
-          ctx.logClientError('failed to load project summary', err);
+          logProjectSummaryLoadFailed(projectId, err, { source: 'list_summaries' });
         }
       }));
     }
@@ -100,12 +130,18 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
       };
       try {
         const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalized)}/summary`, { cache: 'no-store' });
-        if (!resp.ok) return markSummaryLoadError();
+        if (!resp.ok) {
+          logProjectSummaryLoadFailed(normalized, new Error(`HTTP ${resp.status}`), {
+            status: Number(resp.status || 0),
+            source: 'selected_summary',
+          });
+          return markSummaryLoadError();
+        }
         const summary = await resp.json();
         setSummary(normalized, summary);
         return summary;
       } catch (err) {
-        ctx.logClientError('failed to load project summary', err);
+        logProjectSummaryLoadFailed(normalized, err, { source: 'selected_summary' });
         return markSummaryLoadError();
       }
     }
@@ -115,6 +151,7 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
       ctx.setProjectWorkspaceLoading(true);
       ctx.renderProjectWorkspace();
       try {
+        const startedAt = timestampMs();
         const pagination = ctx.projectPagination?.() || {};
         const limit = Math.max(1, Number(pagination.limit || 50));
         const offset = Math.max(0, Number(pagination.offset || 0));
@@ -139,15 +176,62 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
         const activeProjectRequest = canUseInitialLoad && initialLoad.activeContext
           ? initialLoad.activeContext
           : ctx.loadActiveProjectContext();
+        const projectsStage = Promise.resolve(projectsRequest).catch((err) => {
+          logWorkspaceEvent('project workspace initial load failed', err, {
+            event: 'PROJECT_WORKSPACE_INITIAL_LOAD_FAILED',
+            level: 'error',
+            stage: 'projects',
+            limit,
+            offset,
+            used_initial_load: canUseInitialLoad,
+            duration_ms: durationMs(startedAt),
+          });
+          if (err && typeof err === 'object') err.__darklabProjectWorkspaceLogged = true;
+          throw err;
+        });
+        const activeProjectStage = Promise.resolve(activeProjectRequest).catch((err) => {
+          logWorkspaceEvent('project active context preload failed', err, {
+            event: 'PROJECT_ACTIVE_CONTEXT_PRELOAD_FAILED',
+            level: 'warning',
+            stage: 'active_context',
+            limit,
+            offset,
+            used_initial_load: canUseInitialLoad,
+            duration_ms: durationMs(startedAt),
+          });
+          return null;
+        });
         const [projectsResp] = await Promise.all([
-          projectsRequest,
-          activeProjectRequest,
+          projectsStage,
+          activeProjectStage,
         ]);
-        if (!projectsResp.ok) throw new Error(`HTTP ${projectsResp.status}`);
+        if (!projectsResp.ok) {
+          const err = new Error(`HTTP ${projectsResp.status}`);
+          err.__darklabProjectWorkspaceLogged = true;
+          logWorkspaceEvent('project workspace initial load failed', err, {
+            event: 'PROJECT_WORKSPACE_INITIAL_LOAD_FAILED',
+            level: 'error',
+            stage: 'projects',
+            status: Number(projectsResp.status || 0),
+            limit,
+            offset,
+            used_initial_load: canUseInitialLoad,
+            duration_ms: durationMs(startedAt),
+          });
+          throw err;
+        }
         const data = await projectsResp.json();
         const rows = Array.isArray(data.projects) ? data.projects : [];
         const total = Number(data.total || rows.length || 0);
         if (!rows.length && total > 0 && offset > 0) {
+          logWorkspaceEvent('project workspace page offset adjusted', null, {
+            event: 'PROJECT_WORKSPACE_PAGE_OFFSET_ADJUSTED',
+            level: 'debug',
+            limit,
+            offset,
+            total,
+            duration_ms: durationMs(startedAt),
+          });
           ctx.setProjectPagination?.({ limit, offset: Math.max(0, total - limit), total });
           ctx.setProjectWorkspaceLoading(false);
           await refreshProjectWorkspace();
@@ -173,11 +257,17 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
         }
         ctx.setProjectWorkspaceMessage('');
       } catch (err) {
+        if (!err || typeof err !== 'object' || err.__darklabProjectWorkspaceLogged !== true) {
+          logWorkspaceEvent('project workspace initial load failed', err, {
+            event: 'PROJECT_WORKSPACE_INITIAL_LOAD_FAILED',
+            level: 'error',
+            stage: 'projects',
+          });
+        }
         ctx.setProjectRows([]);
         ctx.setProjectSummaries(new Map());
         ctx.setProjectPagination?.({ limit: 50, offset: 0, total: 0 });
         ctx.setProjectWorkspaceMessage('Could not load projects.', { error: true });
-        ctx.logClientError('failed to load /projects', err);
       } finally {
         ctx.setProjectWorkspaceLoading(false);
         ctx.syncProjectNotesForm();

@@ -544,7 +544,7 @@ let exportedCycleAtlasTab = null;
   }
 
   async function openAtlas(options = {}) {
-    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays();
+    if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays({ skipAtlas: true });
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     if (options && options.tab) state.activeTab = tabsApi.tabById?.(options.tab)?.id || state.activeTab;
     state.projectId = String(options && options.projectId || '');

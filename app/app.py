@@ -56,6 +56,8 @@ _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
 _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
+_REVALIDATED_STATIC_CACHE_CONTROL = "no-cache"
+_REVALIDATED_STATIC_PREFIXES = ("/static/fragments/",)
 _DYNAMIC_GZIP_MIN_BYTES = 1024
 _DYNAMIC_GZIP_MIMETYPES = frozenset({"text/html"})
 _ASSET_VERSION_CACHE: dict[str, str] = {}
@@ -105,6 +107,11 @@ def _apply_immutable_asset_cache_headers(response):
     if request.method not in {"GET", "HEAD"} or response.status_code not in {200, 304}:
         return response
     path = request.path or ""
+    if path.startswith(_REVALIDATED_STATIC_PREFIXES):
+        response.headers["Cache-Control"] = _REVALIDATED_STATIC_CACHE_CONTROL
+        return response
+    if _is_source_module_asset(path) and _asset_bundle_mode() != "bundle":
+        return response
     if path.startswith(_IMMUTABLE_ASSET_PREFIXES):
         response.headers["Cache-Control"] = _IMMUTABLE_ASSET_CACHE_CONTROL
     return response

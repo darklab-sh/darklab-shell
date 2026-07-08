@@ -93,6 +93,30 @@ let exportedDarklabProjectWorkspaceEvents = null;
       return null;
     }
 
+    function actionLogDetails(action, button) {
+      return {
+        event: 'PROJECT_WORKSPACE_ACTION_FAILED',
+        level: 'warning',
+        action: String(action || '').slice(0, 80),
+        project_id: String(button?.dataset?.projectId || selectedProjectId() || '').slice(0, 160),
+        target_id: String(button?.dataset?.targetId || '').slice(0, 160),
+        run_id: String(button?.dataset?.runId || '').slice(0, 160),
+        artifact_id: String(button?.dataset?.artifactId || '').slice(0, 160),
+        package_id: String(button?.dataset?.packageId || '').slice(0, 160),
+        workspace_tab: workspaceTab(),
+      };
+    }
+
+    function isCancellationError(err) {
+      const message = String(err && err.message ? err.message : err || '').toLowerCase();
+      return message.includes('cancel') || message.includes('abort');
+    }
+
+    function logActionFailed(action, button, err) {
+      if (isCancellationError(err) || typeof ctx.logClientError !== 'function') return;
+      ctx.logClientError('project workspace action failed', err, actionLogDetails(action, button));
+    }
+
     function restoreHistoryRun() {
       if (typeof ctx.restoreHistoryRunIntoTab === 'function') return ctx.restoreHistoryRunIntoTab;
       if (typeof ctx.restoreHistoryRun === 'function') return ctx.restoreHistoryRun;
@@ -1263,14 +1287,35 @@ let exportedDarklabProjectWorkspaceEvents = null;
         } else if (action === 'unlink-run') {
           const runId = String(btn.dataset.runId || '').trim();
           if (!projectId || !runId) throw new Error('Run link is missing its identifier.');
-          const confirmed = await ctx.confirmProjectRunUnlink(btn.dataset.runCommand || '');
+          const confirmed = await ctx.confirmProjectRunUnlink(projectId, runId, btn.dataset.runCommand || '');
           if (!confirmed) return;
-          await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/links`, {
+          const unlinkResp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/links`, {
             method: 'DELETE',
-            body: JSON.stringify({ entity_type: 'run', entity_id: runId }),
+            body: JSON.stringify({
+              entity_type: 'run',
+              entity_id: runId,
+              ...(confirmed.includeEntities ? { include_entities: true } : {}),
+              ...(confirmed.includeCuratedEntities ? { include_curated_entities: true } : {}),
+            }),
           });
+          let unlinkData = {};
+          try {
+            unlinkData = typeof unlinkResp?.json === 'function'
+              ? await unlinkResp.json()
+              : (unlinkResp || {});
+          } catch (_) {
+            unlinkData = {};
+          }
           await ctx.refreshProjectWorkspace();
-          ctx.setProjectWorkspaceMessage('Run removed from project.');
+          const removedEntities = Number(unlinkData && unlinkData.unlinked_entities && unlinkData.unlinked_entities.removed || 0);
+          const removedCurated = Number(unlinkData && unlinkData.unlinked_entities && unlinkData.unlinked_entities.removed_curated || 0);
+          const entityLabel = removedEntities === 1 ? 'entity' : 'entities';
+          const curatedText = removedCurated > 0
+            ? `, including ${removedCurated.toLocaleString()} curated`
+            : '';
+          ctx.setProjectWorkspaceMessage(removedEntities > 0
+            ? `Run and ${removedEntities.toLocaleString()} same-run Atlas ${entityLabel}${curatedText} removed from project.`
+            : 'Run removed from project.');
           return;
         } else if (action === 'open-finding') {
           const runId = String(btn.dataset.runId || '').trim();
@@ -1359,6 +1404,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         await ctx.refreshProjectWorkspace();
         if (successMessage) ctx.setProjectWorkspaceMessage(successMessage);
       } catch (err) {
+        logActionFailed(action, btn, err);
         ctx.setProjectWorkspaceMessage(err.message || 'Project action failed.', { error: true });
       }
     }

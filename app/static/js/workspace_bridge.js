@@ -1,5 +1,6 @@
 // Neutral workspace boundary for shell modules that need Files actions without
 // importing the full Files panel into the initial shell graph.
+import { logClientError as importedLogClientError } from './runtime_bridge.js';
 
 const WORKSPACE_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -20,6 +21,7 @@ const workspaceHandlers = {
   workspaceCanWrite: null,
 };
 let workspaceLoadPromise = null;
+const workspaceMissingHandlersLogged = new Set();
 
 function setWorkspaceHandlers(handlers = {}) {
   Object.keys(workspaceHandlers).forEach((name) => {
@@ -85,6 +87,16 @@ async function _loadWorkspaceSurface(requiredHandler = '') {
         if (moduleApi && typeof moduleApi === 'object') setWorkspaceHandlers(moduleApi);
         return moduleApi;
       })
+      .catch((err) => {
+        if (typeof importedLogClientError === 'function') {
+          importedLogClientError('workspace surface load failed', err, {
+            event: 'WORKSPACE_SURFACE_LOAD_FAILED',
+            level: 'error',
+            operation: String(requiredHandler || 'loadWorkspaceSurface').slice(0, 120),
+          });
+        }
+        throw err;
+      })
       .finally(() => {
         workspaceLoadPromise = null;
       });
@@ -97,6 +109,16 @@ async function _callLoadedWorkspace(name, args) {
   if (typeof fn !== 'function') {
     await _loadWorkspaceSurface(name);
     fn = _workspaceHandler(name);
+  }
+  if (typeof fn !== 'function' && !workspaceMissingHandlersLogged.has(name)) {
+    workspaceMissingHandlersLogged.add(name);
+    if (typeof importedLogClientError === 'function') {
+      importedLogClientError('workspace handler missing', null, {
+        event: 'WORKSPACE_HANDLER_MISSING',
+        level: 'error',
+        operation: String(name || '').slice(0, 120),
+      });
+    }
   }
   return typeof fn === 'function' ? fn(...args) : undefined;
 }

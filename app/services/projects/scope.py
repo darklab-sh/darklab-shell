@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 
+# Personal-scope predicates intentionally use team_id = '' so they match the
+# partial indexes; schema and migration tests guard that team_id never stays NULL.
 def normalize_team_id(team_id: str | None) -> str:
     return str(team_id or "").strip()
 

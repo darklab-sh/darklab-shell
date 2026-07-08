@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, TypeVar
 
 from core.database_access import get_db_backend, get_db_connect
@@ -79,6 +80,7 @@ from services.projects.metadata import (
     attach_finding_triage_details,
     finding_triage_verification_status_filter_sql_and_params,
 )
+from services.query_debug import log_atlas_entities_list_debug, log_atlas_findings_list_debug, query_debug_started
 from services.storage.transactions import run_read, run_transaction
 
 
@@ -94,6 +96,7 @@ ENTITY_DETAIL_RUN_LIMIT = 50
 ENTITY_DETAIL_FINDING_LIMIT = 50
 ENTITY_DETAIL_RELATED_URL_LIMIT = 25
 _T = TypeVar("_T")
+log = logging.getLogger("shell")
 
 
 def run_atlas_read(callback: Callable[[Any], _T]) -> _T:
@@ -437,14 +440,10 @@ def list_findings(
     include_total: bool = False,
     include_counts: bool | None = None,
 ) -> dict[str, Any]:
+    debug_started_at = query_debug_started(log)
     search = str(query or "").strip()
     search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
-    search_columns = [
-        "f.title",
-        "f.raw_line",
-        "f.tool_root",
-        "e.canonical_value",
-    ]
+    search_columns = ["f.title", "f.raw_line", "f.tool_root", "e.canonical_value"]
     metadata_params = _metadata_owner_params(session_id, team_id)
     search_exprs = _finding_metadata_search_exprs(team_id)
     search_clause = _atlas_search_clause(search_columns, search_exprs)
@@ -586,19 +585,14 @@ def list_findings(
             ],
         ).fetchall()
     findings = [_row_to_finding(row) for row in rows]
-    sources_by_finding = _finding_import_sources_by_id(
-        conn,
-        session_id,
-        [finding["id"] for finding in findings],
-        team_id=team_id,
-    )
+    sources_by_finding = _finding_import_sources_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)
-    return {
+    result = {
         "findings": findings,
         "total": total,
         "limit": page_limit,
@@ -608,6 +602,8 @@ def list_findings(
         "counts": counts,
         "counts_exact": bool(include_counts),
     }
+    log_atlas_findings_list_debug(log, debug_started_at, locals(), row_count=len(findings))
+    return result
 
 
 def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "") -> dict[str, Any] | None:
@@ -687,6 +683,7 @@ def list_entities(
     offset: int = 0,
     include_total: bool = False,
 ) -> dict[str, Any]:
+    debug_started_at = query_debug_started(log)
     normalized_type = str(entity_type or "").strip().lower()
     if normalized_type not in ATLAS_ENTITY_TYPES:
         normalized_type = ""
@@ -823,7 +820,7 @@ def list_entities(
         item["labels"] = metadata.get("labels", [])
         item["project_link_count"] = int(metadata.get("project_link_count") or 0)
         entities.append(item)
-    return {
+    result = {
         "entities": entities,
         "total": total,
         "limit": page_limit,
@@ -831,6 +828,8 @@ def list_entities(
         "has_more": has_more,
         "total_exact": total_exact,
     }
+    log_atlas_entities_list_debug(log, debug_started_at, locals(), row_count=len(entities))
+    return result
 
 
 def entity_detail(

@@ -219,6 +219,7 @@ function loadAtlas({
   apiFetchInterceptor = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
+  closeMajorOverlaysImpl = vi.fn(),
   useRealSelectEnhancer = false,
   activeTeamScopeCanImpl = () => true,
   teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
@@ -542,6 +543,7 @@ function loadAtlas({
         },
         refocusComposerAfterAction: vi.fn(),
         openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
+        closeMajorOverlays: closeMajorOverlaysImpl,
         downloadBlobAsAttachment,
         activeTeamScopeCan: activeTeamScopeCanImpl,
         teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
@@ -567,6 +569,7 @@ function loadAtlas({
           window.enhanceAppSelects = enhanceAppSelects;
         }
         window.emitUiEvent = emitUiEvent;
+        window.closeMajorOverlays = closeMajorOverlays;
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
@@ -591,6 +594,7 @@ function loadAtlas({
     showToast,
     logClientError,
     openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
+    closeMajorOverlays: closeMajorOverlaysImpl,
     syncAppSelect,
     enhanceAppSelects,
     downloadBlobAsAttachment,
@@ -856,6 +860,15 @@ describe('Atlas overlay', () => {
     )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_url', expect.objectContaining({ cache: 'no-store' }))
     expect(document.getElementById('atlas-detail')?.textContent).toContain('curl https://107.178.109.44/login')
+  })
+
+  it('does not close its own fallback shell while finishing a first open', async () => {
+    const closeMajorOverlays = vi.fn()
+    const { openAtlas } = loadAtlas({ closeMajorOverlaysImpl: closeMajorOverlays })
+
+    await openAtlas({ source: 'test' })
+
+    expect(closeMajorOverlays).toHaveBeenCalledWith({ skipAtlas: true })
   })
 
   it('previews and applies an Atlas import from a project-scoped Atlas surface', async () => {

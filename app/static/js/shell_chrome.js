@@ -178,6 +178,28 @@ let importedProjectWorkspaceShell;
     return typeof open === 'function' ? open(...args) : undefined;
   }
 
+  function _reportSurfaceOpenFailure(surface, err, { source = '' } = {}) {
+    const normalized = String(surface || '').toLowerCase();
+    const label = normalized === 'atlas' ? 'Atlas' : 'Projects';
+    const event = normalized === 'atlas' ? 'ATLAS_OPEN_FAILED' : 'PROJECT_WORKSPACE_OPEN_FAILED';
+    _shellLogClientError(`failed to open ${label}`, err, {
+      event,
+      level: 'error',
+      source,
+    });
+    _shellShowToast(`Failed to open ${label}. Please try again.`, 'error');
+  }
+
+  function _openAtlasFromSurface(source = '') {
+    void _shellOpenAtlas({ source })
+      .catch((err) => _reportSurfaceOpenFailure('atlas', err, { source }));
+  }
+
+  function _openProjectWorkspaceFromSurface(source = '') {
+    void openProjectWorkspace()
+      .catch((err) => _reportSurfaceOpenFailure('projects', err, { source }));
+  }
+
   async function _shellOpenCommandRegistry(...args) {
     const registry = await _shellLoadLazyModal(importedLoadCommandRegistry, 'loadCommandRegistry');
     const open = registry?.openCommandRegistry || _shellFn('openCommandRegistry', importedOpenCommandRegistry);
@@ -378,7 +400,7 @@ let importedProjectWorkspaceShell;
     if (!projectWorkspaceDomPromise) {
       projectWorkspaceDomPromise = fetch(PROJECT_WORKSPACE_FRAGMENT_URL, {
         credentials: 'same-origin',
-        cache: 'force-cache',
+        cache: 'no-cache',
       })
         .then((resp) => {
           if (!resp || !resp.ok) {
@@ -889,7 +911,7 @@ let importedProjectWorkspaceShell;
     }
     const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
     if (action === 'atlas') {
-      void _shellOpenAtlas({ source: 'rail' });
+      _openAtlasFromSurface('rail');
       return;
     }
     if (action === 'findings-board') {
@@ -913,7 +935,7 @@ let importedProjectWorkspaceShell;
       return;
     }
     if (action === 'projects') {
-      void openProjectWorkspace();
+      _openProjectWorkspaceFromSurface('rail');
       return;
     }
     if (action === 'options' && typeof importedOpenOptions === 'function') {
@@ -964,7 +986,7 @@ let importedProjectWorkspaceShell;
     event?.preventDefault?.();
     event?.stopPropagation?.();
     closeHudProjectMenu();
-    void openProjectWorkspace();
+    _openProjectWorkspaceFromSurface('hud_menu');
   }
 
   function _canCreateProjectFromHud() {
@@ -1115,7 +1137,7 @@ let importedProjectWorkspaceShell;
       return;
     }
     closeHudProjectMenu();
-    void openProjectWorkspace();
+    _openProjectWorkspaceFromSurface('hud_create');
   }
 
   function _renderHudProjectMenuProjects(projects, query = '') {
@@ -3136,8 +3158,8 @@ let importedProjectWorkspaceShell;
       renderProjectWorkspace: _renderProjectWorkspace,
       syncProjectNotesForm: _syncProjectNotesForm,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
-      logClientError: (message, err) => {
-        _shellLogClientError(message, err);
+      logClientError: (message, err, details) => {
+        _shellLogClientError(message, err, details);
       },
     });
     return projectWorkspaceLifecycleController;
@@ -3265,6 +3287,7 @@ let importedProjectWorkspaceShell;
       toggleFindingGroup: projectWorkspaceState.toggleFindingGroup,
       toggleMobileArchivedOpen: _toggleProjectMobileArchivedOpen,
       workspaceTab: projectWorkspaceState.tab,
+      logClientError: _shellLogClientError,
     });
     return projectWorkspaceEventsController;
   }
@@ -4569,6 +4592,16 @@ let importedProjectWorkspaceShell;
     };
   }
 
+  function _settleProjectWorkspaceInitialLoad(initialLoad) {
+    if (!initialLoad || typeof initialLoad !== 'object') return;
+    [
+      initialLoad.projectsResp,
+      initialLoad.activeContext,
+    ].forEach((promise) => {
+      if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+    });
+  }
+
   function _scheduleProjectWorkspaceExternalRefresh() {
     if (!_projectWorkspaceModulesReady()) {
       if (!_projectWorkspaceOverlayOpenFallback()) return;
@@ -4606,10 +4639,24 @@ let importedProjectWorkspaceShell;
       }
       _shellFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.('projects', projectWorkspaceOverlay, projectWorkspaceModal);
     }
-    await _ensureProjectWorkspaceModules();
-    if (openToken !== projectWorkspaceOpenToken) return false;
-    await _projectWorkspaceShellController().open({ refreshOptions: { initialLoad } });
+    try {
+      await _ensureProjectWorkspaceModules();
+    } catch (err) {
+      _settleProjectWorkspaceInitialLoad(initialLoad);
+      throw err;
+    }
     if (openToken !== projectWorkspaceOpenToken) {
+      _settleProjectWorkspaceInitialLoad(initialLoad);
+      return false;
+    }
+    try {
+      await _projectWorkspaceShellController().open({ refreshOptions: { initialLoad } });
+    } catch (err) {
+      _settleProjectWorkspaceInitialLoad(initialLoad);
+      throw err;
+    }
+    if (openToken !== projectWorkspaceOpenToken) {
+      _settleProjectWorkspaceInitialLoad(initialLoad);
       _projectWorkspaceShellController().close({ refocus: false });
       return false;
     }
@@ -4734,9 +4781,9 @@ let importedProjectWorkspaceShell;
       .then(controller => controller.confirmTargetDelete(targetValue));
   }
 
-  function _confirmProjectRunUnlink(runCommand) {
+  function _confirmProjectRunUnlink(projectId, runId, runCommand) {
     return _loadProjectWorkspaceActionsController()
-      .then(controller => controller.confirmRunUnlink(runCommand));
+      .then(controller => controller.confirmRunUnlink(projectId, runId, runCommand));
   }
 
   function _confirmProjectPackageDelete(packageName) {

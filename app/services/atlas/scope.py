@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 
+# Personal-scope predicates intentionally use team_id = '' so they match the
+# partial indexes; schema and migration tests guard that team_id never stays NULL.
 def _sql_join(parts: tuple[str, ...]) -> str:
     return "".join(parts)
 

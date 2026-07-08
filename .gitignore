@@ -32,6 +32,7 @@ app/static/build/*
 !app/static/build/*.gz
 !app/static/build/*.ico
 !app/static/build/*.js
+!app/static/build/*.map
 !app/static/build/*.ttf
 !app/static/build/*.woff2
 !app/static/build/manifest.json

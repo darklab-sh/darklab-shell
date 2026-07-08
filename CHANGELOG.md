@@ -6,6 +6,47 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.5] - Unreleased
+
+### Changed
+
+- **Initial shell startup and first-open surfaces are lighter** — The initial page now ships less inactive UI, while first-use surfaces still open with the same polished behavior.
+  - Feature-owned styles for Projects, Atlas, Command Registry, Run Comparison, Schedules, Status Monitor, Watchers, Workflows, and Files load with their first-use modules instead of blocking the first shell paint.
+  - Atlas and Projects mount their large modal shells from first-use HTML fragments, while Schedules, Watchers, and Findings Board create their modal shells when their feature modules load.
+  - Finding triage, styled HTML/PDF export, terminal tour commands, Files, and Playwright-only test hooks use lighter bridges or runtime gates so their full controllers stay off the initial shell path until needed.
+  - Source asset mode keeps JS module URLs unversioned, generated bundle-mode ESM ships minified code with linked source maps, and hashed build assets serve committed Brotli/gzip siblings by content negotiation.
+  - Browser-facing fonts use WOFF2 on the shell path, `ansi_up.js` defers, and jsPDF still gets the TrueType files it needs for PDF export.
+  - Projects starts controller imports, the first project list, and active-project context together; Atlas shows its overlay shell immediately, starts its summary/list requests early, and keeps detail/mobile/board controllers out of the first-open path.
+  - **Tests:** route, browser-unit, asset, source-mode Playwright, and mobile Playwright coverage verifies the lighter shell, lazy fragments/styles, bundle/source URL contracts, compression, source maps, first-open behavior, and Files/triage/export/tour bridge boundaries.
+
+- **Project and Atlas first-page reads are cheaper** — The hot list paths now match their indexes and avoid broad count work until callers need it.
+  - Personal Atlas and Project reads use the same explicit personal-team predicate as their partial indexes, with startup normalization for legacy personal rows that still have `NULL` team IDs.
+  - Project and Atlas first-open sort paths have dedicated SQLite/Postgres indexes, and run file artifact lookups use run-id-leading indexes where the existing primary key does not already cover the path.
+  - Project list count loading rolls up the visible page from scoped run/entity links and indexed artifact/finding lookups instead of running the previous broad `COUNT(DISTINCT)` union.
+  - Atlas entity and finding pages use `limit + 1` paging by default and defer exact totals/status buckets unless a caller asks for them; API v1 keeps exact totals for headless clients.
+  - Initial shell boot and first-open modal paths share in-flight workflow catalog, Files list, and active Project context loads, and anonymous personal sessions skip the boot-only Teams refresh until team UI needs it.
+  - **Tests:** SQLite/Postgres query-plan coverage, Project route coverage, Atlas route/browser coverage, and browser-unit tests verify index selection, exact-total opt-in, lower-bound pagination, Project count/finding summary parity, request coalescing, and current source/bundle asset contracts.
+
+- **Performance diagnostics are safer and more useful** — Startup and first-use paths now emit bounded context when they fail without logging raw search text or query-string secrets.
+  - Missing generated build assets, lazy module contract failures, Atlas/Projects preload/request failures, Project workspace action failures, and Files lazy-surface failures log structured event names with bounded IDs, route names, asset names, status, and timing context.
+  - Project, Project metrics, and Atlas list services emit DEBUG-level timing and branch details for the new pagination/count paths so operators can troubleshoot regressions without turning normal large-list views into warning noise.
+
+### Fixed
+
+- **First-open modal behavior stays polished after the startup trim** — The lazy shell changes now preserve the pre-trim visual and interaction details.
+  - Theme selector alignment, Run Details entity rows, Project Runs/Findings placeholders, main-terminal Atlas entity highlights, and Atlas entity tab auto-selection render correctly on first load.
+  - Atlas keeps its own fallback shell open while the first-use controller finishes loading, so the import dialog no longer closes itself while previewing a browser import on first open.
+  - Atlas and Projects first-open prefetches settle quietly when an open is canceled or module loading fails, and fragment failures show a retryable error toast plus bounded client context instead of leaving a silent rejected promise.
+  - Project cleanup and unlink confirmations distinguish disposable and curated same-run Atlas rows more clearly, and Project Runs tab removals send the selected cleanup flags before summarizing removed entity counts.
+
+- **Optimized Project and API paths keep their old behavior** — The performance work preserves the important edge cases around paging, team scope, and command discovery.
+  - API v1 team Project finding lists include cross-member findings reachable through authorized team Project run/entity links, matching Project count and finding-summary rollups.
+  - Project list pagination keeps limit handling active even when Python runs with assertions disabled.
+  - Pending command-discovered Project targets are treated as disposable same-run entities unless another curation signal exists, so fresh command targets do not pull same-run findings into the curated cleanup bucket.
+  - Build asset compression sidecars are generated from a deterministic source-size rule, so tiny source maps do not look stale on CI when Node/zlib patch versions disagree about whether gzip saves a byte.
+
+---
+
 ## [2.4] — 2026-07-06
 
 ### Added
@@ -51,73 +92,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Initial shell render path is lighter** — Feature-owned styles for Projects, Atlas, Command Registry, Run Comparison, Schedules, Status Monitor, Watchers, Workflows, and Files now load with their first-use modules instead of blocking the first shell paint.
-  - Schedules, Watchers, and Findings Board now create their modal shells when their feature modules load, then bind their own focus traps, dismissible behavior, and mobile sheet gestures.
-  - Atlas and Projects now mount their large modal shells from first-use HTML fragments before their lazy controllers bind, so the initial document no longer ships those closed surfaces.
-  - Project first-use focus trapping now uses the imported UI helper directly during fragment bootstrap, keeping the browser-boundary inventory unchanged while preserving keyboard containment after the modal mounts.
-  - Shortcut coverage now treats the Project workspace fragment as absent before first open, matching the lazy shell behavior while still verifying Alt+P toggles the mounted modal.
-  - Moving the Atlas and Projects shells drops the source `index.html` file from 107.7 KB to 84.9 KB in the current checkout, while a bundle-mode first-open timing probe keeps Projects at 72 ms to overlay and 112 ms to content, and Atlas at 67 ms to overlay and 70 ms to content on the local test run.
-  - Atlas first open now shows the overlay shell before its controller finishes loading, starts the summary and first list requests immediately, and keeps entity detail, mobile Atlas, and the full Findings Board controller off the first-open path until those views are used.
-  - The immediate Atlas shell now handles Escape during the pre-controller load window, so a fast close gesture no longer gets swallowed before the real dismissible bindings are ready.
-  - Core mobile shell layout rules stay on the initial CSS path, so lazy-loading the Status Monitor stylesheet no longer lets desktop chrome overlap the mobile transcript or steal taps from the mobile composer.
-  - **Tests:** updated index-route asset coverage, refreshed the committed build output, exercised the lazy source-mode smoke path plus focused browser unit coverage, and reran the full mobile Playwright spec in bundle mode.
-- Run Details entity rows now keep their Atlas-style layout on first load, so entity values, hit/run metadata, and project badges align correctly before the full Atlas stylesheet has loaded.
-- Atlas entity tabs now auto-select the first loaded entity and populate the details panel again when switching to IPs, Domains, Ports, Hashes, CVEs, or URLs.
-- Run removal confirmations now hide the disposable same-run Atlas cleanup checkbox when a linked run only has curated same-run entities, leaving the curated cleanup option visible with standalone wording.
-- Run removal previews now treat pending command-discovered Project targets as disposable same-run entities unless another curation signal exists, so fresh command targets do not pull their same-run findings into the curated cleanup bucket.
-- API v1 team Project finding lists now include cross-member findings that are reachable through authorized team Project run/entity links, matching the Project count and finding-summary rollups.
-- Architecture guardrails now reflect the current static build route, post-baseline migration shape, and split-module baselines from the performance and index work.
-- Frontend module inventory now classifies the lazy Files bridge resolver helpers as the workspace bridge contract, so resolver-helper drift checks cover the new first-use Files boundary.
-- Finding triage now uses a lightweight bridge for Project, Atlas, and Findings board labels/actions, so the full remediation and verification editor stays out of the initial shell and loads only when a user opens triage.
-  - **Tests:** focused browser-module coverage verifies the triage editor, Atlas desktop/mobile paths, Project workspace triage actions, and frontend inventory guard still work with the lazy editor boundary.
-- HTML/PDF export formatting now uses a lightweight shell and permalink bridge, so the full export formatter stays out of the initial shell bundle and loads only for styled HTML/PDF exports.
-  - **Tests:** focused browser-module coverage verifies tab export, permalink export, PDF helper loading, shell bundle lazy-entry contracts, and frontend inventory guard still work with the lazy export boundary.
-- Terminal tour commands now route through a lightweight lazy bridge, so the terminal-guided tour implementation loads only when a user runs `tour`.
-- Playwright-only browser hooks now load through a tiny `navigator.webdriver` gate, keeping the E2E hook surface out of ordinary shell startup while preserving the test-only globals under Playwright.
-  - Together, the regenerated shell bundle is about 82.3 KB smaller raw, 21.2 KB smaller gzip, and 17.8 KB smaller Brotli than the previous committed bundle.
-- Source asset mode now keeps JS module URLs unversioned while leaving CSS, fonts, favicon, and classic vendor assets cache-busted, so lazy ES modules and their relative imports share one browser module identity instead of refetching the same source file under both plain and `?v=` URLs.
-  - **Tests:** route coverage verifies source-mode ESM entries and lazy module URLs stay unversioned while classic vendor assets keep versioned URLs; the source-mode lazy-surface smoke test now records JS requests and fails if a source module appears under duplicate URL identities.
-- Personal-scope migration SQL and Project list finding-summary queries now use analyzer-friendly static SQL statements or local SQL assembly helpers, clearing Bandit's B608 warnings while keeping caller values bound through parameters.
-- Asset build-file serving now imports Werkzeug's `safe_join` from its public module, clearing the Pylance private-import warning without changing the route behavior.
-- Personal Atlas and Project reads now use the same explicit personal-team predicate as their partial indexes, and startup normalizes legacy personal rows with `NULL` team IDs so SQLite and Postgres can keep those list, count, and slug lookups on indexed plans.
-  - **Tests:** focused SQLite and Postgres query-plan coverage verifies the representative personal Atlas entity/finding and Project owner predicates use the expected partial indexes, with migration coverage for the legacy `NULL` team-id normalization.
-- Project and Atlas first-open sort paths now have dedicated SQLite/Postgres indexes for Project name/archive/update ordering, Atlas entity recency ordering, Atlas finding review-state ordering, and team finding source-run lookups.
-  - Project list queries split the active project row from the normal ordered list so the remaining page can use the stable sort indexes, and Atlas entity paging now chooses the ordered page before counting source runs for those rows.
-  - **Tests:** SQLite and Postgres query-plan coverage verifies the new Project, Atlas entity, Atlas finding, and team finding indexes are selected for representative personal and team scopes.
-- Run file artifact lookups now have run-id-leading indexes for history decoration, run artifact pages, Project artifact counts/pages, run comparisons, and deletion cleanup.
-  - `run_output_artifacts.run_id` already has primary-key coverage, so output-artifact joins and latest-output lookups keep using that existing index instead of adding duplicate coverage.
-  - **Tests:** SQLite and Postgres query-plan coverage verifies the new run-file artifact indexes and existing run-output artifact primary-key index are selected for representative lookups.
-- Project list count loading now rolls up the visible page from scoped run/entity links and indexed artifact/finding lookups instead of running the previous broad `COUNT(DISTINCT)` union across linked runs, entities, findings, artifacts, packages, labels, and notes.
-  - Direct finding matches are split across `run_id`, `first_run_id`, and `last_run_id` lookups and deduped per project, so first-open Project counts stay fresh without relying on the expensive `OR` join.
-  - **Tests:** route coverage verifies Project list counts and finding summaries still match Project details, including direct-run findings that appear through more than one run-reference column.
-- First-open Projects lazy loading now starts the independent workspace controller imports in parallel, reducing the blank/loading gap between opening the modal and rendering the project list.
-  - **Tests:** the lazy-asset contract now verifies the Projects controller cluster starts every module import before any individual import resolves.
-- Projects now races the first list and active-project requests against the first-use controller imports, then hands that in-flight data into the workspace controller instead of starting a second request after the code loads.
-  - The first-open Project core covers the shell, list, details, navigation, filters, targets, lifecycle, and renderer; entities, findings, run pages, board UI, editors, nested sheets, actions, and mobile-only controllers load when those tabs or actions need them.
-  - **Tests:** browser-unit coverage verifies core Project loading, targeted deferred controller loading, label saves through the deferred action controller, and the updated frontend inventory budgets for the narrower first-open boundary.
-- Atlas entity and finding pages now use `limit + 1` paging by default and defer exact totals/status buckets until a caller asks for them, so first-open Atlas can render rows without repeating the same full count work.
-  - The Atlas pager now uses `has_more` for next-page navigation and marks lower-bound totals with a plus, while API v1 keeps exact totals and documents the paging metadata in the OpenAPI contract.
-  - **Tests:** route and browser-module coverage verifies deferred totals, exact-total opt-in, status-count opt-in, and estimated pagination labels.
-- Initial shell boot and first-open modal paths now share in-flight workflow catalog, Files list, and active Project context loads, while anonymous personal sessions skip the boot-only `/session/teams` refresh until the scope selector or Teams panel needs it.
-  - Manual Files refreshes still force a fresh file-list request, so user-triggered refresh behavior stays explicit after the passive startup de-duplication.
-  - **Tests:** browser-unit coverage verifies shared Files list loads, active Project context request coalescing, anonymous team-scope boot gating, and the existing workflow catalog de-duplication path.
-- Initial shell pages now defer the vendored `ansi_up.js` script, and load browser-facing fonts from WOFF2 files instead of raw TrueType.
-  - The first-paint CSS no longer advertises the export-only JetBrains Mono 300 face, the primary monospace WOFF2 face is preloaded through the same hashed asset helper as the rest of the shell, the asset build only publishes WOFF2 fonts as immutable build files, and PDF export keeps the TrueType files it needs for jsPDF.
-  - **Tests:** route coverage verifies source and bundle pages render the deferred classic script, WOFF2 font bundle URLs, and WOFF2/TTF vendor font route coverage; E2E assertions expect saved HTML exports to embed WOFF2 fonts; the README project-structure guard now follows locally deleted tracked files while validating the current checkout.
-- Bundle-mode shell loads now serve smaller generated assets and compressed transfer payloads instead of sending raw, unminified bundle bytes to browsers that advertise compression support.
-  - Hashed build assets emit minified ESM output plus committed Brotli and gzip siblings during `assets:sync`; `/static/build/...` serves those siblings by content negotiation while preserving immutable cache headers and hiding direct `.br`/`.gz` URLs.
-  - The Files panel and drag/drop helpers now load through the shared lazy asset runtime on first use, while terminal file commands, shortcuts, project artifact previews, mobile menu actions, and test hooks call through the lightweight Files bridge instead of pulling the full panel into the initial shell graph.
-  - **Tests:** route coverage verifies dynamic HTML gzip, Brotli/gzip build-asset negotiation, immutable cache headers, and direct compressed-sibling 404s; browser-unit coverage verifies the Files lazy surface loads from manifest URLs; `assets:check` verifies the committed minified and precompressed artifacts match the current build.
 - Runtime-injected command flags with no explicit position now keep the pre-split behavior of inserting immediately after the command root instead of drifting to the end of the command.
 - Split run and diagnostics route modules now import cleanly on their own, so route registration no longer depends on a fragile parent-first import order.
 - Atlas lookup routes now propagate patched database backends into the split lookup helper modules, so Postgres route tests and runtime paths use the intended dialect after the decomposition.
 - Project artifact and evidence-package query wrappers now propagate patched database connections into their split helper modules, preserving the established Postgres test seam after the decomposition.
-- The theme selector now loads with its drawer alignment and lighter backdrop on first open, instead of waiting for the workspace stylesheet to load later.
-  - **Tests:** the theme selector browser check verifies first-open drawer alignment before any lazy workspace surface is opened.
-- Project workspace tabs now clear first-load placeholders before lazy tab renderers append real content, and the Runs tab stays in a loading state when partial summaries or stale empty page caches are waiting on the server-backed run page.
-  - **Tests:** Projects browser and unit coverage verify linked run rows do not coexist with the empty Runs state, stale empty Runs pages refresh against the current summary count, and populated Findings views do not retain their loading placeholder.
-- Main terminal Atlas entity highlights now keep their compact green styling on first load instead of falling back to the generic gray chip style before the lazy Atlas stylesheet opens.
-  - **Tests:** output unit coverage verifies terminal Atlas token and context-menu styles live in the eager shell stylesheet rather than the lazy Atlas stylesheet.
 - Workspace cleanup now routes failed scanner-user `rm -rf` fallback attempts back through the inactive-workspace repair flow with bounded helper stderr, so stale scanner-owned files no longer cause repeated `WORKSPACE_CLEANUP_ERROR` loops.
   - **Tests:** added regression coverage for a scanner-owned workspace child where appuser removal fails, scanner-user removal returns non-zero, repair runs, and the expired workspace is still removed.
 - Diagnostics helper compatibility exports now stay visible on `blueprints.assets`, so existing route tests and monkeypatch seams keep working after the assets route split.

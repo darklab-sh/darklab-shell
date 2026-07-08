@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.projects.metadata import _metadata_owner_where
+from services.projects.owner_clauses import project_entity_owner_clause, project_finding_owner_clause
 from services.projects.scope import shared_owner_where
+from services.query_debug import log_project_list_metrics_debug, query_debug_started
 from services.runs.kinds import RUN_KIND_EXTERNAL
+
+log = logging.getLogger("shell")
 
 
 def empty_project_counts():
@@ -26,10 +31,7 @@ def empty_project_counts():
 
 
 def empty_project_finding_summary():
-    return {
-        "review_states": {},
-        "severities": {},
-    }
+    return {"review_states": {}, "severities": {}}
 
 
 def add_finding_summary_count(summary, *, review_state, severity, count):
@@ -77,25 +79,13 @@ def _record_project_finding(
     )
 
 
-def project_entity_owner_clause(session_id, team_id="", *, table_alias="e"):
-    if team_id:
-        return "", ()
-    prefix = f"{table_alias}." if table_alias else ""
-    return f"AND {prefix}session_id = ? AND {prefix}team_id = '' ", (session_id,)
-
-
-def project_finding_owner_clause(session_id, team_id="", *, table_alias="f"):
-    if team_id:
-        return "", ()
-    prefix = f"{table_alias}." if table_alias else ""
-    return f"AND {prefix}session_id = ? AND {prefix}team_id = '' ", (session_id,)
-
-
 def project_list_metrics(conn, session_id, project_ids, *, team_id=""):
+    debug_started_at = query_debug_started(log)
     ids = [str(project_id) for project_id in project_ids if project_id]
     counts = {project_id: empty_project_counts() for project_id in ids}
     finding_summaries = {project_id: empty_project_finding_summary() for project_id in ids}
     if not ids:
+        log_project_list_metrics_debug(log, debug_started_at, 0, 0, 0, 0, 0, bool(team_id))
         return counts, finding_summaries
     dialect = dialect_for_backend(get_db_backend())
     project_filter_sql, project_filter_params = dialect.in_clause("l.project_id", ids)
@@ -148,7 +138,9 @@ def project_list_metrics(conn, session_id, project_ids, *, team_id=""):
                 project_counts["targets"] += 1
 
     all_run_ids = sorted(run_project_ids)
+    run_chunk_count = 0
     for run_id_chunk in _chunks(all_run_ids):
+        run_chunk_count += 1
         run_filter_sql, run_filter_params = dialect.in_clause("run_id", run_id_chunk)
         for row in conn.execute(
             "SELECT run_id, COUNT(*) AS count FROM run_file_artifacts "  # nosec
@@ -225,7 +217,9 @@ def project_list_metrics(conn, session_id, project_ids, *, team_id=""):
                     )
 
     all_entity_ids = sorted(entity_project_ids)
+    entity_chunk_count = 0
     for entity_id_chunk in _chunks(all_entity_ids):
+        entity_chunk_count += 1
         entity_filter_sql, entity_filter_params = dialect.in_clause("f.entity_id", entity_id_chunk)
         for row in conn.execute(
             "SELECT f.entity_id, f.id AS finding_id, "
@@ -265,4 +259,8 @@ def project_list_metrics(conn, session_id, project_ids, *, team_id=""):
     ).fetchall():
         counts[str(row["project_id"])]["notes"] = int(row["count"] or 0)
 
+    log_project_list_metrics_debug(
+        log, debug_started_at, len(ids), len(all_run_ids), len(all_entity_ids),
+        run_chunk_count, entity_chunk_count, bool(team_id),
+    )
     return counts, finding_summaries
