@@ -952,7 +952,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── styles.css      # Compatibility CSS entrypoint; templates link modular CSS files directly
 │   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
-│   │   ├── favicon.svg         # Site favicon
+│   │   ├── favicon.ico         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
 │   │   ├── fragments/
 │   │   │   ├── atlas_overlay.html # First-use Atlas modal shell

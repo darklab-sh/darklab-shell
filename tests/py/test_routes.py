@@ -327,7 +327,7 @@ class TestIndexRoute:
             body = client.get("/").get_data(as_text=True)
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'type="module" src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
-        assert re.search(r'href="/static/build/static-favicon\.[a-f0-9]{12}\.svg"', body)
+        assert re.search(r'href="/static/build/static-favicon\.[a-f0-9]{12}\.ico"', body)
         assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
         assert (
             "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
@@ -12239,6 +12239,14 @@ class TestVendorAssets:
         assert resp.status_code == 200
         assert "text/css" in resp.content_type
         self._assert_immutable_asset_cache(resp)
+
+    def test_favicon_ico_is_served(self):
+        client = get_client()
+        resp = client.get("/favicon.ico")
+        assert resp.status_code == 200
+        assert "image/x-icon" in resp.content_type
+        source_path = Path(__file__).resolve().parents[2] / "app" / "static" / "favicon.ico"
+        assert resp.data == source_path.read_bytes()
 
     def test_built_css_bundle_is_served_with_immutable_cache_header(self):
         client = get_client()

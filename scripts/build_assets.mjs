@@ -303,7 +303,7 @@ function configuredStandaloneSources() {
     ...((Array.isArray(config.lazy) ? config.lazy : [])),
     ...((Array.isArray(config.excluded) ? config.excluded : [])),
   ]);
-  sources.add('/static/favicon.svg');
+  sources.add('/static/favicon.ico');
   const fontRoot = resolve(ROOT, 'app/static/fonts');
   for (const rel of collectStaticFiles(fontRoot)) {
     if (!rel.endsWith('.woff2')) continue;

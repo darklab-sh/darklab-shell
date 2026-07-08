@@ -4,7 +4,7 @@ Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 
 import logging
 import mimetypes
-import os
+import os  # noqa: F401 - compatibility seam for diagnostics tests.
 import shutil  # noqa: F401 - compatibility seam for diagnostics tests.
 import time
 from pathlib import Path
@@ -321,8 +321,8 @@ def vendor_fonts(filename):
 @assets_bp.route("/favicon.ico")
 def favicon():
     return send_file(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "favicon.svg"),
-        mimetype="image/svg+xml",
+        Path(__file__).resolve().parent.parent / "static" / "favicon.ico",
+        mimetype="image/x-icon",
     )
 
 

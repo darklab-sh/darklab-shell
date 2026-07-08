@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,003
+- behavior tests: 4,004
 - docs/inventory meta-tests: 63
-- `pytest`: 2319 (2269 behavior + 50 meta)
+- `pytest`: 2320 (2270 behavior + 50 meta)
 - `vitest`: 1478 (1465 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,066
+- total: 4,067
 
 This document is organized in two parts:
 
@@ -1865,6 +1865,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
+| `TestVendorAssets.test_favicon_ico_is_served` | Verifies the browser favicon route serves the restored ICO asset. |
 | `TestVendorAssets.test_built_css_bundle_is_served_with_immutable_cache_header` | Verifies generated CSS bundles are served with the immutable static-asset cache header. |
 | `TestVendorAssets.test_built_assets_use_precompressed_variants_when_accepted` | Verifies generated build assets negotiate committed Brotli/gzip siblings while keeping direct compressed-sibling URLs hidden. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |

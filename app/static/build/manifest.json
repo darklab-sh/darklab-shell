@@ -617,9 +617,9 @@
       "path": "/static/build/static-styles.5ebac6464907.css",
       "hash": "5ebac6464907623a2d0dd8fc4071c16a617a75a451bf2378295ee04d933a4b14"
     },
-    "/static/favicon.svg": {
-      "path": "/static/build/static-favicon.de2731ee0935.svg",
-      "hash": "de2731ee09356d93f2b4142fcb8995f74c61a352042c8950bfb517334d5de671"
+    "/static/favicon.ico": {
+      "path": "/static/build/static-favicon.8185782f11d9.ico",
+      "hash": "8185782f11d9cc03a4d5b5160564e0a8a9ee4787fbac1fbfd02410e14dd5cee8"
     },
     "/static/js/features/workspace/workspace_viewer_formats.js": {
       "path": "/static/build/static-workspace-viewer-formats.0f2803d919cb.js",

@@ -609,7 +609,7 @@ Saving the default empty payload deletes the stored triage row instead of keepin
 | `GET` | `/vendor/xterm-addon-fit.js` | Serves the vendored xterm fit addon used to size interactive PTY terminals. |
 | `GET` | `/vendor/xterm.css` | Serves the vendored xterm stylesheet used by interactive PTY terminals. |
 | `GET` | `/vendor/fonts/<path:filename>` | Serves only committed font files from the vendored font manifest. |
-| `GET` | `/favicon.ico` | Serves the SVG site favicon for browser compatibility. |
+| `GET` | `/favicon.ico` | Serves the site favicon for browser compatibility. |
 | `GET` | `/health` | Returns Docker/load-balancer health with DB and optional Redis checks; degraded dependencies return 503. |
 | `GET` | `/status` | Returns lightweight HUD status data for uptime, DB, Redis, and server time; always responds 200. |
 | `GET` | `/diag` | Serves IP-gated operator diagnostics as HTML or JSON; returns 404 outside `diagnostics_allowed_cidrs`. |
@@ -2237,12 +2237,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,003
+- behavior tests: 4,004
 - docs/inventory meta-tests: 63
-- `pytest`: 2319 (2269 behavior + 50 meta)
+- `pytest`: 2320 (2270 behavior + 50 meta)
 - `vitest`: 1478 (1465 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,066
+- total: 4,067
 
 ### Testing Architecture
 
