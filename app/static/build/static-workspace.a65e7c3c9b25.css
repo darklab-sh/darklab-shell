@@ -528,11 +528,3 @@
     flex-direction: column;
   }
 }
-
-#theme-overlay {
-  align-items: stretch;
-  justify-content: flex-end;
-  background: color-mix(in srgb, var(--theme-overlay-backdrop-bg) 24%, transparent);
-  backdrop-filter: blur(1px);
-  -webkit-backdrop-filter: blur(1px);
-}

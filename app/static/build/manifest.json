@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.7d812e1c1257.css",
-      "hash": "7d812e1c125743a41a6007e6b01ea1aa35f4ec01885e05eb9de6fb1f211daef8",
+      "path": "/static/build/app.da8362f32f77.css",
+      "hash": "da8362f32f775ac0d4f7373cc8675bb3db5dba731916b5195e2a0e0e3ef4d57b",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -21,7 +21,7 @@
       "source_hashes": {
         "/static/css/core/fonts.css": "233ca59974a307e4cda3fb06dc84bf8e15be6d85a2a98f6c9a97c75eafcbb3c9",
         "/static/css/core/base.css": "464c49db31fea00c6762c2cd90c43cb0a9a5d5c3e09bfbcabf7ff38cfc00c914",
-        "/static/css/shell.css": "8030ff38cf960e8fd3c4fa588ddf3fa1411e5a5cb5f0c8f6116ed41f129a52c5",
+        "/static/css/shell.css": "5c1e257c040974c5630b28626bf63939601b36c22b87a246a311654b16e01b20",
         "/static/css/primitives/components.css": "f5ad470e888d4914ab56407ee1223aae55a82b98a03bded2d4f6ec3c4c72c192",
         "/static/css/welcome.css": "5cdb6be8622e40fd25261ce6eca5c40b0453e039333038aeef63e361d85b325f",
         "/static/css/shell-chrome.css": "04a9131c01be1c8555006a8df822969921c319569c8188973fa13da2b58ce12e",
@@ -610,8 +610,8 @@
       "hash": "edd48bf98077ab8f8011084f02e58a06a1262f9d9f9173d7036bf6e91c7c02e2"
     },
     "/static/css/features/workspace.css": {
-      "path": "/static/build/static-workspace.894a8f9e448e.css",
-      "hash": "894a8f9e448e0025b2be3c7e9ba4df9feaa91bed99e4c3c614ac29f682b1c864"
+      "path": "/static/build/static-workspace.a65e7c3c9b25.css",
+      "hash": "a65e7c3c9b25f8ba201b5abbc284b892b5978edfe5bd616da604b2239b34561e"
     },
     "/static/css/styles.css": {
       "path": "/static/build/static-styles.5ebac6464907.css",

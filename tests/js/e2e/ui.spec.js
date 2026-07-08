@@ -369,6 +369,8 @@ test.describe('theme selector', () => {
   test('clicking the theme button opens the theme selector', async ({ page }) => {
     await openRailAction(page, 'theme')
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#theme-overlay')).toHaveCSS('align-items', 'stretch')
+    await expect(page.locator('#theme-overlay')).toHaveCSS('justify-content', 'flex-end')
     await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
   })
 

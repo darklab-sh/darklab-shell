@@ -108,6 +108,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Split run and diagnostics route modules now import cleanly on their own, so route registration no longer depends on a fragile parent-first import order.
 - Atlas lookup routes now propagate patched database backends into the split lookup helper modules, so Postgres route tests and runtime paths use the intended dialect after the decomposition.
 - Project artifact and evidence-package query wrappers now propagate patched database connections into their split helper modules, preserving the established Postgres test seam after the decomposition.
+- The theme selector now loads with its drawer alignment and lighter backdrop on first open, instead of waiting for the workspace stylesheet to load later.
+  - **Tests:** the theme selector browser check verifies first-open drawer alignment before any lazy workspace surface is opened.
 - Workspace cleanup now routes failed scanner-user `rm -rf` fallback attempts back through the inactive-workspace repair flow with bounded helper stderr, so stale scanner-owned files no longer cause repeated `WORKSPACE_CLEANUP_ERROR` loops.
   - **Tests:** added regression coverage for a scanner-owned workspace child where appuser removal fails, scanner-user removal returns non-zero, repair runs, and the expired workspace is still removed.
 - Diagnostics helper compatibility exports now stay visible on `blueprints.assets`, so existing route tests and monkeypatch seams keep working after the assets route split.
