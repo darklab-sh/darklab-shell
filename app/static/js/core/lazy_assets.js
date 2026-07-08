@@ -1,7 +1,13 @@
 // Shared lazy asset loader for rarely-used scripts and modules.
 import { getAppConfig as importedGetAppConfig } from './config.js';
 import { emitUiEvent as importedEmitUiEvent } from './state.js';
-import { setAtlasHandlers as importedSetAtlasHandlers } from '../features/atlas/atlas_bridge.js';
+import {
+  getAtlasDetailController as importedGetAtlasDetailController,
+  setAtlasDetailHandlers as importedSetAtlasDetailHandlers,
+  setAtlasDetailLoader as importedSetAtlasDetailLoader,
+  setAtlasHandlers as importedSetAtlasHandlers,
+} from '../features/atlas/atlas_bridge.js';
+import { setAtlasMobileLoader as importedSetAtlasMobileLoader } from '../features/atlas/atlas_mobile_bridge.js';
 import { setWorkflowHandlers as importedSetWorkflowHandlers } from '../features/workflows/workflows_bridge.js';
 import { setHistoryCompareHandlers as importedSetHistoryCompareHandlers } from '../features/run-comparison/history_compare_bridge.js';
 import { setCommandRegistryHandlers as importedSetCommandRegistryHandlers } from '../features/command-registry/command_registry_bridge.js';
@@ -39,6 +45,7 @@ let exportedLoadWatchersModal = null;
       beforeId: 'history-panel',
     },
   };
+  let _atlasShellFallbackHandle = null;
 
   function _logLazyAssetConfigInvalid(err) {
     if (_lazyAssetConfigInvalidLogged || typeof importedLogClientError !== 'function') return;
@@ -103,6 +110,9 @@ let exportedLoadWatchersModal = null;
     if (name === 'atlas_entity_detail') return { url: '/static/js/features/atlas/atlas_entity_detail.js', type: 'module' };
     if (name === 'atlas_overlay') return { url: '/static/js/features/atlas/atlas_overlay.js', type: 'module' };
     if (name === 'atlas_mobile') return { url: '/static/js/features/atlas/atlas_mobile.js', type: 'module' };
+    if (name === 'findings_board_bridge') {
+      return { url: '/static/js/features/findings/findings_board_bridge.js', type: 'module' };
+    }
     if (name === 'findings_board') return { url: '/static/js/features/findings/findings_board_modal.js', type: 'module' };
     if (name === 'finding_triage_editor') return { url: '/static/js/features/findings/finding_triage_editor.js', type: 'module' };
     if (name === 'project_activity') return { url: '/static/js/features/projects/project_activity.js', type: 'module' };
@@ -597,28 +607,58 @@ let exportedLoadWatchersModal = null;
     throw err;
   }
 
+  function _isAtlasMobileMode() {
+    return !!(
+      typeof document !== 'undefined'
+      && document.body
+      && document.body.classList.contains('mobile-terminal-mode')
+    );
+  }
+
+  async function loadAtlasDetailRenderer() {
+    const detailModule = await loadLazyAsset('atlas_entity_detail');
+    const detailApi = _requireLazyModuleExport(detailModule, 'DarklabAtlasDetail');
+    if (typeof importedSetAtlasDetailHandlers === 'function') {
+      importedSetAtlasDetailHandlers({ DarklabAtlasDetail: detailApi });
+    }
+    return detailApi;
+  }
+
+  async function loadAtlasMobileController() {
+    const cssReady = loadLazyAsset('atlas_mobile_css');
+    const mobileModule = await loadLazyAsset('atlas_mobile');
+    await cssReady;
+    return mobileModule?.DarklabAtlasMobile || null;
+  }
+
   async function loadAtlasOverlay() {
     await _ensureLazyDomFragment('atlas_overlay');
     const hasMobileAtlas = !!document.getElementById('atlas-mobile-root');
-    const cssReady = Promise.all([
-      loadLazyAsset('atlas_css'),
-      hasMobileAtlas ? loadLazyAsset('atlas_mobile_css') : Promise.resolve(),
+    const cssReady = loadLazyAsset('atlas_css');
+    const mobileReady = hasMobileAtlas && _isAtlasMobileMode()
+      ? loadAtlasMobileController()
+      : Promise.resolve(null);
+    const [
+      tabsModule,
+      entityRowModule,
+      overlayModule,
+      mobileApi,
+    ] = await Promise.all([
+      loadLazyAsset('atlas_tabs'),
+      loadLazyAsset('atlas_entity_row'),
+      loadLazyAsset('atlas_overlay'),
+      mobileReady,
     ]);
-    const tabsModule = await loadLazyAsset('atlas_tabs');
-    const entityRowModule = await loadLazyAsset('atlas_entity_row');
-    const detailModule = await loadLazyAsset('atlas_entity_detail');
-    const overlayModule = await loadLazyAsset('atlas_overlay');
-    const mobileModule = hasMobileAtlas
-      ? await loadLazyAsset('atlas_mobile')
-      : null;
     await cssReady;
     const DarklabAtlasOverlay = _requireLazyModuleExport(overlayModule, 'DarklabAtlasOverlay');
     const atlasApi = {
       DarklabAtlasTabs: _requireLazyModuleExport(tabsModule, 'DarklabAtlasTabs'),
       DarklabAtlasEntityRow: _requireLazyModuleExport(entityRowModule, 'DarklabAtlasEntityRow'),
-      DarklabAtlasDetail: _requireLazyModuleExport(detailModule, 'DarklabAtlasDetail'),
+      DarklabAtlasDetail: importedGetAtlasDetailController?.() || null,
       DarklabAtlasOverlay,
-      DarklabAtlasMobile: mobileModule?.DarklabAtlasMobile || null,
+      DarklabAtlasMobile: mobileApi,
+      loadAtlasDetail: loadAtlasDetailRenderer,
+      loadAtlasMobile: loadAtlasMobileController,
       openAtlas: _requireLazyModuleExport(overlayModule, 'openAtlas', value => (
         typeof value === 'function' && value !== lazyOpenAtlas
       )),
@@ -638,6 +678,160 @@ let exportedLoadWatchersModal = null;
       importedSetAtlasHandlers(atlasApi);
     }
     return atlasApi;
+  }
+
+  const ATLAS_INITIAL_TABS = Object.freeze({
+    findings: { id: 'findings', type: '' },
+    ip: { id: 'ip', type: 'ip' },
+    domain: { id: 'domain', type: 'domain' },
+    port: { id: 'port', type: 'port' },
+    hash: { id: 'hash', type: 'hash' },
+    cve: { id: 'cve', type: 'cve' },
+    url: { id: 'url', type: 'url' },
+  });
+
+  function _atlasInitialTab(options = {}) {
+    const requested = String(options && options.tab || 'findings');
+    return ATLAS_INITIAL_TABS[requested] || ATLAS_INITIAL_TABS.findings;
+  }
+
+  function _createAtlasInitialLoad(options = {}) {
+    if (typeof importedApiFetch !== 'function' || !importedHasRuntimeHandler?.('apiFetch')) return null;
+    const tab = _atlasInitialTab(options);
+    const projectId = String(options && options.projectId || '');
+    const runId = String(options && options.runId || '').trim();
+    const queryText = String(options && options.entityValue || '').trim();
+    const orphanFilter = 'hide';
+    const suppressionFilter = 'hide';
+    const limit = 50;
+    const offset = 0;
+    const summaryParams = new URLSearchParams({
+      orphan_filter: orphanFilter,
+      suppression_filter: suppressionFilter,
+    });
+    if (runId) summaryParams.set('run_id', runId);
+    if (projectId) summaryParams.set('project_id', projectId);
+    const baseSummaryParams = new URLSearchParams({
+      orphan_filter: orphanFilter,
+      suppression_filter: suppressionFilter,
+    });
+    if (projectId) baseSummaryParams.set('project_id', projectId);
+    const listParams = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (queryText) listParams.set('q', queryText);
+    if (projectId) listParams.set('project_id', projectId);
+    if (runId) listParams.set('run_id', runId);
+    listParams.set('orphan_filter', orphanFilter);
+    listParams.set('suppression_filter', suppressionFilter);
+    const listUrl = tab.id === 'findings'
+      ? `/atlas/findings?${listParams.toString()}`
+      : (() => {
+          listParams.set('type', tab.type);
+          return `/atlas/entities?${listParams.toString()}`;
+        })();
+    return {
+      tabId: tab.id,
+      type: tab.type,
+      projectId,
+      runId,
+      query: queryText,
+      findingStatus: '',
+      orphanFilter,
+      suppressionFilter,
+      limit,
+      offset,
+      summaryResp: importedApiFetch(`/atlas?${summaryParams.toString()}`, { cache: 'no-store' }),
+      baseSummaryResp: runId
+        ? importedApiFetch(`/atlas?${baseSummaryParams.toString()}`, { cache: 'no-store' })
+        : null,
+      listResp: importedApiFetch(listUrl, { cache: 'no-store' }),
+    };
+  }
+
+  function _hideAtlasShellFallback() {
+    const overlay = document.getElementById('atlas-overlay');
+    if (!overlay) return;
+    overlay.classList.add('u-hidden');
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  function _settleAtlasInitialLoad(initialLoad) {
+    if (!initialLoad || typeof initialLoad !== 'object') return;
+    [
+      initialLoad.summaryResp,
+      initialLoad.baseSummaryResp,
+      initialLoad.listResp,
+    ].forEach((promise) => {
+      if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+    });
+  }
+
+  function _bindAtlasShellFallbackDismiss(overlay, surface) {
+    if (_atlasShellFallbackHandle && typeof _atlasShellFallbackHandle.dispose === 'function') {
+      _atlasShellFallbackHandle.dispose();
+    }
+    let cancelled = false;
+    let disposed = false;
+    const closeControls = [
+      surface?.querySelector?.(':scope > .sheet-grab') || null,
+      document.querySelector('.atlas-close'),
+    ].filter(Boolean);
+    const close = (event) => {
+      if (disposed || !overlay.classList.contains('open')) return;
+      cancelled = true;
+      _hideAtlasShellFallback();
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    };
+    const onKeydown = (event) => {
+      if (!event || event.key !== 'Escape') return;
+      close(event);
+    };
+    const onBackdropClick = (event) => {
+      if (event && event.target !== overlay) return;
+      close(event);
+    };
+    document.addEventListener('keydown', onKeydown, true);
+    overlay.addEventListener('click', onBackdropClick);
+    closeControls.forEach((control) => {
+      control.addEventListener('click', close);
+    });
+    let handle = null;
+    handle = {
+      cancelled: () => cancelled,
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        document.removeEventListener('keydown', onKeydown, true);
+        overlay.removeEventListener('click', onBackdropClick);
+        closeControls.forEach((control) => {
+          control.removeEventListener('click', close);
+        });
+        if (_atlasShellFallbackHandle === handle) _atlasShellFallbackHandle = null;
+      },
+    };
+    _atlasShellFallbackHandle = handle;
+    return handle;
+  }
+
+  async function _openAtlasShellFallback() {
+    const overlay = await _ensureLazyDomFragment('atlas_overlay');
+    if (!overlay) return null;
+    const surface = document.getElementById('atlas-surface');
+    const list = document.getElementById('atlas-list');
+    overlay.classList.remove('u-hidden');
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    if (list && !String(list.textContent || '').trim()) {
+      list.textContent = 'Loading Atlas...';
+    }
+    if (typeof importedEmitUiEvent === 'function') {
+      importedEmitUiEvent('app:interaction-surface-ready', { surface: 'atlas' });
+    }
+    return _bindAtlasShellFallbackDismiss(overlay, surface);
   }
 
   async function loadWatchersModal() {
@@ -1110,10 +1304,18 @@ let exportedLoadWatchersModal = null;
   }
 
   async function lazyOpenAtlas(options = {}) {
+    const initialLoad = _createAtlasInitialLoad(options);
+    const shellFallback = await _openAtlasShellFallback();
     const atlas = await loadAtlasOverlay();
+    if (shellFallback && typeof shellFallback.cancelled === 'function' && shellFallback.cancelled()) {
+      _settleAtlasInitialLoad(initialLoad);
+      if (typeof shellFallback.dispose === 'function') shellFallback.dispose();
+      return false;
+    }
+    if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
     const open = atlas?.openAtlas;
     if (typeof open !== 'function' || open === lazyOpenAtlas) return false;
-    return open(options);
+    return initialLoad ? open({ ...options, initialLoad }) : open(options);
   }
 
   function lazyCloseAtlas(options = {}) {
@@ -1498,6 +1700,8 @@ let exportedLoadWatchersModal = null;
   exportedLoadTourCliCommand = loadTourCliCommand;
   exportedLoadWorkspaceSurface = loadWorkspaceSurface;
   exportedLoadWatchersModal = loadWatchersModal;
+  if (typeof importedSetAtlasDetailLoader === 'function') importedSetAtlasDetailLoader(loadAtlasDetailRenderer);
+  if (typeof importedSetAtlasMobileLoader === 'function') importedSetAtlasMobileLoader(loadAtlasMobileController);
   if (typeof window.openAtlas !== 'function') window.openAtlas = lazyOpenAtlas;
   if (typeof window.closeAtlas !== 'function') window.closeAtlas = lazyCloseAtlas;
   if (typeof window.isAtlasOverlayOpen !== 'function') window.isAtlasOverlayOpen = lazyIsAtlasOverlayOpen;

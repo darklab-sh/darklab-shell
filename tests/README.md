@@ -2794,7 +2794,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `selects a requested finding when opened from a project finding row` | Verifies that project-launched Atlas can open to Findings, keep project scope, and select the requested finding after the list loads. |
 | `opens Findings scoped to a run and clears the run filter chip` | Verifies that run-launched Atlas requests summary, Findings, and entity rows for one source run and exposes a clearable run filter chip. |
 | `applies a source-run filter from the Atlas run selector` | Verifies that the Atlas run selector applies the selected source run to summary and Findings requests. |
-| `enables entity pagination once the list loads even when detail is still loading` | Verifies that Atlas entity pagination unlocks after the list response even if the selected entity detail request is still pending. |
+| `enables entity pagination once the list loads without blocking on detail` | Verifies that Atlas entity pagination unlocks after the list response without starting an entity detail request. |
 | `clears entity pagination when switching from a large tab to a single-page tab` | Verifies that Atlas clears hidden pagination text and disables controls after moving to a tab that fits on one page. |
 | `ignores stale entity list responses after switching tabs` | Verifies that a late response from a previous Atlas tab cannot overwrite the active tab's list or pagination state. |
 | `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |

@@ -513,6 +513,7 @@ function loadAtlas({
         'app/static/js/features/atlas/atlas_tabs.js',
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
+        'app/static/js/features/findings/findings_board_bridge.js',
         'app/static/js/features/atlas/atlas_overlay.js',
         'app/static/js/features/atlas/atlas_mobile_bridge.js',
         'app/static/js/features/atlas/atlas_mobile.js',
@@ -791,7 +792,7 @@ describe('Atlas overlay', () => {
   it('opens as a first-class surface and renders entity detail', async () => {
     const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast } = loadAtlas()
 
-    await openAtlas({ source: 'test', tab: 'ip' })
+    await openAtlas({ source: 'test', tab: 'ip', forceView: 'detail' })
 
     expect(isAtlasOverlayOpen()).toBe(true)
     expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(false)
@@ -1139,7 +1140,7 @@ describe('Atlas overlay', () => {
       activeProject: { id: 'prj_1', name: 'Case Alpha' },
     })
 
-    await openAtlas({ source: 'test', tab: 'ip' })
+    await openAtlas({ source: 'test', tab: 'ip', forceView: 'detail' })
     document.querySelector('#atlas-detail .atlas-detail-actions button:nth-child(2)')?.click()
     await Promise.resolve()
     await Promise.resolve()
@@ -1214,7 +1215,7 @@ describe('Atlas overlay', () => {
     })
     const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
 
-    await openAtlas({ source: 'test', tab: 'ip' })
+    await openAtlas({ source: 'test', tab: 'ip', forceView: 'detail' })
     const deleteBtn = () => {
       document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1427,7 +1428,7 @@ describe('Atlas overlay', () => {
     )
   })
 
-  it('enables entity pagination once the list loads even when detail is still loading', async () => {
+  it('enables entity pagination once the list loads without blocking on detail', async () => {
     let detailRequested = false
     const apiFetch = vi.fn((url) => {
       const target = String(url)
@@ -1467,7 +1468,7 @@ describe('Atlas overlay', () => {
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 51+')
     })
-    expect(detailRequested).toBe(true)
+    expect(detailRequested).toBe(false)
     expect(document.getElementById('atlas-next-btn')?.disabled).toBe(false)
   })
 
@@ -1812,7 +1813,13 @@ describe('Atlas overlay', () => {
   it('exports filtered entity rows without leaving the Atlas surface', async () => {
     const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()
 
-    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'port' })
+    await openAtlas({
+      source: 'project-workspace',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      tab: 'port',
+      forceView: 'detail',
+    })
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-detail')?.textContent).toContain('example.com:443/tcp')
     })
@@ -1832,7 +1839,13 @@ describe('Atlas overlay', () => {
     expect(apiFetch.mock.calls.some(([url]) => String(url).includes('/refresh_intel'))).toBe(false)
 
     document.body.classList.add('mobile-terminal-mode')
-    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'port' })
+    await openAtlas({
+      source: 'project-workspace',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      tab: 'port',
+      forceView: 'detail',
+    })
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('example.com:443/tcp')
     })

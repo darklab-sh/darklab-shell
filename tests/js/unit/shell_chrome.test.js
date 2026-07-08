@@ -615,7 +615,6 @@ function loadShellChrome({
 describe('shell chrome rail sections', () => {
   it('keeps rail modal launchers wired to ESM imports instead of dead placeholders', () => {
     [
-      "loadAtlasOverlay as importedLoadAtlasOverlay",
       "loadCommandRegistry as importedLoadCommandRegistry",
       "loadFindingsBoard as importedLoadFindingsBoard",
       "loadSchedulesModal as importedLoadSchedulesModal",
@@ -626,7 +625,6 @@ describe('shell chrome rail sections', () => {
       expect(SHELL_CHROME_RAW_SRC).toContain(snippet)
     });
     [
-      'importedLoadAtlasOverlay',
       'importedLoadCommandRegistry',
       'importedLoadFindingsBoard',
       'importedLoadSchedulesModal',

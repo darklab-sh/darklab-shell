@@ -1,5 +1,6 @@
 import { formatPortEntityMetadata as importedFormatPortEntityMetadata } from './atlas_entity_row.js';
 import { verificationStatusLabel as importedVerificationStatusLabel } from '../findings/finding_triage_bridge.js';
+import { setAtlasDetailHandlers as importedSetAtlasDetailHandlers } from './atlas_bridge.js';
 
 // Session Entity Atlas detail rendering helpers.
 
@@ -806,6 +807,9 @@ const _darklabGlobal = window;
     node,
   };
 
+  if (typeof importedSetAtlasDetailHandlers === 'function') {
+    importedSetAtlasDetailHandlers({ DarklabAtlasDetail });
+  }
 
 export {
   DarklabAtlasDetail,

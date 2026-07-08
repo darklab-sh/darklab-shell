@@ -30,12 +30,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Make the Atlas modal populate immediately on first open.**
-  - Load the minimum overlay, tabs, and list code needed for the first visible Atlas view before loading detail-heavy modules.
-  - Defer entity detail, history/run-comparison helpers, and mobile Atlas code until the user selects an entity or the viewport is actually mobile.
-  - Import first-open Atlas modules in parallel where they do not depend on one another.
-  - Show the modal skeleton before lazy imports finish so opening the modal always gives immediate visual feedback.
-  - Re-measure first open with cold cache and warm cache, including click-to-overlay, click-to-content, requests, and bytes.
+No open TODOs are currently tracked.
 
 ---
 

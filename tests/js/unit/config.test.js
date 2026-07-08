@@ -166,6 +166,10 @@ describe('frontend config bootstrap', () => {
                 url: '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
                 type: 'module',
               },
+              findings_board_bridge: {
+                url: '/static/js/features/findings/findings_board_bridge.js?v=board-bridge-hash',
+                type: 'module',
+              },
               project_activity: {
                 url: '/static/js/features/projects/project_activity.js?v=activity-hash',
                 type: 'module',
@@ -378,14 +382,12 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/findings/findings_board_modal.js?v=board-hash',
       '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
       '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
-      '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
       '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
-      '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
     ]))
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash')
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash')
-    expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash')
-    await vi.waitFor(() => expect(imported).toContain('/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash'))
+    expect(window.__darklabImportModule).not.toHaveBeenCalledWith('/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash')
+    expect(window.__darklabImportModule).not.toHaveBeenCalledWith('/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash')
     expect(appended).toHaveLength(0)
 
     await expect(atlasPromise).resolves.toEqual({ atlas: 'rail' })
@@ -454,9 +456,7 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/findings/findings_board_modal.js?v=board-hash',
       '/static/js/features/atlas/atlas_tabs.js?v=atlas-tabs-hash',
       '/static/js/features/atlas/atlas_entity_row.js?v=atlas-row-hash',
-      '/static/js/features/atlas/atlas_entity_detail.js?v=atlas-detail-hash',
       '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
-      '/static/js/features/atlas/atlas_mobile.js?v=atlas-mobile-hash',
       '/static/js/features/projects/project_report.js?v=report-hash',
       '/static/js/features/projects/project_activity.js?v=activity-hash',
       '/static/js/features/projects/project_overview.js?v=overview-hash',

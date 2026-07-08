@@ -212,6 +212,7 @@ class TestIndexRoute:
             "atlas_entity_detail": "/static/js/features/atlas/atlas_entity_detail.js",
             "atlas_overlay": "/static/js/features/atlas/atlas_overlay.js",
             "atlas_mobile": "/static/js/features/atlas/atlas_mobile.js",
+            "findings_board_bridge": "/static/js/features/findings/findings_board_bridge.js",
             "findings_board": "/static/js/features/findings/findings_board_modal.js",
             "project_activity": "/static/js/features/projects/project_activity.js",
             "project_artifacts": "/static/js/features/projects/project_artifacts.js",

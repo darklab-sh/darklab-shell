@@ -8,6 +8,12 @@ const atlasHandlers = {
   refreshAtlasOverlay: null,
   cycleAtlasTab: null,
 };
+const atlasDetailHandlers = {
+  DarklabAtlasDetail: null,
+  renderDetail: null,
+  renderFindingDetail: null,
+};
+let atlasDetailLoader = null;
 
 function setAtlasHandlers(handlers = {}) {
   Object.keys(atlasHandlers).forEach((name) => {
@@ -15,8 +21,29 @@ function setAtlasHandlers(handlers = {}) {
   });
 }
 
+function setAtlasDetailHandlers(handlers = {}) {
+  if (handlers.DarklabAtlasDetail) atlasDetailHandlers.DarklabAtlasDetail = handlers.DarklabAtlasDetail;
+  const detail = handlers.DarklabAtlasDetail || handlers;
+  ['renderDetail', 'renderFindingDetail'].forEach((name) => {
+    if (typeof detail[name] === 'function') atlasDetailHandlers[name] = detail[name];
+  });
+}
+
+function setAtlasDetailLoader(loader) {
+  if (typeof loader === 'function') atlasDetailLoader = loader;
+}
+
 function getAtlasOverlayController() {
   return atlasHandlers.DarklabAtlasOverlay || null;
+}
+
+function getAtlasDetailController() {
+  return atlasDetailHandlers.DarklabAtlasDetail || atlasDetailHandlers;
+}
+
+function loadAtlasDetail(...args) {
+  if (typeof atlasDetailLoader === 'function') return atlasDetailLoader(...args);
+  return Promise.resolve(getAtlasDetailController());
 }
 
 function openAtlas(...args) {
@@ -52,9 +79,13 @@ function cycleAtlasTab(...args) {
 export {
   closeAtlas,
   cycleAtlasTab,
+  getAtlasDetailController,
   getAtlasOverlayController,
   isAtlasOverlayOpen,
+  loadAtlasDetail,
   openAtlas,
   refreshAtlasOverlay,
+  setAtlasDetailHandlers,
+  setAtlasDetailLoader,
   setAtlasHandlers,
 };

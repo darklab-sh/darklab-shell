@@ -1001,6 +1001,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── findings/
 │   │       │   │   ├── finding_triage_bridge.js # Lightweight finding-triage bridge for lazy remediation controls
 │   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
+│   │       │   │   ├── findings_board_bridge.js # Lightweight Findings Board bridge for Atlas and lazy modal launches
 │   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
 │   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers

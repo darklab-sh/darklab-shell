@@ -16,7 +16,6 @@ import {
 } from './controller.js';
 import { openWorkspace as importedOpenWorkspace } from './workspace_bridge.js';
 import {
-  loadAtlasOverlay as importedLoadAtlasOverlay,
   loadCommandRegistry as importedLoadCommandRegistry,
   loadFindingsBoard as importedLoadFindingsBoard,
   loadSchedulesModal as importedLoadSchedulesModal,
@@ -175,8 +174,7 @@ let importedProjectWorkspaceShell;
   }
 
   async function _shellOpenAtlas(...args) {
-    const atlas = await _shellLoadLazyModal(importedLoadAtlasOverlay, 'loadAtlasOverlay');
-    const open = atlas?.openAtlas || _shellFn('openAtlas', importedOpenAtlas);
+    const open = _shellFn('openAtlas', importedOpenAtlas);
     return typeof open === 'function' ? open(...args) : undefined;
   }
 
