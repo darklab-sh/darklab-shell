@@ -61,6 +61,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - The immediate Atlas shell now handles Escape during the pre-controller load window, so a fast close gesture no longer gets swallowed before the real dismissible bindings are ready.
   - Core mobile shell layout rules stay on the initial CSS path, so lazy-loading the Status Monitor stylesheet no longer lets desktop chrome overlap the mobile transcript or steal taps from the mobile composer.
   - **Tests:** updated index-route asset coverage, refreshed the committed build output, exercised the lazy source-mode smoke path plus focused browser unit coverage, and reran the full mobile Playwright spec in bundle mode.
+- Run Details entity rows now keep their Atlas-style layout on first load, so entity values, hit/run metadata, and project badges align correctly before the full Atlas stylesheet has loaded.
+- Atlas entity tabs now auto-select the first loaded entity and populate the details panel again when switching to IPs, Domains, Ports, Hashes, CVEs, or URLs.
+- Run removal confirmations now hide the disposable same-run Atlas cleanup checkbox when a linked run only has curated same-run entities, leaving the curated cleanup option visible with standalone wording.
+- Run removal previews now treat pending command-discovered Project targets as disposable same-run entities unless another curation signal exists, so fresh command targets do not pull their same-run findings into the curated cleanup bucket.
 - API v1 team Project finding lists now include cross-member findings that are reachable through authorized team Project run/entity links, matching the Project count and finding-summary rollups.
 - Architecture guardrails now reflect the current static build route, post-baseline migration shape, and split-module baselines from the performance and index work.
 - Frontend module inventory now classifies the lazy Files bridge resolver helpers as the workspace bridge contract, so resolver-helper drift checks cover the new first-use Files boundary.
@@ -110,6 +114,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Project artifact and evidence-package query wrappers now propagate patched database connections into their split helper modules, preserving the established Postgres test seam after the decomposition.
 - The theme selector now loads with its drawer alignment and lighter backdrop on first open, instead of waiting for the workspace stylesheet to load later.
   - **Tests:** the theme selector browser check verifies first-open drawer alignment before any lazy workspace surface is opened.
+- Project workspace tabs now clear first-load placeholders before lazy tab renderers append real content, and the Runs tab stays in a loading state when partial summaries or stale empty page caches are waiting on the server-backed run page.
+  - **Tests:** Projects browser and unit coverage verify linked run rows do not coexist with the empty Runs state, stale empty Runs pages refresh against the current summary count, and populated Findings views do not retain their loading placeholder.
+- Main terminal Atlas entity highlights now keep their compact green styling on first load instead of falling back to the generic gray chip style before the lazy Atlas stylesheet opens.
+  - **Tests:** output unit coverage verifies terminal Atlas token and context-menu styles live in the eager shell stylesheet rather than the lazy Atlas stylesheet.
 - Workspace cleanup now routes failed scanner-user `rm -rf` fallback attempts back through the inactive-workspace repair flow with bounded helper stderr, so stale scanner-owned files no longer cause repeated `WORKSPACE_CLEANUP_ERROR` loops.
   - **Tests:** added regression coverage for a scanner-owned workspace child where appuser removal fails, scanner-user removal returns non-zero, repair runs, and the expired workspace is still removed.
 - Diagnostics helper compatibility exports now stay visible on `blueprints.assets`, so existing route tests and monkeypatch seams keep working after the assets route split.

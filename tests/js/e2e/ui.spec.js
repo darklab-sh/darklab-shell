@@ -1136,6 +1136,7 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('[data-atlas-tab="domain"]')).toHaveClass(/\bis-active\b/)
     await page.locator('#atlas-search').fill(fixture.entityValue)
     await expect(page.locator('#atlas-list')).toContainText(fixture.entityValue, { timeout: 15_000 })
+    await expect(page.locator('#atlas-detail')).toContainText(fixture.entityValue, { timeout: 15_000 })
 
     await page.locator('#atlas-saved-view-create-rule').click()
 
@@ -1459,6 +1460,7 @@ test.describe('project workspace modal', () => {
     await switchProjectTab(page, 'findings')
     const findingRow = page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()
     await expect(findingRow).toBeVisible()
+    await expect(page.locator('#project-explorer-body')).not.toContainText('Loading project findings')
     await findingRow.locator('[data-project-action="edit-finding-metadata"]').click()
     await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT FINDING')
@@ -1531,6 +1533,7 @@ test.describe('project workspace modal', () => {
     await switchProjectTab(page, 'runs')
     const evidenceRunRow = page.locator('.project-explorer-item').filter({ hasText: 'nmap -oN reports/evidence.txt' }).first()
     await expect(evidenceRunRow).toBeVisible()
+    await expect(page.locator('#project-explorer-body')).not.toContainText('No linked runs yet.')
     await evidenceRunRow.locator('[data-project-action="filter-run-findings"]').click()
     await expect(page.locator('.project-explorer-tab.is-active')).toContainText('Findings')
     await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')

@@ -4218,6 +4218,7 @@ let importedProjectWorkspaceShell;
     _loadProjectRunsController()
       .then((controller) => {
         if (!container.isConnected || projectWorkspaceState.tab() !== 'runs') return;
+        container.replaceChildren();
         controller.renderRuns(container, projectId, summary);
       })
       .catch((err) => {
@@ -4254,6 +4255,7 @@ let importedProjectWorkspaceShell;
     _loadProjectEntitiesController()
       .then((controller) => {
         if (!container.isConnected || projectWorkspaceState.tab() !== 'entities') return;
+        container.replaceChildren();
         controller.renderEntities(container, projectId, summary);
       })
       .catch((err) => {
@@ -4272,6 +4274,7 @@ let importedProjectWorkspaceShell;
     _loadProjectFindingsController()
       .then((controller) => {
         if (!container.isConnected || projectWorkspaceState.tab() !== 'findings') return;
+        container.replaceChildren();
         controller.renderFindings(container, projectId, summary);
       })
       .catch((err) => {
@@ -4290,6 +4293,7 @@ let importedProjectWorkspaceShell;
     _loadProjectArtifactsController()
       .then((controller) => {
         if (!container.isConnected || projectWorkspaceState.tab() !== 'artifacts') return;
+        container.replaceChildren();
         controller.renderArtifacts(container, projectId, summary);
       })
       .catch((err) => {
@@ -4308,6 +4312,7 @@ let importedProjectWorkspaceShell;
     _loadProjectPackagesController()
       .then((controller) => {
         if (!container.isConnected || projectWorkspaceState.tab() !== 'packages') return;
+        container.replaceChildren();
         controller.renderPackages(container, projectId, summary);
       })
       .catch((err) => {

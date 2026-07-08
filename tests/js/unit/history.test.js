@@ -1,6 +1,9 @@
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
+const HISTORY_CSS = readFileSync(resolve(process.cwd(), 'app/static/css/features/history.css'), 'utf8')
 const _noopFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
 const HISTORY_SCRIPT_PATHS = [
   'app/static/js/core/history_core.js',
@@ -1515,6 +1518,12 @@ describe('history panel actions', () => {
     expect(row.classList.contains('chrome-row-clickable')).toBe(true)
     expect(row.classList.contains('history-run-list-item')).toBe(false)
     expect(row.textContent).toContain('192.0.2.10')
+
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-row')
+    expect(HISTORY_CSS).toContain('display: flex;')
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-main')
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-value')
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-badges')
   })
 
   it('shows remove from project in Run Details and can also unlink same-run entities', async () => {
@@ -1656,8 +1665,22 @@ describe('history panel actions', () => {
     let linked = true
     const showConfirm = vi.fn((options = {}) => {
       const content = options.content
-      expect(content?.textContent || '').toContain('Also remove disposable same-run Atlas entities from this project')
-      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
+      const disposableCheckbox = content.querySelector('[data-history-project-run-entities-scope="disposable"]')
+      const disposableLabel = disposableCheckbox.closest('label')
+      const curatedCheckbox = content.querySelector('[data-history-project-run-entities-scope="curated"]')
+      const curatedLabel = curatedCheckbox.closest('label')
+
+      expect(content?.textContent || '').not.toContain('Also remove disposable same-run Atlas entities from this project')
+      expect(disposableCheckbox.disabled).toBe(true)
+      expect(disposableLabel.hidden).toBe(true)
+      expect(disposableLabel.classList.contains('u-hidden')).toBe(true)
+      expect(disposableLabel.textContent.trim()).toBe('')
+      expect(content?.textContent || '').not.toContain('Also remove curated same-run Atlas entities from this project')
+      expect(content?.textContent || '').toContain('Remove curated same-run Atlas entities from this project')
+      expect(curatedCheckbox.disabled).toBe(false)
+      expect(curatedLabel.hidden).toBe(false)
+      expect(curatedLabel.classList.contains('u-hidden')).toBe(false)
+      curatedCheckbox.checked = true
       return Promise.resolve('remove')
     })
     const apiFetch = vi.fn((url, options = {}) => {
@@ -1704,15 +1727,15 @@ describe('history panel actions', () => {
             ok: true,
             preview: {
               available: 1,
-              removable: 1,
-              curated: 0,
-              kept_curated: 0,
+              removable: 0,
+              curated: 1,
+              kept_curated: 1,
               removed: 0,
               removed_curated: 0,
               run_findings: 0,
-              removable_findings: 1,
-              curated_findings: 0,
-              kept_curated_findings: 0,
+              removable_findings: 0,
+              curated_findings: 1,
+              kept_curated_findings: 1,
               run_count: 1,
             },
           }),
@@ -1762,7 +1785,12 @@ describe('history panel actions', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'DELETE',
-      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-active-linked', include_entities: true }),
+      body: JSON.stringify({
+        entity_type: 'run',
+        entity_id: 'run-active-linked',
+        include_entities: true,
+        include_curated_entities: true,
+      }),
     }))
   })
 

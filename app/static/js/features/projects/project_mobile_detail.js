@@ -314,11 +314,24 @@ let exportedDarklabProjectMobileDetail = null;
       fragment.appendChild(toolbar);
 
       const allRuns = ctx.projectRunItems(summary);
+      const summaryRunCount = Math.max(0, Number(summary?.counts?.runs || 0) || 0);
       const filterActive = ctx.projectTargetFilterActive(projectId, summary);
       const runFilterActive = ctx.projectRunFilterActive?.(projectId, summary);
       const useServerPage = !filterActive && !runFilterActive;
       const pagination = ctx.projectRunPagination?.(projectId) || {};
-      if (useServerPage && !pagination.loaded) ctx.loadProjectRuns?.(projectId).catch(() => {});
+      const pageRuns = Array.isArray(pagination.runs) ? pagination.runs : [];
+      const needsCountHintRefresh = useServerPage
+        && pagination.loaded
+        && summaryRunCount > 0
+        && !Number(pagination.total || 0)
+        && !pageRuns.length
+        && Number(pagination.count_hint || 0) !== summaryRunCount;
+      if (useServerPage && (!pagination.loaded || needsCountHintRefresh)) {
+        ctx.loadProjectRuns?.(projectId, {
+          force: needsCountHintRefresh,
+          countHint: summaryRunCount,
+        }).catch(() => {});
+      }
       if (filterActive && !ctx.projectFindingsLoaded(projectId)) {
         fragment.appendChild(ctx.emptyProjectPanel('Loading target associations...'));
         return fragment;
@@ -327,14 +340,17 @@ let exportedDarklabProjectMobileDetail = null;
       const runs = useServerPage && canUseLoadedPage
         ? (Array.isArray(pagination.runs) ? pagination.runs : [])
         : ctx.filteredProjectRuns(projectId, summary);
-      if (!allRuns.length) {
+      const hasLoadedServerRuns = useServerPage
+        && pagination.loaded
+        && (Number(pagination.total || 0) > 0 || pageRuns.length > 0);
+      if (useServerPage && (!pagination.loaded || needsCountHintRefresh)) {
+        fragment.appendChild(ctx.emptyProjectPanel('Loading runs...'));
+        return fragment;
+      }
+      if (!allRuns.length && !hasLoadedServerRuns) {
         fragment.appendChild(emptyPanel('No linked runs yet.', [
           ctx.makeProjectButton('Link last run', 'link-last-run', projectId, 'primary'),
         ]));
-        return fragment;
-      }
-      if (useServerPage && !pagination.loaded) {
-        fragment.appendChild(ctx.emptyProjectPanel('Loading runs...'));
         return fragment;
       }
       if (!runs.length) {

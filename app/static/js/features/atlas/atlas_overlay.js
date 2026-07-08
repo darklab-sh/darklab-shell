@@ -2315,7 +2315,7 @@ let exportedCycleAtlasTab = null;
             state.addActiveProjectOnSelect = false;
           }
         }
-        if (!state.selectedId && !state.requestedEntityValue && state.requestedView === 'detail' && state.entities[0]) {
+        if (!state.selectedId && !state.requestedEntityValue && state.entities[0]) {
           state.selectedId = state.entities[0].id;
           state.detailOffsets = { runs: 0, findings: 0 };
         }

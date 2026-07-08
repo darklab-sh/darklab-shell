@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,004
+- behavior tests: 4,006
 - docs/inventory meta-tests: 63
 - `pytest`: 2320 (2270 behavior + 50 meta)
-- `vitest`: 1478 (1465 behavior + 13 meta)
+- `vitest`: 1480 (1467 behavior + 13 meta)
 - `playwright`: 269 behavior
-- total: 4,067
+- total: 4,069
 
 This document is organized in two parts:
 
@@ -2795,7 +2795,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `selects a requested finding when opened from a project finding row` | Verifies that project-launched Atlas can open to Findings, keep project scope, and select the requested finding after the list loads. |
 | `opens Findings scoped to a run and clears the run filter chip` | Verifies that run-launched Atlas requests summary, Findings, and entity rows for one source run and exposes a clearable run filter chip. |
 | `applies a source-run filter from the Atlas run selector` | Verifies that the Atlas run selector applies the selected source run to summary and Findings requests. |
-| `enables entity pagination once the list loads without blocking on detail` | Verifies that Atlas entity pagination unlocks after the list response without starting an entity detail request. |
+| `enables entity pagination while the auto-selected detail loads` | Verifies that Atlas entity pagination unlocks while the automatically selected entity detail is still loading. |
 | `clears entity pagination when switching from a large tab to a single-page tab` | Verifies that Atlas clears hidden pagination text and disables controls after moving to a tab that fits on one page. |
 | `ignores stale entity list responses after switching tabs` | Verifies that a late response from a previous Atlas tab cannot overwrite the active tab's list or pagination state. |
 | `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |
@@ -2994,6 +2994,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `exports representative core helpers as ESM APIs` | Verifies representative core helpers expose direct ESM imports. |
 | `distinguishes loaded bridge wrappers from registered lazy handlers` | Verifies lazy ESM bridges report handler readiness separately from the wrapper module being loaded. |
 | `keeps Project Runs compare honest when the ESM bridge handler is not ready` | Verifies Project Runs compare actions do not pretend to open when the ESM bridge handler has not registered yet. |
+| `keeps Project Runs loading when summary counts invalidate a stale empty page` | Verifies Project Runs stays in a loading state when summary counts show rows exist but the currently rendered page is stale and empty. |
 | `exports representative owner APIs without requiring browser-global mirrors` | Verifies representative owner modules expose callable ESM APIs without relying on browser-global mirrors. |
 | `keeps mutable app state behind the explicit state API` | Verifies tab, composer, autocomplete, and welcome state mutations go through exported getter/setter helpers instead of assigning to read-only ESM value imports. |
 | `builds workspace prompt labels from ESM tab state without a global cwd reader` | Verifies workspace prompt labels read the current tab folder through ESM state instead of a legacy browser-global CWD helper. |
@@ -3292,6 +3293,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `preserves absolute line numbers when line-number mode is enabled later` | Verifies that enabling line numbers after output trimming uses stored absolute line numbers for retained rows. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
+| `keeps terminal Atlas entity token styling on the eager shell stylesheet` | Verifies that terminal Atlas entity token styling is available from the eager shell stylesheet instead of waiting on lazy feature CSS. |
 | `keeps highlighted entity text selectable with the rest of the output line` | Verifies that highlighted Atlas entity tokens remain part of normal transcript text selection and copying. |
 | `falls back to value matching when ANSI makes entity offsets stale` | Verifies entity-token rendering does not trust stale start/end offsets after ANSI stripping changes visible text positions. |
 | `supports keyboard navigation and outside-click close in the entity context menu` | Verifies the output entity context menu focuses its first action, supports arrow-key movement, returns focus to the token on Escape, and closes on outside click. |

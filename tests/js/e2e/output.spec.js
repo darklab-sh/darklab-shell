@@ -113,10 +113,17 @@ test.describe('output actions', () => {
   test('summarize appends a signal summary block for the active tab output', async ({ page }) => {
     await page.evaluate(() => {
       clearTab(activeTabId)
-      appendLine('443/tcp open https', '', activeTabId, {
+      appendLine('443/tcp open https on ip.darklab.sh', '', activeTabId, {
         signals: ['findings'],
         command_root: 'nmap',
         target: 'ip.darklab.sh',
+        entities: [{
+          type: 'domain',
+          value: 'ip.darklab.sh',
+          canonical_value: 'ip.darklab.sh',
+          start: 22,
+          end: 35,
+        }],
       })
       appendLine('warning: retrying request', 'notice', activeTabId, {
         signals: ['warnings'],
@@ -134,6 +141,25 @@ test.describe('output actions', () => {
         target: 'ip.darklab.sh',
       })
     })
+
+    const atlasToken = page.locator('.tab-panel.active .atlas-entity-token').first()
+    await expect(atlasToken).toHaveText('ip.darklab.sh')
+    const atlasTokenStyle = await atlasToken.evaluate((token) => {
+      const style = window.getComputedStyle(token)
+      return {
+        display: style.display,
+        borderTopWidth: style.borderTopWidth,
+        borderTopLeftRadius: style.borderTopLeftRadius,
+        backgroundColor: style.backgroundColor,
+      }
+    })
+    expect(atlasTokenStyle).toMatchObject({
+      display: 'inline',
+      borderTopWidth: '0px',
+      borderTopLeftRadius: '4px',
+    })
+    expect(atlasTokenStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    await expect(page.locator('link[href*="features/atlas.css"]')).toHaveCount(0)
 
     await page.locator('#search-summary-btn').click()
 

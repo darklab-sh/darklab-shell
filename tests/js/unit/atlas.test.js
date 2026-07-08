@@ -792,7 +792,7 @@ describe('Atlas overlay', () => {
   it('opens as a first-class surface and renders entity detail', async () => {
     const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast } = loadAtlas()
 
-    await openAtlas({ source: 'test', tab: 'ip', forceView: 'detail' })
+    await openAtlas({ source: 'test', tab: 'ip' })
 
     expect(isAtlasOverlayOpen()).toBe(true)
     expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(false)
@@ -1428,7 +1428,7 @@ describe('Atlas overlay', () => {
     )
   })
 
-  it('enables entity pagination once the list loads without blocking on detail', async () => {
+  it('enables entity pagination while the auto-selected detail loads', async () => {
     let detailRequested = false
     const apiFetch = vi.fn((url) => {
       const target = String(url)
@@ -1468,7 +1468,7 @@ describe('Atlas overlay', () => {
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 51+')
     })
-    expect(detailRequested).toBe(false)
+    expect(detailRequested).toBe(true)
     expect(document.getElementById('atlas-next-btn')?.disabled).toBe(false)
   })
 

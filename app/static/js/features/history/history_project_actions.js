@@ -442,6 +442,10 @@ function _historyProjectRunEntityOptionContent({
   if (kind === 'remove') {
     wrap.prepend(runFindingsNote);
   }
+  const setNodeHidden = (node, hidden) => {
+    node.classList.toggle('u-hidden', hidden);
+    node.hidden = hidden;
+  };
   return {
     wrap,
     checkbox,
@@ -474,17 +478,17 @@ function _historyProjectRunEntityOptionContent({
         checkbox.disabled = removable <= 0;
         curatedCheckbox.checked = false;
         curatedCheckbox.disabled = curated <= 0;
-        wrap.classList.toggle('u-hidden', removable <= 0 && curated <= 0 && runFindings <= 0);
-        runFindingsNote.classList.toggle('u-hidden', runFindings <= 0);
+        setNodeHidden(wrap, removable <= 0 && curated <= 0 && runFindings <= 0);
+        setNodeHidden(runFindingsNote, runFindings <= 0);
         runFindingsNote.textContent = runFindings > 0
           ? `Removing the run link will remove ${runFindings.toLocaleString()} ${runFindingLabel} from this project's Findings tab.`
           : '';
-        label.classList.toggle('u-hidden', removable <= 0);
-        curatedLabel.classList.toggle('u-hidden', curated <= 0);
+        setNodeHidden(label, removable <= 0);
+        setNodeHidden(curatedLabel, curated <= 0);
         text.textContent = removable > 0
           ? 'Also remove disposable same-run Atlas entities from this project'
           : '';
-        note.classList.toggle('u-hidden', removable <= 0);
+        setNodeHidden(note, removable <= 0);
         note.textContent = removable > 0
           ? [
             `This will unlink ${removable.toLocaleString()} ${entityLabel} found only in ${runCount > 1 ? 'these runs' : 'this run'}.`,
@@ -494,9 +498,9 @@ function _historyProjectRunEntityOptionContent({
           ].filter(Boolean).join(' ')
           : '';
         curatedText.textContent = curated > 0
-          ? 'Also remove curated same-run Atlas entities from this project'
+          ? `${removable > 0 ? 'Also remove' : 'Remove'} curated same-run Atlas entities from this project`
           : '';
-        curatedNote.classList.toggle('u-hidden', curated <= 0);
+        setNodeHidden(curatedNote, curated <= 0);
         curatedNote.textContent = curated > 0
           ? [
             `${curated.toLocaleString()} curated ${curatedEntityLabel}`,
@@ -510,9 +514,9 @@ function _historyProjectRunEntityOptionContent({
       const keptCurated = Number(preview && preview.kept_curated || 0);
       checkbox.checked = false;
       checkbox.disabled = count <= 0;
-      wrap.classList.toggle('u-hidden', count <= 0);
+      setNodeHidden(wrap, count <= 0);
       text.textContent = count > 0 ? labelForCount(count, runCount) : '';
-      note.classList.toggle('u-hidden', count <= 0 || keptCurated <= 0);
+      setNodeHidden(note, count <= 0 || keptCurated <= 0);
       note.textContent = keptCurated > 0
         ? `${keptCurated.toLocaleString()} curated ${keptCurated === 1 ? 'entity will' : 'entities will'} stay linked.`
         : '';

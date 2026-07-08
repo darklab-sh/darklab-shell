@@ -2913,6 +2913,7 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(document.getElementById('project-explorer-body').textContent).toContain('old finding should not persist')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('Loading project findings')
 
     projectRuns = [
       { id: 'new-run', command: 'nmap new.darklab.sh', started: '2026-05-07T00:01:00Z', exit_code: 0, output_line_count: 4, created: '2026-05-07T00:01:10Z' },

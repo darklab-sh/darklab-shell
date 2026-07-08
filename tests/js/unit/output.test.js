@@ -1,4 +1,9 @@
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { fromDomScripts } from './helpers/extract.js'
+
+const SHELL_CSS = readFileSync(resolve(process.cwd(), 'app/static/css/shell.css'), 'utf8')
+const ATLAS_CSS = readFileSync(resolve(process.cwd(), 'app/static/css/features/atlas.css'), 'utf8')
 
 function loadOutputFns({
   appConfig = {},
@@ -617,6 +622,13 @@ describe('appendLine', () => {
       summaries: 0,
     })
     expect(_getTabs()[0]._outputSignalCountsValid).toBe(true)
+  })
+
+  it('keeps terminal Atlas entity token styling on the eager shell stylesheet', () => {
+    expect(SHELL_CSS).toContain('.chip.atlas-entity-token')
+    expect(SHELL_CSS).toContain('background: var(--green-glow);')
+    expect(SHELL_CSS).toContain('.atlas-output-entity-menu')
+    expect(ATLAS_CSS).not.toContain('.chip.atlas-entity-token')
   })
 
   it('keeps highlighted entity text selectable with the rest of the output line', () => {

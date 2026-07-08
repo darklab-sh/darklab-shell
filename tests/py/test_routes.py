@@ -10009,6 +10009,79 @@ class TestProjectRoutes:
         assert removable_id not in remaining_entity_links
         assert curated_id in remaining_entity_links
 
+        auto_target_project = self._create_project(client, session_id)
+        auto_target_run_id = self._seed_run(session_id, "nmap auto-target.darklab.test")
+        auto_target_domain = "auto-target-" + uuid.uuid4().hex[:8] + ".darklab.test"
+        with db_connect() as conn:
+            auto_target_recorded = materialize_run_entities(
+                conn,
+                session_id,
+                auto_target_run_id,
+                [{
+                    "text": f"{auto_target_domain} 192.0.2.55",
+                    "entities": [
+                        {"type": "domain", "value": auto_target_domain, "canonical_value": auto_target_domain},
+                        {"type": "ip", "value": "192.0.2.55", "canonical_value": "192.0.2.55"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:10:01+00:00",
+            )
+            record_run_findings(conn, session_id, auto_target_run_id, [{
+                "text": f"443/tcp open https on {auto_target_domain}",
+                "signals": ["findings"],
+                "line_index": 0,
+                "entities": [{"type": "domain", "value": auto_target_domain, "canonical_value": auto_target_domain}],
+            }])
+            conn.commit()
+        auto_target_domain_id = next(item["id"] for item in auto_target_recorded if item["type"] == "domain")
+        auto_target_link_resp = client.post(
+            f"/projects/{auto_target_project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": auto_target_run_id,
+                "source": "manual",
+                "include_entities": True,
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE project_links SET source = 'auto_command', review_state = 'pending', source_detail = ? "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+                (
+                    json.dumps({
+                        "kind": "positional",
+                        "name": "argument_1",
+                        "project_target": True,
+                        "value_type": "target",
+                    }),
+                    auto_target_project["id"],
+                    auto_target_domain_id,
+                ),
+            )
+            conn.commit()
+        auto_target_preview_resp = client.post(
+            f"/projects/{auto_target_project['id']}/links/run-entities/remove-preview",
+            json={"run_ids": [auto_target_run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert auto_target_link_resp.status_code == 201
+        assert auto_target_preview_resp.status_code == 200
+        assert json.loads(auto_target_preview_resp.data)["preview"] == {
+            "available": 2,
+            "removable": 2,
+            "curated": 0,
+            "kept_curated": 0,
+            "removed": 0,
+            "removed_curated": 0,
+            "run_findings": 0,
+            "removable_findings": 1,
+            "curated_findings": 0,
+            "kept_curated_findings": 0,
+            "run_count": 1,
+        }
+
         curated_project = self._create_project(client, session_id)
         curated_run_id = self._seed_run(session_id, "nmap curated.darklab.sh")
         curated_recorded = self._seed_run_entities(session_id, curated_run_id)

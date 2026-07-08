@@ -50,6 +50,10 @@ No open Technical Debt items are currently tracked.
 
 These are possible future improvements, split by whether they look worth carrying forward.
 
+- **Curated cleanup reason labels for run deletion and Project unlinking.**
+  - Improve the confirmation copy for deleting runs and removing runs from Projects so it explains why Atlas entities and findings are considered curated or protected.
+  - Show clearer reason groups such as manually linked, Project-linked by the active Project, reviewed, labeled, noted, seen in other runs, or tied to findings that should be kept.
+  - Keep the default cleanup behavior conservative, but make the modal language less surprising when a newly scanned Project-linked run shows items in the curated bucket.
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
 - **Cross-session Atlas view.**
