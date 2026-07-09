@@ -828,6 +828,84 @@ body.mobile-terminal-mode .output-follow-btn {
   white-space: normal;
 }
 
+.cleanup-sample-details {
+  margin-top: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.cleanup-sample-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.cleanup-sample-toggle:hover,
+.cleanup-sample-toggle:focus-visible {
+  color: var(--text);
+}
+
+.cleanup-sample-toggle:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 2px;
+}
+
+.cleanup-sample-toggle-glyph {
+  width: 1ch;
+  color: var(--green);
+}
+
+.cleanup-sample-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  max-height: min(260px, 42vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.cleanup-sample-group-title {
+  margin-bottom: 4px;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+}
+
+.cleanup-sample-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cleanup-sample-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.cleanup-sample-value {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.cleanup-sample-omitted {
+  color: var(--muted);
+}
+
+.cleanup-sample-badge.badge {
+  letter-spacing: 0;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;

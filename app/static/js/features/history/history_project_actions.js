@@ -8,6 +8,7 @@ import {
   applyProjectRunEntityUnlinkPreview,
   setCleanupNodeHidden,
 } from '../../ui/cleanup_reasons.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
 import {
   enhanceAppSelects as importedEnhanceAppSelects,
   syncAppSelect as importedSyncAppSelect,
@@ -451,6 +452,11 @@ function _historyProjectRunEntityOptionContent({
   if (kind === 'remove') {
     wrap.appendChild(notEligibleNote);
   }
+  const sampleDetails = document.createElement('div');
+  sampleDetails.className = 'cleanup-sample-slot u-hidden';
+  if (kind === 'remove') {
+    wrap.appendChild(sampleDetails);
+  }
   return {
     wrap,
     label,
@@ -463,6 +469,8 @@ function _historyProjectRunEntityOptionContent({
     curatedNote,
     runFindingsNote,
     notEligibleNote,
+    sampleDetails,
+    bindDisclosure: importedBindDisclosure,
     setNodeHidden: setCleanupNodeHidden,
     includeEntities() {
       return !!checkbox.checked && !checkbox.disabled;

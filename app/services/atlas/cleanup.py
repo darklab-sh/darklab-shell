@@ -9,6 +9,7 @@ from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.atlas.scope import normalize_team_id
 from services.cleanup_reasons import (
+    CleanupSampleCollector,
     build_cleanup_reason_summary,
     empty_cleanup_bucket_counts,
     increment_cleanup_reason,
@@ -88,10 +89,88 @@ def _any_flag(row, keys: tuple[str, ...]) -> bool:
     return any(_flag(row, key) for key in keys)
 
 
-def _record_row_reasons(reason_counts, row, bucket: str, kind: str, reason_keys: tuple[tuple[str, str], ...]) -> None:
-    for key, code in reason_keys:
-        if _flag(row, key):
-            increment_cleanup_reason(reason_counts, code, bucket, kind)
+def _row_reason_codes(row, reason_keys: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    return tuple(code for key, code in reason_keys if _flag(row, key))
+
+
+def _record_row_reasons(
+    reason_counts,
+    row,
+    bucket: str,
+    kind: str,
+    reason_keys: tuple[tuple[str, str], ...],
+) -> tuple[str, ...]:
+    reason_codes = _row_reason_codes(row, reason_keys)
+    for code in reason_codes:
+        increment_cleanup_reason(reason_counts, code, bucket, kind)
+    return reason_codes
+
+
+def _cleanup_sample_display_values(
+    conn,
+    session_id: str,
+    ids_by_kind: dict[str, list[str]],
+    *,
+    team_id: str = "",
+) -> dict[str, dict[str, Any]]:
+    display_values: dict[str, dict[str, Any]] = {}
+    entity_ids = _unique_ids(ids_by_kind.get("entities") or [])
+    if entity_ids:
+        placeholders = _placeholders(entity_ids)
+        owner_sql, owner_params = _owner_filter("entities", session_id, team_id)
+        rows = conn.execute(
+            "SELECT id, type, canonical_value FROM entities "  # nosec
+            f"WHERE {owner_sql} AND id IN ({placeholders})",
+            [*owner_params, *entity_ids],
+        ).fetchall()
+        display_values["entities"] = {
+            str(row["id"]): {
+                "display_value": row["canonical_value"],
+                "item_type": row["type"],
+            }
+            for row in rows
+            if row["id"]
+        }
+
+    finding_ids = _unique_ids(ids_by_kind.get("findings") or [])
+    if finding_ids:
+        placeholders = _placeholders(finding_ids)
+        owner_sql, owner_params = _owner_filter("findings", session_id, team_id)
+        rows = conn.execute(
+            "SELECT id, title FROM findings "  # nosec
+            f"WHERE {owner_sql} AND id IN ({placeholders})",
+            [*owner_params, *finding_ids],
+        ).fetchall()
+        display_values["findings"] = {
+            str(row["id"]): {
+                "display_value": row["title"],
+            }
+            for row in rows
+            if row["id"]
+        }
+    return display_values
+
+
+def _cleanup_reason_summary_with_samples(
+    conn,
+    session_id: str,
+    bucket_counts: dict[str, dict[str, int]],
+    reason_counts: dict[tuple[str, str], dict[str, int]],
+    sample_collector: CleanupSampleCollector,
+    *,
+    team_id: str = "",
+) -> dict[str, Any]:
+    display_values = _cleanup_sample_display_values(
+        conn,
+        session_id,
+        sample_collector.ids_by_kind(),
+        team_id=team_id,
+    )
+    return build_cleanup_reason_summary(
+        bucket_counts,
+        reason_counts,
+        samples=sample_collector.build(bucket_counts, display_values),
+    )
 
 
 def _row_owner_filter(alias: str, team_id: str) -> str:
@@ -189,6 +268,7 @@ def atlas_run_cleanup_preview(
 
     bucket_counts = empty_cleanup_bucket_counts()
     reason_counts: dict[tuple[str, str], dict[str, int]] = {}
+    sample_collector = CleanupSampleCollector()
     normalized_team_id = normalize_team_id(team_id)
     owner_value = normalized_team_id or session_id
     finding_owner_sql = _row_owner_filter("f", normalized_team_id)
@@ -286,11 +366,25 @@ def atlas_run_cleanup_preview(
         if _any_flag(row, ("has_other_runs", "is_imported")):
             not_eligible_finding_ids.append(str(row["id"]))
             not_eligible_finding_count += 1
-            _record_row_reasons(reason_counts, row, "not_eligible", "findings", _FINDING_NOT_ELIGIBLE_REASONS)
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "not_eligible",
+                "findings",
+                _FINDING_NOT_ELIGIBLE_REASONS,
+            )
+            sample_collector.record("not_eligible", "findings", row["id"], reason_codes)
             continue
         if _any_flag(row, tuple(key for key, _ in _FINDING_CURATED_REASONS)):
             curated_finding_ids.append(str(row["id"]))
-            _record_row_reasons(reason_counts, row, "kept_by_default", "findings", _FINDING_CURATED_REASONS)
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "kept_by_default",
+                "findings",
+                _FINDING_CURATED_REASONS,
+            )
+            sample_collector.record("kept_by_default", "findings", row["id"], reason_codes)
             continue
         finding_ids.append(str(row["id"]))
         increment_cleanup_reason(reason_counts, "source_run_removed", "disposable", "findings")
@@ -373,11 +467,25 @@ def atlas_run_cleanup_preview(
         has_kept_findings = _flag(row, "has_kept_findings")
         if hard_excluded or _flag(row, "has_not_eligible_findings") or (has_kept_findings and not is_curated):
             not_eligible_entity_count += 1
-            _record_row_reasons(reason_counts, row, "not_eligible", "entities", _ENTITY_NOT_ELIGIBLE_REASONS)
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "not_eligible",
+                "entities",
+                _ENTITY_NOT_ELIGIBLE_REASONS,
+            )
+            sample_collector.record("not_eligible", "entities", row["id"], reason_codes)
             continue
         if is_curated:
             curated_entity_ids.append(str(row["id"]))
-            _record_row_reasons(reason_counts, row, "kept_by_default", "entities", _ENTITY_CURATED_REASONS)
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "kept_by_default",
+                "entities",
+                _ENTITY_CURATED_REASONS,
+            )
+            sample_collector.record("kept_by_default", "entities", row["id"], reason_codes)
             continue
         entity_ids.append(str(row["id"]))
     curated_entity_count = len(curated_entity_ids)
@@ -395,7 +503,14 @@ def atlas_run_cleanup_preview(
         "finding_ids": [finding_id for finding_id in finding_delete_ids if finding_id],
         "curated_entity_count": curated_entity_count,
         "curated_finding_count": curated_finding_count,
-        "cleanup_reasons": build_cleanup_reason_summary(bucket_counts, reason_counts),
+        "cleanup_reasons": _cleanup_reason_summary_with_samples(
+            conn,
+            session_id,
+            bucket_counts,
+            reason_counts,
+            sample_collector,
+            team_id=normalized_team_id,
+        ),
     }
 
 

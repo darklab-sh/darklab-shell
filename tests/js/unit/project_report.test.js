@@ -204,6 +204,56 @@ describe('project report controller', () => {
     ])
   })
 
+  it('preserves visible metadata edits when background selector pages render', async () => {
+    const { reportApi } = loadReportModule()
+    const apiFetch = vi.fn(async (url) => {
+      const target = String(url || '')
+      if (target === '/projects/proj_1/report') {
+        return apiResponse({
+          report: {
+            updated: '2026-06-04T12:00:00Z',
+            draft: {},
+          },
+          templates: [],
+        })
+      }
+      if (target.includes('/runs?')) return apiResponse({ runs: summary.runs, total: summary.runs.length })
+      if (target.includes('/targets?')) return apiResponse({ targets: summary.targets, total: summary.targets.length })
+      if (target.includes('/findings?')) return apiResponse({ findings: [], total: 0 })
+      if (target.includes('/artifacts?')) {
+        return apiResponse({ artifacts: summary.artifacts, total: summary.artifacts.length })
+      }
+      return apiResponse({})
+    })
+    const sparseSummary = {
+      project: { id: 'proj_1', name: 'Acme workspace' },
+      runs: [],
+      targets: [],
+      artifacts: [],
+    }
+    const ctx = makeContext(apiFetch, { projectFindingItems: vi.fn(() => []) })
+    const controller = reportApi.createProjectReportController(ctx)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    ctx.renderProjectExplorer = vi.fn(() => {
+      container.replaceChildren()
+      controller.renderReport(container, 'proj_1', sparseSummary)
+    })
+
+    await controller.load('proj_1', { render: false })
+    controller.renderReport(container, 'proj_1', sparseSummary)
+    const input = container.querySelector('[data-project-report-metadata="engagement_name"]')
+    input.value = 'Typed while selectors load'
+
+    await vi.waitFor(() => {
+      expect(ctx.renderProjectExplorer).toHaveBeenCalled()
+    })
+
+    expect(container.querySelector('[data-project-report-metadata="engagement_name"]').value)
+      .toBe('Typed while selectors load')
+    expect(controller.stateFor('proj_1').draft.metadata.engagement_name).toBe('Typed while selectors load')
+  })
+
   it('saves with the loaded updated token and the current draft fields', async () => {
     const { reportApi } = loadReportModule()
     const calls = []

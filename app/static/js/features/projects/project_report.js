@@ -258,6 +258,12 @@ let exportedDarklabProjectReport = null;
       if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
     }
 
+    function renderProjectSurfacesPreservingEdits(projectId) {
+      const st = stateFor(projectId);
+      if (st.loaded && !st.loading) syncEditableFields(st, visibleRoot(projectId));
+      renderProjectSurfaces();
+    }
+
     function selectedItems(summary, key) {
       if (key === 'run_ids') return ctx.projectRunItems?.(summary) || [];
       if (key === 'target_ids') return ctx.projectTargetItems?.(summary) || [];
@@ -555,7 +561,7 @@ let exportedDarklabProjectReport = null;
       } finally {
         if (isCurrentRequest()) {
           page.loading = false;
-          if (render) renderProjectSurfaces();
+          if (render) renderProjectSurfacesPreservingEdits(projectId);
         }
       }
       return page;

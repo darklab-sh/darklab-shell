@@ -16,7 +16,11 @@ import {
 import { DarklabEntityMetadata as importedEntityMetadata } from '../../ui/ui_entity_metadata.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from '../../ui/ui_outside_click.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
-import { atlasRunCleanupCopy as importedAtlasRunCleanupCopy } from '../../ui/cleanup_reasons.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import {
+  atlasRunCleanupCopy as importedAtlasRunCleanupCopy,
+  cleanupSampleDetails as importedCleanupSampleDetails,
+} from '../../ui/cleanup_reasons.js';
 import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
 import { apiFetch as importedApiFetch, logClientError as importedLogClientError } from '../../session.js';
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_bridge.js';
@@ -78,6 +82,8 @@ let exportedCycleAtlasTab = null;
   const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
   const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
   const atlasRunCleanupCopy = (typeof importedAtlasRunCleanupCopy !== 'undefined' && importedAtlasRunCleanupCopy) || null;
+  const cleanupSampleDetails = (typeof importedCleanupSampleDetails !== 'undefined' && importedCleanupSampleDetails) || null;
+  const bindDisclosure = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure) || null;
   const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
   const downloadBlobAsAttachment = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment) || null;
   const markInteractionSurfaceReady = (typeof importedMarkInteractionSurfaceReady !== 'undefined' && importedMarkInteractionSurfaceReady) || null;
@@ -2772,6 +2778,10 @@ let exportedCycleAtlasTab = null;
       });
     }
     appendCleanupNote(wrap, notEligibleNote);
+    const samples = typeof cleanupSampleDetails === 'function'
+      ? cleanupSampleDetails(cleanup.cleanup_reasons, { bindDisclosure })
+      : null;
+    if (samples) wrap.appendChild(samples);
     return wrap;
   }
 

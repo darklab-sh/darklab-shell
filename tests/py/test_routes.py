@@ -52,6 +52,7 @@ from services.runs.output_model import LineEvent, LineRole
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import record_run_findings
 from services.atlas.materializer import materialize_run_entities, upsert_entity
+from services.cleanup_reasons import CleanupSampleCollector, empty_cleanup_bucket_counts, set_cleanup_bucket_count
 from services.workspace import files as workspace_files
 from services.workspace.files import resolve_workspace_path
 
@@ -9940,6 +9941,7 @@ class TestProjectRoutes:
             }])
             conn.commit()
         removable_id = recorded[0]["id"]
+        curated_entity = recorded[1]
         curated_id = recorded[1]["id"]
 
         link_resp = client.post(
@@ -10004,6 +10006,20 @@ class TestProjectRoutes:
         assert reason_counts[("default_project_link", "disposable")] == (1, 0)
         assert reason_counts[("entity_label", "kept_by_default")] == (1, 0)
         assert reason_counts[("finding_attached_to_removed_entity", "disposable")] == (0, 1)
+        assert cleanup_reasons["samples"] == {
+            "kept_by_default": {
+                "entities": {
+                    "items": [{
+                        "bucket": "kept_by_default",
+                        "kind": "entities",
+                        "display_value": curated_entity["canonical_value"],
+                        "item_type": curated_entity["type"],
+                        "reasons": [{"code": "entity_label", "label": "labeled"}],
+                    }],
+                    "omitted": 0,
+                },
+            },
+        }
         assert unlink_resp.status_code == 200
         unlink_data = json.loads(unlink_resp.data)
         assert unlink_data["unlinked_entities"]["removed"] == 1
@@ -10418,6 +10434,35 @@ class TestProjectRoutes:
             for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("finding_attached_to_kept_entity", "kept_by_default")] == (1, 1)
+        assert preview["cleanup_reasons"]["samples"] == {
+            "kept_by_default": {
+                "entities": {
+                    "items": [{
+                        "bucket": "kept_by_default",
+                        "kind": "entities",
+                        "display_value": "unlink-child.darklab.sh",
+                        "item_type": "domain",
+                        "reasons": [{
+                            "code": "finding_attached_to_kept_entity",
+                            "label": "attached to kept entity",
+                        }],
+                    }],
+                    "omitted": 0,
+                },
+                "findings": {
+                    "items": [{
+                        "bucket": "kept_by_default",
+                        "kind": "findings",
+                        "display_value": "443/tcp open https on unlink-child.darklab.sh",
+                        "reasons": [{
+                            "code": "finding_attached_to_kept_entity",
+                            "label": "attached to kept entity",
+                        }],
+                    }],
+                    "omitted": 0,
+                },
+            },
+        }
         assert unlink_resp.status_code == 200
         unlink_data = json.loads(unlink_resp.data)["unlinked_entities"]
         assert unlink_data["removed"] == 0
@@ -15276,6 +15321,18 @@ class TestAtlasRoutes:
         }
         assert reason_counts[("entity_label", "kept_by_default")] == (1, 0)
         assert reason_counts[("source_run_removed", "disposable")] == (0, 1)
+        kept_entity_samples = preview["cleanup_reasons"]["samples"]["kept_by_default"]["entities"]
+        assert kept_entity_samples == {
+            "items": [{
+                "bucket": "kept_by_default",
+                "kind": "entities",
+                "display_value": "CVE-2025-49113",
+                "item_type": "cve",
+                "reasons": [{"code": "entity_label", "label": "labeled"}],
+            }],
+            "omitted": 0,
+        }
+        assert "disposable" not in preview["cleanup_reasons"]["samples"]
         assert delete_resp.status_code == 200
         with db_connect() as conn:
             rows = conn.execute(
@@ -15341,6 +15398,11 @@ class TestAtlasRoutes:
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
         cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
         other_run_id = "run-" + uuid.uuid4().hex
+        extra_imported_entities = [
+            ("ent_sample_extra_a_" + uuid.uuid4().hex[:8], "sample-a.darklab.sh"),
+            ("ent_sample_extra_b_" + uuid.uuid4().hex[:8], "sample-b.darklab.sh"),
+            ("ent_sample_extra_c_" + uuid.uuid4().hex[:8], "sample-c.darklab.sh"),
+        ]
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
@@ -15394,37 +15456,151 @@ class TestAtlasRoutes:
                     "2026-05-14T00:00:00+00:00",
                 ),
             )
+            for entity_id, value in extra_imported_entities:
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "VALUES (?, ?, 'domain', ?, ?, ?, ?, ?)",
+                    (
+                        entity_id,
+                        session_id,
+                        value,
+                        "sig_" + entity_id,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (entity_id, run_id, "2026-05-14T00:00:00+00:00", "2026-05-14T00:00:00+00:00"),
+                )
+                conn.execute(
+                    "INSERT INTO atlas_entity_import_links "
+                    "(entity_id, batch_id, first_observed_at, last_observed_at, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        entity_id,
+                        "batch-" + uuid.uuid4().hex,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                    ),
+                )
             conn.commit()
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
             headers={"X-Session-ID": session_id},
         )
-        delete_resp = client.delete(
-            f"/history/{run_id}?prune_atlas=1",
+        repeat_preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
             headers={"X-Session-ID": session_id},
         )
 
         assert preview_resp.status_code == 200
+        assert repeat_preview_resp.status_code == 200
         preview = json.loads(preview_resp.data)["cleanup"]
+        repeat_preview = json.loads(repeat_preview_resp.data)["cleanup"]
         assert preview["entities"] == 0
         assert preview["findings"] == 0
-        assert preview["cleanup_reasons"]["buckets"]["not_eligible"] == {"entities": 2, "findings": 1, "total": 3}
+        assert preview["cleanup_reasons"]["buckets"]["not_eligible"] == {"entities": 5, "findings": 1, "total": 6}
         reason_counts = {
             (item["code"], item["bucket"]): (item["entities"], item["findings"])
             for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("seen_in_other_runs", "not_eligible")] == (1, 1)
-        assert reason_counts[("imported_entity", "not_eligible")] == (1, 0)
+        assert reason_counts[("imported_entity", "not_eligible")] == (4, 0)
         assert reason_counts[("imported_finding", "not_eligible")] == (0, 1)
         assert reason_counts[("entity_has_kept_findings", "not_eligible")] == (1, 0)
+        not_eligible_samples = preview["cleanup_reasons"]["samples"]["not_eligible"]
+        expected_entity_samples_by_id = {
+            cve_id: {
+                "bucket": "not_eligible",
+                "kind": "entities",
+                "display_value": "CVE-2025-49113",
+                "item_type": "cve",
+                "reasons": [{"code": "imported_entity", "label": "imported entity"}],
+            },
+            domain_id: {
+                "bucket": "not_eligible",
+                "kind": "entities",
+                "display_value": "darklab.sh",
+                "item_type": "domain",
+                "reasons": [
+                    {"code": "seen_in_other_runs", "label": "seen elsewhere"},
+                    {"code": "entity_has_kept_findings", "label": "has kept findings"},
+                ],
+            },
+        }
+        for entity_id, value in extra_imported_entities:
+            expected_entity_samples_by_id[entity_id] = {
+                "bucket": "not_eligible",
+                "kind": "entities",
+                "display_value": value,
+                "item_type": "domain",
+                "reasons": [{"code": "imported_entity", "label": "imported entity"}],
+            }
+        assert not_eligible_samples["entities"] == {
+            "items": [
+                expected_entity_samples_by_id[entity_id]
+                for entity_id in sorted(expected_entity_samples_by_id)[:3]
+            ],
+            "omitted": 2,
+        }
+        assert all(
+            not item["display_value"].startswith("ent_")
+            for item in not_eligible_samples["entities"]["items"]
+        )
+        assert not_eligible_samples["findings"] == {
+            "items": [{
+                "bucket": "not_eligible",
+                "kind": "findings",
+                "display_value": "443/tcp open https on darklab.sh",
+                "reasons": [
+                    {"code": "seen_in_other_runs", "label": "seen elsewhere"},
+                    {"code": "imported_finding", "label": "imported finding"},
+                ],
+            }],
+            "omitted": 0,
+        }
+        assert "seen later" not in not_eligible_samples["findings"]["items"][0]["display_value"]
+        assert repeat_preview["cleanup_reasons"]["samples"] == preview["cleanup_reasons"]["samples"]
+        reasonless_collector = CleanupSampleCollector()
+        reasonless_collector.record("not_eligible", "entities", "reasonless-entity", ())
+        reasonless_bucket_counts = empty_cleanup_bucket_counts()
+        set_cleanup_bucket_count(reasonless_bucket_counts, "not_eligible", "entities", 1)
+        assert reasonless_collector.build(
+            reasonless_bucket_counts,
+            {"entities": {"reasonless-entity": {"display_value": "reasonless.example", "item_type": "domain"}}},
+        ) == {
+            "not_eligible": {
+                "entities": {
+                    "items": [{
+                        "bucket": "not_eligible",
+                        "kind": "entities",
+                        "display_value": "reasonless.example",
+                        "item_type": "domain",
+                        "reasons": [],
+                    }],
+                    "omitted": 0,
+                },
+            },
+        }
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1",
+            headers={"X-Session-ID": session_id},
+        )
         assert delete_resp.status_code == 200
         assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 0, "findings": 0}
         with db_connect() as conn:
             assert conn.execute(
                 "SELECT COUNT(*) FROM entities WHERE session_id = ?",
                 (session_id,),
-            ).fetchone()[0] == 2
+            ).fetchone()[0] == 5
             assert conn.execute(
                 "SELECT COUNT(*) FROM findings WHERE session_id = ?",
                 (session_id,),
@@ -15661,6 +15837,29 @@ class TestAtlasRoutes:
         }
         assert reason_counts[("entity_project_link", "kept_by_default")] == (1, 0)
         assert reason_counts[("finding_parent_entity_project_link", "kept_by_default")] == (0, 1)
+        team_samples = preview["cleanup_reasons"]["samples"]["kept_by_default"]
+        assert team_samples["entities"] == {
+            "items": [{
+                "bucket": "kept_by_default",
+                "kind": "entities",
+                "display_value": "darklab.sh",
+                "item_type": "domain",
+                "reasons": [{"code": "entity_project_link", "label": "linked to a Project"}],
+            }],
+            "omitted": 0,
+        }
+        assert team_samples["findings"] == {
+            "items": [{
+                "bucket": "kept_by_default",
+                "kind": "findings",
+                    "display_value": "443/tcp open https on darklab.sh",
+                    "reasons": [{
+                        "code": "finding_parent_entity_project_link",
+                        "label": "Project-linked entity",
+                    }],
+                }],
+            "omitted": 0,
+        }
         assert delete_resp.status_code == 200
         assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 1, "findings": 0}
         with db_connect() as conn:
@@ -15797,6 +15996,8 @@ class TestAtlasRoutes:
         assert preview_resp.status_code == 200
         preview = json.loads(preview_resp.data)["preview"]
         assert preview["sibling_cleanup"]["entities"] == 2
+        assert preview["sibling_cleanup"]["findings"] == 0
+        assert "samples" not in preview["sibling_cleanup"]["cleanup_reasons"]
         assert delete_resp.status_code == 200
         with db_connect() as conn:
             assert conn.execute(

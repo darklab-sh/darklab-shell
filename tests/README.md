@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,019
+- behavior tests: 4,020
 - docs/inventory meta-tests: 63
 - `pytest`: 2329 (2279 behavior + 50 meta)
-- `vitest`: 1483 (1470 behavior + 13 meta)
+- `vitest`: 1484 (1471 behavior + 13 meta)
 - `playwright`: 270 behavior
-- total: 4,082
+- total: 4,083
 
 This document is organized in two parts:
 
@@ -1802,9 +1802,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_completed_run_preserves_command_url_target_source_links_after_entity_materialization` | Verifies completed run finalization keeps command-discovered URL targets and their derived host source-linked after Atlas output entities are materialized. |
 | `TestProjectRoutes.test_completed_run_auto_promote_rules_apply_to_run_entities` | Verifies completed runs apply enabled auto-promote rules to newly materialized Atlas entities before active-project bulk linking. |
 | `TestProjectRoutes.test_completed_run_auto_promote_failure_is_non_fatal` | Verifies auto-promote failures during run finalization do not prevent run or Atlas entity persistence. |
-| `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run disposable Atlas entity links from the project while keeping kept-by-default entities. |
+| `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run disposable Atlas entity links from the project while keeping kept-by-default entities and showing bounded kept samples. |
 | `TestProjectRoutes.test_team_project_run_unlink_preview_matches_delete_for_owner_scoped_entities` | Verifies team Project run unlink previews match delete behavior for owner-scoped same-run Atlas entity links. |
-| `TestProjectRoutes.test_team_project_run_unlink_keeps_entity_with_cross_member_curated_child_finding` | Verifies team Project run unlink keeps an entity link when a reviewed child finding belongs to another teammate's session. |
+| `TestProjectRoutes.test_team_project_run_unlink_keeps_entity_with_cross_member_curated_child_finding` | Verifies team Project run unlink keeps an entity link when a reviewed child finding belongs to another teammate's session and reports kept entity/finding samples. |
 | `TestProjectRoutes.test_bulk_project_links_reject_too_many_entity_ids` | Verifies bulk project link requests reject payloads over the server-side run limit. |
 | `TestProjectRoutes.test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached` | Verifies bulk project links report `policy_blocked` when the project link limit is reached mid-batch. |
 | `TestProjectRoutes.test_project_target_quota_ignores_bulk_linked_atlas_entities` | Verifies project target quota checks do not count bulk-linked Atlas entities as discovered or manually added project targets. |
@@ -1988,13 +1988,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasRoutes.test_stale_run_links_do_not_hide_atlas_orphans_or_block_cleanup` | Verifies stale Atlas source links from deleted runs do not hide orphaned rows or block source-run cleanup. |
 | `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune disposable Atlas rows from the deleted run while preserving kept-by-default entities. |
 | `TestAtlasRoutes.test_run_cleanup_ignores_cross_session_entity_metadata_when_classifying_curated` | Verifies Atlas run cleanup ignores labels and notes from other sessions when deciding whether rows are kept by default. |
-| `TestAtlasRoutes.test_run_cleanup_reports_not_eligible_imported_and_seen_elsewhere_rows` | Verifies Atlas run cleanup reports imported and seen-elsewhere rows as not eligible for the cleanup instead of disposable. |
+| `TestAtlasRoutes.test_run_cleanup_reports_not_eligible_imported_and_seen_elsewhere_rows` | Verifies Atlas run cleanup reports imported and seen-elsewhere rows as not eligible, returns bounded stable samples, and includes omitted counts. |
 | `TestAtlasRoutes.test_run_cleanup_protects_findings_reachable_through_project_run_links` | Verifies run cleanup keeps findings that are project-reachable through linked source runs. |
 | `TestAtlasRoutes.test_run_delete_can_prune_curated_project_reachable_atlas_rows_when_requested` | Verifies the explicit kept-by-default cleanup option can delete single-source Atlas rows that are project-reachable. |
 | `TestAtlasRoutes.test_run_delete_keeps_curated_entity_with_not_eligible_child_finding_when_pruning_curated` | Verifies kept-by-default cleanup does not delete an entity when doing so would also delete a not-eligible child finding. |
 | `TestAtlasRoutes.test_team_history_cleanup_preview_matches_delete_for_owner_scoped_atlas_rows` | Verifies team-scoped History cleanup previews match delete behavior for owner-scoped Atlas rows. |
 | `TestAtlasRoutes.test_team_history_cleanup_delete_matches_preview_for_cross_member_atlas_rows` | Verifies team-scoped History cleanup deletes the same Atlas rows previewed when the rows belong to another teammate's session. |
-| `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove disposable sibling entities from the same source run. |
+| `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove disposable sibling entities from the same source run while keeping same-run cleanup counts consistent. |
 | `TestAtlasRoutes.test_run_retaining_atlas_cleanup_detaches_sources_and_recalculates_rows` | Verifies source-run Atlas cleanup keeps the run transcript while detaching links, pruning disposable rows, and recalculating shared counts. |
 | `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings, report missing ids, and record entity deletion audit rows. |
 | `TestAtlasRoutes.test_atlas_read_and_write_routes_are_session_scoped` | Verifies Atlas read, write, refresh, delete, and project-link routes do not reveal or mutate another session's Atlas data. |
@@ -2799,7 +2799,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
 | `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
-| `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations show same-run cleanup only when sibling rows can be removed and render the shared reason labels. |
+| `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations show same-run cleanup only when sibling rows can be removed and render shared reason labels plus collapsed sample details. |
 | `disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings` | Verifies that view-only team scope disables Atlas delete and suppression affordances before a confirmation can open while still allowing read-only triage details. |
 | `applies the project filter when opened from a project` | Verifies that project-launched Atlas shows the project filter select/chip, requests rows filtered to that project, can switch to another project from inside Atlas, and clears project scope from the chip. |
 | `selects a requested finding when opened from a project finding row` | Verifies that project-launched Atlas can open to Findings, keep project scope, and select the requested finding after the list loads. |
@@ -3135,7 +3135,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `opens the watchers modal from the Run Details baseline action` | Verifies Run Details can open the Watchers modal with the current run as the prefilled baseline. |
 | `renders Run Details AI summary actions when AI summaries are enabled` | Verifies Run Details can load cached AI assists, request a summary, render returned summary fields, and show validated Copy/Run suggestion actions when the AI feature flags are enabled. |
 | `uses shared row primitives for fallback Run Details entity rows` | Verifies Run Details fallback entity rows use the shared clickable row primitives when the Atlas row renderer is unavailable. |
-| `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run disposable Atlas entity unlinking. |
+| `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run Atlas entity unlinking with cleanup reason labels and sample details. |
 | `uses Current Project attachment state for Run Details project actions when link metadata is missing` | Verifies Run Details still shows remove-from-project actions when an opened run lacks embedded project-link metadata but the Current Project card confirms the active project link. |
 | `loads structured run findings into the run details findings tab` | Verifies the Run Details modal consumes `/entities/run/<id>/findings` and renders structured findings in the Findings tab. |
 | `closes the history panel for permalink but keeps it open for star and delete` | Verifies permalink closes the desktop drawer while star and delete keep it open so the row stays in context under the confirm modal. |
@@ -3153,7 +3153,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `shows a fallback toast when history refresh fails after a successful bulk action` | Verifies a completed bulk action still tells the user to refresh when the post-action History reload fails. |
 | `bulk remove unlinks selected runs from every linked project without a picker` | Verifies bulk remove confirms once, skips the project picker, and posts batch unlink requests for every linked project represented by the selected runs. |
 | `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown rejection reasons. |
-| `only offers Atlas cleanup on run delete when there are removable candidates` | Verifies that run delete confirmations only show the optional Atlas cleanup checkbox when removable cleanup candidates exist. |
+| `only offers Atlas cleanup on run delete when there are removable candidates` | Verifies that run delete confirmations only show optional Atlas cleanup choices when removable candidates exist and render reason badges with collapsed sample details. |
 | `shows run cleanup reason notes without destructive options when only not eligible items exist` | Verifies that run delete confirmations still explain not-eligible Atlas cleanup candidates without showing disposable or kept-by-default deletion checkboxes. |
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
@@ -3451,6 +3451,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | --- | --- |
 | `loads the draft and renders the report editor with preview/export actions` | Verifies that the Report tab loads a saved draft, renders metadata and selection controls, and exposes preview and archive export actions. |
 | `shows template choices only when more than one template is configured` | Verifies that the Report tab hides the template selector for the single shipped default and renders it when multiple configured templates exist. |
+| `preserves visible metadata edits when background selector pages render` | Verifies that background report selector loads preserve metadata values already typed into the visible editor before repainting the Report tab. |
 | `saves with the loaded updated token and the current draft fields` | Verifies that explicit Save sends the optimistic concurrency token and the current report draft. |
 | `clears stale preview output and confirms dirty reloads when editing report metadata` | Verifies that editing report metadata clears the rendered preview, disables Print/PDF until the preview is refreshed, and asks before Reload saved discards unsaved edits. |
 | `keeps include-all selection dynamic when editing metadata` | Verifies that editing report metadata does not freeze default include-all selections to the currently rendered checkbox rows. |
@@ -3761,7 +3762,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
 | `keeps inactive project list pagination visually hidden and settles abandoned first-open prefetches` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability, and that canceled first-open prefetches are settled. |
-| `shows project unlink reason notes without destructive entity options when only not eligible items exist` | Verifies that Project run unlink confirmations still explain not-eligible Atlas cleanup candidates without showing disposable or kept-by-default entity cleanup options. |
+| `shows project unlink reason notes and samples without destructive entity options when only not eligible items exist` | Verifies that Project run unlink confirmations still explain not-eligible Atlas cleanup candidates and render matching sample details without showing disposable or kept-by-default entity cleanup options. |
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `pages and filters the project Details targets browser` | Verifies that the Project Details target browser paginates, filters, keeps target counts stable, and updates target rows without a full modal reload. |
 | `renders Project auto-promote rules with preview, save, apply, and source detail chips` | Verifies that the Project Entities Rules panel previews and saves a rule, applies it after confirmation, and labels auto-promoted entity rows with the matching rule name. |

@@ -19,7 +19,8 @@ import {
   apiFetch as importedRuntimeApiFetch,
   hasRuntimeHandler as importedHasRuntimeHandler,
 } from '../../runtime_bridge.js';
-import { atlasRunCleanupCopy } from '../../ui/cleanup_reasons.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import { atlasRunCleanupCopy, cleanupSampleDetails } from '../../ui/cleanup_reasons.js';
 
 let _pendingHistActionFallback = null;
 const HISTORY_MUTATIONS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
@@ -206,6 +207,10 @@ function _buildHistoryAtlasCleanupContent(cleanup) {
     excludedNote.textContent = copy.notEligibleNote;
     fieldset.appendChild(excludedNote);
   }
+  const samples = cleanupSampleDetails(cleanup?.cleanup_reasons, {
+    bindDisclosure: importedBindDisclosure,
+  });
+  if (samples) fieldset.appendChild(samples);
   wrap.appendChild(fieldset);
   return wrap;
 }

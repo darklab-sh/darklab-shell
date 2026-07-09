@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 CLEANUP_REASON_VERSION = 1
+CLEANUP_SAMPLE_CAP = 3
+CLEANUP_SAMPLE_TEXT_MAX_LENGTH = 120
 
 CLEANUP_BUCKETS = ("disposable", "kept_by_default", "not_eligible")
 CLEANUP_KINDS = ("entities", "findings")
+CLEANUP_SAMPLE_BUCKETS = ("kept_by_default", "not_eligible")
 
 CLEANUP_REASON_DEFINITIONS = {
     "default_project_link": {
@@ -97,6 +100,10 @@ CLEANUP_REASON_DEFINITIONS = {
 }
 
 _REASON_ORDER = tuple(CLEANUP_REASON_DEFINITIONS)
+_CLEANUP_SAMPLE_FALLBACKS = {
+    "entities": "Unknown entity",
+    "findings": "Untitled finding",
+}
 
 
 def empty_cleanup_bucket_counts() -> dict[str, dict[str, int]]:
@@ -128,9 +135,148 @@ def increment_cleanup_reason(
     counts[kind] += max(0, int(amount or 0))
 
 
+def cleanup_sample_display_text(
+    value: object,
+    *,
+    kind: str = "",
+    max_length: int = CLEANUP_SAMPLE_TEXT_MAX_LENGTH,
+) -> str:
+    fallback = _CLEANUP_SAMPLE_FALLBACKS.get(kind, "Untitled item")
+    text = str(value or "").strip() or fallback
+    limit = max(1, int(max_length or 0))
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return text[:limit]
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _ordered_reason_codes(reason_codes: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    valid_codes = {
+        str(code or "").strip()
+        for code in reason_codes
+        if str(code or "").strip() in CLEANUP_REASON_DEFINITIONS
+    }
+    return sorted(
+        valid_codes,
+        key=lambda code: _REASON_ORDER.index(code) if code in _REASON_ORDER else len(_REASON_ORDER),
+    )
+
+
+def _cleanup_sample_reason_payload(reason_codes: list[str] | tuple[str, ...] | set[str]) -> list[dict[str, str]]:
+    return [
+        {
+            "code": code,
+            "label": CLEANUP_REASON_DEFINITIONS[code]["label"],
+        }
+        for code in _ordered_reason_codes(reason_codes)
+    ]
+
+
+def _sample_display_record(
+    display_values: dict[str, dict[str, Any]],
+    kind: str,
+    item_id: str,
+) -> dict[str, Any]:
+    raw_record = display_values.get(kind, {}).get(item_id)
+    item_type = ""
+    if isinstance(raw_record, dict):
+        display_value = (
+            raw_record.get("display_value")
+            or raw_record.get("canonical_value")
+            or raw_record.get("title")
+            or raw_record.get("value")
+            or ""
+        )
+        item_type = str(raw_record.get("item_type") or raw_record.get("type") or "").strip()
+    else:
+        display_value = raw_record
+    record = {
+        "display_value": cleanup_sample_display_text(display_value, kind=kind),
+    }
+    if item_type:
+        record["item_type"] = cleanup_sample_display_text(item_type, max_length=40)
+    return record
+
+
+def _cleanup_sample_item(
+    bucket: str,
+    kind: str,
+    item_id: str,
+    reason_codes: list[str] | tuple[str, ...] | set[str],
+    display_values: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    item = {
+        "bucket": bucket,
+        "kind": kind,
+        **_sample_display_record(display_values, kind, item_id),
+        "reasons": _cleanup_sample_reason_payload(reason_codes),
+    }
+    return item
+
+
+class CleanupSampleCollector:
+    """Keep the lowest bounded IDs per cleanup bucket/kind for later display lookup."""
+
+    def __init__(self, *, cap: int = CLEANUP_SAMPLE_CAP) -> None:
+        self.cap = max(0, int(cap or 0))
+        self._records: dict[tuple[str, str], dict[str, set[str]]] = {}
+
+    def record(
+        self,
+        bucket: str,
+        kind: str,
+        item_id: object,
+        reason_codes: list[str] | tuple[str, ...] | set[str],
+    ) -> None:
+        if self.cap <= 0 or bucket not in CLEANUP_SAMPLE_BUCKETS or kind not in CLEANUP_KINDS:
+            return
+        normalized_id = str(item_id or "").strip()
+        ordered_codes = _ordered_reason_codes(reason_codes)
+        if not normalized_id:
+            return
+        records = self._records.setdefault((bucket, kind), {})
+        records.setdefault(normalized_id, set()).update(ordered_codes)
+        for overflow_id in sorted(records)[self.cap:]:
+            records.pop(overflow_id, None)
+
+    def ids_by_kind(self) -> dict[str, list[str]]:
+        ids: dict[str, set[str]] = {kind: set() for kind in CLEANUP_KINDS}
+        for (_bucket, kind), records in self._records.items():
+            ids.setdefault(kind, set()).update(records)
+        return {kind: sorted(values) for kind, values in ids.items() if values}
+
+    def build(
+        self,
+        bucket_counts: dict[str, dict[str, int]],
+        display_values: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        samples: dict[str, dict[str, dict[str, Any]]] = {}
+        for bucket in CLEANUP_SAMPLE_BUCKETS:
+            for kind in CLEANUP_KINDS:
+                bucket_kind_total = int(bucket_counts.get(bucket, {}).get(kind) or 0)
+                if bucket_kind_total <= 0:
+                    continue
+                records = self._records.get((bucket, kind), {})
+                if not records:
+                    continue
+                items = [
+                    _cleanup_sample_item(bucket, kind, item_id, records[item_id], display_values)
+                    for item_id in sorted(records)
+                ]
+                omitted = max(0, bucket_kind_total - len(items))
+                samples.setdefault(bucket, {})[kind] = {
+                    "items": items,
+                    "omitted": omitted,
+                }
+        return samples
+
+
 def build_cleanup_reason_summary(
     bucket_counts: dict[str, dict[str, int]],
     reason_counts: dict[tuple[str, str], dict[str, int]],
+    *,
+    samples: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     buckets: dict[str, dict[str, int]] = {}
     for bucket in CLEANUP_BUCKETS:
@@ -167,8 +313,11 @@ def build_cleanup_reason_summary(
             "total": total,
         })
 
-    return {
+    summary = {
         "version": CLEANUP_REASON_VERSION,
         "buckets": buckets,
         "reasons": reasons,
     }
+    if samples:
+        summary["samples"] = samples
+    return summary

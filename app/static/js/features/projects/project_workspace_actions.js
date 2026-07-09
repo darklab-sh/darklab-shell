@@ -3,6 +3,7 @@ import {
   applyProjectRunEntityUnlinkPreview,
   setCleanupNodeHidden,
 } from '../../ui/cleanup_reasons.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
 
 let exportedDarklabProjectWorkspaceActions = null;
 
@@ -120,6 +121,10 @@ let exportedDarklabProjectWorkspaceActions = null;
       notEligibleNote.className = 'cleanup-reason-note project-run-entities-note u-hidden';
       wrap.appendChild(notEligibleNote);
 
+      const sampleDetails = document.createElement('div');
+      sampleDetails.className = 'cleanup-sample-slot u-hidden';
+      wrap.appendChild(sampleDetails);
+
       return {
         wrap,
         label,
@@ -132,6 +137,8 @@ let exportedDarklabProjectWorkspaceActions = null;
         curatedNote,
         runFindingsNote,
         notEligibleNote,
+        sampleDetails,
+        bindDisclosure: importedBindDisclosure,
         setNodeHidden: setCleanupNodeHidden,
         includeEntities() {
           return !!checkbox.checked && !checkbox.disabled;

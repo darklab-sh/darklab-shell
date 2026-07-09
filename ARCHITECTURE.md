@@ -1331,7 +1331,9 @@ Atlas is the entity-first triage surface that turns saved external-run output in
 
 **Run-delete cleanup and orphan model.** Deleting a run removes its `entity_run_links` and `findings_occurrences` rows but leaves the parent entity and finding rows in place so labels, notes, project links, project-visible findings, and triage state survive transcript pruning. Run-delete confirmations can opt in to also remove disposable entities and findings whose only source run was the deleted one. Single-source rows with keep signals are kept by default, and the confirmation has a separate checkbox to include them when the operator wants a deeper cleanup. Keep signals include project links, project-visible finding relationships, labels, notes, and findings reviewed away from `new`; imported rows and rows still seen elsewhere are described as not eligible for that cleanup. Atlas surfaces expose an orphan-source filter so operators can audit entities and findings whose source runs have all been deleted, and the entity/finding delete confirmations can sweep same-source siblings with the same reason-labeled guardrail.
 
-**Cleanup reason payload.** Atlas run cleanup previews, History run-delete cleanup previews, Atlas entity/finding sibling-delete previews, and Project run unlink previews include a `cleanup_reasons` object for browser confirmation copy. The payload has a `version`, a `buckets` object keyed by `disposable`, `kept_by_default`, and `not_eligible`, and a `reasons` list. Each bucket reports `entities`, `findings`, and `total`; each reason reports `code`, `bucket`, `label`, `description`, `entities`, `findings`, and `total`. Destructive UI should reconcile choices from bucket totals and render the provided labels/descriptions as explanatory copy. Reason counts are additive: one row can match several reasons, so summed reason totals can exceed the bucket total. Reason codes are preview metadata for the browser UI, not a frozen headless API contract.
+**Cleanup reason payload.** Atlas run cleanup previews, History run-delete cleanup previews, Atlas entity/finding sibling-delete previews, and Project run unlink previews include a `cleanup_reasons` object for browser confirmation copy. The payload has a `version`, a `buckets` object keyed by `disposable`, `kept_by_default`, and `not_eligible`, and a `reasons` list. Each bucket reports `entities`, `findings`, and `total`; each reason reports `code`, `bucket`, `label`, `description`, `entities`, `findings`, and `total`. Reason counts are additive: one row can match several reasons, so summed reason totals can exceed the bucket total.
+
+The payload can also include display-only `samples` for kept-by-default and not-eligible rows so confirmations can show a compact disclosure with example entities or findings. Samples are grouped as `samples.<bucket>.<kind>`, where `bucket` is `kept_by_default` or `not_eligible` and `kind` is `entities` or `findings`. Each group has `items` plus `omitted`; at most three items are returned per bucket/kind, and `omitted` is the exact number of additional rows in that bucket/kind beyond the returned items. Not every flow emits every group; absent groups simply mean that preview has no samples for that bucket/kind. Sample items carry `bucket`, `kind`, a bounded `display_value`, optional `item_type`, and the matching reason code/label chips for that row. Entity samples use owner-scoped canonical values, and finding samples use bounded finding titles; they do not expose raw database IDs, raw output lines, output snippets, labels, or notes. Samples are live preview metadata only and are not persisted into snapshots, permalinks, exports, or other shareable artifacts. Destructive UI should reconcile choices from bucket totals and render labels, descriptions, and samples as explanatory copy. Reason codes and samples are preview metadata for the browser UI, not a frozen headless API contract.
 
 **Project linkage.** Project membership for Atlas entities flows through the generic `project_links` table with `entity_type='atlas_entity'`. There is no separate per-entity project table; promotion from Atlas to a project is a tag on the entity row, not a copy. Active-project run capture can also tag the Atlas entities materialized from the same run after the run finishes, and Options lets users turn that entity side off while leaving run capture on.
 
@@ -2239,12 +2241,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,019
+- behavior tests: 4,020
 - docs/inventory meta-tests: 63
 - `pytest`: 2329 (2279 behavior + 50 meta)
-- `vitest`: 1483 (1470 behavior + 13 meta)
+- `vitest`: 1484 (1471 behavior + 13 meta)
 - `playwright`: 270 behavior
-- total: 4,082
+- total: 4,083
 
 ### Testing Architecture
 

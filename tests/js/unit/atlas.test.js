@@ -1221,13 +1221,36 @@ describe('Atlas overlay', () => {
               kept_by_default: { entities: 1, findings: 1, total: 2 },
               not_eligible: { entities: 0, findings: 0, total: 0 },
             },
-            reasons: [
-              { bucket: 'kept_by_default', code: 'entity_project_link', label: 'linked to a Project', entities: 1, findings: 0, total: 1 },
-              { bucket: 'kept_by_default', code: 'finding_review_state', label: 'reviewed finding', entities: 0, findings: 1, total: 1 },
-            ],
-          },
-        },
-      },
+	            reasons: [
+	              { bucket: 'kept_by_default', code: 'entity_project_link', label: 'linked to a Project', entities: 1, findings: 0, total: 1 },
+	              { bucket: 'kept_by_default', code: 'finding_review_state', label: 'reviewed finding', entities: 0, findings: 1, total: 1 },
+	            ],
+	            samples: {
+	              kept_by_default: {
+	                entities: {
+	                  items: [{
+	                    bucket: 'kept_by_default',
+	                    kind: 'entities',
+	                    display_value: '107.178.109.44',
+	                    item_type: 'ip',
+	                    reasons: [{ code: 'entity_project_link', label: 'linked to a Project' }],
+	                  }],
+	                  omitted: 0,
+	                },
+	                findings: {
+	                  items: [{
+	                    bucket: 'kept_by_default',
+	                    kind: 'findings',
+	                    display_value: 'Reviewed finding',
+	                    reasons: [{ code: 'finding_review_state', label: 'reviewed finding' }],
+	                  }],
+	                  omitted: 0,
+	                },
+	              },
+	            },
+	          },
+	        },
+	      },
     ]
     const apiFetch = vi.fn((url) => {
       const target = String(url)
@@ -1284,10 +1307,17 @@ describe('Atlas overlay', () => {
     await Promise.resolve()
     const curatedContent = showConfirm.mock.calls[2][0].content
     expect(curatedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
-    expect(curatedContent.textContent).toContain('Also delete single-source Atlas items kept by default')
-    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
-    expect(curatedContent.textContent).toContain('Reasons: linked to a Project, reviewed finding.')
-  })
+	    expect(curatedContent.textContent).toContain('Also delete single-source Atlas items kept by default')
+	    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
+	    expect(curatedContent.textContent).toContain('Reasons: linked to a Project, reviewed finding.')
+	    const sampleDetails = curatedContent.querySelector('[data-cleanup-samples]')
+	    expect(sampleDetails).not.toBeNull()
+	    expect(sampleDetails.querySelector('.cleanup-sample-toggle')?.getAttribute('aria-expanded')).toBe('false')
+	    expect(sampleDetails.textContent).toContain('107.178.109.44')
+	    expect(sampleDetails.textContent).toContain('Reviewed finding')
+	    expect([...sampleDetails.querySelectorAll('.badge')].map(badge => badge.textContent))
+	      .toEqual(expect.arrayContaining(['ip', 'linked to a Project', 'reviewed finding']))
+	  })
 
   it('disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('delete'))

@@ -15,6 +15,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import entity_exists_in_scope, metadata_owner_params, metadata_owner_sql
 from services.cleanup_reasons import (
+    CleanupSampleCollector,
     build_cleanup_reason_summary,
     empty_cleanup_bucket_counts,
     increment_cleanup_reason,
@@ -445,6 +446,51 @@ def _project_visible_finding_ids(
     return {str(row["id"]) for row in rows if row["id"]}
 
 
+def _project_cleanup_sample_display_values(
+    conn,
+    session_id,
+    ids_by_kind,
+    *,
+    team_id="",
+) -> dict[str, dict[str, Any]]:
+    display_values: dict[str, dict[str, Any]] = {}
+    entity_ids = [str(entity_id or "") for entity_id in ids_by_kind.get("entities", []) if str(entity_id or "")]
+    if entity_ids:
+        placeholders = ",".join("?" for _ in entity_ids)
+        entity_owner_sql, entity_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="e")
+        rows = conn.execute(
+            "SELECT e.id, e.type, e.canonical_value FROM entities e "  # nosec
+            f"WHERE {entity_owner_sql} AND e.id IN ({placeholders})",
+            [*entity_owner_params, *entity_ids],
+        ).fetchall()
+        display_values["entities"] = {
+            str(row["id"]): {
+                "display_value": row["canonical_value"],
+                "item_type": row["type"],
+            }
+            for row in rows
+            if row["id"]
+        }
+
+    finding_ids = [str(finding_id or "") for finding_id in ids_by_kind.get("findings", []) if str(finding_id or "")]
+    if finding_ids:
+        placeholders = ",".join("?" for _ in finding_ids)
+        finding_owner_sql, finding_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="f")
+        rows = conn.execute(
+            "SELECT f.id, f.title FROM findings f "  # nosec
+            f"WHERE {finding_owner_sql} AND f.id IN ({placeholders})",
+            [*finding_owner_params, *finding_ids],
+        ).fetchall()
+        display_values["findings"] = {
+            str(row["id"]): {
+                "display_value": row["title"],
+            }
+            for row in rows
+            if row["id"]
+        }
+    return display_values
+
+
 def _attach_project_run_entity_unlink_finding_stats(
     conn,
     stats,
@@ -455,6 +501,7 @@ def _attach_project_run_entity_unlink_finding_stats(
     curated_ids,
     *,
     team_id="",
+    sample_collector=None,
 ):
     current_finding_ids = _project_visible_finding_ids(conn, session_id, project_id, team_id=team_id)
     after_run_finding_ids = _project_visible_finding_ids(
@@ -480,10 +527,19 @@ def _attach_project_run_entity_unlink_finding_stats(
         excluded_run_ids=run_ids,
         excluded_entity_ids=[*removable_ids, *curated_ids],
     )
+    curated_finding_ids = after_removable_finding_ids - after_curated_finding_ids
     stats["run_findings"] = len(current_finding_ids - after_run_finding_ids)
     stats["removable_findings"] = len(after_run_finding_ids - after_removable_finding_ids)
-    stats["curated_findings"] = len(after_removable_finding_ids - after_curated_finding_ids)
+    stats["curated_findings"] = len(curated_finding_ids)
     stats["kept_curated_findings"] = stats["curated_findings"]
+    if sample_collector is not None:
+        for finding_id in curated_finding_ids:
+            sample_collector.record(
+                "kept_by_default",
+                "findings",
+                finding_id,
+                ("finding_attached_to_kept_entity",),
+            )
 
 
 def preview_project_run_entity_links(session_id, project_id, data, *, team_id=""):
@@ -541,7 +597,13 @@ def _project_run_entity_link_disposable_reason(row):
     return ""
 
 
-def _project_run_entity_unlink_reason_summary(stats, reason_counts):
+def _project_run_entity_unlink_reason_summary(
+    stats,
+    reason_counts,
+    *,
+    sample_collector=None,
+    sample_display_values=None,
+):
     bucket_counts = empty_cleanup_bucket_counts()
     set_cleanup_bucket_count(bucket_counts, "disposable", "entities", stats["removable"])
     set_cleanup_bucket_count(
@@ -576,7 +638,10 @@ def _project_run_entity_unlink_reason_summary(stats, reason_counts):
             "findings",
             stats["curated_findings"],
         )
-    return build_cleanup_reason_summary(bucket_counts, reason_counts)
+    samples = None
+    if sample_collector is not None:
+        samples = sample_collector.build(bucket_counts, sample_display_values or {})
+    return build_cleanup_reason_summary(bucket_counts, reason_counts, samples=samples)
 
 
 def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids, *, include_curated=False, team_id=""):
@@ -692,6 +757,7 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
     removable_ids = []
     curated_ids = []
     reason_counts = {}
+    sample_collector = CleanupSampleCollector()
     for row in rows:
         stats["available"] += 1
         disposable_reason = _project_run_entity_link_disposable_reason(row)
@@ -705,14 +771,19 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         ))
         if is_curated:
             curated_ids.append(str(row["id"]))
+            reason_codes = []
             if int(row["has_other_runs"] or 0) > 0:
                 increment_cleanup_reason(reason_counts, "seen_in_other_runs", "kept_by_default", "entities")
+                reason_codes.append("seen_in_other_runs")
             if int(row["has_other_projects"] or 0) > 0:
                 increment_cleanup_reason(reason_counts, "other_project_links", "kept_by_default", "entities")
+                reason_codes.append("other_project_links")
             if int(row["has_labels"] or 0) > 0:
                 increment_cleanup_reason(reason_counts, "entity_label", "kept_by_default", "entities")
+                reason_codes.append("entity_label")
             if int(row["has_note"] or 0) > 0:
                 increment_cleanup_reason(reason_counts, "entity_note", "kept_by_default", "entities")
+                reason_codes.append("entity_note")
             if int(row["has_curated_findings"] or 0) > 0:
                 increment_cleanup_reason(
                     reason_counts,
@@ -720,8 +791,11 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
                     "kept_by_default",
                     "entities",
                 )
+                reason_codes.append("finding_attached_to_kept_entity")
             if not disposable_reason:
                 increment_cleanup_reason(reason_counts, "custom_project_link", "kept_by_default", "entities")
+                reason_codes.append("custom_project_link")
+            sample_collector.record("kept_by_default", "entities", row["id"], reason_codes)
             continue
         removable_ids.append(str(row["id"]))
         increment_cleanup_reason(reason_counts, disposable_reason, "disposable", "entities")
@@ -740,10 +814,22 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         removable_ids if not include_curated else removable_ids[:stats["removable"]],
         curated_ids,
         team_id=team_id,
+        sample_collector=sample_collector,
     )
     if include_curated:
         stats["kept_curated_findings"] = 0
-    stats["cleanup_reasons"] = _project_run_entity_unlink_reason_summary(stats, reason_counts)
+    sample_display_values = _project_cleanup_sample_display_values(
+        conn,
+        session_id,
+        sample_collector.ids_by_kind(),
+        team_id=team_id,
+    )
+    stats["cleanup_reasons"] = _project_run_entity_unlink_reason_summary(
+        stats,
+        reason_counts,
+        sample_collector=sample_collector,
+        sample_display_values=sample_display_values,
+    )
     return stats, removable_ids
 
 

@@ -44,6 +44,128 @@ function cleanupReasonSentence(summary, bucket, fallback) {
   return `Reasons: ${labels.slice(0, 4).join(', ')}${labels.length > 4 ? ', and more' : ''}.`;
 }
 
+function cleanupReasonSamples(summary) {
+  const samples = summary?.samples || {};
+  const groups = [];
+  ['kept_by_default', 'not_eligible'].forEach(bucket => {
+    ['entities', 'findings'].forEach(kind => {
+      const group = samples?.[bucket]?.[kind] || {};
+      const items = Array.isArray(group.items) ? group.items : [];
+      const omitted = cleanupNumber(group.omitted);
+      if (items.length || omitted > 0) groups.push({ bucket, kind, items, omitted });
+    });
+  });
+  return groups;
+}
+
+function cleanupSampleBucketLabel(bucket) {
+  if (bucket === 'kept_by_default') return 'Kept by default';
+  if (bucket === 'not_eligible') return 'Not eligible';
+  return 'Cleanup';
+}
+
+function cleanupSampleKindLabel(kind) {
+  return kind === 'findings' ? 'findings' : 'entities';
+}
+
+function cleanupSampleDisplayValue(sample) {
+  const value = String(sample?.display_value || '').trim();
+  return value || (sample?.kind === 'findings' ? 'Untitled finding' : 'Unknown entity');
+}
+
+function appendCleanupSampleBadge(row, label, extraClass = '') {
+  const text = String(label || '').trim();
+  if (!text) return;
+  const badge = document.createElement('span');
+  badge.className = `badge badge-tone-muted cleanup-sample-badge${extraClass ? ` ${extraClass}` : ''}`;
+  badge.textContent = text;
+  row.appendChild(badge);
+}
+
+let cleanupSamplePanelIdCounter = 0;
+
+function nextCleanupSamplePanelId() {
+  cleanupSamplePanelIdCounter += 1;
+  return `cleanup-samples-${cleanupSamplePanelIdCounter}`;
+}
+
+function cleanupSampleDetails(summary, { bindDisclosure, className = '' } = {}) {
+  const groups = cleanupReasonSamples(summary);
+  if (!groups.length) return null;
+  if (typeof bindDisclosure !== 'function') {
+    throw new Error('cleanupSampleDetails requires bindDisclosure');
+  }
+  const wrap = document.createElement('div');
+  wrap.className = `cleanup-sample-details${className ? ` ${className}` : ''}`;
+  wrap.dataset.cleanupSamples = '1';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'btn btn-ghost btn-compact cleanup-sample-toggle';
+  const glyph = document.createElement('span');
+  glyph.className = 'cleanup-sample-toggle-glyph';
+  const label = document.createElement('span');
+  label.textContent = 'Sample rows';
+  trigger.append(glyph, label);
+  const panel = document.createElement('div');
+  panel.className = 'cleanup-sample-panel nice-scroll u-hidden';
+  panel.id = nextCleanupSamplePanelId();
+  trigger.setAttribute('aria-controls', panel.id);
+
+  groups.forEach(group => {
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'cleanup-sample-group';
+    const title = document.createElement('div');
+    title.className = 'cleanup-sample-group-title';
+    title.textContent = `${cleanupSampleBucketLabel(group.bucket)} ${cleanupSampleKindLabel(group.kind)}`;
+    groupWrap.appendChild(title);
+    const list = document.createElement('ul');
+    list.className = 'cleanup-sample-list';
+    group.items.forEach(sample => {
+      const item = document.createElement('li');
+      item.className = 'cleanup-sample-item';
+      const value = document.createElement('span');
+      value.className = 'cleanup-sample-value';
+      value.textContent = cleanupSampleDisplayValue(sample);
+      item.appendChild(value);
+      if (sample?.item_type) appendCleanupSampleBadge(item, sample.item_type, 'cleanup-sample-type');
+      (Array.isArray(sample?.reasons) ? sample.reasons : []).forEach(reason => {
+        appendCleanupSampleBadge(item, reason?.label);
+      });
+      list.appendChild(item);
+    });
+    if (group.omitted > 0) {
+      const omitted = document.createElement('li');
+      omitted.className = 'cleanup-sample-omitted';
+      omitted.textContent = `and ${group.omitted.toLocaleString()} more`;
+      list.appendChild(omitted);
+    }
+    groupWrap.appendChild(list);
+    panel.appendChild(groupWrap);
+  });
+
+  function update(open) {
+    glyph.textContent = open ? '▾' : '▸';
+  }
+  update(false);
+  bindDisclosure(trigger, {
+    panel,
+    hiddenClass: 'u-hidden',
+    openClass: null,
+    initialOpen: false,
+    onToggle: update,
+  });
+  wrap.append(trigger, panel);
+  return wrap;
+}
+
+function syncCleanupSampleDetails(slot, summary, options = {}) {
+  if (!slot) return;
+  slot.replaceChildren();
+  const details = cleanupSampleDetails(summary, options);
+  if (details) slot.appendChild(details);
+  setCleanupNodeHidden(slot, !details);
+}
+
 function cleanupItemCount(summary, bucket, fallbackEntities, fallbackFindings) {
   const entities = cleanupBucketCountOrFallback(summary, bucket, 'entities', fallbackEntities);
   const findings = cleanupBucketCountOrFallback(summary, bucket, 'findings', fallbackFindings);
@@ -174,10 +296,15 @@ function applyProjectRunEntityUnlinkPreview(control, preview) {
       cleanupReasonSentence(summary, 'not_eligible', ''),
     ].filter(Boolean).join(' ')
     : '';
+  syncCleanupSampleDetails(control.sampleDetails, summary, {
+    bindDisclosure: control.bindDisclosure,
+  });
 }
 
 export {
   applyProjectRunEntityUnlinkPreview,
   atlasRunCleanupCopy,
+  cleanupSampleDetails,
   setCleanupNodeHidden,
+  syncCleanupSampleDetails,
 };

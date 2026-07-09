@@ -829,7 +829,7 @@ describe('shell chrome project workspace', () => {
     }`)
   })
 
-  it('shows project unlink reason notes without destructive entity options when only not eligible items exist', async () => {
+  it('shows project unlink reason notes and samples without destructive entity options when only not eligible items exist', async () => {
     const showConfirm = vi.fn(({ content }) => {
       expect(content).not.toBeNull()
       const visibleCheckboxLabels = [...content.querySelectorAll('label.form-check')]
@@ -837,6 +837,15 @@ describe('shell chrome project workspace', () => {
       expect(visibleCheckboxLabels).toHaveLength(0)
       expect(content.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
       expect(content.textContent).toContain('Reasons: seen elsewhere, imported finding.')
+      const samples = content.querySelector('[data-cleanup-samples]')
+      expect(samples).not.toBeNull()
+      expect(samples.querySelector('.cleanup-sample-toggle')?.getAttribute('aria-expanded')).toBe('false')
+      samples.querySelector('.cleanup-sample-toggle')?.click()
+      expect(samples.querySelector('.cleanup-sample-toggle')?.getAttribute('aria-expanded')).toBe('true')
+      expect(samples.textContent).toContain('seen-elsewhere.darklab.sh')
+      expect(samples.textContent).toContain('imported finding')
+      expect([...samples.querySelectorAll('.badge')].map(badge => badge.textContent))
+        .toEqual(expect.arrayContaining(['domain', 'seen elsewhere', 'imported finding']))
       return Promise.resolve('remove')
     })
     const apiFetch = vi.fn((url) => {
@@ -881,6 +890,32 @@ describe('shell chrome project workspace', () => {
                     total: 1,
                   },
                 ],
+                samples: {
+                  not_eligible: {
+                    entities: {
+                      items: [{
+                        bucket: 'not_eligible',
+                        kind: 'entities',
+                        display_value: 'seen-elsewhere.darklab.sh',
+                        item_type: 'domain',
+                        reasons: [{ code: 'seen_in_other_runs', label: 'seen elsewhere' }],
+                      }],
+                      omitted: 0,
+                    },
+                    findings: {
+                      items: [{
+                        bucket: 'not_eligible',
+                        kind: 'findings',
+                        display_value: 'imported finding',
+                        reasons: [{
+                          code: 'imported_finding',
+                          label: 'imported finding',
+                        }],
+                      }],
+                      omitted: 0,
+                    },
+                  },
+                },
               },
             },
           }),

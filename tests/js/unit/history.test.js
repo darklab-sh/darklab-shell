@@ -1535,12 +1535,33 @@ describe('history panel actions', () => {
       expect(content.textContent).toContain('2 related findings will no longer appear in this project.')
       expect(content.textContent).toContain('Also remove same-run Atlas entities kept by default from this project')
       expect(content.textContent).toContain('1 entity kept by default and 3 related findings will stay in this project unless this is checked.')
-      expect(content.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
-      expect(content.textContent).toContain('Reasons: imported entity, seen elsewhere.')
-      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
-      content.querySelector('[data-history-project-run-entities-scope="curated"]').checked = true
-      return Promise.resolve('remove')
-    })
+	      expect(content.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
+	      expect(content.textContent).toContain('Reasons: imported entity, seen elsewhere.')
+	      const samples = content.querySelector('[data-cleanup-samples]')
+	      expect(samples).not.toBeNull()
+	      const sampleToggle = samples.querySelector('.cleanup-sample-toggle')
+	      expect(sampleToggle?.classList.contains('btn')).toBe(true)
+	      expect(sampleToggle?.classList.contains('btn-ghost')).toBe(true)
+	      expect(sampleToggle?.classList.contains('btn-compact')).toBe(true)
+	      expect(sampleToggle?.getAttribute('aria-expanded')).toBe('false')
+	      const samplePanel = samples.querySelector('.cleanup-sample-panel')
+	      expect(samplePanel?.id).toMatch(/^cleanup-samples-\d+$/)
+	      expect(sampleToggle?.getAttribute('aria-controls')).toBe(samplePanel?.id)
+	      expect(samplePanel?.classList.contains('nice-scroll')).toBe(true)
+	      expect(samplePanel?.classList.contains('u-hidden')).toBe(true)
+	      sampleToggle?.click()
+	      expect(sampleToggle?.getAttribute('aria-expanded')).toBe('true')
+	      expect(samplePanel?.classList.contains('u-hidden')).toBe(false)
+	      expect(samples.textContent).toContain('darklab.sh')
+	      expect(samples.textContent).toContain('443/tcp open https on darklab.sh')
+	      expect(samples.textContent).toContain('Unknown entity')
+	      expect(samples.textContent).toContain('and 2 more')
+	      expect([...samples.querySelectorAll('.badge')].map(badge => badge.textContent))
+	        .toEqual(expect.arrayContaining(['domain', 'labeled', 'attached to kept entity']))
+	      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
+	      content.querySelector('[data-history-project-run-entities-scope="curated"]').checked = true
+	      return Promise.resolve('remove')
+	    })
     const apiFetch = vi.fn((url, options = {}) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -1606,9 +1627,9 @@ describe('history panel actions', () => {
                   kept_by_default: { entities: 1, findings: 3, total: 4 },
                   not_eligible: { entities: 1, findings: 1, total: 2 },
                 },
-                reasons: [
-                  {
-                    code: 'imported_entity',
+	                reasons: [
+	                  {
+	                    code: 'imported_entity',
                     bucket: 'not_eligible',
                     label: 'imported entity',
                     entities: 1,
@@ -1621,12 +1642,50 @@ describe('history panel actions', () => {
                     label: 'seen elsewhere',
                     entities: 0,
                     findings: 1,
-                    total: 1,
-                  },
-                ],
-              },
-            },
-          }),
+	                    total: 1,
+	                  },
+	                ],
+	                samples: {
+	                  kept_by_default: {
+	                    entities: {
+	                      items: [{
+	                        bucket: 'kept_by_default',
+	                        kind: 'entities',
+	                        display_value: 'darklab.sh',
+	                        item_type: 'domain',
+	                        reasons: [{ code: 'entity_label', label: 'labeled' }],
+	                      }],
+	                      omitted: 0,
+	                    },
+	                    findings: {
+	                      items: [{
+	                        bucket: 'kept_by_default',
+	                        kind: 'findings',
+	                        display_value: '443/tcp open https on darklab.sh',
+	                        reasons: [{
+	                          code: 'finding_attached_to_kept_entity',
+	                          label: 'attached to kept entity',
+	                        }],
+	                      }],
+	                      omitted: 2,
+	                    },
+	                  },
+	                  not_eligible: {
+	                    entities: {
+	                      items: [{
+	                        bucket: 'not_eligible',
+	                        kind: 'entities',
+	                        display_value: '',
+	                        item_type: 'domain',
+	                        reasons: [{ code: 'imported_entity', label: 'imported entity' }],
+	                      }],
+	                      omitted: 0,
+	                    },
+	                  },
+	                },
+	              },
+	            },
+	          }),
         })
       }
       if (url === '/projects/project-active/links' && options.method === 'DELETE') {
@@ -2747,9 +2806,9 @@ describe('history panel actions', () => {
             kept_by_default: { entities: 1, findings: 1, total: 2 },
             not_eligible: { entities: 1, findings: 1, total: 2 },
           },
-          reasons: [
-            {
-              code: 'entity_has_kept_findings',
+	          reasons: [
+	            {
+	              code: 'entity_has_kept_findings',
               bucket: 'not_eligible',
               label: 'has kept findings',
               entities: 1,
@@ -2762,12 +2821,37 @@ describe('history panel actions', () => {
               label: 'imported finding',
               entities: 0,
               findings: 1,
-              total: 1,
-            },
-          ],
-        },
-      },
-    ]
+	              total: 1,
+	            },
+	          ],
+	          samples: {
+	            kept_by_default: {
+	              entities: {
+	                items: [{
+	                  bucket: 'kept_by_default',
+	                  kind: 'entities',
+	                  display_value: 'CVE-2025-49113',
+	                  item_type: 'cve',
+	                  reasons: [{ code: 'entity_project_link', label: 'linked to a Project' }],
+	                }],
+	                omitted: 0,
+	              },
+	            },
+	            not_eligible: {
+	              findings: {
+	                items: [{
+	                  bucket: 'not_eligible',
+	                  kind: 'findings',
+	                  display_value: 'Imported finding',
+	                  reasons: [{ code: 'imported_finding', label: 'imported finding' }],
+	                }],
+	                omitted: 0,
+	              },
+	            },
+	          },
+	        },
+	      },
+	    ]
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && url === '/history/run-1/atlas-cleanup-preview') {
         return Promise.resolve({
@@ -2805,10 +2889,17 @@ describe('history panel actions', () => {
     expect(curatedDefaultCleanup).not.toBeNull()
     expect(curatedDefaultCleanup.checked).toBe(false)
     expect(curatedContent.textContent).toContain('Also delete single-source Atlas items kept by default')
-    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
-    expect(curatedContent.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
-    expect(curatedContent.textContent).toContain('Reasons: has kept findings, imported finding.')
-  })
+	    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
+	    expect(curatedContent.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
+	    expect(curatedContent.textContent).toContain('Reasons: has kept findings, imported finding.')
+	    const sampleDetails = curatedContent.querySelector('[data-cleanup-samples]')
+	    expect(sampleDetails).not.toBeNull()
+	    expect(sampleDetails.querySelector('.cleanup-sample-toggle')?.getAttribute('aria-expanded')).toBe('false')
+	    expect(sampleDetails.textContent).toContain('CVE-2025-49113')
+	    expect(sampleDetails.textContent).toContain('Imported finding')
+	    expect([...sampleDetails.querySelectorAll('.badge')].map(badge => badge.textContent))
+	      .toEqual(expect.arrayContaining(['cve', 'linked to a Project', 'imported finding']))
+	  })
 
   it('shows run cleanup reason notes without destructive options when only not eligible items exist', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('cancel'))
