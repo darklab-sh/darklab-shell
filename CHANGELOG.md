@@ -31,6 +31,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Missing generated build assets, lazy module contract failures, Atlas/Projects preload/request failures, Project workspace action failures, and Files lazy-surface failures log structured event names with bounded IDs, route names, asset names, status, and timing context.
   - Project, Project metrics, and Atlas list services emit DEBUG-level timing and branch details for the new pagination/count paths so operators can troubleshoot regressions without turning normal large-list views into warning noise.
 
+- **Docker deployments expose static inventory labels** — Built images and Compose containers now carry OCI and `sh.darklab.*` labels for app version, git revision, build date, Python version, configured database backend, and the metrics path.
+  - The database-backend label uses the same `${DATABASE_BACKEND:-sqlite}` Compose interpolation the app receives, while live health, database size, and pool state remain in `/metrics`.
+  - **Tests:** one pytest contract verifies the Dockerfile labels, Compose label interpolation, app/package version alignment, and Python base-image label source.
+
 ### Fixed
 
 - **First-open modal behavior stays polished after the startup trim** — The lazy shell changes now preserve the pre-trim visual and interaction details.

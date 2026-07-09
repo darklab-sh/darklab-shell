@@ -20,7 +20,7 @@ log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 CONFIG_LOAD_SUMMARY: dict[str, Any] = {}
 
-APP_VERSION = "2.4"
+APP_VERSION = "2.5.0"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 

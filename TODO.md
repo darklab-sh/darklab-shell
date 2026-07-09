@@ -30,23 +30,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Expose static boot-time metadata as Docker container labels.**
-  - **Scope:**
-    - Surface a small set of static, boot-time app facts as Docker image/container labels so CheckMK's Docker plugin (and any other label-aware tooling) can show them alongside the container without scraping `/metrics`.
-    - This complements rather than replaces the existing Prometheus surface at `/metrics`, which already exposes `darklab_version_info`, `darklab_build_info`, `darklab_db_backend_info`, health, and sizes. Labels are the at-a-glance, Docker-native inventory view; Prometheus stays the live/numeric path.
-  - **What to expose (static or config-derived only):**
-    - App version, plus git revision and Python version where useful.
-    - Configured database backend (`sqlite`/`postgres`).
-    - Candidates worth considering: broker mode, image build date, and standard OCI provenance fields (title, source, revision).
-    - Keep the set to values that are fixed for the container's lifetime. Live or changing values such as health, database size, and pool state stay in Prometheus, since labels are frozen at container creation.
-  - **Approach:**
-    - Drive build-time constants from OCI `LABEL`s in the Dockerfile via a version build-arg, using `org.opencontainers.image.*` keys where they fit.
-    - Source runtime-config values from interpolated labels in `docker-compose.yml` that read the same env the app reads, for example `${DATABASE_BACKEND:-sqlite}`, so the label matches the app's actual resolution. The backend is resolved purely from the `database_backend` config key, so a label mirroring `DATABASE_BACKEND` does not drift from a `DATABASE_URL` override.
-    - Pick one source of truth for the version string before wiring it in; `config.py` `APP_VERSION` and `package.json` currently disagree (`2.4` versus `2.4.0`).
-    - Namespace custom labels under a stable prefix such as `sh.darklab.*` and keep the set documented.
-  - **Docs and verification:**
-    - Document the label set and the CheckMK Docker-plugin consumption path in the monitoring/configuration docs, noting labels are the static inventory view and `/metrics` is the live view.
-    - Verify labels appear via `docker inspect` and that the database-backend label tracks `DATABASE_BACKEND` when it changes.
+No open TODOs are currently tracked.
 
 ---
 

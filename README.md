@@ -307,6 +307,8 @@ The production overlay adds reverse-proxy-aware environment values, GELF Docker 
 
 The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
+Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
+
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
 
 ---

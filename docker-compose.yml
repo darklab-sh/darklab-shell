@@ -81,7 +81,13 @@ services:
       context: .
       args:
         APP_PORT: ${APP_PORT:-8888}
+        APP_VERSION: ${APP_VERSION:-2.5.0}
+        VCS_REF: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     container_name: darklab_shell
+    labels:
+      sh.darklab.config.database_backend: ${DATABASE_BACKEND:-sqlite}
+      sh.darklab.metrics.path: /metrics
     init: true
     ports:
       - "${APP_PORT:-8888}:${APP_PORT:-8888}"

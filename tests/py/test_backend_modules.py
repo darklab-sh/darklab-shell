@@ -15365,6 +15365,36 @@ class TestEntrypointWorkspaceRepair:
         assert "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" in entrypoint
         assert shell_env["RESTRICTED_COMMAND_INPUT_CIDRS"] == "${RESTRICTED_COMMAND_INPUT_CIDRS:-}"
 
+    def test_docker_static_metadata_labels_match_runtime_config_contract(self):
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text()
+        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        shell_service = compose["services"]["shell"]
+        shell_env = TestAIRuntimeWiring._compose_environment(shell_service)
+        build_args = {str(key): str(value) for key, value in shell_service["build"]["args"].items()}
+        labels = {str(key): str(value) for key, value in shell_service["labels"].items()}
+        package_version = json.loads((REPO_ROOT / "package.json").read_text())["version"]
+        python_image = re.search(r"^FROM python:(?P<version>[0-9.]+)-slim$", dockerfile, re.MULTILINE)
+
+        assert python_image is not None
+        assert app_config.APP_VERSION == package_version
+        assert f"ARG APP_VERSION={app_config.APP_VERSION}" in dockerfile
+        assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}}}"
+        assert build_args["VCS_REF"] == "${GIT_SHA:-unknown}"
+        assert build_args["BUILD_DATE"] == "${BUILD_DATE:-unknown}"
+        assert f"ARG PYTHON_VERSION={python_image.group('version')}" in dockerfile
+        for label in (
+            'org.opencontainers.image.version="${APP_VERSION}"',
+            'org.opencontainers.image.revision="${VCS_REF}"',
+            'org.opencontainers.image.created="${BUILD_DATE}"',
+            'sh.darklab.app.version="${APP_VERSION}"',
+            'sh.darklab.git.revision="${VCS_REF}"',
+            'sh.darklab.python.version="${PYTHON_VERSION}"',
+        ):
+            assert label in dockerfile
+        assert labels["sh.darklab.config.database_backend"] == shell_env["DATABASE_BACKEND"]
+        assert labels["sh.darklab.config.database_backend"] == "${DATABASE_BACKEND:-sqlite}"
+        assert labels["sh.darklab.metrics.path"] == "/metrics"
+
     def test_compose_redis_is_ephemeral_under_read_only_root(self):
         compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
         redis_service = compose["services"]["redis"]
@@ -22485,8 +22515,8 @@ class TestAutocompleteContextLoading:
 
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.2.42", "cdncheck -h"),
-            ("TRUFFLEHOG_VERSION", "v3.95.7", "trufflehog --help"),
+            ("CDNCHECK_VERSION", "v1.2.43", "cdncheck -h"),
+            ("TRUFFLEHOG_VERSION", "v3.95.8", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):

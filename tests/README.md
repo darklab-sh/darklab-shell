@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,020
+- behavior tests: 4,021
 - docs/inventory meta-tests: 63
-- `pytest`: 2329 (2279 behavior + 50 meta)
+- `pytest`: 2330 (2280 behavior + 50 meta)
 - `vitest`: 1484 (1471 behavior + 13 meta)
 - `playwright`: 270 behavior
-- total: 4,083
+- total: 4,084
 
 This document is organized in two parts:
 
@@ -787,6 +787,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestEntrypointWorkspaceRepair.test_app_import_and_factory_are_side_effect_free_until_bootstrap` | Verifies in a fresh subprocess that importing app modules and building factory apps do not create DB, Redis, logging, or Prometheus startup side effects, while bootstrap does. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestEntrypointWorkspaceRepair.test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only` | Verifies that the container entrypoint and Compose environment wire restricted CIDRs into scanner-user-only egress deny rules. |
+| `TestEntrypointWorkspaceRepair.test_docker_static_metadata_labels_match_runtime_config_contract` | Verifies that Docker image labels, Compose container labels, app/package version strings, and the database-backend runtime interpolation stay aligned. |
 | `TestEntrypointWorkspaceRepair.test_compose_redis_is_ephemeral_under_read_only_root` | Verifies that the bundled Redis service disables persistence while running under a read-only root filesystem. |
 | `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
 | `TestEntrypointWorkspaceRepair.test_playwright_server_uses_wsgi_application_entrypoint` | Verifies that the Playwright server helper launches Gunicorn through the `wsgi:application` entrypoint. |

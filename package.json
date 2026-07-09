@@ -1,6 +1,6 @@
 {
   "name": "darklab_shell",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "module",
   "scripts": {
     "test": "npm run test:pytest && npm run test:unit && npm run test:e2e:source && npm run test:e2e",
@@ -40,13 +40,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^4.1.10",
     "esbuild": "0.28.1",
     "eslint": "^10.6.0",
     "jsdom": "^29.1.1",
-    "markdownlint-cli2": "^0.22.1",
+    "markdownlint-cli2": "^0.23.0",
     "stylelint": "^17.14.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "js-yaml": "4.2.0",

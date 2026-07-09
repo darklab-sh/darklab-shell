@@ -952,6 +952,50 @@ The production overlay adds:
 
 Application log format and Docker log transport are separate controls. To emit GELF-shaped application logs, set `log_format: gelf` in `config.yaml` or `config.local.yaml`. To send container stdout/stderr through Docker's GELF driver, use the production overlay and set `DOCKER_GELF_ADDRESS`.
 
+### Docker Labels
+
+The Docker image and Compose container include a small static label set for Docker-native inventory tools such as CheckMK's Docker plugin. These labels are meant for quick identification. Use `/metrics` for live values such as health, database size, queue state, and connection-pool state.
+
+Image labels are set by the Dockerfile:
+
+| Label | Value |
+|-------|-------|
+| `org.opencontainers.image.title` | `darklab_shell` |
+| `org.opencontainers.image.description` | Short app description |
+| `org.opencontainers.image.source` | Source repository URL |
+| `org.opencontainers.image.url` | Project URL |
+| `org.opencontainers.image.vendor` | `darklab.sh` |
+| `org.opencontainers.image.version` | App version from the `APP_VERSION` build arg |
+| `org.opencontainers.image.revision` | Git revision from the `VCS_REF` build arg |
+| `org.opencontainers.image.created` | Build timestamp from the `BUILD_DATE` build arg |
+| `sh.darklab.app.name` | `darklab_shell` |
+| `sh.darklab.app.version` | App version from the same build arg |
+| `sh.darklab.git.revision` | Git revision from the same build arg |
+| `sh.darklab.python.version` | Python base image version |
+
+The base Compose service adds container labels for runtime configuration that is fixed when the container starts:
+
+| Label | Value |
+|-------|-------|
+| `sh.darklab.config.database_backend` | `${DATABASE_BACKEND:-sqlite}` |
+| `sh.darklab.metrics.path` | `/metrics` |
+
+For release builds, pass the same metadata values you want Docker inventory to show:
+
+```bash
+docker compose build \
+  --build-arg APP_VERSION=2.5.0 \
+  --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
+  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+To check the labels on a running container:
+
+```bash
+docker inspect darklab_shell \
+  --format '{{ index .Config.Labels "sh.darklab.config.database_backend" }}'
+```
+
 ---
 
 ## Workspace Storage Recipes
