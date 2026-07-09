@@ -262,9 +262,15 @@ commands:
               description: Short timeout in seconds
       arguments:
         - placeholder: <host>
+          position: 1
           hint_only: true
           value_type: host
           description: Hostname or IP followed by one or more ports
+        - placeholder: <port>
+          position: 2
+          hint_only: true
+          value_type: port_set
+          description: TCP port or ports to check
   - root: telnet
     description: Opens an interactive Telnet-style TCP session for protocol and banner troubleshooting.
     category: Network Diagnostics

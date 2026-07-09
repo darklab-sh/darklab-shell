@@ -231,6 +231,8 @@ async function forceComparePaneOverflow(overlay) {
   const panes = overlay.locator('.history-compare-pane')
   await panes.evaluateAll((paneElements) => {
     paneElements.forEach((pane) => {
+      pane.style.alignSelf = 'start'
+      pane.style.minHeight = '0'
       pane.style.height = '90px'
       pane.style.maxHeight = '90px'
       pane.style.overflowY = 'auto'
@@ -255,6 +257,14 @@ async function expectSplitPaneScrollSync(overlay) {
         rightScrollable: false,
       }
     }
+    for (const pane of [left, right]) {
+      pane.style.alignSelf = 'start'
+      pane.style.minHeight = '0'
+      pane.style.height = '90px'
+      pane.style.maxHeight = '90px'
+      pane.style.overflowY = 'auto'
+    }
+    await nextFrame()
     const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
       ? window.useMobileTerminalViewportMode()
       : false

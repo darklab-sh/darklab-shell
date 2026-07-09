@@ -3493,6 +3493,17 @@ class TestProjectOverviewContract:
                     "2026-06-30T00:00:01Z",
                 ),
             )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_preview) "
+                "VALUES (?, ?, ?, ?, ?, 0, '', '')",
+                (
+                    "run_nc_host_port_target",
+                    "tok_host_value_type",
+                    "nc -zv ip.darklab.sh 443 80",
+                    "2026-06-30T00:00:00Z",
+                    "2026-06-30T00:00:01Z",
+                ),
+            )
             import services.projects.targets as project_targets
 
             monkeypatch.setattr(
@@ -3563,6 +3574,13 @@ class TestProjectOverviewContract:
             assert warning_log.call_args.args == ("PROJECT_TARGET_DISCOVERY_FILE_READ_FAILED",)
             assert warning_log.call_args.kwargs["extra"]["value_type"] == "host"
             assert warning_log.call_args.kwargs["extra"]["error_type"] == "WorkspaceError"
+            nc_recorded = project_workspace.record_project_target_discoveries(
+                conn,
+                "tok_host_value_type",
+                project["id"],
+                "run_nc_host_port_target",
+                commands.command_project_target_inputs("nc -zv ip.darklab.sh 443 80"),
+            )
             conn.commit()
 
         assert {item["value"] for item in recorded} == {
@@ -3573,6 +3591,7 @@ class TestProjectOverviewContract:
             "edge.example.com",
             "192.0.2.11",
         }
+        assert [item["value"] for item in nc_recorded] == ["ip.darklab.sh"]
         target_page = project_workspace.list_project_targets("tok_host_value_type", project["id"], limit=10)
         assert target_page is not None
         targets = {item["value"]: item for item in target_page["targets"]}
@@ -3594,6 +3613,11 @@ class TestProjectOverviewContract:
         assert targets["192.0.2.11"]["type"] == "ip"
         assert targets["192.0.2.11"]["source"] == "auto_input_file"
         assert targets["192.0.2.11"]["source_detail"]["value_type"] == "host"
+        assert targets["ip.darklab.sh"]["type"] == "domain"
+        assert targets["ip.darklab.sh"]["source"] == "auto_command"
+        assert targets["ip.darklab.sh"]["source_detail"]["value_type"] == "host"
+        assert "443" not in targets
+        assert "80" not in targets
         assert "bad/path" not in targets
         assert {item["type"] for item in targets.values()} == {"domain", "ip"}
 
@@ -16305,7 +16329,7 @@ class TestDerivedCommandRegistry:
     def test_real_registry_positional_argument_order_covers_known_host_port_slots(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
-        for root in ("tcptraceroute", "telnet"):
+        for root in ("nc", "tcptraceroute", "telnet"):
             hints = context[root]["arg_hints"]["__positional__"]
             assert hints[0]["value"] == "<host>"
             assert hints[0]["position"] == 1
@@ -16313,6 +16337,28 @@ class TestDerivedCommandRegistry:
             assert hints[1]["value"] == "<port>"
             assert hints[1]["position"] == 2
             assert hints[1]["value_type"] == "port_set"
+
+        nc_inputs = commands.command_project_target_inputs("nc -zv ip.darklab.sh 443 80")
+        assert nc_inputs == [
+            {
+                "value": "ip.darklab.sh",
+                "value_type": "host",
+                "source_kind": "positional",
+                "source_name": "argument_1",
+            },
+            {
+                "value": "443",
+                "value_type": "port_set",
+                "source_kind": "positional",
+                "source_name": "argument_2",
+            },
+            {
+                "value": "80",
+                "value_type": "port_set",
+                "source_kind": "positional",
+                "source_name": "argument_3",
+            },
+        ]
 
     def test_nuclei_url_target_discovery_ignores_template_path_flags(self):
         inputs = commands.command_project_target_inputs(
