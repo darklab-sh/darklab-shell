@@ -10,6 +10,7 @@ const readScriptSource = relativePath => stripEsmExports(readFileSync(resolve(RE
 const SHELL_CHROME_RAW_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 const ENTITY_METADATA_SRC = readScriptSource('app/static/js/ui/ui_entity_metadata.js')
 const UI_ACTION_SHEET_SRC = readScriptSource('app/static/js/ui/ui_action_sheet.js')
+const UI_CLEANUP_REASONS_SRC = readScriptSource('app/static/js/ui/cleanup_reasons.js')
 const ATLAS_ENTITY_ROW_SRC = readScriptSource('app/static/js/features/atlas/atlas_entity_row.js')
 const PROJECT_TARGET_VALIDATION_SRC = readScriptSource('app/static/js/features/projects/project_target_validation.js')
 const PROJECTS_CSS = readFileSync(resolve(REPO_ROOT, 'app/static/css/features/projects.css'), 'utf8')
@@ -435,6 +436,7 @@ function loadShellChrome({
       ${PROJECT_ENTITY_EDITOR_SRC}
       global.DarklabProjectEntityEditor = exportedDarklabProjectEntityEditor;
       window.DarklabProjectEntityEditor = exportedDarklabProjectEntityEditor;
+      ${UI_CLEANUP_REASONS_SRC}
       ${PROJECT_WORKSPACE_ACTIONS_SRC}
       global.DarklabProjectWorkspaceActions = exportedDarklabProjectWorkspaceActions;
       window.DarklabProjectWorkspaceActions = exportedDarklabProjectWorkspaceActions;
@@ -825,6 +827,88 @@ describe('shell chrome project workspace', () => {
       _settleProjectWorkspaceInitialLoad(initialLoad);
       throw err;
     }`)
+  })
+
+  it('shows project unlink reason notes without destructive entity options when only not eligible items exist', async () => {
+    const showConfirm = vi.fn(({ content }) => {
+      expect(content).not.toBeNull()
+      const visibleCheckboxLabels = [...content.querySelectorAll('label.form-check')]
+        .filter(label => !label.hidden && !label.classList.contains('u-hidden'))
+      expect(visibleCheckboxLabels).toHaveLength(0)
+      expect(content.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
+      expect(content.textContent).toContain('Reasons: seen elsewhere, imported finding.')
+      return Promise.resolve('remove')
+    })
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/project-1/links/run-entities/remove-preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            preview: {
+              available: 0,
+              removable: 2,
+              curated: 1,
+              kept_curated: 0,
+              removed: 0,
+              removed_curated: 0,
+              run_findings: 0,
+              removable_findings: 3,
+              curated_findings: 2,
+              kept_curated_findings: 0,
+              run_count: 1,
+              cleanup_reasons: {
+                buckets: {
+                  disposable: { entities: 0, findings: 0, total: 0 },
+                  kept_by_default: { entities: 0, findings: 0, total: 0 },
+                  not_eligible: { entities: 1, findings: 1, total: 2 },
+                },
+                reasons: [
+                  {
+                    code: 'seen_in_other_runs',
+                    bucket: 'not_eligible',
+                    label: 'seen elsewhere',
+                    entities: 1,
+                    findings: 0,
+                    total: 1,
+                  },
+                  {
+                    code: 'imported_finding',
+                    bucket: 'not_eligible',
+                    label: 'imported finding',
+                    entities: 0,
+                    findings: 1,
+                    total: 1,
+                  },
+                ],
+              },
+            },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const controller = new Function(
+      'context',
+      '__darklabExtractGlobals',
+      `${UI_CLEANUP_REASONS_SRC}\n${PROJECT_WORKSPACE_ACTIONS_SRC}\n`
+        + 'return exportedDarklabProjectWorkspaceActions.createProjectWorkspaceActionsController(context);',
+    )({ apiFetch, showConfirm }, {})
+
+    const confirmed = await controller.confirmRunUnlink('project-1', 'run-1', 'nmap darklab.sh')
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Remove run from project: nmap darklab.sh?',
+      tone: 'danger',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links/run-entities/remove-preview', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ run_ids: ['run-1'] }),
+    }))
+    expect(confirmed).toEqual({
+      includeEntities: false,
+      includeCuratedEntities: false,
+    })
   })
 
   it('labels only the current active project in the project list', async () => {
@@ -3714,6 +3798,23 @@ describe('shell chrome project workspace', () => {
               curated_findings: 1,
               kept_curated_findings: 1,
               run_count: 1,
+              cleanup_reasons: {
+                buckets: {
+                  disposable: { entities: 2, findings: 5, total: 7 },
+                  kept_by_default: { entities: 1, findings: 1, total: 2 },
+                  not_eligible: { entities: 1, findings: 0, total: 1 },
+                },
+                reasons: [
+                  {
+                    code: 'seen_in_other_runs',
+                    bucket: 'not_eligible',
+                    label: 'seen elsewhere',
+                    entities: 1,
+                    findings: 0,
+                    total: 1,
+                  },
+                ],
+              },
             },
           }),
         })
@@ -5053,7 +5154,10 @@ describe('shell chrome project workspace', () => {
       'Also remove disposable same-run Atlas entities from this project',
     )
     expect(unlinkConfirmCall?.[0].content?.textContent).toContain(
-      'Also remove curated same-run Atlas entities from this project',
+      'Also remove same-run Atlas entities kept by default from this project',
+    )
+    expect(unlinkConfirmCall?.[0].content?.textContent).toContain(
+      '1 entity not eligible for this cleanup. Reason: seen elsewhere.',
     )
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links/run-entities/remove-preview', expect.objectContaining({
       method: 'POST',

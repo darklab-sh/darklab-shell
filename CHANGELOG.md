@@ -37,12 +37,22 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Theme selector alignment, Run Details entity rows, Project Runs/Findings placeholders, main-terminal Atlas entity highlights, and Atlas entity tab auto-selection render correctly on first load.
   - Atlas keeps its own fallback shell open while the first-use controller finishes loading, so the import dialog no longer closes itself while previewing a browser import on first open.
   - Atlas and Projects first-open prefetches settle quietly when an open is canceled or module loading fails, and fragment failures show a retryable error toast plus bounded client context instead of leaving a silent rejected promise.
-  - Project cleanup and unlink confirmations distinguish disposable and curated same-run Atlas rows more clearly, and Project Runs tab removals send the selected cleanup flags before summarizing removed entity counts.
+  - Project cleanup, Project unlink, run deletion, and Atlas sibling-cleanup confirmations now explain disposable, kept-by-default, and not-eligible Atlas cleanup buckets with grouped reason labels; Project Runs tab removals still send the selected cleanup flags before summarizing removed entity counts.
+  - Cleanup confirmations now treat explicit zero-count reason buckets as authoritative, so stale legacy compatibility counts cannot bring back empty Atlas cleanup checkboxes.
+  - History run deletion now leaves optional Atlas cleanup unchecked by default, matching Atlas and Project cleanup confirmations.
+  - Cleanup confirmation option visibility now uses one shared helper, keeping the hidden-state contract consistent across History and Projects.
+  - Cleanup confirmation reason notes now share one muted text treatment across Atlas, History, and Projects while preserving each modal's spacing.
+  - Kept-by-default run cleanup no longer deletes a parent Atlas entity when that would indirectly delete a child finding that is not eligible for the cleanup.
+  - Atlas entity/finding sibling cleanup previews no longer count the row being explicitly deleted as not eligible, so selected rows do not block cleanup of their same-run siblings.
+  - Team-scoped History cleanup previews and deletes now classify team-owned Project links and metadata by team ownership, so cross-member Project links keep the same Atlas rows in preview and apply.
+  - Team-scoped History cleanup now applies the same team ownership scope during deletion, so Atlas rows previewed for cleanup are removed even when the row was first created by a different teammate.
+  - Team-scoped Project run unlink previews now keep entity links when a reviewed child finding belongs to another teammate in the same team.
+  - Atlas cleanup browser-unit fixtures now use the same cleanup reason codes and labels emitted by the backend, keeping the confirmation-copy coverage aligned with production payloads.
 
 - **Optimized Project and API paths keep their old behavior** — The performance work preserves the important edge cases around paging, team scope, and command discovery.
   - API v1 team Project finding lists include cross-member findings reachable through authorized team Project run/entity links, matching Project count and finding-summary rollups.
   - Project list pagination keeps limit handling active even when Python runs with assertions disabled.
-  - Pending command-discovered Project targets are treated as disposable same-run entities unless another curation signal exists, so fresh command targets do not pull same-run findings into the curated cleanup bucket.
+  - Pending command-discovered Project targets are treated as disposable same-run entities unless another keep signal exists, so fresh command targets do not pull same-run findings into the kept-by-default cleanup bucket.
   - Build asset compression sidecars are generated from a deterministic source-size rule, so tiny source maps do not look stale on CI when Node/zlib patch versions disagree about whether gzip saves a byte.
 
 ---

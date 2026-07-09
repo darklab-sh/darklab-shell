@@ -1187,7 +1187,25 @@ describe('Atlas overlay', () => {
     const showConfirm = vi.fn(() => Promise.resolve('cancel'))
     const previews = [
       { source_run_id: 'run1', sibling_cleanup: { has_cleanup: false, entities: 0, findings: 0, curated_total: 0 } },
-      { source_run_id: 'run1', sibling_cleanup: { has_cleanup: true, entities: 1, findings: 0, curated_total: 0 } },
+      {
+        source_run_id: 'run1',
+        sibling_cleanup: {
+          has_cleanup: true,
+          entities: 1,
+          findings: 1,
+          curated_total: 0,
+          cleanup_reasons: {
+            buckets: {
+              disposable: { entities: 1, findings: 1, total: 2 },
+              kept_by_default: { entities: 0, findings: 0, total: 0 },
+              not_eligible: { entities: 0, findings: 0, total: 0 },
+            },
+            reasons: [
+              { bucket: 'disposable', code: 'source_run_removed', label: 'source run removed', entities: 0, findings: 1, total: 1 },
+            ],
+          },
+        },
+      },
       {
         source_run_id: 'run1',
         sibling_cleanup: {
@@ -1197,6 +1215,17 @@ describe('Atlas overlay', () => {
           curated_entities: 1,
           curated_findings: 1,
           curated_total: 2,
+          cleanup_reasons: {
+            buckets: {
+              disposable: { entities: 1, findings: 1, total: 2 },
+              kept_by_default: { entities: 1, findings: 1, total: 2 },
+              not_eligible: { entities: 0, findings: 0, total: 0 },
+            },
+            reasons: [
+              { bucket: 'kept_by_default', code: 'entity_project_link', label: 'linked to a Project', entities: 1, findings: 0, total: 1 },
+              { bucket: 'kept_by_default', code: 'finding_review_state', label: 'reviewed finding', entities: 0, findings: 1, total: 1 },
+            ],
+          },
         },
       },
     ]
@@ -1246,7 +1275,8 @@ describe('Atlas overlay', () => {
     await Promise.resolve()
     const noCuratedContent = showConfirm.mock.calls[1][0].content
     expect(noCuratedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
-    expect(noCuratedContent.textContent).toContain('This will remove 1 entity and 0 findings.')
+    expect(noCuratedContent.textContent).toContain('Also remove 1 finding and 1 entity from Atlas')
+    expect(noCuratedContent.textContent).toContain('Reason: source run removed.')
     expect(noCuratedContent.textContent).not.toContain('will be kept')
 
     deleteBtn()?.click()
@@ -1254,8 +1284,9 @@ describe('Atlas overlay', () => {
     await Promise.resolve()
     const curatedContent = showConfirm.mock.calls[2][0].content
     expect(curatedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
-    expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
-    expect(curatedContent.textContent).toContain('1 curated entity and 1 curated finding will be kept unless this is checked.')
+    expect(curatedContent.textContent).toContain('Also delete single-source Atlas items kept by default')
+    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
+    expect(curatedContent.textContent).toContain('Reasons: linked to a Project, reviewed finding.')
   })
 
   it('disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings', async () => {

@@ -16,6 +16,7 @@ import {
 import { DarklabEntityMetadata as importedEntityMetadata } from '../../ui/ui_entity_metadata.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from '../../ui/ui_outside_click.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import { atlasRunCleanupCopy as importedAtlasRunCleanupCopy } from '../../ui/cleanup_reasons.js';
 import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
 import { apiFetch as importedApiFetch, logClientError as importedLogClientError } from '../../session.js';
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_bridge.js';
@@ -76,6 +77,7 @@ let exportedCycleAtlasTab = null;
   const bindFocusTrap = (typeof importedBindFocusTrap !== 'undefined' && importedBindFocusTrap) || null;
   const bindMobileSheet = (typeof importedBindMobileSheet !== 'undefined' && importedBindMobileSheet) || null;
   const bindOutsideClickClose = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose) || null;
+  const atlasRunCleanupCopy = (typeof importedAtlasRunCleanupCopy !== 'undefined' && importedAtlasRunCleanupCopy) || null;
   const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
   const downloadBlobAsAttachment = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment) || null;
   const markInteractionSurfaceReady = (typeof importedMarkInteractionSurfaceReady !== 'undefined' && importedMarkInteractionSurfaceReady) || null;
@@ -2715,58 +2717,61 @@ let exportedCycleAtlasTab = null;
     }
   }
 
-  function cleanupLabel(cleanup) {
+  function cleanupFallbackLabel(cleanup) {
     const entities = Number(cleanup?.entities || 0);
     const findings = Number(cleanup?.findings || 0);
     return `${entities.toLocaleString()} ${entities === 1 ? 'entity' : 'entities'} and `
       + `${findings.toLocaleString()} ${findings === 1 ? 'finding' : 'findings'}`;
   }
 
-  function curatedCleanupLabel(cleanup) {
-    const entities = Number(cleanup?.curated_entities || 0);
-    const findings = Number(cleanup?.curated_findings || 0);
-    return `${entities.toLocaleString()} curated ${entities === 1 ? 'entity' : 'entities'} and `
-      + `${findings.toLocaleString()} curated ${findings === 1 ? 'finding' : 'findings'}`;
+  function appendCleanupNote(container, text) {
+    if (!text) return;
+    const note = document.createElement('div');
+    note.className = 'cleanup-reason-note atlas-muted';
+    note.textContent = text;
+    container.appendChild(note);
+  }
+
+  function appendCleanupCheckbox(container, { datasetName, labelText, noteText, checked = false, id = '' }) {
+    const label = document.createElement('label');
+    label.className = 'form-check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = checked;
+    if (id) checkbox.id = id;
+    checkbox.dataset[datasetName] = '1';
+    const textNode = document.createElement('span');
+    textNode.textContent = labelText;
+    label.append(checkbox, textNode);
+    container.appendChild(label);
+    appendCleanupNote(container, noteText);
   }
 
   function deleteCleanupContent(preview, checkboxId) {
     const cleanup = preview?.sibling_cleanup || {};
-    const curated = Number(cleanup.curated_total || 0);
-    if (!preview?.source_run_id || (!cleanup.has_cleanup && curated <= 0)) return null;
+    const copy = atlasRunCleanupCopy ? atlasRunCleanupCopy(cleanup) : null;
+    const hasDisposable = copy ? copy.hasDisposable : !!cleanup.has_cleanup;
+    const hasKept = copy ? copy.hasKept : Number(cleanup.curated_total || 0) > 0;
+    const notEligibleNote = copy?.notEligibleNote || '';
+    if (!preview?.source_run_id || (!hasDisposable && !hasKept && !notEligibleNote)) return null;
     const wrap = document.createElement('div');
     wrap.className = 'atlas-delete-cleanup-option';
-    if (cleanup.has_cleanup) {
-      const label = document.createElement('label');
-      label.className = 'form-check';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.id = checkboxId;
-      checkbox.checked = false;
-      checkbox.dataset.atlasDeleteCleanup = '1';
-      const textNode = document.createElement('span');
-      textNode.textContent = 'Also remove disposable Atlas items only sourced by the same run';
-      label.append(checkbox, textNode);
-      const note = document.createElement('div');
-      note.className = 'atlas-muted';
-      note.textContent = `This will remove ${cleanupLabel(cleanup)}.`;
-      wrap.append(label, note);
+    if (hasDisposable) {
+      appendCleanupCheckbox(wrap, {
+        datasetName: 'atlasDeleteCleanup',
+        id: checkboxId,
+        labelText: copy?.disposableLabel || 'Also remove disposable Atlas items only sourced by the same run',
+        noteText: copy?.disposableNote || `This will remove ${cleanupFallbackLabel(cleanup)}.`,
+      });
     }
-    if (curated > 0) {
-      const curatedLabel = document.createElement('label');
-      curatedLabel.className = 'form-check';
-      const curatedCheckbox = document.createElement('input');
-      curatedCheckbox.type = 'checkbox';
-      curatedCheckbox.checked = false;
-      curatedCheckbox.dataset.atlasDeleteCuratedCleanup = '1';
-      const curatedText = document.createElement('span');
-      curatedText.textContent = 'Also delete curated single-source Atlas items';
-      curatedLabel.append(curatedCheckbox, curatedText);
-      const curatedNote = document.createElement('div');
-      curatedNote.className = 'atlas-muted';
-      curatedNote.textContent = `${curatedCleanupLabel(cleanup)} will be kept unless this is checked. Curated means project-linked, project-visible, reviewed, labeled, or noted.`;
-      wrap.append(curatedLabel);
-      wrap.appendChild(curatedNote);
+    if (hasKept) {
+      appendCleanupCheckbox(wrap, {
+        datasetName: 'atlasDeleteCuratedCleanup',
+        labelText: copy?.keptLabel || 'Also delete single-source Atlas items kept by default',
+        noteText: copy?.keptNote || 'Single-source Atlas items kept by default will stay unless this is checked.',
+      });
     }
+    appendCleanupNote(wrap, notEligibleNote);
     return wrap;
   }
 
@@ -2873,36 +2878,30 @@ let exportedCycleAtlasTab = null;
       const previewResp = await api()(`/atlas/runs/${encodeURIComponent(runId)}/cleanup-preview`, { cache: 'no-store' });
       if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
       const cleanup = (await previewResp.json()).cleanup || {};
-      const curated = Number(cleanup.curated_total || 0);
-      const removalNote = cleanup.has_cleanup
-        ? `This will remove ${cleanupLabel(cleanup)} that only came from this run.`
+      const copy = atlasRunCleanupCopy ? atlasRunCleanupCopy(cleanup) : null;
+      const hasDisposable = copy ? copy.hasDisposable : !!cleanup.has_cleanup;
+      const hasKept = copy ? copy.hasKept : Number(cleanup.curated_total || 0) > 0;
+      const removalNote = hasDisposable
+        ? [
+          copy?.disposableLabel
+            ? `${copy.disposableLabel.replace(/^Also remove /, 'This will remove ')}.`
+            : `This will remove ${cleanupFallbackLabel(cleanup)} that only came from this run.`,
+          copy?.disposableNote || '',
+        ].filter(Boolean).join(' ')
         : 'No disposable same-run Atlas items were found.';
       const content = document.createElement('div');
       content.className = 'atlas-delete-cleanup-option';
-      const primaryNote = document.createElement('div');
-      primaryNote.className = 'atlas-muted';
-      primaryNote.textContent = removalNote;
-      content.appendChild(primaryNote);
-      if (curated > 0) {
-        const curatedLabel = document.createElement('label');
-        curatedLabel.className = 'form-check';
-        const curatedCheckbox = document.createElement('input');
-        curatedCheckbox.type = 'checkbox';
-        curatedCheckbox.checked = false;
-        curatedCheckbox.dataset.atlasCleanCurated = '1';
-        const curatedText = document.createElement('span');
-        curatedText.textContent = 'Also delete curated single-source Atlas items';
-        curatedLabel.append(curatedCheckbox, curatedText);
-        const curatedNote = document.createElement('div');
-        curatedNote.className = 'atlas-muted';
-        curatedNote.textContent = `${curatedCleanupLabel(cleanup)} will be kept unless this is checked. Curated means project-linked, project-visible, reviewed, labeled, or noted.`;
-        content.append(curatedLabel, curatedNote);
+      appendCleanupNote(content, removalNote);
+      if (hasKept) {
+        appendCleanupCheckbox(content, {
+          datasetName: 'atlasCleanCurated',
+          labelText: copy?.keptLabel || 'Also delete single-source Atlas items kept by default',
+          noteText: copy?.keptNote || 'Single-source Atlas items kept by default will stay unless this is checked.',
+        });
       } else {
-        const keptNote = document.createElement('div');
-        keptNote.className = 'atlas-muted';
-        keptNote.textContent = 'Rows that still have other sources will stay in Atlas.';
-        content.appendChild(keptNote);
+        appendCleanupNote(content, copy?.notEligibleNote || 'Rows that still have other sources will stay in Atlas.');
       }
+      if (hasKept) appendCleanupNote(content, copy?.notEligibleNote || '');
       const choice = await showConfirm({
         body: {
           text: 'Clean this run from Atlas?',

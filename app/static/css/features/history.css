@@ -470,9 +470,10 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 
 .history-project-run-entities-note {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
+  margin: 8px 0 0 28px;
+}
+
+.history-bulk-note {
   margin: 8px 0 0 28px;
 }
 

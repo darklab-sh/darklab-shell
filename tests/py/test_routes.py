@@ -5846,14 +5846,16 @@ class TestProjectRoutes:
         run_kind="external",
         owner_tab_id="",
         started="datetime('now')",
+        team_id="",
     ):
         run_id = run_id or "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
-                f"VALUES (?, ?, ?, ?, ?, {started}, ?, 0)",
-                (run_id, session_id, run_kind, owner_tab_id, command, "[]"),
+                "(id, session_id, team_id, run_kind, owner_tab_id, command, started, output_preview, "
+                "output_line_count) "
+                f"VALUES (?, ?, ?, ?, ?, ?, {started}, ?, 0)",
+                (run_id, session_id, team_id, run_kind, owner_tab_id, command, "[]"),
             )
             conn.commit()
         return run_id
@@ -6980,7 +6982,7 @@ class TestProjectRoutes:
         assert json.loads(still_present.data)["package"]["id"] == package["id"]
         assert _audit_event_rows(target_id=package["id"], event_type="package.delete") == []
 
-    def _seed_run_entities(self, session_id, run_id):
+    def _seed_run_entities(self, session_id, run_id, *, team_id=""):
         with db_connect() as conn:
             recorded = materialize_run_entities(
                 conn,
@@ -6993,6 +6995,7 @@ class TestProjectRoutes:
                         {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
                     ],
                 }],
+                team_id=team_id,
                 seen_at="2026-05-14T00:00:01+00:00",
             )
             conn.commit()
@@ -9974,7 +9977,9 @@ class TestProjectRoutes:
 
         assert link_resp.status_code == 201
         assert preview_resp.status_code == 200
-        assert json.loads(preview_resp.data)["preview"] == {
+        preview_data = json.loads(preview_resp.data)["preview"]
+        cleanup_reasons = preview_data.pop("cleanup_reasons")
+        assert preview_data == {
             "available": 2,
             "removable": 1,
             "curated": 1,
@@ -9987,6 +9992,18 @@ class TestProjectRoutes:
             "kept_curated_findings": 0,
             "run_count": 1,
         }
+        assert cleanup_reasons["buckets"] == {
+            "disposable": {"entities": 1, "findings": 1, "total": 2},
+            "kept_by_default": {"entities": 1, "findings": 0, "total": 1},
+            "not_eligible": {"entities": 0, "findings": 0, "total": 0},
+        }
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in cleanup_reasons["reasons"]
+        }
+        assert reason_counts[("default_project_link", "disposable")] == (1, 0)
+        assert reason_counts[("entity_label", "kept_by_default")] == (1, 0)
+        assert reason_counts[("finding_attached_to_removed_entity", "disposable")] == (0, 1)
         assert unlink_resp.status_code == 200
         unlink_data = json.loads(unlink_resp.data)
         assert unlink_data["unlinked_entities"]["removed"] == 1
@@ -10068,7 +10085,9 @@ class TestProjectRoutes:
 
         assert auto_target_link_resp.status_code == 201
         assert auto_target_preview_resp.status_code == 200
-        assert json.loads(auto_target_preview_resp.data)["preview"] == {
+        auto_target_preview = json.loads(auto_target_preview_resp.data)["preview"]
+        auto_target_reasons = auto_target_preview.pop("cleanup_reasons")
+        assert auto_target_preview == {
             "available": 2,
             "removable": 2,
             "curated": 0,
@@ -10081,6 +10100,82 @@ class TestProjectRoutes:
             "kept_curated_findings": 0,
             "run_count": 1,
         }
+        auto_target_reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in auto_target_reasons["reasons"]
+        }
+        assert auto_target_reasons["buckets"]["disposable"] == {"entities": 2, "findings": 1, "total": 3}
+        assert auto_target_reason_counts[("default_project_link", "disposable")] == (1, 0)
+        assert auto_target_reason_counts[("auto_target_project_link", "disposable")] == (1, 0)
+
+        custom_project = self._create_project(client, session_id)
+        other_project = self._create_project(client, session_id)
+        custom_run_id = self._seed_run(session_id, "nmap custom-link.darklab.test")
+        custom_domain = "custom-link-" + uuid.uuid4().hex[:8] + ".darklab.test"
+        with db_connect() as conn:
+            custom_recorded = materialize_run_entities(
+                conn,
+                session_id,
+                custom_run_id,
+                [{
+                    "text": f"{custom_domain} 192.0.2.56",
+                    "entities": [
+                        {"type": "domain", "value": custom_domain, "canonical_value": custom_domain},
+                        {"type": "ip", "value": "192.0.2.56", "canonical_value": "192.0.2.56"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:20:01+00:00",
+            )
+            conn.commit()
+        custom_domain_id = next(item["id"] for item in custom_recorded if item["type"] == "domain")
+        custom_ip_id = next(item["id"] for item in custom_recorded if item["type"] == "ip")
+        custom_link_resp = client.post(
+            f"/projects/{custom_project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": custom_run_id,
+                "source": "manual",
+                "include_entities": True,
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE project_links SET source_detail = ? "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+                (json.dumps({"reason": "manual-review"}), custom_project["id"], custom_domain_id),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now'))",
+                ("link-other-" + uuid.uuid4().hex, other_project["id"], custom_ip_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'keep context', datetime('now'), datetime('now'))",
+                ("note-" + uuid.uuid4().hex, session_id, custom_domain_id),
+            )
+            conn.commit()
+        custom_preview_resp = client.post(
+            f"/projects/{custom_project['id']}/links/run-entities/remove-preview",
+            json={"run_ids": [custom_run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert custom_link_resp.status_code == 201
+        assert custom_preview_resp.status_code == 200
+        custom_preview = json.loads(custom_preview_resp.data)["preview"]
+        custom_reasons = custom_preview.pop("cleanup_reasons")
+        assert custom_preview["removable"] == 0
+        assert custom_preview["curated"] == 2
+        assert custom_reasons["buckets"]["kept_by_default"] == {"entities": 2, "findings": 0, "total": 2}
+        custom_reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in custom_reasons["reasons"]
+        }
+        assert custom_reason_counts[("custom_project_link", "kept_by_default")] == (1, 0)
+        assert custom_reason_counts[("entity_note", "kept_by_default")] == (1, 0)
+        assert custom_reason_counts[("other_project_links", "kept_by_default")] == (1, 0)
 
         curated_project = self._create_project(client, session_id)
         curated_run_id = self._seed_run(session_id, "nmap curated.darklab.sh")
@@ -10134,6 +10229,212 @@ class TestProjectRoutes:
                 (curated_project["id"],),
             ).fetchone()["count"]
         assert remaining_curated_links == 0
+
+    def test_team_project_run_unlink_preview_matches_delete_for_owner_scoped_entities(self):
+        client = get_client()
+        owner_token = "tok_project_unlink_owner_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_project_unlink_operator_" + uuid.uuid4().hex[:8]
+        team = self._create_team(client, owner_token, name="Project Unlink Cleanup")
+        team_id = team["id"]
+        self._join_team(client, owner_token, team_id, operator_token, role="operator", display_name="Operator")
+        owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        project = self._create_project(client, owner_token, headers=owner_headers)
+        run_id = self._seed_run(owner_token, "nmap team-unlink.darklab.sh", team_id=team_id)
+        self._seed_run_entities(owner_token, run_id, team_id=team_id)
+        with db_connect() as conn:
+            record_run_findings(conn, owner_token, run_id, [{
+                "text": "443/tcp open https on darklab.sh",
+                "signals": ["findings"],
+                "line_index": 0,
+                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+            }], team_id=team_id)
+            conn.commit()
+        link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": run_id,
+                "source": "manual",
+                "include_entities": True,
+            },
+            headers=owner_headers,
+        )
+        preview_resp = client.post(
+            f"/projects/{project['id']}/links/run-entities/remove-preview",
+            json={"run_ids": [run_id]},
+            headers=operator_headers,
+        )
+        unlink_resp = client.delete(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": run_id,
+                "include_entities": True,
+            },
+            headers=operator_headers,
+        )
+
+        assert link_resp.status_code == 201
+        assert preview_resp.status_code == 200
+        preview_data = json.loads(preview_resp.data)["preview"]
+        cleanup_reasons = preview_data.pop("cleanup_reasons")
+        assert preview_data == {
+            "available": 2,
+            "removable": 2,
+            "curated": 0,
+            "kept_curated": 0,
+            "removed": 0,
+            "removed_curated": 0,
+            "run_findings": 0,
+            "removable_findings": 1,
+            "curated_findings": 0,
+            "kept_curated_findings": 0,
+            "run_count": 1,
+        }
+        assert cleanup_reasons["buckets"]["disposable"] == {"entities": 2, "findings": 1, "total": 3}
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in cleanup_reasons["reasons"]
+        }
+        assert reason_counts[("default_project_link", "disposable")] == (2, 0)
+        assert reason_counts[("finding_attached_to_removed_entity", "disposable")] == (0, 1)
+        assert unlink_resp.status_code == 200
+        unlink_data = json.loads(unlink_resp.data)
+        assert unlink_data["unlinked_entities"]["removed"] == 2
+        with db_connect() as conn:
+            remaining_entity_links = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                (project["id"],),
+            ).fetchone()["count"]
+        assert remaining_entity_links == 0
+
+    def test_team_project_run_unlink_keeps_entity_with_cross_member_curated_child_finding(self):
+        client = get_client()
+        owner_token = "tok_project_unlink_child_owner_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_project_unlink_child_operator_" + uuid.uuid4().hex[:8]
+        team = self._create_team(client, owner_token, name="Project Unlink Child Cleanup")
+        team_id = team["id"]
+        self._join_team(client, owner_token, team_id, operator_token, role="operator", display_name="Operator")
+        owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        project = self._create_project(client, owner_token, headers=owner_headers)
+        suffix = uuid.uuid4().hex[:12]
+        run_id = "run-team-unlink-child-" + suffix
+        entity_id = "ent_team_unlink_child_" + suffix
+        finding_id = "fnd_team_unlink_child_" + suffix
+        seen_at = "2026-05-14T00:00:00+00:00"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, team_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, 'external', 'nmap unlink-child.darklab.sh', ?, '[]', 1)",
+                (run_id, operator_token, team_id, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, created) "
+                "VALUES (?, ?, ?, 'domain', 'unlink-child.darklab.sh', ?, ?, ?, 1, ?)",
+                (entity_id, owner_token, team_id, "sig-" + entity_id, seen_at, seen_at, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES (?, ?, ?, ?, 1)",
+                (entity_id, run_id, seen_at, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, review_state, "
+                "title, raw_line, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'info', 'finding', 'nmap', ?, ?, ?, ?, 1, 'new', 'reviewed', ?, ?, ?)",
+                (
+                    finding_id,
+                    operator_token,
+                    team_id,
+                    run_id,
+                    entity_id,
+                    "domain:unlink-child.darklab.sh",
+                    "sig-" + finding_id,
+                    run_id,
+                    run_id,
+                    seen_at,
+                    seen_at,
+                    "443/tcp open https on unlink-child.darklab.sh",
+                    "443/tcp open https on unlink-child.darklab.sh",
+                    seen_at,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 1, '443/tcp open https on unlink-child.darklab.sh', ?)",
+                (finding_id, run_id, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', 1.0, 'confirmed', '{}', ?)",
+                ("plr_team_unlink_child_" + suffix, project["id"], run_id, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'active_project', 1.0, 'confirmed', '{}', ?)",
+                ("ple_team_unlink_child_" + suffix, project["id"], entity_id, seen_at),
+            )
+            conn.commit()
+
+        preview_resp = client.post(
+            f"/projects/{project['id']}/links/run-entities/remove-preview",
+            json={"run_ids": [run_id]},
+            headers=operator_headers,
+        )
+        unlink_resp = client.delete(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": run_id,
+                "include_entities": True,
+            },
+            headers=operator_headers,
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["preview"]
+        assert preview["available"] == 1
+        assert preview["removable"] == 0
+        assert preview["curated"] == 1
+        assert preview["kept_curated"] == 1
+        assert preview["curated_findings"] == 1
+        assert preview["cleanup_reasons"]["buckets"]["kept_by_default"] == {
+            "entities": 1,
+            "findings": 1,
+            "total": 2,
+        }
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in preview["cleanup_reasons"]["reasons"]
+        }
+        assert reason_counts[("finding_attached_to_kept_entity", "kept_by_default")] == (1, 1)
+        assert unlink_resp.status_code == 200
+        unlink_data = json.loads(unlink_resp.data)["unlinked_entities"]
+        assert unlink_data["removed"] == 0
+        assert unlink_data["kept_curated"] == 1
+        with db_connect() as conn:
+            remaining_entity_links = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+                (project["id"], entity_id),
+            ).fetchone()["count"]
+            remaining_run_links = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                (project["id"], run_id),
+            ).fetchone()["count"]
+        assert remaining_entity_links == 1
+        assert remaining_run_links == 0
 
     def test_bulk_project_links_reject_too_many_entity_ids(self):
         client = get_client()
@@ -14421,13 +14722,22 @@ class TestAtlasRoutes:
     def _session_id(self):
         return "atlas-" + uuid.uuid4().hex[:8]
 
-    def _seed_entity_run(self, session_id):
+    def _register_session_token(self, session_id):
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (session_id, datetime.now(timezone.utc).isoformat(), ""),
+            )
+            conn.commit()
+
+    def _seed_entity_run(self, session_id, *, team_id=""):
         run_id = "run-" + uuid.uuid4().hex
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
-                (run_id, session_id, "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+                "INSERT INTO runs "
+                "(id, session_id, team_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, 'external', ?, ?, ?, 1)",
+                (run_id, session_id, team_id, "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
             recorded = materialize_run_entities(
                 conn,
@@ -14440,6 +14750,7 @@ class TestAtlasRoutes:
                         {"type": "cve", "value": "CVE-2025-49113", "canonical_value": "CVE-2025-49113"},
                     ],
                 }],
+                team_id=team_id,
                 seen_at="2026-05-14T00:00:01+00:00",
             )
             record_run_findings(conn, session_id, run_id, [{
@@ -14447,7 +14758,7 @@ class TestAtlasRoutes:
                 "signals": ["findings"],
                 "line_index": 0,
                 "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
-            }])
+            }], team_id=team_id)
             conn.commit()
         return run_id, recorded
 
@@ -14954,6 +15265,17 @@ class TestAtlasRoutes:
         assert preview["entities"] == 1
         assert preview["findings"] == 1
         assert preview["curated_entities"] == 1
+        assert preview["cleanup_reasons"]["buckets"] == {
+            "disposable": {"entities": 1, "findings": 1, "total": 2},
+            "kept_by_default": {"entities": 1, "findings": 0, "total": 1},
+            "not_eligible": {"entities": 0, "findings": 0, "total": 0},
+        }
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in preview["cleanup_reasons"]["reasons"]
+        }
+        assert reason_counts[("entity_label", "kept_by_default")] == (1, 0)
+        assert reason_counts[("source_run_removed", "disposable")] == (0, 1)
         assert delete_resp.status_code == 200
         with db_connect() as conn:
             rows = conn.execute(
@@ -14966,6 +15288,147 @@ class TestAtlasRoutes:
             ).fetchone()[0]
         assert [(row["type"], row["canonical_value"]) for row in rows] == [("cve", "CVE-2025-49113")]
         assert finding_count == 0
+
+    def test_run_cleanup_ignores_cross_session_entity_metadata_when_classifying_curated(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id, recorded = self._seed_entity_run(session_id)
+        cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, 'other-session', 'atlas_entity', ?, 'foreign', 'manual', datetime('now'))",
+                ("lbl-" + uuid.uuid4().hex, cve_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, 'other-session', 'atlas_entity', ?, 'foreign note', datetime('now'), datetime('now'))",
+                ("note-" + uuid.uuid4().hex, cve_id),
+            )
+            conn.commit()
+
+        preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 2
+        assert preview["findings"] == 1
+        assert preview["curated_entities"] == 0
+        assert delete_resp.status_code == 200
+        with db_connect() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0] == 0
+
+    def test_run_cleanup_reports_not_eligible_imported_and_seen_elsewhere_rows(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        other_run_id = "run-" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                (
+                    other_run_id,
+                    session_id,
+                    "nmap later.darklab.sh",
+                    "2026-05-14T00:05:00+00:00",
+                    "[]",
+                ),
+            )
+            finding_id = conn.execute(
+                "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
+                (session_id, domain_id),
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO entity_run_links "
+                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES (?, ?, ?, ?, 1)",
+                (domain_id, other_run_id, "2026-05-14T00:05:00+00:00", "2026-05-14T00:05:00+00:00"),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 99, 'seen later', ?)",
+                (finding_id, other_run_id, "2026-05-14T00:05:00+00:00"),
+            )
+            conn.execute(
+                "INSERT INTO atlas_entity_import_links "
+                "(entity_id, batch_id, first_observed_at, last_observed_at, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    cve_id,
+                    "batch-" + uuid.uuid4().hex,
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO atlas_finding_import_occurrences "
+                "(finding_id, batch_id, row_number, observed_at, created, updated) "
+                "VALUES (?, ?, 1, ?, ?, ?)",
+                (
+                    finding_id,
+                    "batch-" + uuid.uuid4().hex,
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+
+        preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 0
+        assert preview["findings"] == 0
+        assert preview["cleanup_reasons"]["buckets"]["not_eligible"] == {"entities": 2, "findings": 1, "total": 3}
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in preview["cleanup_reasons"]["reasons"]
+        }
+        assert reason_counts[("seen_in_other_runs", "not_eligible")] == (1, 1)
+        assert reason_counts[("imported_entity", "not_eligible")] == (1, 0)
+        assert reason_counts[("imported_finding", "not_eligible")] == (0, 1)
+        assert reason_counts[("entity_has_kept_findings", "not_eligible")] == (1, 0)
+        assert delete_resp.status_code == 200
+        assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 0, "findings": 0}
+        with db_connect() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0] == 2
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0] == 1
 
     def test_run_cleanup_protects_findings_reachable_through_project_run_links(self):
         client = get_client()
@@ -14997,6 +15460,13 @@ class TestAtlasRoutes:
         preview = json.loads(preview_resp.data)["cleanup"]
         assert preview["findings"] == 0
         assert preview["curated_findings"] == 1
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in preview["cleanup_reasons"]["reasons"]
+        }
+        assert preview["cleanup_reasons"]["buckets"]["not_eligible"] == {"entities": 1, "findings": 0, "total": 1}
+        assert reason_counts[("entity_has_kept_findings", "not_eligible")] == (1, 0)
+        assert reason_counts[("finding_project_run_occurrence", "kept_by_default")] == (0, 1)
         assert default_delete_resp.status_code == 200
         with db_connect() as conn:
             assert conn.execute(
@@ -15050,6 +15520,262 @@ class TestAtlasRoutes:
                 "SELECT COUNT(*) FROM entities WHERE session_id = ?",
                 (session_id,),
             ).fetchone()[0] == 0
+
+    def test_run_delete_keeps_curated_entity_with_not_eligible_child_finding_when_pruning_curated(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Curated Parent With Imported Child"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        link_resp = client.post(
+            f"/atlas/entities/{domain_id}/project_links",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            finding_id = conn.execute(
+                "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
+                (session_id, domain_id),
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO atlas_finding_import_occurrences "
+                "(finding_id, batch_id, row_number, observed_at, created, updated) "
+                "VALUES (?, ?, 1, ?, ?, ?)",
+                (
+                    finding_id,
+                    "batch-" + uuid.uuid4().hex,
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                    "2026-05-14T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+
+        preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1&prune_curated_atlas=1",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert project_resp.status_code == 201
+        assert link_resp.status_code == 201
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 1
+        assert preview["findings"] == 0
+        assert preview["curated_entities"] == 0
+        assert preview["curated_findings"] == 0
+        assert preview["cleanup_reasons"]["buckets"] == {
+            "disposable": {"entities": 1, "findings": 0, "total": 1},
+            "kept_by_default": {"entities": 0, "findings": 0, "total": 0},
+            "not_eligible": {"entities": 1, "findings": 1, "total": 2},
+        }
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in preview["cleanup_reasons"]["reasons"]
+        }
+        assert reason_counts[("entity_has_kept_findings", "not_eligible")] == (1, 0)
+        assert reason_counts[("imported_finding", "not_eligible")] == (0, 1)
+        assert delete_resp.status_code == 200
+        assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 1, "findings": 0}
+        with db_connect() as conn:
+            remaining_entities = conn.execute(
+                "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",
+                (session_id,),
+            ).fetchall()
+            remaining_findings = conn.execute(
+                "SELECT id, entity_id FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+        assert [(row["type"], row["canonical_value"]) for row in remaining_entities] == [("domain", "darklab.sh")]
+        assert [tuple(row) for row in remaining_findings] == [(finding_id, domain_id)]
+
+    def test_team_history_cleanup_preview_matches_delete_for_owner_scoped_atlas_rows(self):
+        client = get_client()
+        owner_token = "tok_atlas_team_owner_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_atlas_team_operator_" + uuid.uuid4().hex[:8]
+        self._register_session_token(owner_token)
+        self._register_session_token(operator_token)
+        team_resp = client.post(
+            "/session/teams",
+            headers={"X-Session-ID": owner_token},
+            json={"name": "Atlas Cleanup " + uuid.uuid4().hex[:8], "display_name": "Owner"},
+        )
+        assert team_resp.status_code == 201
+        team_id = json.loads(team_resp.data)["team"]["id"]
+        invite_resp = client.post(
+            f"/session/teams/{team_id}/invites",
+            headers={"X-Session-ID": owner_token},
+            json={"role": "operator", "label": "Cleanup operator"},
+        )
+        assert invite_resp.status_code == 201
+        join_resp = client.post(
+            "/session/teams/join",
+            headers={"X-Session-ID": operator_token},
+            json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "Operator"},
+        )
+        assert join_resp.status_code == 201
+        run_id, recorded = self._seed_entity_run(owner_token, team_id=team_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        project_id = "prj_team_cleanup_" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO projects (id, session_id, team_id, name, slug, status, created, updated) "
+                "VALUES (?, ?, ?, 'Team Cleanup Project', ?, 'active', datetime('now'), datetime('now'))",
+                (project_id, operator_token, team_id, "team-cleanup-" + uuid.uuid4().hex[:8]),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now'))",
+                ("link-team-cleanup-" + uuid.uuid4().hex, project_id, domain_id),
+            )
+            conn.commit()
+
+        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
+            headers=operator_headers,
+        )
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1",
+            headers=operator_headers,
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 1
+        assert preview["findings"] == 0
+        assert preview["curated_entities"] == 1
+        assert preview["curated_findings"] == 1
+        reason_counts = {
+            (item["code"], item["bucket"]): (item["entities"], item["findings"])
+            for item in preview["cleanup_reasons"]["reasons"]
+        }
+        assert reason_counts[("entity_project_link", "kept_by_default")] == (1, 0)
+        assert reason_counts[("finding_parent_entity_project_link", "kept_by_default")] == (0, 1)
+        assert delete_resp.status_code == 200
+        assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 1, "findings": 0}
+        with db_connect() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()[0] == 1
+
+    def test_team_history_cleanup_delete_matches_preview_for_cross_member_atlas_rows(self):
+        client = get_client()
+        owner_token = "tok_atlas_cross_owner_" + uuid.uuid4().hex[:8]
+        operator_token = "tok_atlas_cross_operator_" + uuid.uuid4().hex[:8]
+        self._register_session_token(owner_token)
+        self._register_session_token(operator_token)
+        team_resp = client.post(
+            "/session/teams",
+            headers={"X-Session-ID": owner_token},
+            json={"name": "Atlas Cross Cleanup " + uuid.uuid4().hex[:8], "display_name": "Owner"},
+        )
+        assert team_resp.status_code == 201
+        team_id = json.loads(team_resp.data)["team"]["id"]
+        invite_resp = client.post(
+            f"/session/teams/{team_id}/invites",
+            headers={"X-Session-ID": owner_token},
+            json={"role": "operator", "label": "Cross cleanup operator"},
+        )
+        assert invite_resp.status_code == 201
+        join_resp = client.post(
+            "/session/teams/join",
+            headers={"X-Session-ID": operator_token},
+            json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "Operator"},
+        )
+        assert join_resp.status_code == 201
+        suffix = uuid.uuid4().hex[:12]
+        run_id = "run-team-cross-cleanup-" + suffix
+        entity_id = "ent_team_cross_cleanup_" + suffix
+        finding_id = "fnd_team_cross_cleanup_" + suffix
+        seen_at = "2026-05-14T00:00:00+00:00"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, team_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, 'external', 'nmap cross-cleanup.darklab.sh', ?, '[]', 1)",
+                (run_id, operator_token, team_id, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "occurrence_count, created) "
+                "VALUES (?, ?, ?, 'domain', 'cross-cleanup.darklab.sh', ?, ?, ?, 1, ?)",
+                (entity_id, owner_token, team_id, "sig-" + entity_id, seen_at, seen_at, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES (?, ?, ?, ?, 1)",
+                (entity_id, run_id, seen_at, seen_at),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'info', 'finding', 'nmap', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                (
+                    finding_id,
+                    owner_token,
+                    team_id,
+                    run_id,
+                    entity_id,
+                    "domain:cross-cleanup.darklab.sh",
+                    "sig-" + finding_id,
+                    run_id,
+                    run_id,
+                    seen_at,
+                    seen_at,
+                    "443/tcp open https on cross-cleanup.darklab.sh",
+                    "443/tcp open https on cross-cleanup.darklab.sh",
+                    seen_at,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 1, '443/tcp open https on cross-cleanup.darklab.sh', ?)",
+                (finding_id, run_id, seen_at),
+            )
+            conn.commit()
+
+        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
+            headers=operator_headers,
+        )
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1",
+            headers=operator_headers,
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 1
+        assert preview["findings"] == 1
+        assert preview["cleanup_reasons"]["buckets"]["disposable"] == {"entities": 1, "findings": 1, "total": 2}
+        assert delete_resp.status_code == 200
+        assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 1, "findings": 1}
+        with db_connect() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM runs WHERE id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM entities WHERE id = ?", (entity_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM findings WHERE id = ?", (finding_id,)).fetchone()[0] == 0
 
     def test_delete_atlas_finding_can_cleanup_same_run_siblings(self):
         client = get_client()

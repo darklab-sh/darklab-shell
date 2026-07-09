@@ -19,6 +19,7 @@ import {
   apiFetch as importedRuntimeApiFetch,
   hasRuntimeHandler as importedHasRuntimeHandler,
 } from '../../runtime_bridge.js';
+import { atlasRunCleanupCopy } from '../../ui/cleanup_reasons.js';
 
 let _pendingHistActionFallback = null;
 const HISTORY_MUTATIONS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
@@ -162,43 +163,29 @@ async function _historyMutationError(resp, fallback) {
   return err;
 }
 
-function _historyCleanupLabel(cleanup) {
-  const entities = Number(cleanup?.entities || 0);
-  const findings = Number(cleanup?.findings || 0);
-  return `${findings.toLocaleString()} ${findings === 1 ? 'finding' : 'findings'} and `
-    + `${entities.toLocaleString()} ${entities === 1 ? 'entity' : 'entities'}`;
-}
-
-function _historyCuratedCleanupLabel(cleanup) {
-  const entities = Number(cleanup?.curated_entities || 0);
-  const findings = Number(cleanup?.curated_findings || 0);
-  return `${findings.toLocaleString()} curated ${findings === 1 ? 'finding' : 'findings'} and `
-    + `${entities.toLocaleString()} curated ${entities === 1 ? 'entity' : 'entities'}`;
-}
-
 function _buildHistoryAtlasCleanupContent(cleanup) {
-  const curated = Number(cleanup?.curated_total || 0);
-  if (!cleanup?.has_cleanup && curated <= 0) return null;
+  const copy = atlasRunCleanupCopy(cleanup);
+  if (!copy.hasDisposable && !copy.hasKept && !copy.notEligibleNote) return null;
   const wrap = document.createElement('div');
   wrap.className = 'modal-inline-field';
   const fieldset = document.createElement('div');
   fieldset.className = 'form-fieldset';
-  if (cleanup?.has_cleanup) {
+  if (copy.hasDisposable) {
     const label = document.createElement('label');
     label.className = 'form-check';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.checked = true;
+    checkbox.checked = false;
     checkbox.dataset.historyAtlasCleanup = '1';
     const text = document.createElement('span');
-    text.textContent = `Also remove ${_historyCleanupLabel(cleanup)} from Atlas`;
+    text.textContent = copy.disposableLabel;
     label.append(checkbox, text);
     const note = document.createElement('div');
-    note.className = 'history-bulk-note';
-    note.textContent = 'These are disposable Atlas items only sourced by this run.';
+    note.className = 'cleanup-reason-note history-bulk-note';
+    note.textContent = copy.disposableNote;
     fieldset.append(label, note);
   }
-  if (curated > 0) {
+  if (copy.hasKept) {
     const curatedLabel = document.createElement('label');
     curatedLabel.className = 'form-check';
     const curatedCheckbox = document.createElement('input');
@@ -206,12 +193,18 @@ function _buildHistoryAtlasCleanupContent(cleanup) {
     curatedCheckbox.checked = false;
     curatedCheckbox.dataset.historyAtlasCleanupCurated = '1';
     const curatedText = document.createElement('span');
-    curatedText.textContent = 'Also delete curated single-source Atlas items';
+    curatedText.textContent = copy.keptLabel;
     curatedLabel.append(curatedCheckbox, curatedText);
     const curatedNote = document.createElement('div');
-    curatedNote.className = 'history-bulk-note';
-    curatedNote.textContent = `${_historyCuratedCleanupLabel(cleanup)} will be kept unless this is checked. Curated means project-linked, project-visible, reviewed, labeled, or noted.`;
+    curatedNote.className = 'cleanup-reason-note history-bulk-note';
+    curatedNote.textContent = copy.keptNote;
     fieldset.append(curatedLabel, curatedNote);
+  }
+  if (copy.notEligibleNote) {
+    const excludedNote = document.createElement('div');
+    excludedNote.className = 'cleanup-reason-note history-bulk-note';
+    excludedNote.textContent = copy.notEligibleNote;
+    fieldset.appendChild(excludedNote);
   }
   wrap.appendChild(fieldset);
   return wrap;
@@ -377,8 +370,6 @@ export {
   _buildHistoryAtlasCleanupContent,
   _historyActiveScopeCan,
   _historyCanManageHistory,
-  _historyCleanupLabel,
-  _historyCuratedCleanupLabel,
   _historyMutationError,
   _historyScopeDeniedMessage,
   _historyShowPermissionDenied,

@@ -24,28 +24,29 @@ def delete_history_run(
     atlas_cleanup = {"entities": 0, "findings": 0}
     with get_db_connect()() as conn:
         owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
+            "SELECT id, session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
             (run_id, *scope_params),
         ).fetchone()
         if owned:
-            cleanup_preview = (
-                atlas_run_cleanup_preview(conn, session_id, [run_id], include_curated=prune_curated_atlas)
-                if prune_atlas
-                else None
-            )
+            cleanup_session_id = str(owned["session_id"] or session_id)
+            cleanup_team_id = str(owned["team_id"] or getattr(owner_scope, "team_id", "") or "")
+            cleanup_preview = atlas_run_cleanup_preview(
+                conn, cleanup_session_id, [run_id], include_curated=prune_curated_atlas, team_id=cleanup_team_id
+            ) if prune_atlas else None
             delete_run_artifacts(conn, [run_id])
             if cleanup_preview:
-                atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
+                atlas_cleanup = delete_atlas_cleanup_preview(
+                    conn,
+                    cleanup_session_id,
+                    cleanup_preview,
+                    team_id=cleanup_team_id,
+                )
         cur = conn.execute("DELETE FROM runs WHERE id = ? AND " + scope_sql, (run_id, *scope_params))  # nosec
         if cur.rowcount:
             record_event(
                 AuditEventType.HISTORY_DELETE,
                 target_id=run_id,
-                details={
-                    "run_id": run_id,
-                    "deleted_count": int(cur.rowcount or 0),
-                    "source": "history",
-                },
+                details={"run_id": run_id, "deleted_count": int(cur.rowcount or 0), "source": "history"},
                 conn=conn,
                 **audit_fields,
             )
@@ -53,15 +54,18 @@ def delete_history_run(
     return int(cur.rowcount or 0), atlas_cleanup
 
 
-def history_run_cleanup_preview(session_id: str, run_id: str):
+def history_run_cleanup_preview(session_id: str, run_id: str, owner_scope=None):
     with get_db_connect()() as conn:
+        scope_sql, scope_params = ("session_id = ?", [session_id]) if owner_scope is None else owner_scope.predicate()
         owned = conn.execute(
-            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
-            (run_id, session_id),
+            "SELECT session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
+            (run_id, *scope_params),
         ).fetchone()
         if not owned:
             return None
-        return atlas_run_cleanup_preview(conn, session_id, [run_id])
+        cleanup_session_id = str(owned["session_id"] or session_id)
+        cleanup_team_id = str(owned["team_id"] or getattr(owner_scope, "team_id", "") or "")
+        return atlas_run_cleanup_preview(conn, cleanup_session_id, [run_id], team_id=cleanup_team_id)
 
 
 def bulk_export_rows(owner_scope, run_ids: list[str], snapshot_ids: list[str]):
@@ -133,11 +137,7 @@ def bulk_delete_runs(
             record_event(
                 AuditEventType.HISTORY_DELETE,
                 target_id="",
-                details={
-                    "run_ids": deletable_ids,
-                    "deleted_count": len(deletable_ids),
-                    "source": "history_bulk",
-                },
+                details={"run_ids": deletable_ids, "deleted_count": len(deletable_ids), "source": "history_bulk"},
                 conn=conn,
                 **audit_fields,
             )

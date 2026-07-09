@@ -820,6 +820,14 @@ body.mobile-terminal-mode .output-follow-btn {
   font-size: 11px;
 }
 
+.cleanup-reason-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;
