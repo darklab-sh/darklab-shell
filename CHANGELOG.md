@@ -41,6 +41,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Accepted command autocomplete roots now keep examples visible** — Choosing a command root such as `ping` from a partial match like `pin` now refreshes autocomplete after insertion, so the same example commands appear as when the root is typed manually.
+
 - **Run comparison e2e coverage is less flaky** — The history/project compare test now forces a smaller split-pane scroll area before checking scroll sync, so the test no longer depends on borderline rendered row heights.
 
 - **First-open modal behavior stays polished after the startup trim** — The lazy shell changes now preserve the pre-trim visual and interaction details.

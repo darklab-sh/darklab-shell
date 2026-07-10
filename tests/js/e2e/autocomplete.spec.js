@@ -124,6 +124,57 @@ test.describe('autocomplete', () => {
     await expect(dropdown).toContainText('Hostname, IP, or CIDR')
   })
 
+  test('accepting a command root by keyboard or click keeps examples visible', async ({
+    page,
+  }) => {
+    const input = page.locator('#cmd')
+    const dropdown = page.locator('#ac-dropdown')
+
+    async function expectPingRootSuggestion() {
+      await expect
+        .poll(async () => ({
+          hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+          text: (await dropdown.textContent()) || '',
+        }))
+        .toEqual(
+          expect.objectContaining({
+            hidden: false,
+            text: expect.stringContaining('ping'),
+          }),
+        )
+    }
+
+    async function expectPingExamples() {
+      await expect
+        .poll(async () => ({
+          hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+          text: (await dropdown.textContent()) || '',
+        }))
+        .toEqual(
+          expect.objectContaining({
+            hidden: false,
+            text: expect.stringContaining('ping -c 4 darklab.sh'),
+          }),
+        )
+      await expect(dropdown).toContainText('ping -h')
+    }
+
+    await input.pressSequentially('pin')
+    await expectPingRootSuggestion()
+    await page.keyboard.press('ArrowDown')
+    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('ping')
+    await page.keyboard.press('Enter')
+    await expect(input).toHaveValue('ping')
+    await expectPingExamples()
+
+    await setComposerValueForTest(page, '')
+    await input.pressSequentially('pin')
+    await expectPingRootSuggestion()
+    await dropdown.locator('.ac-item').filter({ hasText: 'ping' }).first().click()
+    await expect(input).toHaveValue('ping')
+    await expectPingExamples()
+  })
+
   test('workspace input flags suggest live session files instead of static examples', async ({ page }) => {
     const input = page.locator('#cmd')
     const dropdown = page.locator('#ac-dropdown')

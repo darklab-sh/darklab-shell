@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,027
+- behavior tests: 4,029
 - docs/inventory meta-tests: 63
 - `pytest`: 2336 (2286 behavior + 50 meta)
-- `vitest`: 1484 (1471 behavior + 13 meta)
-- `playwright`: 270 behavior
-- total: 4,090
+- `vitest`: 1485 (1472 behavior + 13 meta)
+- `playwright`: 271 behavior
+- total: 4,092
 
 This document is organized in two parts:
 
@@ -2847,6 +2847,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
 | `acAccept clears stale suggestions after accepting a single contextual match` | Verifies that accepting the only contextual suggestion clears the hidden suggestion list so a second Tab cannot reapply stale replacement bounds. |
 | `acAccept refreshes autocomplete after accepting a slash-terminated folder` | Verifies that accepting a folder-like completion reopens autocomplete so the next path segment can be completed immediately. |
+| `acAccept refreshes autocomplete after accepting a command root suggestion` | Verifies that accepting a completed command root such as `ping` reopens autocomplete so command examples stay visible. |
 | `acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen` | Verifies that accepting a suggestion hides the dropdown and suppresses the one programmatic input update caused by the accept path, so the menu does not immediately reopen. |
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
@@ -4317,6 +4318,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `clicking outside the prompt hides autocomplete without changing the input` | Verifies that clicking outside the prompt hides autocomplete without changing the input. |
 | `context-aware autocomplete replaces only the active token for command flags` | Verifies that context-aware autocomplete replaces only the active token for command flags. |
 | `context-aware autocomplete shows positional hints alongside flags after a known command root` | Verifies that contextual autocomplete can surface positional guidance like `<target>` alongside command-specific flags after a known root such as `nmap `. |
+| `accepting a command root by keyboard or click keeps examples visible` | Verifies that choosing a completed command root such as `ping` from a partial match keeps the command examples open for both keyboard and mouse selection. |
 | `workspace input flags suggest live session files instead of static examples` | Verifies that workspace-aware input flags show current session files and do not leak static registry examples. |
 | `built-in pipe support suggests the supported pipe commands after a pipe` | Verifies that after a pipe character, the narrow built-in pipe commands appear in the autocomplete dropdown. |
 
