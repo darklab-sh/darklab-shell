@@ -5094,6 +5094,10 @@ commands:
       deny:
         - wpscan -o
         - wpscan --output
+        - wpscan --api-token
+    requires_secrets:
+      - env: WPSCAN_API_TOKEN
+        optional: true
     workspace_flags:
       - flag: -o
         mode: write

@@ -48,6 +48,7 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | `puredns` | Allows `bruteforce` with the packaged SecLists DNS wordlist and declares resolver, trusted-resolver, domain-list, valid-domain, raw massdns, and wildcard output flags as workspace paths. | puredns should use explicit resolver files and save useful outputs in Files instead of relying on hidden home-directory defaults. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the active workspace, and launches with `XDG_CONFIG_HOME=<active workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-owner database path instead of falling back to `$HOME/.config/amass`. |
 | `ipinfo` | Injects optional `IPINFO_TOKEN` from the encrypted secrets vault and blocks config-writing/token-on-command-line flows such as `init`, `config`, `completion install`, and inline token flags. | Users can run the official IPinfo CLI for provider-native IP/ASN output without storing tokens in shell history or letting the CLI write persistent config inside the container. |
+| `wpscan` | Injects optional `WPSCAN_API_TOKEN` from the encrypted secrets vault and blocks inline `--api-token` use. | Regular WordPress scans still work without a key, while API-backed vulnerability data can be enabled without putting the token in command history or argv. |
 | `urlscan-cli` | Injects `URLSCAN_API_KEY` from the encrypted secrets vault and blocks key/config/completion setup, inline key flags, and stdin-driven scan/result forms. | Users can submit URLs, fetch scan results, and search urlscan.io without writing keys to a local keyring/config file or putting tokens into command history. |
 | `chaos` | Injects `PDCP_API_KEY` from the encrypted secrets vault and blocks inline key flags, updater flows, list-file input, and direct output-file writes. | Users can query ProjectDiscovery Chaos for domain subdomains while keeping the provider key in the app vault and avoiding unmanaged file reads/writes. |
 
@@ -117,7 +118,7 @@ Shodan's CLI still expects its `shodan init` config file. Users do not need to r
 
 The Options Secrets picker reads this command-registry metadata so users see the known tool key names first. Custom names remain available for local registry overlays.
 
-`ipinfo` declares `IPINFO_TOKEN` as optional. The CLI can show limited unauthenticated output, while saved tokens unlock the provider data attached to the user's IPinfo account.
+`ipinfo` declares `IPINFO_TOKEN` as optional. The CLI can show limited unauthenticated output, while saved tokens unlock the provider data attached to the user's IPinfo account. `wpscan` follows the same optional-secret pattern with `WPSCAN_API_TOKEN`: normal scans run without it, and token-backed vulnerability data is available when the secret is saved.
 
 `urlscan-cli` and `chaos` declare required CLI secrets. `urlscan-cli` receives `URLSCAN_API_KEY`; `chaos` receives `PDCP_API_KEY`. Their setup and inline-key flags are blocked so the vault stays the only supported key path.
 

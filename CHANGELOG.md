@@ -12,6 +12,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **HTTP and TCP ping tools are available in the shell** — The Docker image now includes Debian's packaged `httping` plus a pinned upstream `tcping` Go install, with command registry entries for examples, help, target/port autocomplete, and container smoke coverage for the recommended syntax.
 
+- **WPScan can use a vault-backed API token** — `wpscan` now receives optional `WPSCAN_API_TOKEN` values from the encrypted secrets vault, while regular scans still run without a token and inline `--api-token` usage is blocked so keys stay out of command text.
+
 ### Changed
 
 - **Initial shell startup and first-open surfaces are lighter** — The initial page now ships less inactive UI, while first-use surfaces still open with the same polished behavior.
