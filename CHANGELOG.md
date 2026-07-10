@@ -43,6 +43,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Container smoke CI installs the app import dependencies it collects through** — The GitLab smoke job now installs Alpine's `py3-pydantic` and `py3-tldextract` packages before running `scripts/container_smoke_test.sh`, so the pytest wrapper can import the config schema and output-signal helpers before it starts the Docker-backed smoke container.
+  - **Tests:** verified `docker:29.6.1` can collect `tests/py/test_container_smoke_test.py` after installing `python3`, `py3-pytest`, `py3-yaml`, `py3-pydantic`, `py3-tldextract`, and `docker-cli-compose`.
+
 - **Accepted command autocomplete roots now keep examples visible** — Choosing a command root such as `ping` from a partial match like `pin` now refreshes autocomplete after insertion, so the same example commands appear as when the root is typed manually.
 
 - **Run comparison e2e coverage is less flaky** — The history/project compare test now forces a smaller split-pane scroll area before checking scroll sync, so the test no longer depends on borderline rendered row heights.

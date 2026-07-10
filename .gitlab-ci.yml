@@ -216,7 +216,7 @@ container-smoke-test:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache python3 py3-pytest py3-yaml docker-cli-compose
+    - apk add --no-cache python3 py3-pytest py3-yaml py3-pydantic py3-tldextract docker-cli-compose
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
