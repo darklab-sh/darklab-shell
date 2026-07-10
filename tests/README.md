@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,021
+- behavior tests: 4,027
 - docs/inventory meta-tests: 63
-- `pytest`: 2330 (2280 behavior + 50 meta)
+- `pytest`: 2336 (2286 behavior + 50 meta)
 - `vitest`: 1484 (1471 behavior + 13 meta)
 - `playwright`: 270 behavior
-- total: 4,084
+- total: 4,090
 
 This document is organized in two parts:
 

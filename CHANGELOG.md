@@ -8,6 +8,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [2.5.0] - Unreleased
 
+### Added
+
+- **HTTP and TCP ping tools are available in the shell** — The Docker image now includes Debian's packaged `httping` plus a pinned upstream `tcping` Go install, with command registry entries for examples, help, target/port autocomplete, and container smoke coverage for the recommended syntax.
+
 ### Changed
 
 - **Initial shell startup and first-open surfaces are lighter** — The initial page now ships less inactive UI, while first-use surfaces still open with the same polished behavior.
@@ -36,6 +40,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** one pytest contract verifies the Dockerfile labels, Compose label interpolation, app/package version alignment, and Python base-image label source.
 
 ### Fixed
+
+- **Run comparison e2e coverage is less flaky** — The history/project compare test now forces a smaller split-pane scroll area before checking scroll sync, so the test no longer depends on borderline rendered row heights.
 
 - **First-open modal behavior stays polished after the startup trim** — The lazy shell changes now preserve the pre-trim visual and interaction details.
   - Theme selector alignment, Run Details entity rows, Project Runs/Findings placeholders, main-terminal Atlas entity highlights, and Atlas entity tab auto-selection render correctly on first load.

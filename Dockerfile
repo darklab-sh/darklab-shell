@@ -27,6 +27,7 @@ ARG TESTSSL_VERSION=v3.2.3
 ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
+ARG TCPING_VERSION=v2.7.1
 ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=latest
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
@@ -63,7 +64,7 @@ RUN apt-get install -y --no-install-recommends \
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
-                        ca-certificates perl zlib1g-dev unzip inetutils-telnet
+                        ca-certificates perl zlib1g-dev unzip inetutils-telnet httping
 
 # Update the man page database
 RUN mandb -c
@@ -132,6 +133,7 @@ RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@${AMAS
 RUN go install github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}
 RUN go install github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
 RUN go install github.com/ffuf/ffuf/v2@${FFUF_VERSION}
+RUN go install github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog \
     && go -C /tmp/trufflehog install \

@@ -19,6 +19,7 @@ import {
 // Use fake shell commands — they bypass the allowlist and complete instantly.
 const CMD_A = 'hostname'
 const CMD_B = 'date'
+const COMPARE_PANE_SCROLL_TEST_HEIGHT = '48px'
 
 function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
@@ -229,22 +230,22 @@ async function selectVisibleHistoryRuns(page, commands) {
 
 async function forceComparePaneOverflow(overlay) {
   const panes = overlay.locator('.history-compare-pane')
-  await panes.evaluateAll((paneElements) => {
+  await panes.evaluateAll((paneElements, height) => {
     paneElements.forEach((pane) => {
       pane.style.alignSelf = 'start'
       pane.style.minHeight = '0'
-      pane.style.height = '90px'
-      pane.style.maxHeight = '90px'
+      pane.style.height = height
+      pane.style.maxHeight = height
       pane.style.overflowY = 'auto'
     })
-  })
+  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
   await expect.poll(() => panes.evaluateAll((paneElements) => (
     paneElements.every((pane) => pane.scrollHeight > pane.clientHeight)
   ))).toBe(true)
 }
 
 async function expectSplitPaneScrollSync(overlay) {
-  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split) => {
+  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split, height) => {
     const left = split.querySelector('.history-compare-pane[data-side="a"]')
     const right = split.querySelector('.history-compare-pane[data-side="b"]')
     const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
@@ -260,8 +261,8 @@ async function expectSplitPaneScrollSync(overlay) {
     for (const pane of [left, right]) {
       pane.style.alignSelf = 'start'
       pane.style.minHeight = '0'
-      pane.style.height = '90px'
-      pane.style.maxHeight = '90px'
+      pane.style.height = height
+      pane.style.maxHeight = height
       pane.style.overflowY = 'auto'
     }
     await nextFrame()
@@ -291,7 +292,7 @@ async function expectSplitPaneScrollSync(overlay) {
       mobileMode,
       rightScrollable: rightMax > 0,
     }
-  })
+  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
   expect(scrollState.mobileMode, 'split compare scroll sync is only active in desktop mode').toBe(false)
   expect(scrollState.leftScrollable, 'left compare pane should be scrollable before testing sync').toBe(true)
   expect(scrollState.rightScrollable, 'right compare pane should be scrollable before testing sync').toBe(true)

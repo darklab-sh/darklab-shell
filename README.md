@@ -204,6 +204,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 |------|---------|
 | `ping` | ICMP reachability |
 | `curl` / `wget` | HTTP/HTTPS requests |
+| `httping` | HTTP/HTTPS reachability and request timing |
 | `dig` / `nslookup` / `host` | DNS lookups |
 | `whois` | Domain & IP registration info |
 | `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
@@ -224,6 +225,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `cdncheck` | CDN, cloud, and WAF provider classification for hosts and IPs (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
+| `tcping` | TCP reachability and latency checks for service ports when ICMP is blocked |
 | `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
 | `masscan` | High-speed TCP port scanner; requires raw sockets (container has `NET_RAW`/`NET_ADMIN`) |
 | `assetfinder` | Fast passive domain and IP discovery using public sources |

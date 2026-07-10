@@ -100,6 +100,81 @@ commands:
           hint_only: true
           value_type: host
           description: Hostname or IP to probe
+  - root: httping
+    description: Sends repeated HTTP or HTTPS requests and reports web reachability and latency.
+    category: Network Diagnostics
+    knowledge:
+      notes:
+        - Use -g when you want to measure a full URL; without it, httping treats the target as a host.
+      safe_defaults:
+        - Bound checks with -c and use HTTPS URLs for external services.
+      common_flags:
+        - "-c - stop after a request count"
+        - "-g - probe a full URL"
+        - "-G - send GET instead of HEAD"
+      artifact_behavior: Writes nothing to the workspace; results are shown in the terminal only.
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - httping
+      deny: []
+    autocomplete:
+      examples:
+        - value: httping --help
+          description: Show help and usage
+        - value: httping -c 4 -g https://darklab.sh
+          description: Send four HTTP timing probes to a URL
+        - value: httping -G -c 4 -g https://darklab.sh
+          description: Measure GET request timing instead of HEAD timing
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -h
+          description: Probe a hostname
+          takes_value: true
+          value_hint:
+            placeholder: <host>
+            value_type: host
+        - value: -p
+          description: Port to use with -h
+          takes_value: true
+          value_type: port_set
+          suggest:
+            - value: '80'
+              description: HTTP
+            - value: '443'
+              description: HTTPS
+        - value: -c
+          description: Stop after count requests
+          takes_value: true
+          suggest:
+            - value: '4'
+              description: Send four requests
+            - value: '10'
+              description: Send ten requests
+        - value: -g
+          description: Probe a full URL
+          takes_value: true
+          value_hint:
+            placeholder: <url>
+            value_type: url
+        - value: -G
+          description: Use GET instead of HEAD
+        - value: -s
+          description: Show HTTP status codes
+        - value: -S
+          description: Split connection and transfer timing
+        - value: -t
+          description: Timeout before giving up
+          takes_value: true
+      arguments:
+        - placeholder: <url-or-host>
+          hint_only: true
+          value_type: target
+          description: URL or host to probe
   - root: traceroute
     description: Maps the network path to a host by showing each hop and round-trip timing.
     category: Network Diagnostics
@@ -196,6 +271,77 @@ commands:
           hint_only: true
           value_type: host
           description: Hostname or IP to trace
+        - placeholder: <port>
+          position: 2
+          hint_only: true
+          value_type: port_set
+          description: TCP port to probe
+  - root: tcping
+    description: Tests TCP service reachability and latency without relying on ICMP.
+    category: Network Diagnostics
+    knowledge:
+      notes:
+        - Useful when ICMP ping is blocked but a service port should still answer TCP connections.
+      safe_defaults:
+        - Bound checks with -c and set a short timeout when probing filtered ports.
+      common_flags:
+        - "-c - stop after a probe count"
+        - "-t - per-connection timeout"
+        - "-j - print JSON output"
+      artifact_behavior: Writes nothing to the workspace; results are shown in the terminal only.
+    help:
+      flags:
+        - -h
+        - --help
+    policy:
+      allow:
+        - tcping
+      deny: []
+    autocomplete:
+      examples:
+        - value: tcping --help
+          description: Show help and usage
+        - value: tcping -c 4 ip.darklab.sh 443
+          description: Send four TCP probes to port 443
+        - value: tcping -c 4 -t 2 ip.darklab.sh 80
+          description: Probe a TCP service with a short timeout
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -c
+          description: Stop after count probes
+          takes_value: true
+          suggest:
+            - value: '4'
+              description: Send four probes
+            - value: '10'
+              description: Send ten probes
+        - value: -t
+          description: Timeout before giving up
+          takes_value: true
+          suggest:
+            - value: '2'
+              description: Two-second timeout
+        - value: -i
+          description: Wait interval between probes
+          takes_value: true
+          suggest:
+            - value: 1s
+              description: One-second interval
+        - value: -j
+          description: Print JSON output
+        - value: --pretty
+          description: Pretty-print JSON output
+      arguments:
+        - placeholder: <host>
+          position: 1
+          hint_only: true
+          value_type: host
+          description: Hostname or IP to probe
         - placeholder: <port>
           position: 2
           hint_only: true
