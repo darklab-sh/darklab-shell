@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,029
+- behavior tests: 4,036
 - docs/inventory meta-tests: 63
-- `pytest`: 2336 (2286 behavior + 50 meta)
+- `pytest`: 2343 (2293 behavior + 50 meta)
 - `vitest`: 1485 (1472 behavior + 13 meta)
 - `playwright`: 271 behavior
-- total: 4,092
+- total: 4,099
 
 This document is organized in two parts:
 
@@ -1222,6 +1222,18 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSecretsVault.test_storage_migration_keeps_source_secret_when_destination_name_collides` | Verifies session secret migration keeps the source row when a destination secret with the same name already exists. |
 | `TestSecretsVault.test_storage_legacy_duplicate_consumer_env_uses_most_recent_update` | Verifies legacy duplicate consumer-env rows resolve to the most recently updated secret. |
 | `TestSecretsVault.test_storage_rejects_duplicate_consumer_env_bindings` | Verifies a session cannot bind the same consumer env name to two different encrypted secrets. |
+
+#### `test_backup_system.py`
+
+| Test | Description |
+| --- | --- |
+| `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, and excludes live SQLite files from the copied data directory. |
+| `test_extra_and_env_files_are_included_without_logging_secret_values` | Verifies env files and repeatable extra files are included while secret-bearing values stay out of the manifest. |
+| `test_missing_extra_file_fails_unless_operator_allows_it` | Verifies explicit extra files fail loudly when missing unless the operator opts into ignoring missing paths. |
+| `test_unreadable_data_dir_reports_root_guidance_and_cleans_lock` | Verifies unreadable host data directories return root/bind-mount guidance and still clean up the backup lock. |
+| `test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit` | Verifies tmpfs workspace backups are skipped without opt-in even when the same host path exists, unavailable app containers are reported when ephemeral backup is requested, production Compose workspace overrides resolve to the base project bind path, and explicit bind sources still copy the physical host path. |
+| `test_postgres_backup_uses_pg_dump_environment_without_password_argument` | Verifies local Postgres backups pass credentials through the `pg_dump` environment, Compose-network URLs select containerized `pg_dump`, and Compose Postgres backups run inside the service container instead of falling back to host `pg_dump`. |
+| `test_workspace_volume_source_with_container_exports_with_docker_cp` | Verifies Docker-volume workspace backups use `docker cp` from the mounted app container path when container metadata is available. |
 
 #### `test_check_versions.py`
 

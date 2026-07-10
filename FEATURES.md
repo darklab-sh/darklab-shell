@@ -43,6 +43,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
+- [Operator Backups](#operator-backups)
 - [Session Tokens](#session-tokens)
 - [Team-Mode](#team-mode)
 - [Encrypted Secrets](#encrypted-secrets)
@@ -1373,6 +1374,27 @@ sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM run_out
 # Inspect page-level storage when dbstat is available
 sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name ORDER BY bytes DESC LIMIT 10;"
 ```
+
+---
+
+## Operator Backups
+
+**Purpose:** scheduled, deployment-aware backups for self-hosted operators.
+
+**Behavior:**
+
+- `scripts/backup_system.py` loads the effective app config and optional `.env` file before it decides what to back up.
+- SQLite deployments get a consistent `history.db` snapshot through SQLite's backup API. Postgres deployments get a custom-format `pg_dump` archive.
+- The backup includes `data_dir`, local config files, `.env` when present, optional `--extra-file` paths, and enabled workspaces.
+- Data and workspace backup use the physical storage source, not just the app's logical path: bind mounts copy the host path, Docker named volumes are exported through Docker, and tmpfs/container-only workspaces require an explicit opt-in.
+- Locked-down host bind mounts must be readable by the user running the script. On Linux production hosts, that often means running the backup as root or choosing a Docker volume/container source instead of a host path.
+- Each backup writes a redacted manifest, checksums, restore notes, and either a `.tar.gz` archive or an unpacked directory when `--compress none` is used.
+
+**Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
+
+**Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for cron examples and Docker/Compose flags.
+
+**Related files:** `scripts/backup_system.py`, `app/config.py`, `docker-compose.yml`.
 
 ---
 

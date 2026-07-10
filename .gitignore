@@ -37,6 +37,9 @@ app/static/build/*
 !app/static/build/*.woff2
 !app/static/build/manifest.json
 
+# Backup directory
+backups/
+
 # Persistent workspaces bind mount, if in use
 workspaces/
 

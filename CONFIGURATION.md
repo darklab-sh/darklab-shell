@@ -1068,6 +1068,63 @@ workspace_backend: volume
 
 ---
 
+## Operator Backups
+
+Use [`scripts/backup_system.py`](scripts/backup_system.py) when you want a scheduled backup that matches the deployment the app is actually running with. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
+
+Basic cron-friendly example:
+
+```bash
+python scripts/backup_system.py \
+  --env-file .env \
+  --output-dir /backups/darklab_shell \
+  --keep-days 14
+```
+
+Run the script as a host user that can read every physical source it needs to copy. On Linux Docker hosts, production bind mounts commonly require root because `/data` and `/workspaces` are owned by the container's numeric app users and are not world-readable. Docker group access is still useful for Compose Postgres dumps, Docker volume exports, and container-only sources, but it does not grant read access to locked-down host bind-mount directories.
+
+For SQLite, the script writes a consistent `database/history.db` snapshot with SQLite's online backup API, then copies the rest of `data_dir` while leaving the live `history.db`, `history.db-wal`, and `history.db-shm` files out of the copied `data/` directory. When the script runs from the Docker host, it keeps the app's logical `data_dir` separate from the physical backup source, so the bundled `/data` mount resolves to the host `./data` directory declared in Compose. For Postgres, it writes `database/postgres.dump` with `pg_dump --format=custom --no-owner --no-acl`. Compose-managed Postgres backups run `pg_dump` inside the Postgres container with `docker compose exec -T`, so the host does not need `pg_dump` installed. Local host `pg_dump` is used only for host-reachable database URLs or when `--postgres-dump-mode local` is set.
+
+The backup includes:
+
+- the database dump or SQLite snapshot
+- `data_dir` contents, including run-output artifacts, body-store files, package/report jobs, and the app-owned `.secrets_master_key` file when it exists
+- `app/conf/**/*.yaml`, `app/conf/**/*.local.*`, root `docker-compose*.yml` / `docker-compose*.yaml`, and `.env` when present or supplied with `--env-file`
+- files named with repeatable `--extra-file`, such as a local Compose override or systemd unit
+- enabled workspaces when a physical source can be resolved
+
+`data_dir` and workspace backups distinguish the app's logical path from the host or Docker source that needs to be copied:
+
+- The bundled Compose `/data` bind mount is copied from the host path mapped to `/data`.
+- `--data-source bind:/path` can override the data source when a deployment stores app data outside the Compose files.
+- Docker volume or container-only `data_dir` sources can be copied for Postgres deployments; SQLite backups need a host-readable bind path so the online snapshot can read the live database safely.
+
+- Bind mounts are copied from the host path Docker maps to `WORKSPACE_ROOT`.
+- Docker named volumes are exported through Docker. When the app container is available, auto-detection uses `docker cp` from the mounted path; explicit `--workspace-source volume:<name>` uses a short-lived helper container.
+- Tmpfs or container-only workspaces are skipped with a warning unless `--include-ephemeral-workspaces` is set.
+
+The script does not always need the app containers to be running. SQLite backups of the bundled Compose stack can run from the host while containers are stopped because `/data` resolves to the host bind mount. Local config files, `.env`, and explicit host paths also do not need running containers. Compose Postgres dumps, `container:name:/path` sources, and `--include-ephemeral-workspaces` do need the relevant container to be running; when it is not available, the script reports that service or container as unavailable instead of treating the logical container path as a host directory. In `--postgres-dump-mode auto`, a `DATABASE_URL` host that matches a Compose service name, such as `postgres`, is treated as a container-network address and dumped through `docker compose exec` instead of falling back to host `pg_dump`.
+
+When a deployment uses Compose overrides, pass the same Compose files in the same order you use for `docker compose`. The first file supplies the Compose project directory for relative bind mounts, so the production override's `./workspaces:/workspaces` path resolves to repo-root `./workspaces` when you pass `docker-compose.yml` first. The script reads `WORKSPACE_ROOT` from the supplied Compose stack when `--compose-file` is explicit; `--workspace-root` can override the logical app path, and `--workspace-source` can override the physical copy source.
+
+Use these flags when auto-detection needs help:
+
+```bash
+python scripts/backup_system.py \
+  --env-file .env \
+  --compose-file docker-compose.yml \
+  --compose-file examples/docker-compose.prod.yml \
+  --extra-file docker-compose.local.yml \
+  --data-source bind:/srv/darklab/data \
+  --output-dir /backups/darklab_shell
+```
+
+`--data-source` and `--workspace-source` accept `bind:/path`, `volume:name`, or `container:name:/path`. `--workspace-root /path` records the logical app path when it cannot be read from config or Compose. `--include-workspaces never` skips workspace files intentionally. `--dry-run` prints the resolved backend, Postgres dump mode, data directory mapping, Compose files, workspace source, warnings, and skipped items without writing a backup.
+
+Backups contain sensitive material: `.env`, encrypted secret rows, the app-owned secrets key file, and local deployment files may all be present. Store the backup directory with owner-only permissions, keep archives off shared paths, and do not publish `manifest.json` even though it redacts known secret values.
+
+---
+
 ## Production Host Tuning
 
 Wide scans can open many outbound sockets quickly. The production Compose overlay raises the container's file descriptor limit and sets network namespace sysctls, but a few host-level settings may still matter.

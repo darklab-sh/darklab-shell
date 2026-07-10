@@ -309,6 +309,8 @@ The production overlay adds reverse-proxy-aware environment values, GELF Docker 
 
 The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
+Use [`scripts/backup_system.py`](scripts/backup_system.py) for scheduled operator backups. It captures the selected database backend, `/data` artifacts, app-owned secret-key files, local config, `.env`, optional deployment-specific files, and enabled workspace storage. The script records the app's logical paths and the physical host or Docker sources it copies, writes a redacted manifest plus checksums, and is safe to run from cron as a host user that can read the selected bind mounts or Docker sources.
+
 Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
@@ -1202,6 +1204,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
 ├── scripts/
+│   ├── backup_system.py       # Cron-friendly operator backup helper for SQLite/Postgres, /data artifacts, config, secrets material, and workspaces
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
 │   ├── build_assets.mjs       # Generates committed minified frontend bundles in app/static/build/ (run via npm run assets:sync)
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
@@ -1335,6 +1338,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
 │   │   ├── test_architecture.py # Architecture boundary guards for blueprint persistence access
 │   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
+│   │   ├── test_backup_system.py # Operator backup script coverage for SQLite/Postgres, config extras, and workspace sources
 │   │   ├── test_check_versions.py # Dependency version-check helper coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
 │   │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage

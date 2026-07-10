@@ -30,21 +30,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Operator backup script.**
-  - Add a cron-friendly script under `scripts/` that creates a comprehensive system backup for self-hosted operators.
-  - Detect the effective app configuration, including database backend, `data_dir`, workspace settings, `.env` values when supplied, and local config overlays.
-  - Back up SQLite with the SQLite online backup API or `.backup`; back up Postgres with `pg_dump --format=custom --no-owner --no-acl`, supporting both external `DATABASE_URL` deployments and Docker Compose-managed Postgres.
-  - Include `data_dir` because it can hold the SQLite database, run-output artifacts, body-store files, package/report jobs, and the app-owned secrets key file even when Postgres is used for the database.
-  - Include deployment config files such as `app/conf/*.yaml`, `app/conf/*.local.*`, Compose files, and `.env` when present, with sensitive values protected from logs.
-  - Add repeatable `--extra-file` support so operators can include deployment-specific files such as local Compose overrides, systemd units, or host notes without the script special-casing those names.
-  - When workspaces are enabled, treat the app-level `workspace_root` as the logical in-container path, then resolve a separate physical backup source before copying files:
-    - For bind mounts, copy the host path that Docker maps to `WORKSPACE_ROOT`.
-    - For Docker named volumes, export the volume through Docker rather than reading Docker's internal volume directory directly.
-    - For tmpfs or container-only workspace paths, warn by default and require an explicit opt-in such as `--include-ephemeral-workspaces`.
-  - Support Docker/Compose detection with repeatable `--compose-file` inputs and explicit overrides such as `--workspace-source bind:/path`, `--workspace-source volume:name`, `--workspace-source container:name:/path`, and `--include-workspaces never`.
-  - Stage backups atomically, write `manifest.json` with redacted config, app version, git SHA, backend, logical and physical paths, mount metadata, counts, sizes, and command versions, then write checksums and an archive.
-  - Use cron-safe behavior: strict exit codes, a lock file, clear logs, destination permission checks, optional retention such as `--keep-days`, and no secret values printed to stdout or stderr.
-  - Document restore expectations, including ownership and permission notes for `/data`, workspace bind mounts, Docker volumes, `.env`, and the app-owned secrets key.
+No open TODOs are currently tracked.
 
 ---
 
