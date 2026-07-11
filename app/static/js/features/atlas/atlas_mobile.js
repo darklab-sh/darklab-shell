@@ -25,7 +25,7 @@ import { closeActionSheet as importedCloseActionSheet, openActionSheet as import
 import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
 import { enhanceAppSelects as importedEnhanceAppSelects, syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
 import { bindTabStripEdgeListener as importedBindTabStripEdgeListener, syncActiveTabStripScroll as importedSyncActiveTabStripScroll } from '../../ui/ui_tab_strip_edges.js';
-import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 import {
   DarklabTeamScope as importedTeamScope,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
@@ -1056,14 +1056,21 @@ let exportedDarklabAtlasMobile = null;
 
   function renderPagination(state) {
     paginationHost.replaceChildren();
-    const showPager = state.total > state.limit || state.offset > 0;
+    const items = state.activeTab === 'findings' ? state.findings : state.entities;
+    const shown = Array.isArray(items) ? items.length : 0;
+    const hasMore = !!state.hasMore;
+    const showPager = state.total > state.limit || state.offset > 0 || hasMore;
     paginationHost.classList.toggle('u-hidden', !showPager);
     if (!showPager) return;
-    const start = state.total ? state.offset + 1 : 0;
-    const end = Math.min(state.offset + state.limit, state.total);
+    const start = state.total || shown ? state.offset + 1 : 0;
+    const end = state.totalExact
+      ? Math.min(state.offset + state.limit, Math.max(Number(state.total || 0), shown))
+      : (shown ? state.offset + shown : 0);
+    const total = Math.max(Number(state.total || 0), end);
+    const totalText = state.totalExact ? total.toLocaleString() : `${total.toLocaleString()}+`;
     const summary = document.createElement('span');
     summary.className = 'atlas-mobile-pagination-summary atlas-muted';
-    summary.textContent = `${start}-${end} of ${state.total.toLocaleString()}`;
+    summary.textContent = `${start}-${end} of ${totalText}`;
     const prev = document.createElement('button');
     prev.type = 'button';
     prev.className = 'btn btn-secondary btn-compact';
@@ -1077,7 +1084,7 @@ let exportedDarklabAtlasMobile = null;
     next.type = 'button';
     next.className = 'btn btn-secondary btn-compact';
     next.textContent = 'Next';
-    next.disabled = state.offset + state.limit >= state.total || state.loading;
+    next.disabled = !hasMore || state.loading;
     next.addEventListener('click', () => {
       controller.state.offset = controller.state.offset + controller.state.limit;
       controller.refreshAtlas();

@@ -1,6 +1,9 @@
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
+const HISTORY_CSS = readFileSync(resolve(process.cwd(), 'app/static/css/features/history.css'), 'utf8')
 const _noopFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
 const HISTORY_SCRIPT_PATHS = [
   'app/static/js/core/history_core.js',
@@ -1515,6 +1518,12 @@ describe('history panel actions', () => {
     expect(row.classList.contains('chrome-row-clickable')).toBe(true)
     expect(row.classList.contains('history-run-list-item')).toBe(false)
     expect(row.textContent).toContain('192.0.2.10')
+
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-row')
+    expect(HISTORY_CSS).toContain('display: flex;')
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-main')
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-value')
+    expect(HISTORY_CSS).toContain('.history-run-entity-list .atlas-entity-badges')
   })
 
   it('shows remove from project in Run Details and can also unlink same-run entities', async () => {
@@ -1524,12 +1533,35 @@ describe('history panel actions', () => {
       expect(content.textContent).toContain('Also remove disposable same-run Atlas entities from this project')
       expect(content.textContent).toContain('This will unlink 1 entity found only in this run.')
       expect(content.textContent).toContain('2 related findings will no longer appear in this project.')
-      expect(content.textContent).toContain('Also remove curated same-run Atlas entities from this project')
-      expect(content.textContent).toContain('1 curated entity and 3 related findings will stay in this project unless this is checked.')
-      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
-      content.querySelector('[data-history-project-run-entities-scope="curated"]').checked = true
-      return Promise.resolve('remove')
-    })
+      expect(content.textContent).toContain('Also remove same-run Atlas entities kept by default from this project')
+      expect(content.textContent).toContain('1 entity kept by default and 3 related findings will stay in this project unless this is checked.')
+	      expect(content.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
+	      expect(content.textContent).toContain('Reasons: imported entity, seen elsewhere.')
+	      const samples = content.querySelector('[data-cleanup-samples]')
+	      expect(samples).not.toBeNull()
+	      const sampleToggle = samples.querySelector('.cleanup-sample-toggle')
+	      expect(sampleToggle?.classList.contains('btn')).toBe(true)
+	      expect(sampleToggle?.classList.contains('btn-ghost')).toBe(true)
+	      expect(sampleToggle?.classList.contains('btn-compact')).toBe(true)
+	      expect(sampleToggle?.getAttribute('aria-expanded')).toBe('false')
+	      const samplePanel = samples.querySelector('.cleanup-sample-panel')
+	      expect(samplePanel?.id).toMatch(/^cleanup-samples-\d+$/)
+	      expect(sampleToggle?.getAttribute('aria-controls')).toBe(samplePanel?.id)
+	      expect(samplePanel?.classList.contains('nice-scroll')).toBe(true)
+	      expect(samplePanel?.classList.contains('u-hidden')).toBe(true)
+	      sampleToggle?.click()
+	      expect(sampleToggle?.getAttribute('aria-expanded')).toBe('true')
+	      expect(samplePanel?.classList.contains('u-hidden')).toBe(false)
+	      expect(samples.textContent).toContain('darklab.sh')
+	      expect(samples.textContent).toContain('443/tcp open https on darklab.sh')
+	      expect(samples.textContent).toContain('Unknown entity')
+	      expect(samples.textContent).toContain('and 2 more')
+	      expect([...samples.querySelectorAll('.badge')].map(badge => badge.textContent))
+	        .toEqual(expect.arrayContaining(['domain', 'labeled', 'attached to kept entity']))
+	      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
+	      content.querySelector('[data-history-project-run-entities-scope="curated"]').checked = true
+	      return Promise.resolve('remove')
+	    })
     const apiFetch = vi.fn((url, options = {}) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -1589,8 +1621,71 @@ describe('history panel actions', () => {
               curated_findings: 3,
               kept_curated_findings: 3,
               run_count: 1,
-            },
-          }),
+              cleanup_reasons: {
+                buckets: {
+                  disposable: { entities: 1, findings: 2, total: 3 },
+                  kept_by_default: { entities: 1, findings: 3, total: 4 },
+                  not_eligible: { entities: 1, findings: 1, total: 2 },
+                },
+	                reasons: [
+	                  {
+	                    code: 'imported_entity',
+                    bucket: 'not_eligible',
+                    label: 'imported entity',
+                    entities: 1,
+                    findings: 0,
+                    total: 1,
+                  },
+                  {
+                    code: 'seen_in_other_runs',
+                    bucket: 'not_eligible',
+                    label: 'seen elsewhere',
+                    entities: 0,
+                    findings: 1,
+	                    total: 1,
+	                  },
+	                ],
+	                samples: {
+	                  kept_by_default: {
+	                    entities: {
+	                      items: [{
+	                        bucket: 'kept_by_default',
+	                        kind: 'entities',
+	                        display_value: 'darklab.sh',
+	                        item_type: 'domain',
+	                        reasons: [{ code: 'entity_label', label: 'labeled' }],
+	                      }],
+	                      omitted: 0,
+	                    },
+	                    findings: {
+	                      items: [{
+	                        bucket: 'kept_by_default',
+	                        kind: 'findings',
+	                        display_value: '443/tcp open https on darklab.sh',
+	                        reasons: [{
+	                          code: 'finding_attached_to_kept_entity',
+	                          label: 'attached to kept entity',
+	                        }],
+	                      }],
+	                      omitted: 2,
+	                    },
+	                  },
+	                  not_eligible: {
+	                    entities: {
+	                      items: [{
+	                        bucket: 'not_eligible',
+	                        kind: 'entities',
+	                        display_value: '',
+	                        item_type: 'domain',
+	                        reasons: [{ code: 'imported_entity', label: 'imported entity' }],
+	                      }],
+	                      omitted: 0,
+	                    },
+	                  },
+	                },
+	              },
+	            },
+	          }),
         })
       }
       if (url === '/projects/project-active/links' && options.method === 'DELETE') {
@@ -1656,8 +1751,22 @@ describe('history panel actions', () => {
     let linked = true
     const showConfirm = vi.fn((options = {}) => {
       const content = options.content
-      expect(content?.textContent || '').toContain('Also remove disposable same-run Atlas entities from this project')
-      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
+      const disposableCheckbox = content.querySelector('[data-history-project-run-entities-scope="disposable"]')
+      const disposableLabel = disposableCheckbox.closest('label')
+      const curatedCheckbox = content.querySelector('[data-history-project-run-entities-scope="curated"]')
+      const curatedLabel = curatedCheckbox.closest('label')
+
+      expect(content?.textContent || '').not.toContain('Also remove disposable same-run Atlas entities from this project')
+      expect(disposableCheckbox.disabled).toBe(true)
+      expect(disposableLabel.hidden).toBe(true)
+      expect(disposableLabel.classList.contains('u-hidden')).toBe(true)
+      expect(disposableLabel.textContent.trim()).toBe('')
+      expect(content?.textContent || '').not.toContain('Also remove same-run Atlas entities kept by default from this project')
+      expect(content?.textContent || '').toContain('Remove same-run Atlas entities kept by default from this project')
+      expect(curatedCheckbox.disabled).toBe(false)
+      expect(curatedLabel.hidden).toBe(false)
+      expect(curatedLabel.classList.contains('u-hidden')).toBe(false)
+      curatedCheckbox.checked = true
       return Promise.resolve('remove')
     })
     const apiFetch = vi.fn((url, options = {}) => {
@@ -1704,15 +1813,15 @@ describe('history panel actions', () => {
             ok: true,
             preview: {
               available: 1,
-              removable: 1,
-              curated: 0,
-              kept_curated: 0,
+              removable: 0,
+              curated: 1,
+              kept_curated: 1,
               removed: 0,
               removed_curated: 0,
               run_findings: 0,
-              removable_findings: 1,
-              curated_findings: 0,
-              kept_curated_findings: 0,
+              removable_findings: 0,
+              curated_findings: 1,
+              kept_curated_findings: 1,
               run_count: 1,
             },
           }),
@@ -1762,7 +1871,12 @@ describe('history panel actions', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'DELETE',
-      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-active-linked', include_entities: true }),
+      body: JSON.stringify({
+        entity_type: 'run',
+        entity_id: 'run-active-linked',
+        include_entities: true,
+        include_curated_entities: true,
+      }),
     }))
   })
 
@@ -2679,8 +2793,65 @@ describe('history panel actions', () => {
     const previews = [
       { has_cleanup: false, entities: 0, findings: 0, curated_total: 0 },
       { has_cleanup: true, entities: 1, findings: 0, curated_total: 0 },
-      { has_cleanup: true, entities: 1, findings: 1, curated_entities: 1, curated_findings: 1, curated_total: 2 },
-    ]
+      {
+        has_cleanup: true,
+        entities: 1,
+        findings: 1,
+        curated_entities: 1,
+        curated_findings: 1,
+        curated_total: 2,
+        cleanup_reasons: {
+          buckets: {
+            disposable: { entities: 1, findings: 1, total: 2 },
+            kept_by_default: { entities: 1, findings: 1, total: 2 },
+            not_eligible: { entities: 1, findings: 1, total: 2 },
+          },
+	          reasons: [
+	            {
+	              code: 'entity_has_kept_findings',
+              bucket: 'not_eligible',
+              label: 'has kept findings',
+              entities: 1,
+              findings: 0,
+              total: 1,
+            },
+            {
+              code: 'imported_finding',
+              bucket: 'not_eligible',
+              label: 'imported finding',
+              entities: 0,
+              findings: 1,
+	              total: 1,
+	            },
+	          ],
+	          samples: {
+	            kept_by_default: {
+	              entities: {
+	                items: [{
+	                  bucket: 'kept_by_default',
+	                  kind: 'entities',
+	                  display_value: 'CVE-2025-49113',
+	                  item_type: 'cve',
+	                  reasons: [{ code: 'entity_project_link', label: 'linked to a Project' }],
+	                }],
+	                omitted: 0,
+	              },
+	            },
+	            not_eligible: {
+	              findings: {
+	                items: [{
+	                  bucket: 'not_eligible',
+	                  kind: 'findings',
+	                  display_value: 'Imported finding',
+	                  reasons: [{ code: 'imported_finding', label: 'imported finding' }],
+	                }],
+	                omitted: 0,
+	              },
+	            },
+	          },
+	        },
+	      },
+	    ]
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && url === '/history/run-1/atlas-cleanup-preview') {
         return Promise.resolve({
@@ -2702,17 +2873,93 @@ describe('history panel actions', () => {
     confirmHistAction('delete', 'run-1', 'nmap darklab.sh')
     await new Promise((resolve) => setImmediate(resolve))
     const noCuratedContent = showConfirm.mock.calls[1][0].content
-    expect(noCuratedContent.querySelector('[data-history-atlas-cleanup]')).not.toBeNull()
+    const noCuratedCleanup = noCuratedContent.querySelector('[data-history-atlas-cleanup]')
+    expect(noCuratedCleanup).not.toBeNull()
+    expect(noCuratedCleanup.checked).toBe(false)
     expect(noCuratedContent.textContent).toContain('Also remove 0 findings and 1 entity from Atlas')
     expect(noCuratedContent.textContent).not.toContain('curated')
 
     confirmHistAction('delete', 'run-1', 'nmap darklab.sh')
     await new Promise((resolve) => setImmediate(resolve))
     const curatedContent = showConfirm.mock.calls[2][0].content
-    expect(curatedContent.querySelector('[data-history-atlas-cleanup]')).not.toBeNull()
-    expect(curatedContent.querySelector('[data-history-atlas-cleanup-curated]')).not.toBeNull()
-    expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
-    expect(curatedContent.textContent).toContain('1 curated finding and 1 curated entity will be kept unless this is checked.')
+    const curatedCleanup = curatedContent.querySelector('[data-history-atlas-cleanup]')
+    const curatedDefaultCleanup = curatedContent.querySelector('[data-history-atlas-cleanup-curated]')
+    expect(curatedCleanup).not.toBeNull()
+    expect(curatedCleanup.checked).toBe(false)
+    expect(curatedDefaultCleanup).not.toBeNull()
+    expect(curatedDefaultCleanup.checked).toBe(false)
+    expect(curatedContent.textContent).toContain('Also delete single-source Atlas items kept by default')
+	    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
+	    expect(curatedContent.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
+	    expect(curatedContent.textContent).toContain('Reasons: has kept findings, imported finding.')
+	    const sampleDetails = curatedContent.querySelector('[data-cleanup-samples]')
+	    expect(sampleDetails).not.toBeNull()
+	    expect(sampleDetails.querySelector('.cleanup-sample-toggle')?.getAttribute('aria-expanded')).toBe('false')
+	    expect(sampleDetails.textContent).toContain('CVE-2025-49113')
+	    expect(sampleDetails.textContent).toContain('Imported finding')
+	    expect([...sampleDetails.querySelectorAll('.badge')].map(badge => badge.textContent))
+	      .toEqual(expect.arrayContaining(['cve', 'linked to a Project', 'imported finding']))
+	  })
+
+  it('shows run cleanup reason notes without destructive options when only not eligible items exist', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('cancel'))
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && url === '/history/run-1/atlas-cleanup-preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            cleanup: {
+              has_cleanup: true,
+              entities: 3,
+              findings: 2,
+              curated_entities: 1,
+              curated_findings: 1,
+              curated_total: 2,
+              cleanup_reasons: {
+                buckets: {
+                  disposable: { entities: 0, findings: 0, total: 0 },
+                  kept_by_default: { entities: 0, findings: 0, total: 0 },
+                  not_eligible: { entities: 1, findings: 1, total: 2 },
+                },
+                reasons: [
+                  {
+                    code: 'seen_in_other_runs',
+                    bucket: 'not_eligible',
+                    label: 'seen elsewhere',
+                    entities: 1,
+                    findings: 0,
+                    total: 1,
+                  },
+                  {
+                    code: 'imported_finding',
+                    bucket: 'not_eligible',
+                    label: 'imported finding',
+                    entities: 0,
+                    findings: 1,
+                    total: 1,
+                  },
+                ],
+              },
+            },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { confirmHistAction } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+    })
+
+    confirmHistAction('delete', 'run-1', 'nmap darklab.sh')
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const content = showConfirm.mock.calls[0][0].content
+    expect(content).not.toBeNull()
+    expect(content.querySelector('[data-history-atlas-cleanup]')).toBeNull()
+    expect(content.querySelector('[data-history-atlas-cleanup-curated]')).toBeNull()
+    expect(content.textContent).toContain('1 finding and 1 entity not eligible for this cleanup.')
+    expect(content.textContent).toContain('Reasons: seen elsewhere, imported finding.')
   })
 
   it('copies the run id and links runs to active or selected projects from the history menu', async () => {

@@ -7,6 +7,14 @@ from typing import Any
 from core.database_access import get_db_backend
 from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
+from services.atlas.scope import normalize_team_id
+from services.cleanup_reasons import (
+    CleanupSampleCollector,
+    build_cleanup_reason_summary,
+    empty_cleanup_bucket_counts,
+    increment_cleanup_reason,
+    set_cleanup_bucket_count,
+)
 from services.storage.body_store import delete_text_body
 
 _ATLAS_CLEANUP_TEMP_TABLES = (
@@ -14,6 +22,7 @@ _ATLAS_CLEANUP_TEMP_TABLES = (
     "atlas_cleanup_excluded_entities",
     "atlas_cleanup_excluded_findings",
     "atlas_cleanup_allowed_findings",
+    "atlas_cleanup_not_eligible_findings",
 )
 
 
@@ -28,6 +37,10 @@ def _unique_ids(values: list[str] | tuple[str, ...] | set[str] | None) -> list[s
 
 def _placeholders(values: list[str]) -> str:
     return ",".join("?" for _ in values)
+
+
+def _join_sql(*parts: str) -> str:
+    return "".join(parts)
 
 
 def _insert_ignore_sql(table: str) -> str:
@@ -58,6 +71,8 @@ def _public_preview(preview: dict[str, Any]) -> dict[str, Any]:
         "total": entity_count + finding_count,
         "has_cleanup": bool(entity_count or finding_count),
         "has_curated_cleanup": bool(curated_entity_count or curated_finding_count),
+        "cleanup_reasons": preview.get("cleanup_reasons")
+        or build_cleanup_reason_summary(empty_cleanup_bucket_counts(), {}),
     }
 
 
@@ -66,78 +81,147 @@ def public_cleanup_preview(preview: dict[str, Any]) -> dict[str, Any]:
     return _public_preview(preview)
 
 
-def _finding_curated_sql() -> str:
-    return (
-        "COALESCE(NULLIF(f.status, ''), 'new') != 'new' "
-        "OR COALESCE(NULLIF(f.review_state, ''), 'new') != 'new' "
-        "OR EXISTS ("
-        "  SELECT 1 FROM project_links finding_link "
-        "  JOIN projects finding_project ON finding_project.id = finding_link.project_id "
-        "  WHERE finding_link.entity_type = 'finding' "
-        "  AND finding_link.entity_id = f.id "
-        "  AND finding_project.session_id = f.session_id"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM findings_occurrences project_fo "
-        "  JOIN project_links project_run_link ON project_run_link.entity_type = 'run' "
-        "    AND project_run_link.entity_id = project_fo.run_id "
-        "  JOIN projects project_run_project ON project_run_project.id = project_run_link.project_id "
-        "  WHERE project_fo.finding_id = f.id "
-        "  AND project_run_project.session_id = f.session_id"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM project_links direct_run_link "
-        "  JOIN projects direct_run_project ON direct_run_project.id = direct_run_link.project_id "
-        "  WHERE direct_run_link.entity_type = 'run' "
-        "  AND direct_run_project.session_id = f.session_id "
-        "  AND ("
-        "    direct_run_link.entity_id = f.run_id "
-        "    OR direct_run_link.entity_id = f.first_run_id "
-        "    OR direct_run_link.entity_id = f.last_run_id"
-        "  )"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM project_links linked_entity_link "
-        "  JOIN projects linked_entity_project ON linked_entity_project.id = linked_entity_link.project_id "
-        "  WHERE linked_entity_link.entity_type = 'atlas_entity' "
-        "  AND linked_entity_link.entity_id = COALESCE(f.entity_id, f.target_id) "
-        "  AND linked_entity_project.session_id = f.session_id"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM entity_labels finding_label "
-        "  WHERE finding_label.entity_type = 'finding' "
-        "  AND finding_label.entity_id = f.id "
-        "  AND finding_label.session_id = f.session_id"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM entity_notes finding_note "
-        "  WHERE finding_note.entity_type = 'finding' "
-        "  AND finding_note.entity_id = f.id "
-        "  AND finding_note.session_id = f.session_id"
-        ")"
+def _flag(row, key: str) -> bool:
+    return bool(row[key])
+
+
+def _any_flag(row, keys: tuple[str, ...]) -> bool:
+    return any(_flag(row, key) for key in keys)
+
+
+def _row_reason_codes(row, reason_keys: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    return tuple(code for key, code in reason_keys if _flag(row, key))
+
+
+def _record_row_reasons(
+    reason_counts,
+    row,
+    bucket: str,
+    kind: str,
+    reason_keys: tuple[tuple[str, str], ...],
+) -> tuple[str, ...]:
+    reason_codes = _row_reason_codes(row, reason_keys)
+    for code in reason_codes:
+        increment_cleanup_reason(reason_counts, code, bucket, kind)
+    return reason_codes
+
+
+def _cleanup_sample_display_values(
+    conn,
+    session_id: str,
+    ids_by_kind: dict[str, list[str]],
+    *,
+    team_id: str = "",
+) -> dict[str, dict[str, Any]]:
+    display_values: dict[str, dict[str, Any]] = {}
+    entity_ids = _unique_ids(ids_by_kind.get("entities") or [])
+    if entity_ids:
+        placeholders = _placeholders(entity_ids)
+        owner_sql, owner_params = _owner_filter("entities", session_id, team_id)
+        rows = conn.execute(
+            "SELECT id, type, canonical_value FROM entities "  # nosec
+            f"WHERE {owner_sql} AND id IN ({placeholders})",
+            [*owner_params, *entity_ids],
+        ).fetchall()
+        display_values["entities"] = {
+            str(row["id"]): {
+                "display_value": row["canonical_value"],
+                "item_type": row["type"],
+            }
+            for row in rows
+            if row["id"]
+        }
+
+    finding_ids = _unique_ids(ids_by_kind.get("findings") or [])
+    if finding_ids:
+        placeholders = _placeholders(finding_ids)
+        owner_sql, owner_params = _owner_filter("findings", session_id, team_id)
+        rows = conn.execute(
+            "SELECT id, title FROM findings "  # nosec
+            f"WHERE {owner_sql} AND id IN ({placeholders})",
+            [*owner_params, *finding_ids],
+        ).fetchall()
+        display_values["findings"] = {
+            str(row["id"]): {
+                "display_value": row["title"],
+            }
+            for row in rows
+            if row["id"]
+        }
+    return display_values
+
+
+def _cleanup_reason_summary_with_samples(
+    conn,
+    session_id: str,
+    bucket_counts: dict[str, dict[str, int]],
+    reason_counts: dict[tuple[str, str], dict[str, int]],
+    sample_collector: CleanupSampleCollector,
+    *,
+    team_id: str = "",
+) -> dict[str, Any]:
+    display_values = _cleanup_sample_display_values(
+        conn,
+        session_id,
+        sample_collector.ids_by_kind(),
+        team_id=team_id,
+    )
+    return build_cleanup_reason_summary(
+        bucket_counts,
+        reason_counts,
+        samples=sample_collector.build(bucket_counts, display_values),
     )
 
 
-def _entity_curated_sql() -> str:
-    return (
-        "EXISTS ("
-        "  SELECT 1 FROM project_links entity_link "
-        "  JOIN projects entity_project ON entity_project.id = entity_link.project_id "
-        "  WHERE entity_link.entity_type = 'atlas_entity' "
-        "  AND entity_link.entity_id = e.id "
-        "  AND entity_project.session_id = e.session_id"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM entity_labels entity_label "
-        "  WHERE entity_label.entity_type = 'atlas_entity' "
-        "  AND entity_label.entity_id = e.id"
-        ") "
-        "OR EXISTS ("
-        "  SELECT 1 FROM entity_notes entity_note "
-        "  WHERE entity_note.entity_type = 'atlas_entity' "
-        "  AND entity_note.entity_id = e.id"
-        ")"
-    )
+def _row_owner_filter(alias: str, team_id: str) -> str:
+    if normalize_team_id(team_id):
+        return f"{alias}.team_id = ? AND {alias}.team_id != ''"
+    return f"{alias}.session_id = ? AND {alias}.team_id = ''"
+
+
+def _same_owner_sql(alias: str, owner_alias: str, team_id: str) -> str:
+    if normalize_team_id(team_id):
+        return f"{alias}.team_id = {owner_alias}.team_id AND {alias}.team_id != ''"
+    return f"{alias}.session_id = {owner_alias}.session_id AND {alias}.team_id = ''"
+
+
+def _metadata_same_owner_sql(alias: str, owner_alias: str, team_id: str) -> str:
+    if normalize_team_id(team_id):
+        return (
+            f"({alias}.team_id = {owner_alias}.team_id OR "
+            f"(({alias}.team_id IS NULL OR {alias}.team_id = '') AND {alias}.session_id = {owner_alias}.session_id))"
+        )
+    return f"{alias}.session_id = {owner_alias}.session_id AND {alias}.team_id = ''"
+
+
+def _owner_filter(alias: str, session_id: str, team_id: str) -> tuple[str, list[str]]:
+    normalized_team_id = normalize_team_id(team_id)
+    return _row_owner_filter(alias, normalized_team_id), [normalized_team_id or session_id]
+
+
+_FINDING_NOT_ELIGIBLE_REASONS = (
+    ("has_other_runs", "seen_in_other_runs"),
+    ("is_imported", "imported_finding"),
+)
+_FINDING_CURATED_REASONS = (
+    ("has_review_state", "finding_review_state"),
+    ("has_project_link", "finding_project_link"),
+    ("has_project_run_occurrence", "finding_project_run_occurrence"),
+    ("has_direct_project_run", "finding_direct_project_run"),
+    ("has_parent_entity_project_link", "finding_parent_entity_project_link"),
+    ("has_label", "finding_label"),
+    ("has_note", "finding_note"),
+)
+_ENTITY_NOT_ELIGIBLE_REASONS = (
+    ("has_other_runs", "seen_in_other_runs"),
+    ("is_imported", "imported_entity"),
+    ("has_kept_findings", "entity_has_kept_findings"),
+)
+_ENTITY_CURATED_REASONS = (
+    ("has_project_link", "entity_project_link"),
+    ("has_label", "entity_label"),
+    ("has_note", "entity_note"),
+)
 
 
 def atlas_run_cleanup_preview(
@@ -148,18 +232,21 @@ def atlas_run_cleanup_preview(
     exclude_entity_ids: list[str] | tuple[str, ...] | set[str] | None = None,
     exclude_finding_ids: list[str] | tuple[str, ...] | set[str] | None = None,
     include_curated: bool = False,
+    team_id: str = "",
 ) -> dict[str, Any]:
     """Find non-curated Atlas rows only linked to the given run ids."""
     ids = _unique_ids(run_ids)
     excluded_entities = _unique_ids(exclude_entity_ids)
     excluded_findings = _unique_ids(exclude_finding_ids)
     if not ids:
+        cleanup_reasons = build_cleanup_reason_summary(empty_cleanup_bucket_counts(), {})
         return {
             "run_ids": [],
             "entity_ids": [],
             "finding_ids": [],
             "curated_entity_count": 0,
             "curated_finding_count": 0,
+            "cleanup_reasons": cleanup_reasons,
         }
 
     for table_name in _ATLAS_CLEANUP_TEMP_TABLES:
@@ -168,6 +255,7 @@ def atlas_run_cleanup_preview(
     conn.execute("DELETE FROM atlas_cleanup_excluded_entities")
     conn.execute("DELETE FROM atlas_cleanup_excluded_findings")
     conn.execute("DELETE FROM atlas_cleanup_allowed_findings")
+    conn.execute("DELETE FROM atlas_cleanup_not_eligible_findings")
     conn.executemany(_insert_ignore_sql("atlas_cleanup_run_ids"), [(item,) for item in ids])
     conn.executemany(
         _insert_ignore_sql("atlas_cleanup_excluded_entities"),
@@ -178,97 +266,271 @@ def atlas_run_cleanup_preview(
         [(item,) for item in excluded_findings],
     )
 
-    finding_base = (
-        "FROM findings f "
-        "JOIN findings_occurrences fo ON fo.finding_id = f.id "
-        "JOIN runs source_run ON source_run.id = fo.run_id AND source_run.session_id = f.session_id "
-        "WHERE f.session_id = ? "
-        "AND fo.run_id IN (SELECT id FROM atlas_cleanup_run_ids) "
-        "AND NOT EXISTS ("
+    bucket_counts = empty_cleanup_bucket_counts()
+    reason_counts: dict[tuple[str, str], dict[str, int]] = {}
+    sample_collector = CleanupSampleCollector()
+    normalized_team_id = normalize_team_id(team_id)
+    owner_value = normalized_team_id or session_id
+    finding_owner_sql = _row_owner_filter("f", normalized_team_id)
+    entity_owner_sql = _row_owner_filter("e", normalized_team_id)
+    finding_run_owner_sql = _same_owner_sql("other_run", "f", normalized_team_id)
+    finding_source_run_owner_sql = _same_owner_sql("source_run", "f", normalized_team_id)
+    finding_project_owner_sql = _same_owner_sql("finding_project", "f", normalized_team_id)
+    finding_project_run_owner_sql = _same_owner_sql("project_run_project", "f", normalized_team_id)
+    finding_direct_run_owner_sql = _same_owner_sql("direct_run_project", "f", normalized_team_id)
+    finding_parent_entity_owner_sql = _same_owner_sql("linked_entity_project", "f", normalized_team_id)
+    finding_label_owner_sql = _metadata_same_owner_sql("finding_label", "f", normalized_team_id)
+    finding_note_owner_sql = _metadata_same_owner_sql("finding_note", "f", normalized_team_id)
+    entity_run_owner_sql = _same_owner_sql("other_run", "e", normalized_team_id)
+    entity_source_run_owner_sql = _same_owner_sql("source_run", "e", normalized_team_id)
+    entity_project_owner_sql = _same_owner_sql("entity_project", "e", normalized_team_id)
+    entity_label_owner_sql = _metadata_same_owner_sql("entity_label", "e", normalized_team_id)
+    entity_note_owner_sql = _metadata_same_owner_sql("entity_note", "e", normalized_team_id)
+    entity_child_finding_owner_sql = _same_owner_sql("child_f", "e", normalized_team_id)
+    finding_params = [owner_value]
+    finding_candidate_sql = _join_sql(
+        "SELECT DISTINCT f.id, "
+        "EXISTS ("
         "  SELECT 1 FROM findings_occurrences other_fo "
-        "  JOIN runs other_run ON other_run.id = other_fo.run_id AND other_run.session_id = f.session_id "
+        "  JOIN runs other_run ON other_run.id = other_fo.run_id AND ", finding_run_owner_sql, " "
         "  WHERE other_fo.finding_id = f.id "
         "  AND other_fo.run_id NOT IN (SELECT id FROM atlas_cleanup_run_ids)"
-        ") "
-        "AND NOT EXISTS (SELECT 1 FROM atlas_finding_import_occurrences import_fo WHERE import_fo.finding_id = f.id) "
-        "AND NOT EXISTS (SELECT 1 FROM atlas_cleanup_excluded_findings excluded WHERE excluded.id = f.id) "
+        ") AS has_other_runs, "
+        "EXISTS ("
+        "  SELECT 1 FROM atlas_finding_import_occurrences import_fo "
+        "  WHERE import_fo.finding_id = f.id"
+        ") AS is_imported, "
+        "EXISTS ("
+        "  SELECT 1 FROM atlas_cleanup_excluded_findings excluded "
+        "  WHERE excluded.id = f.id"
+        ") AS is_excluded, "
+        "(COALESCE(NULLIF(f.status, ''), 'new') != 'new' "
+        "  OR COALESCE(NULLIF(f.review_state, ''), 'new') != 'new') AS has_review_state, "
+        "EXISTS ("
+        "  SELECT 1 FROM project_links finding_link "
+        "  JOIN projects finding_project ON finding_project.id = finding_link.project_id "
+        "  WHERE finding_link.entity_type = 'finding' "
+        "  AND finding_link.entity_id = f.id "
+        "  AND ", finding_project_owner_sql, " "
+        ") AS has_project_link, "
+        "EXISTS ("
+        "  SELECT 1 FROM findings_occurrences project_fo "
+        "  JOIN project_links project_run_link ON project_run_link.entity_type = 'run' "
+        "    AND project_run_link.entity_id = project_fo.run_id "
+        "  JOIN projects project_run_project ON project_run_project.id = project_run_link.project_id "
+        "  WHERE project_fo.finding_id = f.id "
+        "  AND ", finding_project_run_owner_sql, " "
+        ") AS has_project_run_occurrence, "
+        "EXISTS ("
+        "  SELECT 1 FROM project_links direct_run_link "
+        "  JOIN projects direct_run_project ON direct_run_project.id = direct_run_link.project_id "
+        "  WHERE direct_run_link.entity_type = 'run' "
+        "  AND ", finding_direct_run_owner_sql, " "
+        "  AND (direct_run_link.entity_id = f.run_id "
+        "    OR direct_run_link.entity_id = f.first_run_id "
+        "    OR direct_run_link.entity_id = f.last_run_id)"
+        ") AS has_direct_project_run, "
+        "EXISTS ("
+        "  SELECT 1 FROM project_links linked_entity_link "
+        "  JOIN projects linked_entity_project ON linked_entity_project.id = linked_entity_link.project_id "
+        "  WHERE linked_entity_link.entity_type = 'atlas_entity' "
+        "  AND linked_entity_link.entity_id = COALESCE(f.entity_id, f.target_id) "
+        "  AND ", finding_parent_entity_owner_sql, " "
+        ") AS has_parent_entity_project_link, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_labels finding_label "
+        "  WHERE finding_label.entity_type = 'finding' "
+        "  AND finding_label.entity_id = f.id "
+        "  AND ", finding_label_owner_sql, " "
+        ") AS has_label, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_notes finding_note "
+        "  WHERE finding_note.entity_type = 'finding' "
+        "  AND finding_note.entity_id = f.id "
+        "  AND ", finding_note_owner_sql, " "
+        ") AS has_note "
+        "FROM findings f "
+        "JOIN findings_occurrences fo ON fo.finding_id = f.id "
+        "JOIN runs source_run ON source_run.id = fo.run_id AND ", finding_source_run_owner_sql, " "
+        "WHERE ", finding_owner_sql, " "
+        "AND fo.run_id IN (SELECT id FROM atlas_cleanup_run_ids)",
     )
-    finding_params = [session_id]
-    finding_curated = _finding_curated_sql()
-    finding_curated_filter = "" if include_curated else f"AND NOT ({finding_curated})"
-    finding_rows = conn.execute(
-        "SELECT DISTINCT f.id " + finding_base + finding_curated_filter,
-        finding_params,
-    ).fetchall()
-    curated_finding_count = int(conn.execute(
-        "SELECT COUNT(DISTINCT f.id) AS count " + finding_base + f"AND ({finding_curated})",
-        finding_params,
-    ).fetchone()["count"] or 0)
+    finding_candidate_rows = conn.execute(finding_candidate_sql, finding_params).fetchall()
+    finding_ids = []
+    curated_finding_ids = []
+    not_eligible_finding_ids = []
+    not_eligible_finding_count = 0
+    for row in finding_candidate_rows:
+        if _flag(row, "is_excluded"):
+            continue
+        if _any_flag(row, ("has_other_runs", "is_imported")):
+            not_eligible_finding_ids.append(str(row["id"]))
+            not_eligible_finding_count += 1
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "not_eligible",
+                "findings",
+                _FINDING_NOT_ELIGIBLE_REASONS,
+            )
+            sample_collector.record("not_eligible", "findings", row["id"], reason_codes)
+            continue
+        if _any_flag(row, tuple(key for key, _ in _FINDING_CURATED_REASONS)):
+            curated_finding_ids.append(str(row["id"]))
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "kept_by_default",
+                "findings",
+                _FINDING_CURATED_REASONS,
+            )
+            sample_collector.record("kept_by_default", "findings", row["id"], reason_codes)
+            continue
+        finding_ids.append(str(row["id"]))
+        increment_cleanup_reason(reason_counts, "source_run_removed", "disposable", "findings")
+    curated_finding_count = len(curated_finding_ids)
+    finding_delete_ids = [*finding_ids, *curated_finding_ids] if include_curated else finding_ids
 
-    excluded_findings_for_entities = _unique_ids([row["id"] for row in finding_rows] + excluded_findings)
+    excluded_findings_for_entities = _unique_ids(finding_delete_ids + excluded_findings)
     conn.executemany(
         _insert_ignore_sql("atlas_cleanup_allowed_findings"),
         [(item,) for item in excluded_findings_for_entities],
     )
+    conn.executemany(
+        _insert_ignore_sql("atlas_cleanup_not_eligible_findings"),
+        [(item,) for item in not_eligible_finding_ids],
+    )
 
-    entity_base = (
-        "FROM entities e "
-        "JOIN entity_run_links erl ON erl.entity_id = e.id "
-        "JOIN runs source_run ON source_run.id = erl.run_id AND source_run.session_id = e.session_id "
-        "WHERE e.session_id = ? "
-        "AND erl.run_id IN (SELECT id FROM atlas_cleanup_run_ids) "
-        "AND NOT EXISTS ("
+    entity_params = [owner_value]
+    entity_candidate_sql = _join_sql(
+        "SELECT DISTINCT e.id, "
+        "EXISTS ("
         "  SELECT 1 FROM entity_run_links other_erl "
-        "  JOIN runs other_run ON other_run.id = other_erl.run_id AND other_run.session_id = e.session_id "
+        "  JOIN runs other_run ON other_run.id = other_erl.run_id AND ", entity_run_owner_sql, " "
         "  WHERE other_erl.entity_id = e.id "
         "  AND other_erl.run_id NOT IN (SELECT id FROM atlas_cleanup_run_ids)"
-        ") "
-        "AND NOT EXISTS (SELECT 1 FROM atlas_entity_import_links import_erl WHERE import_erl.entity_id = e.id) "
-        "AND NOT EXISTS (SELECT 1 FROM atlas_cleanup_excluded_entities excluded WHERE excluded.id = e.id) "
-    )
-    entity_params = [session_id]
-    entity_curated = _entity_curated_sql()
-    entity_curated_filter = "" if include_curated else f"AND NOT ({entity_curated}) "
-    entity_child_block = (
-        "AND NOT EXISTS ("
+        ") AS has_other_runs, "
+        "EXISTS ("
+        "  SELECT 1 FROM atlas_entity_import_links import_erl "
+        "  WHERE import_erl.entity_id = e.id"
+        ") AS is_imported, "
+        "EXISTS ("
+        "  SELECT 1 FROM atlas_cleanup_excluded_entities excluded "
+        "  WHERE excluded.id = e.id"
+        ") AS is_excluded, "
+        "EXISTS ("
+        "  SELECT 1 FROM project_links entity_link "
+        "  JOIN projects entity_project ON entity_project.id = entity_link.project_id "
+        "  WHERE entity_link.entity_type = 'atlas_entity' "
+        "  AND entity_link.entity_id = e.id "
+        "  AND ", entity_project_owner_sql, " "
+        ") AS has_project_link, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_labels entity_label "
+        "  WHERE entity_label.entity_type = 'atlas_entity' "
+        "  AND entity_label.entity_id = e.id "
+        "  AND ", entity_label_owner_sql, " "
+        ") AS has_label, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_notes entity_note "
+        "  WHERE entity_note.entity_type = 'atlas_entity' "
+        "  AND entity_note.entity_id = e.id "
+        "  AND ", entity_note_owner_sql, " "
+        ") AS has_note, "
+        "EXISTS ("
         "  SELECT 1 FROM findings child_f "
-        "  WHERE child_f.session_id = e.session_id "
+        "  WHERE ", entity_child_finding_owner_sql, " "
         "  AND child_f.entity_id = e.id "
         "  AND child_f.id NOT IN (SELECT id FROM atlas_cleanup_allowed_findings)"
-        ") "
+        ") AS has_kept_findings, "
+        "EXISTS ("
+        "  SELECT 1 FROM findings child_f "
+        "  JOIN atlas_cleanup_not_eligible_findings not_eligible_child ON not_eligible_child.id = child_f.id "
+        "  WHERE ", entity_child_finding_owner_sql, " "
+        "  AND child_f.entity_id = e.id"
+        ") AS has_not_eligible_findings "
+        "FROM entities e "
+        "JOIN entity_run_links erl ON erl.entity_id = e.id "
+        "JOIN runs source_run ON source_run.id = erl.run_id AND ", entity_source_run_owner_sql, " "
+        "WHERE ", entity_owner_sql, " "
+        "AND erl.run_id IN (SELECT id FROM atlas_cleanup_run_ids)",
     )
-    entity_rows = conn.execute(
-        "SELECT DISTINCT e.id "
-        + entity_base
-        + entity_curated_filter
-        + entity_child_block,
-        entity_params,
-    ).fetchall()
-    curated_entity_count = int(conn.execute(
-        "SELECT COUNT(DISTINCT e.id) AS count " + entity_base + f"AND ({entity_curated})",
-        entity_params,
-    ).fetchone()["count"] or 0)
+    entity_candidate_rows = conn.execute(entity_candidate_sql, entity_params).fetchall()
+    entity_ids = []
+    curated_entity_ids = []
+    not_eligible_entity_count = 0
+    for row in entity_candidate_rows:
+        if _flag(row, "is_excluded"):
+            continue
+        hard_excluded = _any_flag(row, ("has_other_runs", "is_imported"))
+        is_curated = _any_flag(row, tuple(key for key, _ in _ENTITY_CURATED_REASONS))
+        has_kept_findings = _flag(row, "has_kept_findings")
+        if hard_excluded or _flag(row, "has_not_eligible_findings") or (has_kept_findings and not is_curated):
+            not_eligible_entity_count += 1
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "not_eligible",
+                "entities",
+                _ENTITY_NOT_ELIGIBLE_REASONS,
+            )
+            sample_collector.record("not_eligible", "entities", row["id"], reason_codes)
+            continue
+        if is_curated:
+            curated_entity_ids.append(str(row["id"]))
+            reason_codes = _record_row_reasons(
+                reason_counts,
+                row,
+                "kept_by_default",
+                "entities",
+                _ENTITY_CURATED_REASONS,
+            )
+            sample_collector.record("kept_by_default", "entities", row["id"], reason_codes)
+            continue
+        entity_ids.append(str(row["id"]))
+    curated_entity_count = len(curated_entity_ids)
+    entity_delete_ids = [*entity_ids, *curated_entity_ids] if include_curated else entity_ids
+    set_cleanup_bucket_count(bucket_counts, "disposable", "entities", len(entity_ids))
+    set_cleanup_bucket_count(bucket_counts, "disposable", "findings", len(finding_ids))
+    set_cleanup_bucket_count(bucket_counts, "kept_by_default", "entities", curated_entity_count)
+    set_cleanup_bucket_count(bucket_counts, "kept_by_default", "findings", curated_finding_count)
+    set_cleanup_bucket_count(bucket_counts, "not_eligible", "entities", not_eligible_entity_count)
+    set_cleanup_bucket_count(bucket_counts, "not_eligible", "findings", not_eligible_finding_count)
 
     return {
         "run_ids": ids,
-        "entity_ids": [str(row["id"]) for row in entity_rows if row["id"]],
-        "finding_ids": [str(row["id"]) for row in finding_rows if row["id"]],
+        "entity_ids": [entity_id for entity_id in entity_delete_ids if entity_id],
+        "finding_ids": [finding_id for finding_id in finding_delete_ids if finding_id],
         "curated_entity_count": curated_entity_count,
         "curated_finding_count": curated_finding_count,
+        "cleanup_reasons": _cleanup_reason_summary_with_samples(
+            conn,
+            session_id,
+            bucket_counts,
+            reason_counts,
+            sample_collector,
+            team_id=normalized_team_id,
+        ),
     }
 
 
-def delete_atlas_findings(conn, session_id: str, finding_ids: list[str] | tuple[str, ...] | set[str]) -> int:
+def delete_atlas_findings(
+    conn,
+    session_id: str,
+    finding_ids: list[str] | tuple[str, ...] | set[str],
+    *,
+    team_id: str = "",
+) -> int:
     ids = _unique_ids(finding_ids)
     if not ids:
         return 0
     placeholders = _placeholders(ids)
-    params = [session_id, *ids]
+    owner_sql, owner_params = _owner_filter("findings", session_id, team_id)
     owned = [
         str(row["id"])
         for row in conn.execute(
-            f"SELECT id FROM findings WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-            params,
+            f"SELECT id FROM findings WHERE {owner_sql} AND id IN ({placeholders})",  # nosec
+            [*owner_params, *ids],
         ).fetchall()
     ]
     if not owned:
@@ -302,32 +564,45 @@ def delete_atlas_findings(conn, session_id: str, finding_ids: list[str] | tuple[
         owned,
     )
     cur = conn.execute(
-        f"DELETE FROM findings WHERE session_id = ? AND id IN ({owned_placeholders})",  # nosec
-        [session_id, *owned],
+        f"DELETE FROM findings WHERE {owner_sql} AND id IN ({owned_placeholders})",  # nosec
+        [*owner_params, *owned],
     )
     return int(cur.rowcount or 0)
 
 
-def delete_atlas_entities(conn, session_id: str, entity_ids: list[str] | tuple[str, ...] | set[str]) -> dict[str, int]:
+def delete_atlas_entities(
+    conn,
+    session_id: str,
+    entity_ids: list[str] | tuple[str, ...] | set[str],
+    *,
+    team_id: str = "",
+) -> dict[str, int]:
     ids = _unique_ids(entity_ids)
     if not ids:
         return {"entities": 0, "findings": 0}
     placeholders = _placeholders(ids)
-    owned = [
-        str(row["id"])
-        for row in conn.execute(
-            f"SELECT id FROM entities WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-            [session_id, *ids],
-        ).fetchall()
-    ]
+    entity_owner_sql, entity_owner_params = _owner_filter("entities", session_id, team_id)
+    finding_owner_sql, finding_owner_params = _owner_filter("findings", session_id, team_id)
+    owned_rows = conn.execute(
+        f"SELECT id, session_id FROM entities WHERE {entity_owner_sql} AND id IN ({placeholders})",  # nosec
+        [*entity_owner_params, *ids],
+    ).fetchall()
+    owned = [str(row["id"]) for row in owned_rows]
     if not owned:
         return {"entities": 0, "findings": 0}
     owned_placeholders = _placeholders(owned)
+    owned_session_ids = _unique_ids([str(row["session_id"]) for row in owned_rows if row["session_id"]])
+    owned_session_placeholders = _placeholders(owned_session_ids)
     finding_rows = conn.execute(
-        f"SELECT id FROM findings WHERE session_id = ? AND entity_id IN ({owned_placeholders})",  # nosec
-        [session_id, *owned],
+        f"SELECT id FROM findings WHERE {finding_owner_sql} AND entity_id IN ({owned_placeholders})",  # nosec
+        [*finding_owner_params, *owned],
     ).fetchall()
-    deleted_findings = delete_atlas_findings(conn, session_id, [str(row["id"]) for row in finding_rows if row["id"]])
+    deleted_findings = delete_atlas_findings(
+        conn,
+        session_id,
+        [str(row["id"]) for row in finding_rows if row["id"]],
+        team_id=team_id,
+    )
     conn.execute(
         "DELETE FROM project_links WHERE entity_type = 'atlas_entity' "  # nosec
         f"AND entity_id IN ({owned_placeholders})",
@@ -343,14 +618,18 @@ def delete_atlas_entities(conn, session_id: str, entity_ids: list[str] | tuple[s
         f"AND entity_id IN ({owned_placeholders})",
         owned,
     )
-    intel_rows = conn.execute(
-        f"SELECT data_json FROM entity_intel_snapshots WHERE session_id = ? AND entity_id IN ({owned_placeholders})",  # nosec
-        [session_id, *owned],
-    ).fetchall()
-    conn.execute(
-        f"DELETE FROM entity_intel_snapshots WHERE session_id = ? AND entity_id IN ({owned_placeholders})",  # nosec
-        [session_id, *owned],
-    )
+    intel_rows = []
+    if owned_session_ids:
+        intel_rows = conn.execute(
+            "SELECT data_json FROM entity_intel_snapshots "  # nosec
+            f"WHERE session_id IN ({owned_session_placeholders}) AND entity_id IN ({owned_placeholders})",
+            [*owned_session_ids, *owned],
+        ).fetchall()
+        conn.execute(
+            "DELETE FROM entity_intel_snapshots "  # nosec
+            f"WHERE session_id IN ({owned_session_placeholders}) AND entity_id IN ({owned_placeholders})",
+            [*owned_session_ids, *owned],
+        )
     for row in intel_rows:
         delete_text_body(row["data_json"])
     conn.execute(
@@ -362,15 +641,21 @@ def delete_atlas_entities(conn, session_id: str, entity_ids: list[str] | tuple[s
         owned,
     )
     cur = conn.execute(
-        f"DELETE FROM entities WHERE session_id = ? AND id IN ({owned_placeholders})",  # nosec
-        [session_id, *owned],
+        f"DELETE FROM entities WHERE {entity_owner_sql} AND id IN ({owned_placeholders})",  # nosec
+        [*entity_owner_params, *owned],
     )
     return {"entities": int(cur.rowcount or 0), "findings": deleted_findings}
 
 
-def delete_atlas_cleanup_preview(conn, session_id: str, preview: dict[str, Any]) -> dict[str, int]:
-    deleted_findings = delete_atlas_findings(conn, session_id, preview.get("finding_ids") or [])
-    deleted_entities = delete_atlas_entities(conn, session_id, preview.get("entity_ids") or [])
+def delete_atlas_cleanup_preview(
+    conn,
+    session_id: str,
+    preview: dict[str, Any],
+    *,
+    team_id: str = "",
+) -> dict[str, int]:
+    deleted_findings = delete_atlas_findings(conn, session_id, preview.get("finding_ids") or [], team_id=team_id)
+    deleted_entities = delete_atlas_entities(conn, session_id, preview.get("entity_ids") or [], team_id=team_id)
     return {
         "entities": int(deleted_entities.get("entities") or 0),
         "findings": deleted_findings + int(deleted_entities.get("findings") or 0),

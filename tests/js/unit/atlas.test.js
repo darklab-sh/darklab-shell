@@ -219,6 +219,7 @@ function loadAtlas({
   apiFetchInterceptor = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
+  closeMajorOverlaysImpl = vi.fn(),
   useRealSelectEnhancer = false,
   activeTeamScopeCanImpl = () => true,
   teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
@@ -513,6 +514,7 @@ function loadAtlas({
         'app/static/js/features/atlas/atlas_tabs.js',
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
+        'app/static/js/features/findings/findings_board_bridge.js',
         'app/static/js/features/atlas/atlas_overlay.js',
         'app/static/js/features/atlas/atlas_mobile_bridge.js',
         'app/static/js/features/atlas/atlas_mobile.js',
@@ -541,6 +543,7 @@ function loadAtlas({
         },
         refocusComposerAfterAction: vi.fn(),
         openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
+        closeMajorOverlays: closeMajorOverlaysImpl,
         downloadBlobAsAttachment,
         activeTeamScopeCan: activeTeamScopeCanImpl,
         teamScopeDeniedMessage: teamScopeDeniedMessageImpl,
@@ -566,6 +569,7 @@ function loadAtlas({
           window.enhanceAppSelects = enhanceAppSelects;
         }
         window.emitUiEvent = emitUiEvent;
+        window.closeMajorOverlays = closeMajorOverlays;
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
@@ -590,6 +594,7 @@ function loadAtlas({
     showToast,
     logClientError,
     openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
+    closeMajorOverlays: closeMajorOverlaysImpl,
     syncAppSelect,
     enhanceAppSelects,
     downloadBlobAsAttachment,
@@ -855,6 +860,15 @@ describe('Atlas overlay', () => {
     )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_url', expect.objectContaining({ cache: 'no-store' }))
     expect(document.getElementById('atlas-detail')?.textContent).toContain('curl https://107.178.109.44/login')
+  })
+
+  it('does not close its own fallback shell while finishing a first open', async () => {
+    const closeMajorOverlays = vi.fn()
+    const { openAtlas } = loadAtlas({ closeMajorOverlaysImpl: closeMajorOverlays })
+
+    await openAtlas({ source: 'test' })
+
+    expect(closeMajorOverlays).toHaveBeenCalledWith({ skipAtlas: true })
   })
 
   it('previews and applies an Atlas import from a project-scoped Atlas surface', async () => {
@@ -1139,7 +1153,7 @@ describe('Atlas overlay', () => {
       activeProject: { id: 'prj_1', name: 'Case Alpha' },
     })
 
-    await openAtlas({ source: 'test', tab: 'ip' })
+    await openAtlas({ source: 'test', tab: 'ip', forceView: 'detail' })
     document.querySelector('#atlas-detail .atlas-detail-actions button:nth-child(2)')?.click()
     await Promise.resolve()
     await Promise.resolve()
@@ -1173,7 +1187,25 @@ describe('Atlas overlay', () => {
     const showConfirm = vi.fn(() => Promise.resolve('cancel'))
     const previews = [
       { source_run_id: 'run1', sibling_cleanup: { has_cleanup: false, entities: 0, findings: 0, curated_total: 0 } },
-      { source_run_id: 'run1', sibling_cleanup: { has_cleanup: true, entities: 1, findings: 0, curated_total: 0 } },
+      {
+        source_run_id: 'run1',
+        sibling_cleanup: {
+          has_cleanup: true,
+          entities: 1,
+          findings: 1,
+          curated_total: 0,
+          cleanup_reasons: {
+            buckets: {
+              disposable: { entities: 1, findings: 1, total: 2 },
+              kept_by_default: { entities: 0, findings: 0, total: 0 },
+              not_eligible: { entities: 0, findings: 0, total: 0 },
+            },
+            reasons: [
+              { bucket: 'disposable', code: 'source_run_removed', label: 'source run removed', entities: 0, findings: 1, total: 1 },
+            ],
+          },
+        },
+      },
       {
         source_run_id: 'run1',
         sibling_cleanup: {
@@ -1183,8 +1215,42 @@ describe('Atlas overlay', () => {
           curated_entities: 1,
           curated_findings: 1,
           curated_total: 2,
-        },
-      },
+          cleanup_reasons: {
+            buckets: {
+              disposable: { entities: 1, findings: 1, total: 2 },
+              kept_by_default: { entities: 1, findings: 1, total: 2 },
+              not_eligible: { entities: 0, findings: 0, total: 0 },
+            },
+	            reasons: [
+	              { bucket: 'kept_by_default', code: 'entity_project_link', label: 'linked to a Project', entities: 1, findings: 0, total: 1 },
+	              { bucket: 'kept_by_default', code: 'finding_review_state', label: 'reviewed finding', entities: 0, findings: 1, total: 1 },
+	            ],
+	            samples: {
+	              kept_by_default: {
+	                entities: {
+	                  items: [{
+	                    bucket: 'kept_by_default',
+	                    kind: 'entities',
+	                    display_value: '107.178.109.44',
+	                    item_type: 'ip',
+	                    reasons: [{ code: 'entity_project_link', label: 'linked to a Project' }],
+	                  }],
+	                  omitted: 0,
+	                },
+	                findings: {
+	                  items: [{
+	                    bucket: 'kept_by_default',
+	                    kind: 'findings',
+	                    display_value: 'Reviewed finding',
+	                    reasons: [{ code: 'finding_review_state', label: 'reviewed finding' }],
+	                  }],
+	                  omitted: 0,
+	                },
+	              },
+	            },
+	          },
+	        },
+	      },
     ]
     const apiFetch = vi.fn((url) => {
       const target = String(url)
@@ -1214,7 +1280,7 @@ describe('Atlas overlay', () => {
     })
     const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
 
-    await openAtlas({ source: 'test', tab: 'ip' })
+    await openAtlas({ source: 'test', tab: 'ip', forceView: 'detail' })
     const deleteBtn = () => {
       document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1232,7 +1298,8 @@ describe('Atlas overlay', () => {
     await Promise.resolve()
     const noCuratedContent = showConfirm.mock.calls[1][0].content
     expect(noCuratedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
-    expect(noCuratedContent.textContent).toContain('This will remove 1 entity and 0 findings.')
+    expect(noCuratedContent.textContent).toContain('Also remove 1 finding and 1 entity from Atlas')
+    expect(noCuratedContent.textContent).toContain('Reason: source run removed.')
     expect(noCuratedContent.textContent).not.toContain('will be kept')
 
     deleteBtn()?.click()
@@ -1240,9 +1307,17 @@ describe('Atlas overlay', () => {
     await Promise.resolve()
     const curatedContent = showConfirm.mock.calls[2][0].content
     expect(curatedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
-    expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
-    expect(curatedContent.textContent).toContain('1 curated entity and 1 curated finding will be kept unless this is checked.')
-  })
+	    expect(curatedContent.textContent).toContain('Also delete single-source Atlas items kept by default')
+	    expect(curatedContent.textContent).toContain('1 finding kept by default and 1 entity kept by default will be kept unless this is checked.')
+	    expect(curatedContent.textContent).toContain('Reasons: linked to a Project, reviewed finding.')
+	    const sampleDetails = curatedContent.querySelector('[data-cleanup-samples]')
+	    expect(sampleDetails).not.toBeNull()
+	    expect(sampleDetails.querySelector('.cleanup-sample-toggle')?.getAttribute('aria-expanded')).toBe('false')
+	    expect(sampleDetails.textContent).toContain('107.178.109.44')
+	    expect(sampleDetails.textContent).toContain('Reviewed finding')
+	    expect([...sampleDetails.querySelectorAll('.badge')].map(badge => badge.textContent))
+	      .toEqual(expect.arrayContaining(['ip', 'linked to a Project', 'reviewed finding']))
+	  })
 
   it('disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('delete'))
@@ -1427,23 +1502,31 @@ describe('Atlas overlay', () => {
     )
   })
 
-  it('enables entity pagination once the list loads even when detail is still loading', async () => {
+  it('enables entity pagination while the auto-selected detail loads', async () => {
     let detailRequested = false
     const apiFetch = vi.fn((url) => {
       const target = String(url)
       if (target === '/atlas' || target.startsWith('/atlas?')) {
         return Promise.resolve(jsonResponse({
-          total: 436,
-          counts: { ip: 0, domain: 30, hash: 0, cve: 0, url: 0 },
+          total: 51,
+          counts: { ip: 0, domain: 51, hash: 0, cve: 0, url: 0 },
           findings: 0,
         }))
       }
       if (target.startsWith('/atlas/entities?')) {
+        const entities = Array.from({ length: 50 }, (_, index) => ({
+          ...ENTITY,
+          id: index === 0 ? 'ent_domain' : `ent_domain_${index}`,
+          type: 'domain',
+          canonical_value: index === 0 ? 'darklab.sh' : `host-${index}.darklab.sh`,
+        }))
         return Promise.resolve(jsonResponse({
-          entities: [{ ...ENTITY, id: 'ent_domain', type: 'domain', canonical_value: 'darklab.sh' }],
-          total: 436,
+          entities,
+          total: 51,
           limit: 50,
           offset: 0,
+          has_more: true,
+          total_exact: false,
         }))
       }
       if (target === '/atlas/entities/ent_domain') {
@@ -1457,7 +1540,7 @@ describe('Atlas overlay', () => {
     void openAtlas({ source: 'test', tab: 'domain' })
 
     await vi.waitFor(() => {
-      expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 436')
+      expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 51+')
     })
     expect(detailRequested).toBe(true)
     expect(document.getElementById('atlas-next-btn')?.disabled).toBe(false)
@@ -1804,7 +1887,13 @@ describe('Atlas overlay', () => {
   it('exports filtered entity rows without leaving the Atlas surface', async () => {
     const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()
 
-    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'port' })
+    await openAtlas({
+      source: 'project-workspace',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      tab: 'port',
+      forceView: 'detail',
+    })
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-detail')?.textContent).toContain('example.com:443/tcp')
     })
@@ -1824,7 +1913,13 @@ describe('Atlas overlay', () => {
     expect(apiFetch.mock.calls.some(([url]) => String(url).includes('/refresh_intel'))).toBe(false)
 
     document.body.classList.add('mobile-terminal-mode')
-    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha', tab: 'port' })
+    await openAtlas({
+      source: 'project-workspace',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      tab: 'port',
+      forceView: 'detail',
+    })
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('example.com:443/tcp')
     })

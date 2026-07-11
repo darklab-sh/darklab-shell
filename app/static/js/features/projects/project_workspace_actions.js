@@ -1,4 +1,9 @@
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
+import {
+  applyProjectRunEntityUnlinkPreview,
+  setCleanupNodeHidden,
+} from '../../ui/cleanup_reasons.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
 
 let exportedDarklabProjectWorkspaceActions = null;
 
@@ -42,6 +47,22 @@ let exportedDarklabProjectWorkspaceActions = null;
       return data && data.preview ? data.preview : null;
     }
 
+    async function previewRunEntitiesForUnlink(projectId, runIds) {
+      const normalizedProjectId = String(projectId || '').trim();
+      const ids = (Array.isArray(runIds) ? runIds : [runIds])
+        .map(runId => String(runId || '').trim())
+        .filter(Boolean);
+      if (!normalizedProjectId || !ids.length) return null;
+      const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalizedProjectId)}/links/run-entities/remove-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_ids: ids }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      return data && data.preview ? data.preview : null;
+    }
+
     function runEntityLinkOption(preview) {
       const count = Number(preview && preview.linkable || 0);
       if (count <= 0) return null;
@@ -60,6 +81,78 @@ let exportedDarklabProjectWorkspaceActions = null;
       label.append(checkbox, text);
       wrap.appendChild(label);
       return { wrap, checkbox };
+    }
+
+    function runEntityUnlinkOption() {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-run-entities-option u-hidden';
+
+      const runFindingsNote = document.createElement('div');
+      runFindingsNote.className = 'cleanup-reason-note project-run-entities-note u-hidden';
+      wrap.appendChild(runFindingsNote);
+
+      const label = document.createElement('label');
+      label.className = 'form-check u-hidden';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = false;
+      const text = document.createElement('span');
+      label.append(checkbox, text);
+      wrap.appendChild(label);
+
+      const note = document.createElement('div');
+      note.className = 'cleanup-reason-note project-run-entities-note u-hidden';
+      wrap.appendChild(note);
+
+      const curatedLabel = document.createElement('label');
+      curatedLabel.className = 'form-check u-hidden';
+      const curatedCheckbox = document.createElement('input');
+      curatedCheckbox.type = 'checkbox';
+      curatedCheckbox.checked = false;
+      const curatedText = document.createElement('span');
+      curatedLabel.append(curatedCheckbox, curatedText);
+      wrap.appendChild(curatedLabel);
+
+      const curatedNote = document.createElement('div');
+      curatedNote.className = 'cleanup-reason-note project-run-entities-note u-hidden';
+      wrap.appendChild(curatedNote);
+
+      const notEligibleNote = document.createElement('div');
+      notEligibleNote.className = 'cleanup-reason-note project-run-entities-note u-hidden';
+      wrap.appendChild(notEligibleNote);
+
+      const sampleDetails = document.createElement('div');
+      sampleDetails.className = 'cleanup-sample-slot u-hidden';
+      wrap.appendChild(sampleDetails);
+
+      return {
+        wrap,
+        label,
+        checkbox,
+        text,
+        note,
+        curatedLabel,
+        curatedCheckbox,
+        curatedText,
+        curatedNote,
+        runFindingsNote,
+        notEligibleNote,
+        sampleDetails,
+        bindDisclosure: importedBindDisclosure,
+        setNodeHidden: setCleanupNodeHidden,
+        includeEntities() {
+          return !!checkbox.checked && !checkbox.disabled;
+        },
+        includeCuratedEntities() {
+          return !!curatedCheckbox.checked && !curatedCheckbox.disabled;
+        },
+        includeAnyEntities() {
+          return this.includeEntities() || this.includeCuratedEntities();
+        },
+        setPreview(preview) {
+          applyProjectRunEntityUnlinkPreview(this, preview);
+        },
+      };
     }
 
     async function confirmRunLink(projectId, runIds, label) {
@@ -140,13 +233,32 @@ let exportedDarklabProjectWorkspaceActions = null;
       });
     }
 
-    function confirmRunUnlink(runCommand) {
+    async function confirmRunUnlink(projectId, runId, runCommand) {
+      const confirmFn = projectShowConfirm();
+      if (!confirmFn) {
+        throw new Error('Project destructive confirmations require showConfirm.');
+      }
       const label = String(runCommand || 'this run');
-      return confirmDestructive({
+      const option = runEntityUnlinkOption();
+      try {
+        option.setPreview(await previewRunEntitiesForUnlink(projectId, [runId]));
+      } catch (_) {
+        option.setPreview(null);
+      }
+      const choice = await confirmFn({
         body: `Remove run from project: ${label}?`,
-        actionLabel: 'Remove',
-        actionId: 'remove',
+        content: option.wrap.classList.contains('u-hidden') ? null : option.wrap,
+        tone: 'danger',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'remove', label: 'Remove', role: 'destructive' },
+        ],
       });
+      if (choice !== 'remove') return null;
+      return {
+        includeEntities: option.includeEntities(),
+        includeCuratedEntities: option.includeCuratedEntities(),
+      };
     }
 
     function confirmPackageDelete(packageName) {
@@ -176,6 +288,7 @@ let exportedDarklabProjectWorkspaceActions = null;
       confirmRunUnlink,
       confirmTargetDelete,
       linkLastRunToProject,
+      previewRunEntitiesForUnlink,
       previewRunEntitiesForLink,
       syncEntityLabels,
       syncEntityNote,

@@ -98,6 +98,11 @@ let exportedDarklabProjectWorkspaceBootstrap = null;
       const bindMobileSheetFn = optionalFn(ctx.bindMobileSheet);
       if (!bindMobileSheetFn) return;
 
+      if (ctx.projectWorkspaceModal) {
+        bindMobileSheetFn(ctx.projectWorkspaceModal, {
+          onClose: () => ctx.closeProjectWorkspace?.(),
+        });
+      }
       if (ctx.projectTargetEditorOverlay) {
         bindMobileSheetFn(ctx.projectTargetEditorOverlay.querySelector('#project-target-editor-modal'), {
           onClose: () => ctx.closeProjectTargetEditor?.(),
@@ -120,6 +125,20 @@ let exportedDarklabProjectWorkspaceBootstrap = null;
       }
     }
 
+    function bindFocusTraps() {
+      const bindFocusTrapFn = optionalFn(ctx.bindFocusTrap);
+      if (!bindFocusTrapFn) return;
+      [
+        ctx.projectWorkspaceModal,
+        ctx.projectTargetEditorOverlay?.querySelector('#project-target-editor-modal'),
+        ctx.projectEntityEditorOverlay?.querySelector('#project-entity-editor-modal'),
+        ctx.projectPackageManifestOverlay?.querySelector('#project-package-manifest-modal'),
+        ctx.projectPackageWizardOverlay?.querySelector('#project-package-wizard-modal'),
+      ].forEach((card) => {
+        if (card) bindFocusTrapFn(card);
+      });
+    }
+
     function bindAll() {
       ctx.projectWorkspaceShellController?.()?.bindCreateForms();
       ctx.projectTargetsController?.()?.bindEditorEvents();
@@ -139,6 +158,7 @@ let exportedDarklabProjectWorkspaceBootstrap = null;
       bindPackageWizard();
       bindDismissibleOverlays();
       bindMobileSheets();
+      bindFocusTraps();
     }
 
     return {

@@ -679,9 +679,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
     expect(mocks.ExportPdfUtils.buildTerminalExportPdf).toHaveBeenCalledOnce()
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledOnce()
@@ -699,9 +697,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
 
     expect(mocks.ExportHtmlUtils.buildExportDocumentModel).toHaveBeenCalledWith({
       appName: 'testapp',
@@ -724,9 +720,7 @@ describe('data-action dispatch', () => {
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledWith('darklab-2025-01-15T10-30-00.pdf')
   })

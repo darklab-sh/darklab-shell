@@ -15,6 +15,13 @@ import {
 
 const PROJECT_LINK_RUN_COMMAND = 'dig projects.playwright.example +short'
 
+async function expectAtlasInteractionReady(page, { timeout = 15_000 } = {}) {
+  const overlay = page.locator('#atlas-overlay')
+  await expect(overlay).toHaveClass(/\bopen\b/, { timeout })
+  await expect(overlay).toHaveAttribute('data-interaction-ready', '1', { timeout })
+  return overlay
+}
+
 async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {}) {
   const host = page.locator('#confirm-host')
   const action = host.locator(`[data-confirm-action-id="${actionId}"]`)
@@ -369,6 +376,8 @@ test.describe('theme selector', () => {
   test('clicking the theme button opens the theme selector', async ({ page }) => {
     await openRailAction(page, 'theme')
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#theme-overlay')).toHaveCSS('align-items', 'stretch')
+    await expect(page.locator('#theme-overlay')).toHaveCSS('justify-content', 'flex-end')
     await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
   })
 
@@ -1129,11 +1138,12 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
 
     await page.locator('.rail-nav [data-action="atlas"]').click()
-    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expectAtlasInteractionReady(page)
     await page.locator('[data-atlas-tab="domain"]').click()
     await expect(page.locator('[data-atlas-tab="domain"]')).toHaveClass(/\bis-active\b/)
     await page.locator('#atlas-search').fill(fixture.entityValue)
     await expect(page.locator('#atlas-list')).toContainText(fixture.entityValue, { timeout: 15_000 })
+    await expect(page.locator('#atlas-detail')).toContainText(fixture.entityValue, { timeout: 15_000 })
 
     await page.locator('#atlas-saved-view-create-rule').click()
 
@@ -1166,7 +1176,7 @@ test.describe('project workspace modal', () => {
     })}\n`
 
     await page.locator('.rail-nav [data-action="atlas"]').click()
-    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expectAtlasInteractionReady(page)
     await page.locator('#atlas-import-btn').click()
     await expect(page.locator('#atlas-import-overlay')).toHaveClass(/\bopen\b/)
     await page.locator('#atlas-import-format').selectOption('nuclei_jsonl')
@@ -1457,6 +1467,7 @@ test.describe('project workspace modal', () => {
     await switchProjectTab(page, 'findings')
     const findingRow = page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()
     await expect(findingRow).toBeVisible()
+    await expect(page.locator('#project-explorer-body')).not.toContainText('Loading project findings')
     await findingRow.locator('[data-project-action="edit-finding-metadata"]').click()
     await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT FINDING')
@@ -1529,6 +1540,7 @@ test.describe('project workspace modal', () => {
     await switchProjectTab(page, 'runs')
     const evidenceRunRow = page.locator('.project-explorer-item').filter({ hasText: 'nmap -oN reports/evidence.txt' }).first()
     await expect(evidenceRunRow).toBeVisible()
+    await expect(page.locator('#project-explorer-body')).not.toContainText('No linked runs yet.')
     await evidenceRunRow.locator('[data-project-action="filter-run-findings"]').click()
     await expect(page.locator('.project-explorer-tab.is-active')).toContainText('Findings')
     await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')

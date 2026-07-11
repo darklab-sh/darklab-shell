@@ -40,6 +40,8 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _callOutputHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _callRunnerHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _callTabHandler: { class: 'bridge_dispatch', name_arg: 0 },
+  _callLoadedWorkspace: { class: 'bridge_dispatch', name_arg: 0 },
+  _callWorkspace: { class: 'bridge_dispatch', name_arg: 0 },
   _callWorkflowHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _callTabGlobal: { class: 'global_only', name_arg: 0 },
   _cliGlobalFunction: { class: 'global_only', name_arg: 0 },
@@ -48,6 +50,7 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _composerValue: { class: 'global_only', name_arg: 0 },
   _controllerFn: { class: 'import_first', name_arg: 0, fallback_arg: 1 },
   _faqGlobalFunction: { class: 'global_only', name_arg: 0 },
+  hasWorkspaceHandler: { class: 'bridge_dispatch', name_arg: 0 },
   hasOutputHandler: { class: 'bridge_dispatch', name_arg: 0 },
   hasRunnerHandler: { class: 'bridge_dispatch', name_arg: 0 },
   hasTabHandler: { class: 'bridge_dispatch', name_arg: 0 },
@@ -95,6 +98,8 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _welcomeApi: { class: 'global_only', name_arg: 0 },
   _welcomeGlobalFunction: { class: 'global_only', name_arg: 0 },
   _welcomeGlobalValue: { class: 'global_only', name_arg: 0 },
+  _workspaceBridgeFallback: { class: 'global_only', name_arg: 0 },
+  _workspaceHandler: { class: 'bridge_dispatch', name_arg: 0 },
   _workflowGlobalFunction: { class: 'global_only', name_arg: 0 },
   shortcutCall: { class: 'global_only', name_arg: 0 },
   shortcutFunction: { class: 'global_only', name_arg: 0 },
@@ -110,6 +115,8 @@ const RESOLVER_HELPER_NAMES = new Set(Object.keys(RESOLVER_HELPER_REGISTRY));
 // the audited escape hatch). Each entry must still be discovered, or the
 // completeness meta-test reports it as a dead ignore entry.
 const RESOLVER_HELPER_IGNORE = Object.freeze({
+  _projectFactoryReady: 'Checks whether a Project namespace is already available before lazy-loading; controller construction still goes through the registered _projectModule resolver.',
+  _projectWorkspaceModuleReady: 'Checks whether a Project lazy module published its expected controller factory; it is a readiness guard, not an API resolver.',
   _sessionCallAsync: 'Dispatches a session-refresh task name against a local imported-function map, falling back to a SESSION_GLOBAL aliased lookup the literal-publish scanner cannot resolve.',
   _stateValue: 'Reads APP_STATE / search-state slots by key; the keys are internal state slots, not module-API global names.',
 });
@@ -135,6 +142,16 @@ const BRIDGE_DISPATCH_REGISTRY = Object.freeze({
     handler_store: 'tabHandlers',
     setter: 'setTabHandlers',
   },
+  _callLoadedWorkspace: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
+  },
+  _callWorkspace: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
+  },
   _callWorkflowHandler: {
     bridge: 'workflows',
     handler_store: 'workflowHandlers',
@@ -159,6 +176,16 @@ const BRIDGE_DISPATCH_REGISTRY = Object.freeze({
     bridge: 'workflows',
     handler_store: 'workflowHandlers',
     setter: 'setWorkflowHandlers',
+  },
+  hasWorkspaceHandler: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
+  },
+  _workspaceHandler: {
+    bridge: 'workspace',
+    handler_store: 'workspaceHandlers',
+    setter: 'setWorkspaceHandlers',
   },
 });
 const BRIDGE_SETTER_NAMES = new Set(Object.values(BRIDGE_DISPATCH_REGISTRY).map((entry) => entry.setter));

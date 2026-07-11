@@ -460,15 +460,20 @@ body #history-panel { background: var(--theme-chrome-bg); }
   line-height: 1.35;
 }
 
+.history-project-run-entities-option .form-check.u-hidden {
+  display: none;
+}
+
 .history-project-run-entities-option .form-check input {
   flex: 0 0 auto;
   margin-top: 4px;
 }
 
 .history-project-run-entities-note {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
+  margin: 8px 0 0 28px;
+}
+
+.history-bulk-note {
   margin: 8px 0 0 28px;
 }
 
@@ -974,11 +979,71 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 
 .history-run-entity-list .atlas-entity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 70px;
+  overflow: visible;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: var(--theme-chrome-row-bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .history-run-entity-list .atlas-entity-row:last-child {
   border-bottom: 0;
+}
+
+.history-run-entity-list .atlas-entity-row.is-suppressed {
+  opacity: 0.68;
+}
+
+.history-run-entity-list .atlas-entity-main {
+  display: grid;
+  flex: 1 1 auto;
+  align-self: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.history-run-entity-list .atlas-entity-value {
+  display: block;
+  overflow: visible;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.history-run-entity-list .atlas-entity-badges {
+  display: flex;
+  align-items: flex-start;
+  align-self: flex-start;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.history-run-entity-list .atlas-muted {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .history-run-entity-list .history-run-entity-row {

@@ -250,7 +250,7 @@ import {
   closeWorkspace,
   hideWorkspaceEditor,
   hideWorkspaceViewer,
-} from './workspace.js';
+} from './workspace_bridge.js';
 import {
   closeWorkflowEditor as importedCloseWorkflowEditor,
   ensureWorkflowCatalogLoaded as importedEnsureWorkflowCatalogLoaded,
@@ -598,9 +598,7 @@ function setupMobileSheetDragClose() {
   const workspaceModal = document.getElementById('workspace-modal');
   const workflowsModal = document.getElementById('workflows-modal');
   const workflowEditor = document.getElementById('workflow-editor-form');
-  const projectWorkspaceModal = document.getElementById('project-workspace-modal');
   const providerStatusModal = document.getElementById('provider-status-modal');
-  const atlasSurface = document.getElementById('atlas-surface');
   const schedulesModal = document.getElementById('schedules-modal');
   const watchersModal = document.getElementById('watchers-modal');
 
@@ -611,10 +609,8 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(workflowEditor,     { onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(document.getElementById('command-registry-modal'), { onClose: () => closeCommandRegistryPanel() });
-  bindMobileSheet(projectWorkspaceModal, { onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); } });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
   bindMobileSheet(providerStatusModal, { onClose: () => { if (typeof closeProviderStatusModal === 'function') closeProviderStatusModal(); } });
-  bindMobileSheet(atlasSurface,       { onClose: () => { if (typeof closeAtlas === 'function') closeAtlas(); } });
   bindMobileSheet(schedulesModal,     { onClose: () => { if (typeof closeSchedulesModal === 'function') closeSchedulesModal(); } });
   bindMobileSheet(watchersModal,      { onClose: () => { if (typeof closeWatchersModal === 'function') closeWatchersModal(); } });
 }
@@ -631,8 +627,6 @@ function setupDismissibleOverlays() {
   const shortcutsCloseBtn = shortcutsOverlayEl?.querySelector('.shortcuts-close');
   const workflowEditorOverlay = document.getElementById('workflow-editor-overlay');
   const workflowEditorCloseBtns = workflowEditorOverlay?.querySelectorAll('.workflow-editor-close');
-  const projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
-  const projectWorkspaceCloseBtn = projectWorkspaceOverlay?.querySelector('.project-workspace-close');
   const providerStatusOverlay = document.getElementById('provider-status-overlay');
   const providerStatusCloseBtn = providerStatusOverlay?.querySelector('.provider-status-close');
   const schedulesOverlay = document.getElementById('schedules-overlay');
@@ -692,12 +686,6 @@ function setupDismissibleOverlays() {
     isOpen: () => typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen(),
     onClose: closeCommandRegistryPanel,
     closeButtons: typeof commandRegistryCloseBtn !== 'undefined' ? commandRegistryCloseBtn : null,
-  });
-  bindDismissible(projectWorkspaceOverlay, {
-    level: 'modal',
-    isOpen: () => typeof isProjectWorkspaceOpen === 'function' && isProjectWorkspaceOpen(),
-    onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); },
-    closeButtons: projectWorkspaceCloseBtn,
   });
   bindDismissible(commandCatalogOverlay, {
     level: 'modal',
@@ -774,12 +762,6 @@ function setupModalFocusTraps() {
     'provider-status-modal',
     'findings-board-modal',
     'finding-triage-modal',
-    'atlas-import-modal',
-    'project-workspace-modal',
-    'project-target-editor-modal',
-    'project-package-manifest-modal',
-    'project-package-wizard-modal',
-    'project-entity-editor-modal',
     'workspace-modal',
     'workflows-modal',
     'workflow-editor-form',
@@ -980,10 +962,13 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
   logClientError('failed to load /shortcuts', err);
 });
 
-const workflowsLoad = apiFetch('/workflows').then(r => r.json()).then(data => {
-  const items = data.items || [];
-  if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
-});
+const workflowsLoad = typeof ensureWorkflowCatalogLoaded === 'function'
+  ? ensureWorkflowCatalogLoaded()
+  : apiFetch('/workflows').then(r => r.json()).then(data => {
+    const items = data.items || [];
+    if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
+    return items;
+  });
 workflowsLoad.catch(err => {
   logClientError('failed to load /workflows', err);
 });

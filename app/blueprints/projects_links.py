@@ -1,6 +1,4 @@
-"""
-Project link and run-entity relationship routes.
-"""
+"""Project link and run-entity relationship routes."""
 
 from flask import jsonify, request
 
@@ -8,6 +6,7 @@ from blueprints import projects as project_routes
 from extensions import limiter
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
+from services.projects.cleanup_logging import project_unlink_cleanup_fields
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.links import (
     link_project_entities,
@@ -202,21 +201,8 @@ def projects_links_delete(project_id):
         return project_routes._project_not_found()
     if not deleted:
         return project_routes._project_not_found("project link not found")
-    record_event(
-        AuditEventType.PROJECT_UNLINK,
-        target_id=project_id,
-        project_id=project_id,
-        details={
-            "project_id": project_id,
-            "entity_type": data.get("entity_type") or "",
-            "entity_id": data.get("entity_id") or "",
-            "deleted_count": 1,
-            "source": "project_links",
-        },
-        **project_routes._project_audit_fields(session_id, team_id),
-    )
     body: dict[str, object] = {"ok": True}
-    unlinked_entity_count = 0
+    unlinked_entities = None
     if (
         data.get("entity_type") == "run"
         and (data.get("include_entities") or data.get("include_curated_entities"))
@@ -230,13 +216,27 @@ def projects_links_delete(project_id):
         )
         if unlinked_entities is not None:
             body["unlinked_entities"] = unlinked_entities
-            unlinked_entity_count = int(unlinked_entities.get("removed", 0) or 0)
+    cleanup_log_fields = project_unlink_cleanup_fields(data, unlinked_entities)
+    record_event(
+        AuditEventType.PROJECT_UNLINK,
+        target_id=project_id,
+        project_id=project_id,
+        details={
+            "project_id": project_id,
+            "entity_type": data.get("entity_type") or "",
+            "entity_id": data.get("entity_id") or "",
+            "deleted_count": 1,
+            "source": "project_links",
+            **cleanup_log_fields,
+        },
+        **project_routes._project_audit_fields(session_id, team_id),
+    )
     project_routes.log.info("PROJECT_LINK_REMOVED", extra={
         "ip": project_routes.get_client_ip(),
         "session": project_routes.get_log_session_id(session_id),
         "project_id": project_id,
         "entity_type": data.get("entity_type") or "",
         "entity_id": data.get("entity_id") or "",
-        "unlinked_entities": unlinked_entity_count,
+        **cleanup_log_fields,
     })
     return jsonify(body)

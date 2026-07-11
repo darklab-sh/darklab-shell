@@ -412,7 +412,7 @@ def _overview_findings_by_entity(
     if not target_ids:
         return {}
     placeholders = ",".join("?" for _ in target_ids)
-    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND COALESCE(f.team_id, '') = '' "
+    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND f.team_id = '' "
     finding_owner_params = (team_id,) if team_id else (session_id,)
     triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
     rows = conn.execute(
@@ -454,7 +454,7 @@ def _run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tup
     prefix = f"{alias}." if alias else ""
     if team_id:
         return f"{prefix}team_id = ?", (team_id,)
-    return f"{prefix}session_id = ? AND COALESCE({prefix}team_id, '') = ''", (session_id,)
+    return f"{prefix}session_id = ? AND {prefix}team_id = ''", (session_id,)
 
 
 def _project_run_ids(conn, session_id: str, team_id: str, project_id: str) -> list[str]:
@@ -516,7 +516,7 @@ def _overview_operational_tempo(
 
     if target_ids:
         placeholders = ",".join("?" for _ in target_ids)
-        finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND COALESCE(f.team_id, '') = '' "
+        finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND f.team_id = '' "
         finding_owner_params = (team_id,) if team_id else (session_id,)
         triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
         triage_row = conn.execute(
@@ -609,7 +609,7 @@ def _overview_recent_activity(conn, session_id: str, team_id: str, project_id: s
 def _overview_audit_owner_scope(session_id: str, team_id: str) -> tuple[str, tuple[Any, ...]]:
     if team_id:
         return "team_id = ?", (team_id,)
-    return "owner_session_hash = ? AND COALESCE(team_id, '') = ''", (token_hash(session_id),)
+    return "owner_session_hash = ? AND team_id = ''", (token_hash(session_id),)
 
 
 def _overview_latest_completed_audit_event(
@@ -668,7 +668,7 @@ def _overview_latest_report(conn, session_id: str, team_id: str, project_id: str
         report_where = "team_id = ? AND project_id = ?"
         report_params: tuple[Any, ...] = (team_id, project_id)
     else:
-        report_where = "session_id = ? AND COALESCE(team_id, '') = '' AND project_id = ?"
+        report_where = "session_id = ? AND team_id = '' AND project_id = ?"
         report_params = (session_id, project_id)
     row = conn.execute(
         "SELECT id, updated, created FROM project_reports WHERE " + report_where + " "  # nosec
@@ -692,7 +692,7 @@ def _overview_latest_finding_activity_at(
     if not target_ids:
         return ""
     placeholders = ",".join("?" for _ in target_ids)
-    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND COALESCE(f.team_id, '') = '' "
+    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND f.team_id = '' "
     finding_owner_params = (team_id,) if team_id else (session_id,)
     triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
     rows = conn.execute(

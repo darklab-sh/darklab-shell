@@ -543,8 +543,8 @@
     {
       "name": "ExportHtmlUtils",
       "purpose": "module_api_bridge",
-      "owner": "export_html.js",
-      "sources": ["/static/js/export_html.js"],
+      "owner": "export_html_bridge.js",
+      "sources": ["/static/js/export_html_bridge.js", "/static/js/export_html.js"],
       "reason": "Permalink and export helpers share HTML export utilities through a browser bridge to avoid source-mode and page-owned import cycles.",
       "removal_target": "Move export helpers behind an acyclic module import and remove this browser publish."
     },

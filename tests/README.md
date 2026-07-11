@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,994
+- behavior tests: 4,046
 - docs/inventory meta-tests: 63
-- `pytest`: 2314 (2264 behavior + 50 meta)
-- `vitest`: 1474 (1461 behavior + 13 meta)
-- `playwright`: 269 behavior
-- total: 4,057
+- `pytest`: 2352 (2302 behavior + 50 meta)
+- `vitest`: 1485 (1472 behavior + 13 meta)
+- `playwright`: 272 behavior
+- total: 4,109
 
 This document is organized in two parts:
 
@@ -590,7 +590,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
 | `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
-| `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, personal-scope `team_id` defaults, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
 | `TestPostgresMigrations.test_watcher_monitoring_incremental_migration_adds_enum_constraints` | Verifies the incremental watcher-monitoring Postgres migration normalizes legacy watcher-fire enum values and adds fire-kind and acknowledgement-state CHECK constraints. |
 | `TestPostgresMigrations.test_url_host_entity_link_migration_defers_to_startup_backfill` | Verifies the URL host-link migration is a no-op marker because startup backfill owns URL-host repair. |
 | `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
@@ -787,6 +787,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestEntrypointWorkspaceRepair.test_app_import_and_factory_are_side_effect_free_until_bootstrap` | Verifies in a fresh subprocess that importing app modules and building factory apps do not create DB, Redis, logging, or Prometheus startup side effects, while bootstrap does. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestEntrypointWorkspaceRepair.test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only` | Verifies that the container entrypoint and Compose environment wire restricted CIDRs into scanner-user-only egress deny rules. |
+| `TestEntrypointWorkspaceRepair.test_docker_static_metadata_labels_match_runtime_config_contract` | Verifies that Docker image labels, Compose container labels, app/package version strings, and the database-backend runtime interpolation stay aligned. |
 | `TestEntrypointWorkspaceRepair.test_compose_redis_is_ephemeral_under_read_only_root` | Verifies that the bundled Redis service disables persistence while running under a read-only root filesystem. |
 | `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
 | `TestEntrypointWorkspaceRepair.test_playwright_server_uses_wsgi_application_entrypoint` | Verifies that the Playwright server helper launches Gunicorn through the `wsgi:application` entrypoint. |
@@ -1128,6 +1129,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAuditEvents.test_scoped_events_team_viewer_reads_project_activity_only_for_own_team` | Verifies team viewers can read safe project activity for their team but cannot read foreign projects or broad team activity. |
 | `TestAuditEvents.test_scoped_events_team_activity_is_owner_admin_only_and_team_bound` | Verifies broad team activity is owner/admin-only and remains bound to the active team. |
 | `TestAuditEvents.test_periodic_retention_guard_runs_once_per_interval` | Verifies periodic audit retention pruning runs only after the guarded interval elapses. |
+| `TestDatabaseInit.test_personal_scope_predicates_use_sqlite_partial_indexes` | Verifies representative personal Atlas and Project predicates, sort paths, and artifact lookups use SQLite indexes. |
+| `TestDatabaseInit.test_personal_scope_team_id_normalization_guards_strict_predicates` | Verifies the personal-scope team-id normalization migration updates legacy `NULL` personal rows and fresh SQLite schema keeps strict-predicate tables on `team_id NOT NULL DEFAULT ''`. |
 | `TestDatabaseInit.test_atlas_lookup_split_modules_read_shared_backend_accessor` | Verifies split Atlas lookup helper modules observe backend changes through the shared database accessor. |
 | `TestDatabaseInit.test_split_query_modules_read_shared_db_connect_accessor` | Verifies split project and history query modules observe connection changes through the shared database accessor. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
@@ -1219,6 +1222,25 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSecretsVault.test_storage_migration_keeps_source_secret_when_destination_name_collides` | Verifies session secret migration keeps the source row when a destination secret with the same name already exists. |
 | `TestSecretsVault.test_storage_legacy_duplicate_consumer_env_uses_most_recent_update` | Verifies legacy duplicate consumer-env rows resolve to the most recently updated secret. |
 | `TestSecretsVault.test_storage_rejects_duplicate_consumer_env_bindings` | Verifies a session cannot bind the same consumer env name to two different encrypted secrets. |
+
+#### `test_backup_system.py`
+
+| Test | Description |
+| --- | --- |
+| `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, and excludes live SQLite files from the copied data directory. |
+| `test_extra_and_env_files_are_included_without_logging_secret_values` | Verifies env files and repeatable extra files are included while secret-bearing values stay out of the manifest. |
+| `test_missing_extra_file_fails_unless_operator_allows_it` | Verifies explicit extra files fail loudly when missing unless the operator opts into ignoring missing paths. |
+| `test_dry_run_rejects_missing_requested_inputs_before_writing` | Verifies dry runs reject missing primary env, extra env, and extra-file inputs before creating output state while honoring the missing-extra-file opt-out. |
+| `test_unreadable_data_dir_reports_root_guidance_and_cleans_lock` | Verifies unreadable host data directories return root/bind-mount guidance and still clean up the backup lock. |
+| `test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit` | Verifies tmpfs workspace backups are skipped without opt-in even when the same host path exists, unavailable app containers are reported when ephemeral backup is requested, production Compose workspace overrides resolve to the base project bind path, and explicit bind sources still copy the physical host path. |
+| `test_postgres_backup_uses_pg_dump_environment_without_password_argument` | Verifies local Postgres backups pass credentials through the `pg_dump` environment, Compose-network URLs select containerized `pg_dump`, and Compose Postgres backups run inside the service container instead of falling back to host `pg_dump`. |
+| `test_postgres_auto_mode_keeps_remote_urls_on_local_pg_dump` | Verifies a remote Postgres URL keeps using local `pg_dump` even when the supplied Compose stack also has a running Postgres service. |
+| `test_checksum_hashing_reads_large_files_in_chunks` | Verifies backup checksums read large files in bounded chunks instead of loading each file into memory at once. |
+| `test_same_timestamp_backups_get_unique_paths_without_overwriting` | Verifies compressed and unpacked backups with the same timestamp receive distinct output paths without changing the first backup. |
+| `test_default_gzip_archive_contains_valid_restore_payload_and_checksums` | Verifies the default gzip backup contains its restore payload, carries valid checksums, uses private permissions, and leaves no staging or lock files behind. |
+| `test_retention_reports_removed_backups_and_inspection_failures` | Verifies retention records its bounded candidate scan in the manifest, warns about metadata failures, and reports actual removals after publication. |
+| `test_unexpected_backup_failures_print_traceback` | Verifies unexpected backup defects retain a traceback in unattended-job error output. |
+| `test_workspace_volume_source_with_container_exports_with_docker_cp` | Verifies Docker-volume workspace backups use `docker cp` from the mounted app container path when container metadata is available. |
 
 #### `test_check_versions.py`
 
@@ -1583,6 +1605,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
 | `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_personal_scope_predicates_use_postgres_partial_indexes` | Verifies representative personal Atlas and Project predicates, sort paths, and artifact lookups use Postgres indexes. |
 | `test_postgres_legacy_0038_ledger_refuses_unified_marker_when_head_drifted` | Verifies an isolated Postgres schema with only legacy `0001`-`0038` ledger rows but missing head tables refuses the `0039` marker and leaves the ledger unchanged. |
 | `test_postgres_watcher_monitoring_migration_backfills_legacy_rows` | Verifies the Postgres watcher-monitoring migration backfills legacy watcher Project ids and watcher-fire state/kind rows. |
 | `test_team_mode_routes_use_postgres_scope_paths` | Verifies Postgres-backed team creation, invite redemption, recovery rotation, team-scoped API history/run reads, outsider denial, and personal/team Project slug isolation. |
@@ -1688,10 +1711,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
-| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest with module/classic types and versioned URLs. |
+| `TestIndexRoute.test_html_response_uses_gzip_when_accepted` | Verifies the dynamic HTML shell is gzip-compressed when the browser advertises support. |
+| `TestIndexRoute.test_source_mode_lazy_asset_json_matches_configured_lazy_manifest` | Verifies that source-mode lazy asset JSON matches the configured lazy manifest, with unversioned JS module URLs plus versioned CSS and classic vendor URLs. |
 | `TestIndexRoute.test_bundle_mode_renders_built_asset_bundles` | Verifies bundle mode renders the generated app CSS and shell JavaScript bundles instead of source asset links. |
 | `TestIndexRoute.test_bundle_mode_fails_loud_when_manifest_missing` | Verifies bundle mode fails with a clear `assets:sync` message when the manifest is missing. |
-| `TestIndexRoute.test_esm_asset_bundle_uses_module_type_and_source_entries` | Verifies ESM asset bundles render module script tags and source mode emits only the entry module. |
+| `TestIndexRoute.test_esm_asset_bundle_uses_module_type_and_source_entries` | Verifies ESM asset bundles render module script tags, source mode emits only the entry module, and source JS modules keep one unversioned URL identity while classic vendor assets stay cache-busted. |
 | `TestIndexRoute.test_invalid_asset_bundle_mode_logs_warning_once_and_falls_back` | Verifies invalid asset bundle modes warn once and fall back to bundle mode. |
 | `TestIndexRoute.test_asset_bundle_mode_selection_logs_info_once_per_mode` | Verifies valid asset bundle modes log the selected mode once per process. |
 | `TestIndexRoute.test_asset_version_fallback_logs_warning` | Verifies asset URL version fallback logs the missing source path before using `APP_VERSION`. |
@@ -1798,7 +1822,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_completed_run_preserves_command_url_target_source_links_after_entity_materialization` | Verifies completed run finalization keeps command-discovered URL targets and their derived host source-linked after Atlas output entities are materialized. |
 | `TestProjectRoutes.test_completed_run_auto_promote_rules_apply_to_run_entities` | Verifies completed runs apply enabled auto-promote rules to newly materialized Atlas entities before active-project bulk linking. |
 | `TestProjectRoutes.test_completed_run_auto_promote_failure_is_non_fatal` | Verifies auto-promote failures during run finalization do not prevent run or Atlas entity persistence. |
-| `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run, non-curated Atlas entity links from the project while keeping curated entities. |
+| `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run disposable Atlas entity links from the project while keeping kept-by-default entities and showing bounded kept samples. |
+| `TestProjectRoutes.test_team_project_run_unlink_preview_matches_delete_for_owner_scoped_entities` | Verifies team Project run unlink previews match delete behavior for owner-scoped same-run Atlas entity links. |
+| `TestProjectRoutes.test_team_project_run_unlink_keeps_entity_with_cross_member_curated_child_finding` | Verifies team Project run unlink keeps an entity link when a reviewed child finding belongs to another teammate's session and reports kept entity/finding samples. |
 | `TestProjectRoutes.test_bulk_project_links_reject_too_many_entity_ids` | Verifies bulk project link requests reject payloads over the server-side run limit. |
 | `TestProjectRoutes.test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached` | Verifies bulk project links report `policy_blocked` when the project link limit is reached mid-batch. |
 | `TestProjectRoutes.test_project_target_quota_ignores_bulk_linked_atlas_entities` | Verifies project target quota checks do not count bulk-linked Atlas entities as discovered or manually added project targets. |
@@ -1817,7 +1843,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
-| `TestClientLogRoute.test_accepts_safe_asset_failure_context_without_query_values` | Verifies asset failure client logs preserve safe asset context while dropping arbitrary query values. |
+| `TestClientLogRoute.test_routes_supported_levels_and_counts_only_warning_and_error_metrics` | Verifies browser DEBUG/INFO/WARN/WARNING/ERROR levels route correctly, unknown values fall back safely, and only warning/error reports increment client-error metrics. |
+| `TestClientLogRoute.test_accepts_safe_asset_failure_context_without_query_values` | Verifies asset failure client logs preserve safe asset and artifact correlation IDs while dropping arbitrary fields and query values. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
 | `TestStatusRoute.test_uptime_is_non_negative_integer` | Uptime is a non-negative integer count of seconds since app boot. |
@@ -1856,12 +1883,16 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestThemesRoute.test_default_theme_filename_selects_variant` | Checks that default theme filename selects variant. |
 | `TestThemesRoute.test_pref_theme_name_cookie_selects_variant` | Checks that pref theme name cookie selects variant. |
 | `TestThemesRoute.test_empty_registry_falls_back_to_built_in_dark_theme` | Checks that empty registry falls back to built in dark theme. |
+| `TestVendorAssets.test_unhashed_source_assets_are_not_served_with_immutable_cache_header` | Verifies source-mode JS modules and lazy HTML fragments avoid immutable cache headers while hashed build assets keep immutable caching. |
 | `TestVendorAssets.test_ansi_up_js_is_served` | Checks that ansi_up.js is served with correct content type. |
 | `TestVendorAssets.test_jspdf_js_is_served` | Checks that jspdf.umd.min.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
 | `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
+| `TestVendorAssets.test_favicon_ico_is_served` | Verifies the browser favicon route serves the restored ICO asset. |
 | `TestVendorAssets.test_built_css_bundle_is_served_with_immutable_cache_header` | Verifies generated CSS bundles are served with the immutable static-asset cache header. |
+| `TestVendorAssets.test_built_assets_use_precompressed_variants_when_accepted` | Verifies generated build assets negotiate committed Brotli/gzip siblings, JS bundles link to source maps, and direct compressed-sibling URLs stay hidden. |
+| `TestVendorAssets.test_missing_built_asset_logs_warning_with_safe_context` | Verifies missing generated build assets emit a bounded warning without query-string values. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
@@ -1976,10 +2007,15 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasRoutes.test_entity_detail_caps_large_linked_collections` | Verifies Atlas entity detail responses page large linked source-run and finding collections while reporting totals and more-row state. |
 | `TestAtlasRoutes.test_orphan_filter_surfaces_atlas_rows_after_source_run_delete` | Verifies Atlas hides rows without source runs by default while the orphan filter can surface them. |
 | `TestAtlasRoutes.test_stale_run_links_do_not_hide_atlas_orphans_or_block_cleanup` | Verifies stale Atlas source links from deleted runs do not hide orphaned rows or block source-run cleanup. |
-| `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune non-curated Atlas rows from the deleted run while preserving curated entities. |
+| `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune disposable Atlas rows from the deleted run while preserving kept-by-default entities. |
+| `TestAtlasRoutes.test_run_cleanup_ignores_cross_session_entity_metadata_when_classifying_curated` | Verifies Atlas run cleanup ignores labels and notes from other sessions when deciding whether rows are kept by default. |
+| `TestAtlasRoutes.test_run_cleanup_reports_not_eligible_imported_and_seen_elsewhere_rows` | Verifies Atlas run cleanup reports imported and seen-elsewhere rows as not eligible, returns bounded stable samples, and includes omitted counts. |
 | `TestAtlasRoutes.test_run_cleanup_protects_findings_reachable_through_project_run_links` | Verifies run cleanup keeps findings that are project-reachable through linked source runs. |
-| `TestAtlasRoutes.test_run_delete_can_prune_curated_project_reachable_atlas_rows_when_requested` | Verifies the explicit curated cleanup option can delete single-source Atlas rows that are project-reachable. |
-| `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove non-curated sibling entities from the same source run. |
+| `TestAtlasRoutes.test_run_delete_can_prune_curated_project_reachable_atlas_rows_when_requested` | Verifies the explicit kept-by-default cleanup option can delete single-source Atlas rows that are project-reachable. |
+| `TestAtlasRoutes.test_run_delete_keeps_curated_entity_with_not_eligible_child_finding_when_pruning_curated` | Verifies kept-by-default cleanup does not delete an entity when doing so would also delete a not-eligible child finding. |
+| `TestAtlasRoutes.test_team_history_cleanup_preview_matches_delete_for_owner_scoped_atlas_rows` | Verifies team-scoped History cleanup previews match delete behavior for owner-scoped Atlas rows. |
+| `TestAtlasRoutes.test_team_history_cleanup_delete_matches_preview_for_cross_member_atlas_rows` | Verifies team-scoped History cleanup deletes the same Atlas rows previewed when the rows belong to another teammate's session. |
+| `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove disposable sibling entities from the same source run while keeping same-run cleanup counts consistent. |
 | `TestAtlasRoutes.test_run_retaining_atlas_cleanup_detaches_sources_and_recalculates_rows` | Verifies source-run Atlas cleanup keeps the run transcript while detaching links, pruning disposable rows, and recalculating shared counts. |
 | `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings, report missing ids, and record entity deletion audit rows. |
 | `TestAtlasRoutes.test_atlas_read_and_write_routes_are_session_scoped` | Verifies Atlas read, write, refresh, delete, and project-link routes do not reveal or mutate another session's Atlas data. |
@@ -2773,6 +2809,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `saves and applies named Atlas views` | Verifies that Atlas saves the current tab/filter state as a named view and applies it back to the surface. |
 | `syncs populated filter selects and enhances dynamic detail selects` | Verifies that Atlas syncs populated Findings filters and enhances the finding review-state picker after it renders. |
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
+| `does not close its own fallback shell while finishing a first open` | Verifies that Atlas skips closing its own fallback shell while the first-use controller finishes opening. |
 | `previews and applies an Atlas import from a project-scoped Atlas surface` | Verifies that the Atlas import modal previews a file, applies selected options, and refreshes project-scoped Atlas state. |
 | `requires a file before previewing an Atlas import` | Verifies that the Atlas import modal rejects preview without a selected file before calling the backend. |
 | `disables unavailable Atlas import apply options after preview` | Verifies that unavailable Atlas import apply options render disabled and keep apply unavailable. |
@@ -2783,13 +2820,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
 | `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
-| `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations only show optional same-run cleanup when non-curated sibling rows can be removed. |
+| `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations show same-run cleanup only when sibling rows can be removed and render shared reason labels plus collapsed sample details. |
 | `disables Atlas delete actions and opens read-only triage when active team scope cannot triage findings` | Verifies that view-only team scope disables Atlas delete and suppression affordances before a confirmation can open while still allowing read-only triage details. |
 | `applies the project filter when opened from a project` | Verifies that project-launched Atlas shows the project filter select/chip, requests rows filtered to that project, can switch to another project from inside Atlas, and clears project scope from the chip. |
 | `selects a requested finding when opened from a project finding row` | Verifies that project-launched Atlas can open to Findings, keep project scope, and select the requested finding after the list loads. |
 | `opens Findings scoped to a run and clears the run filter chip` | Verifies that run-launched Atlas requests summary, Findings, and entity rows for one source run and exposes a clearable run filter chip. |
 | `applies a source-run filter from the Atlas run selector` | Verifies that the Atlas run selector applies the selected source run to summary and Findings requests. |
-| `enables entity pagination once the list loads even when detail is still loading` | Verifies that Atlas entity pagination unlocks after the list response even if the selected entity detail request is still pending. |
+| `enables entity pagination while the auto-selected detail loads` | Verifies that Atlas entity pagination unlocks while the automatically selected entity detail is still loading. |
 | `clears entity pagination when switching from a large tab to a single-page tab` | Verifies that Atlas clears hidden pagination text and disables controls after moving to a tab that fits on one page. |
 | `ignores stale entity list responses after switching tabs` | Verifies that a late response from a previous Atlas tab cannot overwrite the active tab's list or pagination state. |
 | `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |
@@ -2830,6 +2867,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
 | `acAccept clears stale suggestions after accepting a single contextual match` | Verifies that accepting the only contextual suggestion clears the hidden suggestion list so a second Tab cannot reapply stale replacement bounds. |
 | `acAccept refreshes autocomplete after accepting a slash-terminated folder` | Verifies that accepting a folder-like completion reopens autocomplete so the next path segment can be completed immediately. |
+| `acAccept refreshes autocomplete after accepting a command root suggestion` | Verifies that accepting a completed command root such as `ping` reopens autocomplete so command examples stay visible. |
 | `acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen` | Verifies that accepting a suggestion hides the dropdown and suppresses the one programmatic input update caused by the accept path, so the menu does not immediately reopen. |
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
@@ -2972,12 +3010,13 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
 | `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
 | `lazy-loads rarely used modal controllers on first open` | Verifies that the bootstrap lazy loader loads rarely used modal controllers only when callers first open those surfaces. |
-| `lazy-loads the project workspace controller cluster in order` | Verifies that the Projects workspace controllers load in manifest order only when the workspace opens. |
+| `lazy-loads the project workspace core and targeted deferred controllers in parallel` | Verifies that the Projects modal first loads only the workspace core, then loads deferred Project controllers when a tab or action asks for them. |
 | `lazy-loads the history comparison controller cluster in order` | Verifies that the History comparison controllers load in manifest order only when a compare flow starts. |
 | `logs lazy module load and export-contract failures with safe asset context` | Verifies failed lazy module imports and missing lazy module exports send client logs with asset name, type, sanitized asset path, and export-contract details. |
 | `logs invalid lazy asset config without including the raw JSON body` | Verifies malformed lazy asset JSON logs a warning once while falling back to built-in lazy asset paths. |
 | `lazy-loads the Options panel controller cluster in order` | Verifies that the heavier Options panel controllers load in manifest order only when Options opens and return a loaded Options API object. |
 | `lazy-loads the command registry modal on first open` | Verifies that the Command Registry modal code loads from its manifest URL only when the registry opens and returns a loaded registry API object. |
+| `lazy-loads the Files surface and drag-drop helper together` | Verifies that the Files panel and drag/drop helper load through manifest URLs only when the Files surface is needed. |
 | `lazy-loads workflow controllers while keeping the catalog cache eager` | Verifies that workflow catalog data can render the rail eagerly while terminal workflow commands lazy-load the heavier workflow controller and return a loaded workflow API object. |
 
 #### `core_esm_exports.test.js`
@@ -2987,6 +3026,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `exports representative core helpers as ESM APIs` | Verifies representative core helpers expose direct ESM imports. |
 | `distinguishes loaded bridge wrappers from registered lazy handlers` | Verifies lazy ESM bridges report handler readiness separately from the wrapper module being loaded. |
 | `keeps Project Runs compare honest when the ESM bridge handler is not ready` | Verifies Project Runs compare actions do not pretend to open when the ESM bridge handler has not registered yet. |
+| `keeps Project Runs loading when summary counts invalidate a stale empty page` | Verifies Project Runs stays in a loading state when summary counts show rows exist but the currently rendered page is stale and empty. |
 | `exports representative owner APIs without requiring browser-global mirrors` | Verifies representative owner modules expose callable ESM APIs without relying on browser-global mirrors. |
 | `keeps mutable app state behind the explicit state API` | Verifies tab, composer, autocomplete, and welcome state mutations go through exported getter/setter helpers instead of assigning to read-only ESM value imports. |
 | `builds workspace prompt labels from ESM tab state without a global cwd reader` | Verifies workspace prompt labels read the current tab folder through ESM state instead of a legacy browser-global CWD helper. |
@@ -3117,7 +3157,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `opens the watchers modal from the Run Details baseline action` | Verifies Run Details can open the Watchers modal with the current run as the prefilled baseline. |
 | `renders Run Details AI summary actions when AI summaries are enabled` | Verifies Run Details can load cached AI assists, request a summary, render returned summary fields, and show validated Copy/Run suggestion actions when the AI feature flags are enabled. |
 | `uses shared row primitives for fallback Run Details entity rows` | Verifies Run Details fallback entity rows use the shared clickable row primitives when the Atlas row renderer is unavailable. |
-| `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run, non-curated Atlas entity unlinking. |
+| `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run Atlas entity unlinking with cleanup reason labels and sample details. |
 | `uses Current Project attachment state for Run Details project actions when link metadata is missing` | Verifies Run Details still shows remove-from-project actions when an opened run lacks embedded project-link metadata but the Current Project card confirms the active project link. |
 | `loads structured run findings into the run details findings tab` | Verifies the Run Details modal consumes `/entities/run/<id>/findings` and renders structured findings in the Findings tab. |
 | `closes the history panel for permalink but keeps it open for star and delete` | Verifies permalink closes the desktop drawer while star and delete keep it open so the row stays in context under the confirm modal. |
@@ -3135,7 +3175,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `shows a fallback toast when history refresh fails after a successful bulk action` | Verifies a completed bulk action still tells the user to refresh when the post-action History reload fails. |
 | `bulk remove unlinks selected runs from every linked project without a picker` | Verifies bulk remove confirms once, skips the project picker, and posts batch unlink requests for every linked project represented by the selected runs. |
 | `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown rejection reasons. |
-| `only offers Atlas cleanup on run delete when there are removable candidates` | Verifies that run delete confirmations only show the optional Atlas cleanup checkbox when removable cleanup candidates exist. |
+| `only offers Atlas cleanup on run delete when there are removable candidates` | Verifies that run delete confirmations only show optional Atlas cleanup choices when removable candidates exist and render reason badges with collapsed sample details. |
+| `shows run cleanup reason notes without destructive options when only not eligible items exist` | Verifies that run delete confirmations still explain not-eligible Atlas cleanup candidates without showing disposable or kept-by-default deletion checkboxes. |
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
 | `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
@@ -3285,6 +3326,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `preserves absolute line numbers when line-number mode is enabled later` | Verifies that enabling line numbers after output trimming uses stored absolute line numbers for retained rows. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
+| `keeps terminal Atlas entity token styling on the eager shell stylesheet` | Verifies that terminal Atlas entity token styling is available from the eager shell stylesheet instead of waiting on lazy feature CSS. |
 | `keeps highlighted entity text selectable with the rest of the output line` | Verifies that highlighted Atlas entity tokens remain part of normal transcript text selection and copying. |
 | `falls back to value matching when ANSI makes entity offsets stale` | Verifies entity-token rendering does not trust stale start/end offsets after ANSI stripping changes visible text positions. |
 | `supports keyboard navigation and outside-click close in the entity context menu` | Verifies the output entity context menu focuses its first action, supports arrow-key movement, returns focus to the token on Escape, and closes on outside click. |
@@ -3365,6 +3407,12 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | --- | --- |
 | `loads the source-mode import graph and renders output` | Verifies that the permalink module entry loads its source-mode import graph and renders transcript output. |
 
+#### `project_active_context.test.js`
+
+| Test | Description |
+| --- | --- |
+| `shares concurrent active project loads and refreshes again after the request settles` | Verifies that concurrent active Project context refreshes share one request while later refreshes still fetch fresh state. |
+
 #### `project_activity.test.js`
 
 | Test | Description |
@@ -3425,6 +3473,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | --- | --- |
 | `loads the draft and renders the report editor with preview/export actions` | Verifies that the Report tab loads a saved draft, renders metadata and selection controls, and exposes preview and archive export actions. |
 | `shows template choices only when more than one template is configured` | Verifies that the Report tab hides the template selector for the single shipped default and renders it when multiple configured templates exist. |
+| `preserves visible metadata edits when background selector pages render` | Verifies that background report selector loads preserve metadata values already typed into the visible editor before repainting the Report tab. |
 | `saves with the loaded updated token and the current draft fields` | Verifies that explicit Save sends the optimistic concurrency token and the current report draft. |
 | `clears stale preview output and confirms dirty reloads when editing report metadata` | Verifies that editing report metadata clears the rendered preview, disables Print/PDF until the preview is refreshed, and asks before Reload saved discards unsaved edits. |
 | `keeps include-all selection dynamic when editing metadata` | Verifies that editing report metadata does not freeze default include-all selections to the currently rendered checkbox rows. |
@@ -3734,7 +3783,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
-| `keeps inactive project list pagination visually hidden` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability. |
+| `keeps inactive project list pagination visually hidden and settles abandoned first-open prefetches` | Verifies that the Projects sidebar hides inactive pagination chrome while preserving modal layout stability, and that canceled first-open prefetches are settled. |
+| `shows project unlink reason notes and samples without destructive entity options when only not eligible items exist` | Verifies that Project run unlink confirmations still explain not-eligible Atlas cleanup candidates and render matching sample details without showing disposable or kept-by-default entity cleanup options. |
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `pages and filters the project Details targets browser` | Verifies that the Project Details target browser paginates, filters, keeps target counts stable, and updates target rows without a full modal reload. |
 | `renders Project auto-promote rules with preview, save, apply, and source detail chips` | Verifies that the Project Entities Rules panel previews and saves a rule, applies it after confirmation, and labels auto-promoted entity rows with the matching rule name. |
@@ -3915,6 +3965,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 
 | Test | Description |
 | --- | --- |
+| `does not refresh team scopes on boot for anonymous personal sessions` | Verifies that anonymous personal startup skips the team-scope route until a team-aware surface needs it. |
 | `clears a stale stored team id after a successful team refresh` | Verifies that a stored team id that is no longer returned by `/session/teams` is removed and the selector falls back to Personal. |
 | `exposes active team capabilities for write affordance guards` | Verifies that the active team scope exposes server-granted capabilities for browser write-action guards. |
 | `restores token-scoped team selection before runtime session handlers are ready` | Verifies that reload startup restores a token-scoped team selection even before runtime session handlers are available. |
@@ -4271,6 +4322,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `uses large-search mode for short files with very long lines` | Verifies that large-search protections also apply when a workspace file is large by byte/character size even if it has few rendered lines. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
 | `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
+| `shares the in-flight workspace file request between cache refreshes and modal opens` | Verifies that passive Files cache refreshes and first-open file-list loads share an in-flight `/workspace/files` request. |
 | `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
 | `creates folders through the workspace directory route` | Verifies that New Folder posts to the directory route, refreshes the browser, and enters the created folder. |
 | `opens an app-native folder prompt instead of the browser prompt` | Verifies that New Folder uses the shared themed dialog instead of `window.prompt`. |
@@ -4286,6 +4338,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `clicking outside the prompt hides autocomplete without changing the input` | Verifies that clicking outside the prompt hides autocomplete without changing the input. |
 | `context-aware autocomplete replaces only the active token for command flags` | Verifies that context-aware autocomplete replaces only the active token for command flags. |
 | `context-aware autocomplete shows positional hints alongside flags after a known command root` | Verifies that contextual autocomplete can surface positional guidance like `<target>` alongside command-specific flags after a known root such as `nmap `. |
+| `accepting a command root by keyboard or click keeps examples visible` | Verifies that choosing a completed command root such as `ping` from a partial match keeps the command examples open for both keyboard and mouse selection. |
 | `workspace input flags suggest live session files instead of static examples` | Verifies that workspace-aware input flags show current session files and do not leak static registry examples. |
 | `built-in pipe support suggests the supported pipe commands after a pipe` | Verifies that after a pipe character, the narrow built-in pipe commands appear in the autocomplete dropdown. |
 
@@ -4334,6 +4387,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `permalink shows a failure toast when /share returns invalid JSON` | Verifies that permalink shows a failure toast when /share returns invalid JSON. |
 | `deleting a history entry shows a failure toast when the delete request fails` | Verifies that deleting a history entry shows a failure toast when the delete request fails. |
 | `clearing history shows a failure toast when the delete request fails` | Verifies that clearing history shows a failure toast when the delete request fails. |
+| `lazy modal fragments show a failure toast and retry on the next open` | Verifies Projects and Atlas first-open fragment failures show a retryable toast, emit bounded client logs, and recover on the next open. |
 
 #### `history.spec.js`
 
@@ -4344,6 +4398,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `the history restore button loads output into a tab without touching the composer` | Verifies that the per-row `restore` action button loads the run's output into a tab and leaves `#cmd` empty — the pre-swap "click row to restore" behavior now lives on an explicit button. |
 | `the history restore button switches to an existing tab instead of duplicating it` | Verifies that clicking `restore` for a run whose output is already open activates the existing tab rather than opening a duplicate. |
 | `deleting a starred entry removes it from the chip bar` | Verifies that deleting a starred entry removes it from the chip bar. |
+| `run cleanup confirmation uses live preview defaults samples and selected flags` | Verifies a live History cleanup preview shows disposable, kept-by-default, and not-eligible rows, keeps cleanup unchecked by default, reveals bounded samples, sends only the selected flag, and leaves the expected Atlas state. |
 | `toggling the history star keeps the desktop drawer open` | Verifies that desktop starring behaves like a toggle and does not collapse the drawer while you are working through history entries. |
 | `clear all history removes all chips including starred ones` | Verifies that clear all history removes all chips including starred ones. |
 | `clicking outside the drawer closes the history panel` | Verifies that clicking outside the drawer closes the history panel. |
@@ -4568,7 +4623,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 
 | Test | Description |
 | --- | --- |
-| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects including the lazy Overview tab, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls. |
+| `opens high-risk lazy app surfaces through user controls` | Verifies source mode can open Projects including the lazy Overview tab, Options, Command Registry, Workflows, Atlas, Status Monitor, history run details/compare, and PDF export through real browser controls without loading a source JS module under both plain and versioned URLs. |
 | `does not publish Playwright-only hooks when webdriver is unavailable` | Verifies a normal browser context does not receive Playwright-only helper globals. |
 
 #### `tabs.spec.js`

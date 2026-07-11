@@ -366,6 +366,59 @@ describe('autocomplete helpers', () => {
     }
   })
 
+  it('acAccept refreshes autocomplete after accepting a command root suggestion', () => {
+    vi.useFakeTimers()
+    try {
+      const { acAccept, handleComposerInputChange } = fromDomScripts(
+        ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
+        {
+          document,
+          cmdInput: document.getElementById('cmd'),
+          acDropdown: document.getElementById('ac'),
+          mobileComposerHost: document.getElementById('mobile-composer-host'),
+          mobileCmdInput: document.getElementById('mobile-cmd'),
+          acSuggestions: ['ping'],
+          acContextRegistry: {
+            ping: {
+              examples: [
+                { value: 'ping -h', description: 'Show help and usage' },
+                { value: 'ping -c 4 darklab.sh', description: 'Send 4 pings to a host' },
+              ],
+              flags: [],
+              expects_value: [],
+              arg_hints: {},
+            },
+          },
+          acFiltered: [],
+          acIndex: -1,
+          acSuppressInputOnce: false,
+        },
+        `{
+        acAccept,
+        handleComposerInputChange,
+      }`,
+      )
+      const input = document.getElementById('cmd')
+      input.addEventListener('input', () => handleComposerInputChange(input))
+      input.value = 'pin'
+      input.setSelectionRange(3, 3)
+
+      acAccept('ping')
+      expect(document.getElementById('ac').style.display).toBe('none')
+
+      vi.runOnlyPendingTimers()
+
+      expect(input.value).toBe('ping')
+      expect(document.getElementById('ac').style.display).toBe('block')
+      expect([...document.querySelectorAll('.ac-item')].map(item => item.textContent)).toEqual([
+        'ping -hShow help and usage',
+        'ping -c 4 darklab.shSend 4 pings to a host',
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen', () => {
     const { acAccept } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],

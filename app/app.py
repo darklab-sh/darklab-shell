@@ -5,6 +5,7 @@ Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
+import gzip
 import logging
 import os
 from pathlib import Path
@@ -55,6 +56,10 @@ _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
 _REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _IMMUTABLE_ASSET_PREFIXES = ("/static/", "/vendor/")
+_REVALIDATED_STATIC_CACHE_CONTROL = "no-cache"
+_REVALIDATED_STATIC_PREFIXES = ("/static/fragments/",)
+_DYNAMIC_GZIP_MIN_BYTES = 1024
+_DYNAMIC_GZIP_MIMETYPES = frozenset({"text/html"})
 _ASSET_VERSION_CACHE: dict[str, str] = {}
 _STATIC_ASSET_URL_CACHE: dict[str, str] = {}
 _ASSET_MANIFEST_PATH = Path(__file__).resolve().parent / "static" / "build" / "manifest.json"
@@ -102,8 +107,35 @@ def _apply_immutable_asset_cache_headers(response):
     if request.method not in {"GET", "HEAD"} or response.status_code not in {200, 304}:
         return response
     path = request.path or ""
+    if path.startswith(_REVALIDATED_STATIC_PREFIXES):
+        response.headers["Cache-Control"] = _REVALIDATED_STATIC_CACHE_CONTROL
+        return response
+    if _is_source_module_asset(path) and _asset_bundle_mode() != "bundle":
+        return response
     if path.startswith(_IMMUTABLE_ASSET_PREFIXES):
         response.headers["Cache-Control"] = _IMMUTABLE_ASSET_CACHE_CONTROL
+    return response
+
+
+def _gzip_dynamic_response(response):
+    if request.method not in {"GET", "HEAD"} or response.status_code != 200:
+        return response
+    if response.direct_passthrough or response.headers.get("Content-Encoding"):
+        return response
+    if response.mimetype not in _DYNAMIC_GZIP_MIMETYPES:
+        return response
+    response.vary.add("Accept-Encoding")
+    if request.accept_encodings.quality("gzip") <= 0:
+        return response
+    data = response.get_data()
+    if len(data) < _DYNAMIC_GZIP_MIN_BYTES:
+        return response
+    compressed = gzip.compress(data, compresslevel=6)
+    if len(compressed) >= len(data):
+        return response
+    response.set_data(compressed)
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(compressed))
     return response
 
 
@@ -123,10 +155,20 @@ def _static_asset_url(path: str) -> str:
     if not asset_path.startswith(("/static/", "/vendor/")):
         return asset_path
     if _asset_bundle_mode() != "bundle":
+        if _is_source_module_asset(asset_path):
+            return asset_path
         return _versioned_asset_url(asset_path)
     if asset_path not in _STATIC_ASSET_URL_CACHE:
         _STATIC_ASSET_URL_CACHE[asset_path] = _hashed_static_asset_url(asset_path)
     return _STATIC_ASSET_URL_CACHE[asset_path]
+
+
+def _is_source_module_asset(path: str) -> bool:
+    asset_path = str(path or "")
+    return (
+        asset_path.startswith("/static/js/")
+        and asset_path.split("?", 1)[0].endswith(".js")
+    )
 
 
 def _hashed_static_asset_url(path: str) -> str:
@@ -177,7 +219,13 @@ def _asset_bundle_mode() -> str:
     if mode in _VALID_ASSET_BUNDLE_MODES:
         if mode not in _LOGGED_ASSET_BUNDLE_MODES:
             _LOGGED_ASSET_BUNDLE_MODES.add(mode)
-            log.info("ASSET_BUNDLE_MODE_SELECTED", extra={"asset_bundle_mode": mode})
+            extra = {"asset_bundle_mode": mode}
+            if mode == "source":
+                extra.update({
+                    "source_request_profile": "direct-esm-import-graph",
+                    "source_js_module_urls": "unversioned",
+                })
+            log.info("ASSET_BUNDLE_MODE_SELECTED", extra=extra)
         return mode
     if mode not in _WARNED_INVALID_ASSET_BUNDLE_MODES:
         _WARNED_INVALID_ASSET_BUNDLE_MODES.add(mode)
@@ -270,6 +318,8 @@ def _asset_bundle(logical_name: str) -> list[str]:
             mode=mode,
         )
         raise _asset_manifest_error(f"Asset manifest is incomplete: bundle {logical_name} has no sources")
+    if bundle_type == "esm":
+        return [str(source) for source in sources]
     return [_versioned_asset_url(str(source)) for source in sources]
 
 
@@ -408,6 +458,7 @@ def _log_request():
 
 def _log_response(response):
     response = _apply_immutable_asset_cache_headers(response)
+    response = _gzip_dynamic_response(response)
     started = request.environ.get("darklab_metrics_start")
     try:
         elapsed = time.perf_counter() - float(started) if started else 0.0

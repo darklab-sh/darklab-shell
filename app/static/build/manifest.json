@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.f50f74e8b6d9.css",
-      "hash": "f50f74e8b6d9e85f24bc14e78c85a066da2165199e4b60bc56cd23d5cb854896",
+      "path": "/static/build/app.771a251d5b07.css",
+      "hash": "771a251d5b07adbbcbbd18ee9db29f50e2233469eb3c7eddde1b1d07a5835eb4",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -14,40 +14,20 @@
         "/static/css/welcome.css",
         "/static/css/shell-chrome.css",
         "/static/css/mobile.css",
-        "/static/css/features/projects.css",
-        "/static/css/features/atlas.css",
-        "/static/css/features/atlas-mobile.css",
-        "/static/css/features/command-registry.css",
         "/static/css/features/faq-shortcuts.css",
         "/static/css/features/history.css",
-        "/static/css/features/run-comparison.css",
-        "/static/css/features/schedules.css",
-        "/static/css/features/status-monitor.css",
-        "/static/css/features/watchers.css",
-        "/static/css/features/workflows.css",
-        "/static/css/features/workspace.css",
         "/static/css/mobile-chrome.css"
       ],
       "source_hashes": {
-        "/static/css/core/fonts.css": "47c89c917a1b3a9fba65027939a09d1f06155ad3e0faca08e3a4fd181275c860",
+        "/static/css/core/fonts.css": "233ca59974a307e4cda3fb06dc84bf8e15be6d85a2a98f6c9a97c75eafcbb3c9",
         "/static/css/core/base.css": "464c49db31fea00c6762c2cd90c43cb0a9a5d5c3e09bfbcabf7ff38cfc00c914",
-        "/static/css/shell.css": "8030ff38cf960e8fd3c4fa588ddf3fa1411e5a5cb5f0c8f6116ed41f129a52c5",
+        "/static/css/shell.css": "b83bb2fb3f103332a1e386706ade9b7e92b841a7c478f671668aaaaed5fea146",
         "/static/css/primitives/components.css": "f5ad470e888d4914ab56407ee1223aae55a82b98a03bded2d4f6ec3c4c72c192",
         "/static/css/welcome.css": "5cdb6be8622e40fd25261ce6eca5c40b0453e039333038aeef63e361d85b325f",
         "/static/css/shell-chrome.css": "04a9131c01be1c8555006a8df822969921c319569c8188973fa13da2b58ce12e",
-        "/static/css/mobile.css": "081679f8720be4a712eb53921244277e1d5392f667d2727df0d632426bb5e266",
-        "/static/css/features/projects.css": "80085e9aa11b12b782d03537127d182d722a8a7985c2c4118cdb4b14577eeafa",
-        "/static/css/features/atlas.css": "13b723e54c863223cd67b55d443d95871475003cee0ca794f60336ee38ad9156",
-        "/static/css/features/atlas-mobile.css": "36e1c88ff62c24877a0307de8c3fe6b39f854423a91229ad1bf9b8d7042c892c",
-        "/static/css/features/command-registry.css": "d11acc8c2718bc0f21fa296cdbe8eee8d13f6db4bfb6dac6ddec8f66833ecea9",
+        "/static/css/mobile.css": "a5a876672787a3c308378ebdd669b6c3dd90cb6aebf78b88bc71543ab5f50d53",
         "/static/css/features/faq-shortcuts.css": "7f496747969affaa77c6b89b6decdb80946504c61e35314e32fd408f13f186b2",
-        "/static/css/features/history.css": "c4fce016a788bcb53d480496e2f62fa460b617a89d951aab041c2816f5d7d9c8",
-        "/static/css/features/run-comparison.css": "4a23942692a2d9fed3c58ec9e04624a8c6b6f250c6954c41b8e2147fdacc9095",
-        "/static/css/features/schedules.css": "0205310e7bcefc0091ed4ca1bcfea6d6ce4c5271c0c061aa28d4aab5afde3116",
-        "/static/css/features/status-monitor.css": "cf8358a6adb1dc7c46ba28f25fb30ee88703a7305e1af18c675f49c8340a803e",
-        "/static/css/features/watchers.css": "f7a0f2d0ccb716049aa4301e99b8e8a730fa1e7829c7cc90263cb36c82c7789a",
-        "/static/css/features/workflows.css": "edd48bf98077ab8f8011084f02e58a06a1262f9d9f9173d7036bf6e91c7c02e2",
-        "/static/css/features/workspace.css": "894a8f9e448e0025b2be3c7e9ba4df9feaa91bed99e4c3c614ac29f682b1c864",
+        "/static/css/features/history.css": "9fafc20a463177bba59ab8d043ce1b2aee609a2178437949ea6625fb0353a5e0",
         "/static/css/mobile-chrome.css": "b430d3c7c5491970cfd26ccfffab38f44646c1c33bc294b78194418849aa7430"
       }
     },
@@ -75,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.c09376907730.js",
-      "hash": "394122e4cf811306bfb2302904fc5dcb779a081bbe08bd8c581bbd5bf11ac5d9",
+      "path": "/static/build/shell-bootstrap.d842e92d86b8.js",
+      "hash": "a8afcca9d4328c9e712de0c9e8be62b77fc1b1b46ccab845235ce238b7ec212a",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -100,13 +80,15 @@
         "/static/js/core/utils.js",
         "/static/js/core/workspace_core.js",
         "/static/js/e2e_test_hooks.js",
-        "/static/js/export_html.js",
+        "/static/js/e2e_test_hooks_loader.js",
+        "/static/js/export_html_bridge.js",
         "/static/js/features/atlas/atlas_bridge.js",
+        "/static/js/features/atlas/atlas_mobile_bridge.js",
         "/static/js/features/autocomplete/runtime_context.js",
         "/static/js/features/autocomplete/suggestions.js",
         "/static/js/features/command-registry/command_registry_bridge.js",
         "/static/js/features/command-registry/faq_helpers.js",
-        "/static/js/features/findings/finding_triage_editor.js",
+        "/static/js/features/findings/finding_triage_bridge.js",
         "/static/js/features/history/history_actions.js",
         "/static/js/features/history/history_links.js",
         "/static/js/features/history/history_mutations.js",
@@ -150,11 +132,9 @@
         "/static/js/features/terminal/local_commands.js",
         "/static/js/features/terminal/mobile_composer_keyboard.js",
         "/static/js/features/theme/theme.js",
-        "/static/js/features/tour/tour_cli.js",
+        "/static/js/features/tour/tour_cli_bridge.js",
         "/static/js/features/workflows/workflows_bridge.js",
         "/static/js/features/workspace/workspace_autocomplete_cache.js",
-        "/static/js/features/workspace/workspace_drag_drop.js",
-        "/static/js/features/workspace/workspace_viewer_formats.js",
         "/static/js/history.js",
         "/static/js/mobile_chrome.js",
         "/static/js/output.js",
@@ -170,6 +150,7 @@
         "/static/js/shell_chrome.js",
         "/static/js/tabs.js",
         "/static/js/tabs_bridge.js",
+        "/static/js/ui/cleanup_reasons.js",
         "/static/js/ui/mobile_sheet.js",
         "/static/js/ui/overlay_actions_bridge.js",
         "/static/js/ui/ui_action_sheet.js",
@@ -184,20 +165,19 @@
         "/static/js/ui/ui_tab_strip_edges.js",
         "/static/js/welcome.js",
         "/static/js/welcome_bridge.js",
-        "/static/js/workspace.js",
         "/static/js/workspace_bridge.js"
       ],
       "source_hashes": {
-        "/static/js/app.js": "25c6391ccddae2aa3102ad8d0e0fc029816375d6e696d343a69a0f7662ebe137",
-        "/static/js/autocomplete.js": "f8c0d38d92d6f5297173754b5ff9ef04dd2a075f528f33e140e647a7c3d8f283",
-        "/static/js/controller.js": "83d61a63341553a2e08cee6f3e2785731907ede31f65d91f63c916b64dfe101e",
+        "/static/js/app.js": "270453e30efb6d27c0adbe1174e9a522115febfd2f8712f1515adbde9e11ce69",
+        "/static/js/autocomplete.js": "d36381b1c43b960271faf2a6fc9909179b01ce1b63ca9ca493fbbb9c1c72a581",
+        "/static/js/controller.js": "79b8ef2b62d97fb2e129cc70a9015ffb7b7a1f5be7706894322a11f114b4b55a",
         "/static/js/controller_action_bridge.js": "58db506cdb44b187aefb182b08e0353538fceac601b0b76c5e128f69e5b06386",
         "/static/js/core/app_preferences_core.js": "181e13e894a14f5550f30cb378623a1ab9f1a8c73a4a7acbd3ddc53d0af3248c",
         "/static/js/core/autocomplete_core.js": "89e59ff0d529f4ac5d5a81351f6d810f63ff65fb3f9698b460751a160288f6da",
         "/static/js/core/config.js": "a3ecbd8f32308c97f503e649bf5f6a6f9c5693fef67542502be4f24407819842",
         "/static/js/core/dom.js": "303764c44d702635cb1a915c65f9b3bc59166bc9f29f5d735ecbd3ffa1c457f7",
         "/static/js/core/history_core.js": "a8932a20e826531c509708536ab01b307734a5c30e3b58c1d01e32cdbd69dd14",
-        "/static/js/core/lazy_assets.js": "43e14c2e7959c25682017fa00b0c06b47ac412d04e0e6f268bb74c3d84625636",
+        "/static/js/core/lazy_assets.js": "dd5b80741525567766d511073927539d92044ac6f58cc5ebadeead900f03bf5e",
         "/static/js/core/output_core.js": "8e6cff28237cd6970b5586689a7e52beb2e2998b154b55a662658afd05b74826",
         "/static/js/core/run_output_model.js": "6b28a40f5cf43af52b063eb1ee9a3bf89c1ae51f4dd7468dd2668fdc2b7af5b6",
         "/static/js/core/runner_core.js": "3f0305efe867b17ebd4b15858adc54e6b24cada71939d2b51cd822a88d7ff39e",
@@ -206,19 +186,21 @@
         "/static/js/core/state.js": "33dbbf81762c0efd398e8f59a28bbc73930d43f342f9cbaac59d8b7c891603a2",
         "/static/js/core/utils.js": "125510b48dfa6c561e63a1f458b4326a43387aa7103697e363fceef226dd19ec",
         "/static/js/core/workspace_core.js": "5ce3d6396834d05c465ff8378b0eb4adfacaf68cbb87687ad039d8b53805eb7b",
-        "/static/js/e2e_test_hooks.js": "4feb661d3a32c74cf2bad2d26925c332419a0020d41a574346570ad283e05e0c",
-        "/static/js/export_html.js": "c6644d0f4a2c1b6f6989b5f15c247e1f00247f7f0d77e29e5ec6f6e2d0c06b3e",
-        "/static/js/features/atlas/atlas_bridge.js": "5eb4ef144120e6caa45a07a4c108a03541b89214320c0121141b29e7cb0d728d",
+        "/static/js/e2e_test_hooks.js": "78ddef5836bc659ca5300d019abdff8ed4522cca926ff47e984d461e6595f1ba",
+        "/static/js/e2e_test_hooks_loader.js": "57035eee0ab7dad300beb422abf7045267dce796e16b9cce55e8b4bf423c0bb3",
+        "/static/js/export_html_bridge.js": "2e6cda74060824a0606cf2ef422bf6166b1ccb39a5a503d3873b3b2d39257e2f",
+        "/static/js/features/atlas/atlas_bridge.js": "dbe08bfa7f10e2d725d4a74bd36bd532177208d878e3df7696e8ff8028cb4605",
+        "/static/js/features/atlas/atlas_mobile_bridge.js": "a67298bd661ce99736f42275f83e082b75bfac58fbd33e53c2f5cc2136aa257e",
         "/static/js/features/autocomplete/runtime_context.js": "734e3867385640fb26f1b5abafad907d79e2b3188e1f317dedc303806d71314d",
         "/static/js/features/autocomplete/suggestions.js": "6e59894de1733e029a4400148348aedfb61e2a2808b1e7a6c7d894d0b0a29d20",
         "/static/js/features/command-registry/command_registry_bridge.js": "16cce2515d2738287432c06f14d0addf3dcc6ab550e1ae49bfbaaf4c83bb5e9a",
         "/static/js/features/command-registry/faq_helpers.js": "1f0e4d321cd5e7d98371e2621fe197819d94fe721697e8329b6c9b8b9abd960d",
-        "/static/js/features/findings/finding_triage_editor.js": "2d95e277db02000362690111d109738fb0ad1493314a515c99402dadb8cd67e9",
+        "/static/js/features/findings/finding_triage_bridge.js": "5e804614b89dce76bbe47925205a2c4873460066107e965aeae340a1347e5450",
         "/static/js/features/history/history_actions.js": "9ca6d0a55c2c4e4c1c83dfb2d6fd316b717e025ab0e39d2b9d321abb2405009b",
         "/static/js/features/history/history_links.js": "bdeb6f2a060f76af2dac272ccd070a07facb3458e06e2df0dd461307f9e7ad52",
-        "/static/js/features/history/history_mutations.js": "27aa3d066c7c28e510e22af2eeac108f0af33c0ccd18638414c5a52203902ebd",
+        "/static/js/features/history/history_mutations.js": "0be22978ea92286d8d6d3a07b1f9d9e69586328fde04f09a2d1baf4220b0dcc8",
         "/static/js/features/history/history_panel_bridge.js": "6f23bde0e5a292d8877386e8e84298bdd73036d073c88450ca1b9ad3523cddca",
-        "/static/js/features/history/history_project_actions.js": "9df53266daf50cc8a7e851a714e69f20e97ddcc32cef08d37178b1715c9b149f",
+        "/static/js/features/history/history_project_actions.js": "44fa2305c453ce6b51d4d03037d902400028a9ab39b2a040eafaf50bc260829a",
         "/static/js/features/history/history_recall.js": "b2184d9dbab7d0dc4b0e5e55eeb03214ff49e243a50a3cce07c897aaf585695e",
         "/static/js/features/history/history_recall_bridge.js": "bf6fbf8d39b7df1684736a952c19c6a3fd3414e3676f26cdc35c83fccae2243c",
         "/static/js/features/history/history_restore.js": "7cb80091d2db4e68ecc9c4d6be2f34a53b79462ac7803243a1439acf37850d4f",
@@ -226,16 +208,16 @@
         "/static/js/features/history/history_rows.js": "e592af0f40bb5ec41383e59f1de69367c78ff0602bfd57382ce78c37d6cfb5da",
         "/static/js/features/history/history_run_modal_state_bridge.js": "554fb1fb6aada043096ef9f7d1e2ee602a10e051efa11d57fd6ec138b924e53a",
         "/static/js/features/history/history_search.js": "192b13c11349d3280e2d47f013ec0c9e5f5de6923102dbcb74024242e69b7731",
-        "/static/js/features/mobile/mobile_menu_actions.js": "a75f66889a9f18bd2dcefa67d2dc818d980beb01fd138a9e52ed6bd039262abe",
+        "/static/js/features/mobile/mobile_menu_actions.js": "77267abc716c8e4aeda682793c563d07c9da5065f6ca1f842b0691b51646bae1",
         "/static/js/features/mobile/mobile_shell_layout.js": "b7de0571adee0732a391efd7fc34b7b42ecf791e129a572d84be64279e73af08",
         "/static/js/features/mobile/mobile_shell_layout_bridge.js": "6383e987b619a9123c70a486087517a25bf701f3b2730ca25db4c9dbc2f6ff45",
         "/static/js/features/preferences/preferences.js": "e3c26612577cefcb017abf42998fd7a6c797a33bb3b77b24a39ca66e44ed03ad",
         "/static/js/features/preferences/secrets_bridge.js": "a995c3f014a9d1faca34fdd832864be9275906e9902c87d116ebb198e8ac3187",
         "/static/js/features/preferences/session_token_bridge.js": "52ee5714f4c083282586c33a6a7f8b2cd76e1994a109b315f1ec28b8383a61dc",
-        "/static/js/features/projects/project_active_context.js": "16112bb5aa70ccb3809f5f447ee99c1d6f0158039914b18ca6c60a3bf08765f4",
+        "/static/js/features/projects/project_active_context.js": "87c7b5e0e942070e4844465bab7f37e59c88f3d8e165b30c91c6a4552c6bffac",
         "/static/js/features/projects/project_context_bridge.js": "ffe4cce6a2eb89a49c619c24eea068bdd474d81dc25da6e8875f6c899c3aaafc",
         "/static/js/features/projects/project_hud_bridge.js": "fb9deee1aceac08c49a27e5807ca8fe5e3f9b76de57d47babcc62a7a846fa6e0",
-        "/static/js/features/projects/project_shared_ui.js": "5c6ba92915b9519ae443938ce5ee998df8289b83c2573fc9677b818dfc95b4c7",
+        "/static/js/features/projects/project_shared_ui.js": "547ad943259dadc69c600a7de9821bc8773d5d883f7e62122ef6060832208ad8",
         "/static/js/features/projects/project_target_validation.js": "43b9ae48db09737675faa3344c7e5970b02fd87620d3d699d71a4de875e4c815",
         "/static/js/features/projects/project_workspace_constants.js": "0ea415da200720bbf726598f3cbe730ce6a9cb0ea4c8cfb3c8eac37981b08849",
         "/static/js/features/projects/project_workspace_state.js": "40ab3c8d376b7524ccb2bc8bc8ad0f5136814faf00a2bf2b15644e4a960baeca",
@@ -243,40 +225,39 @@
         "/static/js/features/runner/runner_active_restore.js": "755100ad6ee8cd6545e934b101bf22410efd24f8ffc9109b952db35bd62bb805",
         "/static/js/features/runner/runner_persistence.js": "a7462532501962db86dfbc0e67fc65d1edeef7f4e9c18e71189e29c1b149a0d2",
         "/static/js/features/runner/runner_workspace.js": "6709aca0d250ee71fc6c5e4704b7539084a04489d129ace2ca28bc451534c2f5",
-        "/static/js/features/shortcuts/global_shortcuts.js": "a87b9080229c4b6504d235b0e0d05e21fde2d01656db5196a33353a00546b3d6",
+        "/static/js/features/shortcuts/global_shortcuts.js": "ff2ebf4a0711d03b00324c2f91ec9f341c9bdb70b799be8c5507d6f5d6800b0e",
         "/static/js/features/shortcuts/shortcuts_key_handler.js": "c9111969497d74609e1577fcdbca48b10c89835e865f6846010db73095a118f9",
         "/static/js/features/tabs/share_redaction_bridge.js": "e2116de34da1bfea363f61c395fd7b5c9b23e3ca0fe297bc9975b0a0e9267f69",
         "/static/js/features/tabs/tab_close_lifecycle.js": "07149e22bce17d0e41aa582eb15ff9fbf97daa43ba468dfb928e16e9ae912ae1",
         "/static/js/features/tabs/tab_drag_reorder.js": "c49170769487da18dae47d4c5c8b9a11f0be6d8076afb73600d26bdba27a4b56",
-        "/static/js/features/tabs/tab_exports.js": "ec04e6f9667397b077f254206020f926ef0d448320ee5100ec20c13494b4cc75",
+        "/static/js/features/tabs/tab_exports.js": "c07502feedf1ee8b7a8e74c1746226109c1f2778f1cca111e284f14c5ddf25ce",
         "/static/js/features/tabs/tab_session_state.js": "ea8d8753d75b68b33551293972e6c7d1dd898ce22ff67a0b32f246f9c0ad6537",
-        "/static/js/features/team_scope.js": "dec960e19c26be27790205d76e649238b848e5f55dc374f9d5274da04ee330e3",
+        "/static/js/features/team_scope.js": "b4c6364de65f7fe32bff6daf22fbbb693af93d74158a622178c42da1687be334",
         "/static/js/features/terminal/composer_controller.js": "391a5fd14b534283b4ec40ba435b33ed55e87b799bb412dfa71bcc493d6e1246",
         "/static/js/features/terminal/composer_editing.js": "8c720c63992386876b280191bfc41d7678e251da5b577e23315dae68021fb68c",
         "/static/js/features/terminal/composer_prompt_bridge.js": "19af379513d2348e20efcd785cbfc5bd3ef3d44103e7cb00f12ca270a69a8807",
         "/static/js/features/terminal/local_commands.js": "d41ed6998509b07fcc6b9bac9a5fe7d653f4a67255dce266fcc6f806f6e1640e",
         "/static/js/features/terminal/mobile_composer_keyboard.js": "6f96b0ff50e566fb02a5cd587cc8232e0eab0895bb9298c8841f1eff27e98af2",
         "/static/js/features/theme/theme.js": "f2109fb1ceb9fb4074d422437a1f767813137dbd6ec421ed782c9b5b64b853ea",
-        "/static/js/features/tour/tour_cli.js": "51145ceacad9771f4d2d5cd17337dbed15882e208b6cfc8d4decd3e944a3434a",
+        "/static/js/features/tour/tour_cli_bridge.js": "8cc1032180b477db113c32d73d0c09503dc990ddcf8b5f6fb6258b097ad5ec5b",
         "/static/js/features/workflows/workflows_bridge.js": "459a6a0260ba2d213e920153d0e48ee73e1488b1a80062c05eb7df44616b33d3",
-        "/static/js/features/workspace/workspace_autocomplete_cache.js": "6ba258ce0e7f3432e65dfd902146fab61b04bfee7312f1a37ae72719d8536c90",
-        "/static/js/features/workspace/workspace_drag_drop.js": "67c4aec6a489d99d2138685c12e3673456856a3fce03babc8218321613f5490a",
-        "/static/js/features/workspace/workspace_viewer_formats.js": "0f2803d919cb1721ba87194977ae835918ec163f493c265edeebeec61fe91000",
+        "/static/js/features/workspace/workspace_autocomplete_cache.js": "942cf5428762220e938714bb5aa791c0634fa05e5b0680b38bb4fd6c37731f75",
         "/static/js/history.js": "de5f54cf9ecc03eda565a8a93454d7b8b54a03928c0ff0e41bb93ef1e0671c71",
         "/static/js/mobile_chrome.js": "495b81ae2c0dce6efb7aba6e7768f878bc284b827da135e51feaa3548ce349e3",
         "/static/js/output.js": "ba9772b62e9d7730af0ebf7303074d5e9e1ae918a65e567940bc0319137d3f88",
         "/static/js/output_bridge.js": "aef27b599c599ccb04edf720a376940fdd57607151e5b19b0afb438ea22ff310",
         "/static/js/output_mode_bridge.js": "97096f1c2e6bdf1ce8e0fe1ee37b9e04707a89542f70d3d8bbc66311da747dcc",
-        "/static/js/runner.js": "b72f91d7c4c8f1f31f5a48e2d3c33cfebcc6bc9f81cd7e7dfc8d8a9a70f3d406",
+        "/static/js/runner.js": "43a3d1dec72832ba2969f526c410fc5ce9082285ae9ea8dbfc888a3c6ce8e419",
         "/static/js/runner_bridge.js": "49f013e7e36ce00e552761c2ec4f6ac69752bb83cb41543a5ad8c7565814c7a7",
         "/static/js/runtime_bridge.js": "3aa4129418b507932bf88fd9fe019bfdf3321a8134ed550a24ac90ee4dc2014d",
         "/static/js/search.js": "bb44eda4d76daa312c75fc2c6001b64ef6f030a6a1031dce7b11cd9d8989e59e",
         "/static/js/search_bridge.js": "bf821586eafde47b804636feb6a9e5f0136e5e97941c19d57bb3e48491e6a9c7",
-        "/static/js/session.js": "c916cdb2e2c2238e59de113b25bb101b8010ba1fd2048ca442838357dbcf3c4d",
-        "/static/js/shell_bootstrap.entry.js": "7e3eb78421764b6950675594fbe492c6466fdcdc9efe93bd9ee92b82d3f18654",
-        "/static/js/shell_chrome.js": "1c9651aeee7bf699d5262de122549b707eef97204b73d46ac1f232b463e7816f",
+        "/static/js/session.js": "0b16b5a91199089e489d3d5cda6e4fa455325a7ee83f1d352eb8e697c8ecf3d4",
+        "/static/js/shell_bootstrap.entry.js": "34154699d13322488a575e7ab66df93ee32ae77772b901066f2980b4796262a2",
+        "/static/js/shell_chrome.js": "8ac82744e912b6716512cc94efd89afddc9b76a330f09060651ea206b1dde671",
         "/static/js/tabs.js": "ed6bceca57598f838802ae5d3906abde0e15539f1a7a8adf68aa56671f2eca02",
         "/static/js/tabs_bridge.js": "5815b1a78098016b2bf8c3e4b014248d3dde29936e5ec31debc19bc88cb84be0",
+        "/static/js/ui/cleanup_reasons.js": "8a897e0b0fef17c728f41fc59a19282fd0112cf98457b7f3ad64019f415ca29f",
         "/static/js/ui/mobile_sheet.js": "88d61e7209b22c20ef7ac78ca475155b0f4bee2dea128f423e01d8a176681ca7",
         "/static/js/ui/overlay_actions_bridge.js": "8f6d90a7f8cc971fd02b4489feedc4e88bd2d6c2be4f28d62c7b22d349a37ad4",
         "/static/js/ui/ui_action_sheet.js": "325677c095cd8fa0ab00fc14c4b8c5122321c6b20e9edf158d20c784501ab558",
@@ -291,177 +272,54 @@
         "/static/js/ui/ui_tab_strip_edges.js": "e0c9a9e63426570c08b85825088b3203071cfa1afbbce5c9f462833360d0041b",
         "/static/js/welcome.js": "e513b74d6963d49b314ba6bb40fe6175693ea2569477bea8dd1fd12ba8f2fc7b",
         "/static/js/welcome_bridge.js": "f3a3a21500365b452cfe723d52b28b4dc825974189226d23ea7494653bb18640",
-        "/static/js/workspace.js": "7f4fc9e12bf434d5a6422f5a74a84dda9a94de9d2d734b93d815e089d5132103",
-        "/static/js/workspace_bridge.js": "f47a998bdcdad786be9b4cf156cb23f24077a34dbff53ea0302a0bceb6946afe"
+        "/static/js/workspace_bridge.js": "8b0f5397cbc1d66037be7ec1180c2b17add42f03e47681d367cd303840911349"
       }
     },
     "permalink": {
       "type": "esm",
-      "path": "/static/build/permalink.091b493c3b1c.js",
-      "hash": "091b493c3b1caf7c8385887537c32e73e09fbb895ac7e182f90fb5d4adb35233",
+      "path": "/static/build/permalink.467c05ae1596.js",
+      "hash": "467c05ae1596e788a53a8dd7370948cb337df34f99529cc67167bb85aed33fcf",
       "sources": [
-        "/static/js/autocomplete.js",
-        "/static/js/core/app_preferences_core.js",
-        "/static/js/core/autocomplete_core.js",
         "/static/js/core/config.js",
-        "/static/js/core/dom.js",
-        "/static/js/core/history_core.js",
         "/static/js/core/lazy_assets.js",
         "/static/js/core/output_core.js",
         "/static/js/core/run_output_model.js",
-        "/static/js/core/runner_core.js",
-        "/static/js/core/search_core.js",
-        "/static/js/core/session_core.js",
         "/static/js/core/state.js",
         "/static/js/core/utils.js",
-        "/static/js/core/workspace_core.js",
-        "/static/js/export_html.js",
+        "/static/js/export_html_bridge.js",
         "/static/js/features/atlas/atlas_bridge.js",
-        "/static/js/features/autocomplete/runtime_context.js",
-        "/static/js/features/autocomplete/suggestions.js",
+        "/static/js/features/atlas/atlas_mobile_bridge.js",
         "/static/js/features/command-registry/command_registry_bridge.js",
-        "/static/js/features/command-registry/faq_helpers.js",
-        "/static/js/features/history/history_actions.js",
-        "/static/js/features/history/history_panel_bridge.js",
-        "/static/js/features/history/history_recall.js",
-        "/static/js/features/history/history_recall_bridge.js",
-        "/static/js/features/history/history_restore_bridge.js",
         "/static/js/features/history/history_run_modal_state_bridge.js",
-        "/static/js/features/history/history_search.js",
-        "/static/js/features/mobile/mobile_shell_layout.js",
-        "/static/js/features/mobile/mobile_shell_layout_bridge.js",
-        "/static/js/features/preferences/preferences.js",
         "/static/js/features/preferences/secrets_bridge.js",
-        "/static/js/features/preferences/session_token_bridge.js",
-        "/static/js/features/projects/project_context_bridge.js",
-        "/static/js/features/projects/project_hud_bridge.js",
         "/static/js/features/run-comparison/history_compare_bridge.js",
-        "/static/js/features/runner/runner_active_restore.js",
-        "/static/js/features/runner/runner_persistence.js",
-        "/static/js/features/runner/runner_workspace.js",
-        "/static/js/features/tabs/share_redaction_bridge.js",
-        "/static/js/features/tabs/tab_close_lifecycle.js",
-        "/static/js/features/tabs/tab_drag_reorder.js",
-        "/static/js/features/tabs/tab_exports.js",
-        "/static/js/features/tabs/tab_session_state.js",
-        "/static/js/features/team_scope.js",
-        "/static/js/features/terminal/composer_prompt_bridge.js",
-        "/static/js/features/terminal/local_commands.js",
-        "/static/js/features/theme/theme.js",
-        "/static/js/features/tour/tour_cli.js",
         "/static/js/features/workflows/workflows_bridge.js",
-        "/static/js/features/workspace/workspace_autocomplete_cache.js",
-        "/static/js/features/workspace/workspace_viewer_formats.js",
-        "/static/js/output.js",
-        "/static/js/output_bridge.js",
-        "/static/js/output_mode_bridge.js",
         "/static/js/permalink.entry.js",
         "/static/js/permalink.js",
-        "/static/js/runner.js",
-        "/static/js/runner_bridge.js",
         "/static/js/runtime_bridge.js",
-        "/static/js/search.js",
-        "/static/js/search_bridge.js",
-        "/static/js/session.js",
-        "/static/js/tabs.js",
-        "/static/js/tabs_bridge.js",
-        "/static/js/ui/mobile_sheet.js",
-        "/static/js/ui/overlay_actions_bridge.js",
-        "/static/js/ui/ui_action_sheet.js",
-        "/static/js/ui/ui_confirm.js",
-        "/static/js/ui/ui_disclosure.js",
-        "/static/js/ui/ui_dismissible.js",
-        "/static/js/ui/ui_entity_metadata.js",
-        "/static/js/ui/ui_focus_trap.js",
-        "/static/js/ui/ui_helpers.js",
         "/static/js/ui/ui_outside_click.js",
-        "/static/js/ui/ui_pressable.js",
-        "/static/js/welcome.js",
-        "/static/js/welcome_bridge.js",
-        "/static/js/workspace.js",
         "/static/js/workspace_bridge.js"
       ],
       "source_hashes": {
-        "/static/js/autocomplete.js": "f8c0d38d92d6f5297173754b5ff9ef04dd2a075f528f33e140e647a7c3d8f283",
-        "/static/js/core/app_preferences_core.js": "181e13e894a14f5550f30cb378623a1ab9f1a8c73a4a7acbd3ddc53d0af3248c",
-        "/static/js/core/autocomplete_core.js": "89e59ff0d529f4ac5d5a81351f6d810f63ff65fb3f9698b460751a160288f6da",
         "/static/js/core/config.js": "a3ecbd8f32308c97f503e649bf5f6a6f9c5693fef67542502be4f24407819842",
-        "/static/js/core/dom.js": "303764c44d702635cb1a915c65f9b3bc59166bc9f29f5d735ecbd3ffa1c457f7",
-        "/static/js/core/history_core.js": "a8932a20e826531c509708536ab01b307734a5c30e3b58c1d01e32cdbd69dd14",
-        "/static/js/core/lazy_assets.js": "43e14c2e7959c25682017fa00b0c06b47ac412d04e0e6f268bb74c3d84625636",
+        "/static/js/core/lazy_assets.js": "dd5b80741525567766d511073927539d92044ac6f58cc5ebadeead900f03bf5e",
         "/static/js/core/output_core.js": "8e6cff28237cd6970b5586689a7e52beb2e2998b154b55a662658afd05b74826",
         "/static/js/core/run_output_model.js": "6b28a40f5cf43af52b063eb1ee9a3bf89c1ae51f4dd7468dd2668fdc2b7af5b6",
-        "/static/js/core/runner_core.js": "3f0305efe867b17ebd4b15858adc54e6b24cada71939d2b51cd822a88d7ff39e",
-        "/static/js/core/search_core.js": "1e7ca9c4d9cdb6b4aabcc21623c872a66a838a43b55b0dbc9a61b696bed9241d",
-        "/static/js/core/session_core.js": "ad35e7320f99ad0d8b91b48b6b2e2c76b2d38a459be300b3bfce7c78d2738fb0",
         "/static/js/core/state.js": "33dbbf81762c0efd398e8f59a28bbc73930d43f342f9cbaac59d8b7c891603a2",
         "/static/js/core/utils.js": "125510b48dfa6c561e63a1f458b4326a43387aa7103697e363fceef226dd19ec",
-        "/static/js/core/workspace_core.js": "5ce3d6396834d05c465ff8378b0eb4adfacaf68cbb87687ad039d8b53805eb7b",
-        "/static/js/export_html.js": "c6644d0f4a2c1b6f6989b5f15c247e1f00247f7f0d77e29e5ec6f6e2d0c06b3e",
-        "/static/js/features/atlas/atlas_bridge.js": "5eb4ef144120e6caa45a07a4c108a03541b89214320c0121141b29e7cb0d728d",
-        "/static/js/features/autocomplete/runtime_context.js": "734e3867385640fb26f1b5abafad907d79e2b3188e1f317dedc303806d71314d",
-        "/static/js/features/autocomplete/suggestions.js": "6e59894de1733e029a4400148348aedfb61e2a2808b1e7a6c7d894d0b0a29d20",
+        "/static/js/export_html_bridge.js": "2e6cda74060824a0606cf2ef422bf6166b1ccb39a5a503d3873b3b2d39257e2f",
+        "/static/js/features/atlas/atlas_bridge.js": "dbe08bfa7f10e2d725d4a74bd36bd532177208d878e3df7696e8ff8028cb4605",
+        "/static/js/features/atlas/atlas_mobile_bridge.js": "a67298bd661ce99736f42275f83e082b75bfac58fbd33e53c2f5cc2136aa257e",
         "/static/js/features/command-registry/command_registry_bridge.js": "16cce2515d2738287432c06f14d0addf3dcc6ab550e1ae49bfbaaf4c83bb5e9a",
-        "/static/js/features/command-registry/faq_helpers.js": "1f0e4d321cd5e7d98371e2621fe197819d94fe721697e8329b6c9b8b9abd960d",
-        "/static/js/features/history/history_actions.js": "9ca6d0a55c2c4e4c1c83dfb2d6fd316b717e025ab0e39d2b9d321abb2405009b",
-        "/static/js/features/history/history_panel_bridge.js": "6f23bde0e5a292d8877386e8e84298bdd73036d073c88450ca1b9ad3523cddca",
-        "/static/js/features/history/history_recall.js": "b2184d9dbab7d0dc4b0e5e55eeb03214ff49e243a50a3cce07c897aaf585695e",
-        "/static/js/features/history/history_recall_bridge.js": "bf6fbf8d39b7df1684736a952c19c6a3fd3414e3676f26cdc35c83fccae2243c",
-        "/static/js/features/history/history_restore_bridge.js": "edcd1a1d0f535f4ea89dd8e64356de2cd450ae45b0dbea3d16d66eaabacb62a8",
         "/static/js/features/history/history_run_modal_state_bridge.js": "554fb1fb6aada043096ef9f7d1e2ee602a10e051efa11d57fd6ec138b924e53a",
-        "/static/js/features/history/history_search.js": "192b13c11349d3280e2d47f013ec0c9e5f5de6923102dbcb74024242e69b7731",
-        "/static/js/features/mobile/mobile_shell_layout.js": "b7de0571adee0732a391efd7fc34b7b42ecf791e129a572d84be64279e73af08",
-        "/static/js/features/mobile/mobile_shell_layout_bridge.js": "6383e987b619a9123c70a486087517a25bf701f3b2730ca25db4c9dbc2f6ff45",
-        "/static/js/features/preferences/preferences.js": "e3c26612577cefcb017abf42998fd7a6c797a33bb3b77b24a39ca66e44ed03ad",
         "/static/js/features/preferences/secrets_bridge.js": "a995c3f014a9d1faca34fdd832864be9275906e9902c87d116ebb198e8ac3187",
-        "/static/js/features/preferences/session_token_bridge.js": "52ee5714f4c083282586c33a6a7f8b2cd76e1994a109b315f1ec28b8383a61dc",
-        "/static/js/features/projects/project_context_bridge.js": "ffe4cce6a2eb89a49c619c24eea068bdd474d81dc25da6e8875f6c899c3aaafc",
-        "/static/js/features/projects/project_hud_bridge.js": "fb9deee1aceac08c49a27e5807ca8fe5e3f9b76de57d47babcc62a7a846fa6e0",
         "/static/js/features/run-comparison/history_compare_bridge.js": "e6837bfe56e6bd41c413a1448c3babeac80aa3f8685bf5a897c33419fdb9cfb8",
-        "/static/js/features/runner/runner_active_restore.js": "755100ad6ee8cd6545e934b101bf22410efd24f8ffc9109b952db35bd62bb805",
-        "/static/js/features/runner/runner_persistence.js": "a7462532501962db86dfbc0e67fc65d1edeef7f4e9c18e71189e29c1b149a0d2",
-        "/static/js/features/runner/runner_workspace.js": "6709aca0d250ee71fc6c5e4704b7539084a04489d129ace2ca28bc451534c2f5",
-        "/static/js/features/tabs/share_redaction_bridge.js": "e2116de34da1bfea363f61c395fd7b5c9b23e3ca0fe297bc9975b0a0e9267f69",
-        "/static/js/features/tabs/tab_close_lifecycle.js": "07149e22bce17d0e41aa582eb15ff9fbf97daa43ba468dfb928e16e9ae912ae1",
-        "/static/js/features/tabs/tab_drag_reorder.js": "c49170769487da18dae47d4c5c8b9a11f0be6d8076afb73600d26bdba27a4b56",
-        "/static/js/features/tabs/tab_exports.js": "ec04e6f9667397b077f254206020f926ef0d448320ee5100ec20c13494b4cc75",
-        "/static/js/features/tabs/tab_session_state.js": "ea8d8753d75b68b33551293972e6c7d1dd898ce22ff67a0b32f246f9c0ad6537",
-        "/static/js/features/team_scope.js": "dec960e19c26be27790205d76e649238b848e5f55dc374f9d5274da04ee330e3",
-        "/static/js/features/terminal/composer_prompt_bridge.js": "19af379513d2348e20efcd785cbfc5bd3ef3d44103e7cb00f12ca270a69a8807",
-        "/static/js/features/terminal/local_commands.js": "d41ed6998509b07fcc6b9bac9a5fe7d653f4a67255dce266fcc6f806f6e1640e",
-        "/static/js/features/theme/theme.js": "f2109fb1ceb9fb4074d422437a1f767813137dbd6ec421ed782c9b5b64b853ea",
-        "/static/js/features/tour/tour_cli.js": "51145ceacad9771f4d2d5cd17337dbed15882e208b6cfc8d4decd3e944a3434a",
         "/static/js/features/workflows/workflows_bridge.js": "459a6a0260ba2d213e920153d0e48ee73e1488b1a80062c05eb7df44616b33d3",
-        "/static/js/features/workspace/workspace_autocomplete_cache.js": "6ba258ce0e7f3432e65dfd902146fab61b04bfee7312f1a37ae72719d8536c90",
-        "/static/js/features/workspace/workspace_viewer_formats.js": "0f2803d919cb1721ba87194977ae835918ec163f493c265edeebeec61fe91000",
-        "/static/js/output.js": "ba9772b62e9d7730af0ebf7303074d5e9e1ae918a65e567940bc0319137d3f88",
-        "/static/js/output_bridge.js": "aef27b599c599ccb04edf720a376940fdd57607151e5b19b0afb438ea22ff310",
-        "/static/js/output_mode_bridge.js": "97096f1c2e6bdf1ce8e0fe1ee37b9e04707a89542f70d3d8bbc66311da747dcc",
-        "/static/js/permalink.entry.js": "65158487b8637dc67e6a515db7c1c4eb663b0107de2c523a412eab267acf9d72",
-        "/static/js/permalink.js": "2681d1cd06efeed61cb5bc7699483310f5d2fba77c523e2307489438db763c56",
-        "/static/js/runner.js": "b72f91d7c4c8f1f31f5a48e2d3c33cfebcc6bc9f81cd7e7dfc8d8a9a70f3d406",
-        "/static/js/runner_bridge.js": "49f013e7e36ce00e552761c2ec4f6ac69752bb83cb41543a5ad8c7565814c7a7",
+        "/static/js/permalink.entry.js": "83001d8199af1642b31c90b74e69ee868f57aefbc7e7abe970382c75d624f828",
+        "/static/js/permalink.js": "388499a70bf2779c1104b757c15419f8430e7706fde05c7fc0d0037090f11d5d",
         "/static/js/runtime_bridge.js": "3aa4129418b507932bf88fd9fe019bfdf3321a8134ed550a24ac90ee4dc2014d",
-        "/static/js/search.js": "bb44eda4d76daa312c75fc2c6001b64ef6f030a6a1031dce7b11cd9d8989e59e",
-        "/static/js/search_bridge.js": "bf821586eafde47b804636feb6a9e5f0136e5e97941c19d57bb3e48491e6a9c7",
-        "/static/js/session.js": "c916cdb2e2c2238e59de113b25bb101b8010ba1fd2048ca442838357dbcf3c4d",
-        "/static/js/tabs.js": "ed6bceca57598f838802ae5d3906abde0e15539f1a7a8adf68aa56671f2eca02",
-        "/static/js/tabs_bridge.js": "5815b1a78098016b2bf8c3e4b014248d3dde29936e5ec31debc19bc88cb84be0",
-        "/static/js/ui/mobile_sheet.js": "88d61e7209b22c20ef7ac78ca475155b0f4bee2dea128f423e01d8a176681ca7",
-        "/static/js/ui/overlay_actions_bridge.js": "8f6d90a7f8cc971fd02b4489feedc4e88bd2d6c2be4f28d62c7b22d349a37ad4",
-        "/static/js/ui/ui_action_sheet.js": "325677c095cd8fa0ab00fc14c4b8c5122321c6b20e9edf158d20c784501ab558",
-        "/static/js/ui/ui_confirm.js": "ffed1fc0acad9a9dee3c8a6ec25a837c8fd109659cf5302223e30e801fa6d92b",
-        "/static/js/ui/ui_disclosure.js": "0bd9b1c015e8334d1e988b9bc4370f9c4be9646b50d41ed98b2aa834b7a496ef",
-        "/static/js/ui/ui_dismissible.js": "645df512dce3aa960d07bed271c1d4e9047b93f14950660be497193bfe4cfadf",
-        "/static/js/ui/ui_entity_metadata.js": "48a342fbee543f36be731046c8e29cdaa2f615db8a0c6e9b5afdb4432e6ad563",
-        "/static/js/ui/ui_focus_trap.js": "23f4a852dd716fb92fc1f303ae3f52a31632fdec34439e2d5692724c7d43fea4",
-        "/static/js/ui/ui_helpers.js": "a1ad977b0643a488a9d24e6635ee2a31506a5893f3c1fad6a6b9fbf708e28016",
         "/static/js/ui/ui_outside_click.js": "f714f90f7d5329a8316fa93109323b2c5d3a194d9b95c0d483f52eaec27ef3d0",
-        "/static/js/ui/ui_pressable.js": "69c3e755141d8581589e8672a3be2aa2b0d8b178cab7bca4c6b794d3246a968a",
-        "/static/js/welcome.js": "e513b74d6963d49b314ba6bb40fe6175693ea2569477bea8dd1fd12ba8f2fc7b",
-        "/static/js/welcome_bridge.js": "f3a3a21500365b452cfe723d52b28b4dc825974189226d23ea7494653bb18640",
-        "/static/js/workspace.js": "7f4fc9e12bf434d5a6422f5a74a84dda9a94de9d2d734b93d815e089d5132103",
-        "/static/js/workspace_bridge.js": "f47a998bdcdad786be9b4cf156cb23f24077a34dbff53ea0302a0bceb6946afe"
+        "/static/js/workspace_bridge.js": "8b0f5397cbc1d66037be7ec1180c2b17add42f03e47681d367cd303840911349"
       },
       "entries": [
         "/static/js/permalink.entry.js"
@@ -469,233 +327,293 @@
     }
   },
   "static_assets": {
+    "/static/js/export_html.js": {
+      "path": "/static/build/static-export-html.654c9e4dc002.js",
+      "hash": "bb928f7314e831924359e40f0baeb00e00f4b466ffce651fb3d986ac676e4201"
+    },
     "/static/js/export_pdf.js": {
-      "path": "/static/build/static-export-pdf.829e70eabea0.js",
-      "hash": "73693a9d3c46aa82186761251f8ae8c0b339e230d48e2abcec2400d54dbcc1a6"
+      "path": "/static/build/static-export-pdf.01e8f8c941db.js",
+      "hash": "f68839cca009d22f98be406d352b9852db2d9788d72f9f3f1258e2b5939e669b"
     },
     "/static/js/features/atlas/atlas_entity_detail.js": {
-      "path": "/static/build/static-atlas-entity-detail.46c5fe86afcc.js",
-      "hash": "1d3ae171103df432f0110ce1d4722b37c6ac7ddebe1449c8fcf543ece1d44d17"
+      "path": "/static/build/static-atlas-entity-detail.2942363c3b6d.js",
+      "hash": "bf8c3cca04e6fa9276ebcc5e594149105f0f8dbc8b58b84dc522791546f79283"
     },
     "/static/js/features/atlas/atlas_entity_row.js": {
-      "path": "/static/build/static-atlas-entity-row.a5abbc664a6a.js",
-      "hash": "eec81e5b6331ca0afb313bfde012322a79522b5da2c4811f69cbefd636a939c6"
+      "path": "/static/build/static-atlas-entity-row.8cd9908a2ff4.js",
+      "hash": "cfb26c9d1302ea024b6db62896d81c366a309599280e74f527bade424cf7d0e1"
     },
     "/static/js/features/atlas/atlas_mobile.js": {
-      "path": "/static/build/static-atlas-mobile.d19ec70e34f9.js",
-      "hash": "ae231da339dffd18ca357dd30f42eb712e3dcdf841e899ef119496d685fd03b2"
-    },
-    "/static/js/features/atlas/atlas_mobile_bridge.js": {
-      "path": "/static/build/static-atlas-mobile-bridge.68d660b80c55.js",
-      "hash": "8f8a889c4ca1686f46e138102e5d53c09e4681952933261143bb0d59c06cd8bf"
+      "path": "/static/build/static-atlas-mobile.61171fa08626.js",
+      "hash": "310d448b0993541652b37116b467a9d02322662a1167b6f9c176a32521f135e8"
     },
     "/static/js/features/atlas/atlas_overlay.js": {
-      "path": "/static/build/static-atlas-overlay.42541f17948a.js",
-      "hash": "8cbd6796337f5624976e4f62d9845f2f0c60048ca32a6c15576a01fbbc2fdbc4"
+      "path": "/static/build/static-atlas-overlay.93a35686e565.js",
+      "hash": "5162afa484976d1e2bc267b0eb55aa1e25f2ce2ef090edbd4685834b62e7b774"
     },
     "/static/js/features/atlas/atlas_tabs.js": {
-      "path": "/static/build/static-atlas-tabs.93b6a35ff4c9.js",
-      "hash": "bff56544ffdaebb2665d16f887684cbed68958b972675a1c966334c03f7e69b5"
+      "path": "/static/build/static-atlas-tabs.30f7b73fe7a1.js",
+      "hash": "7c11f11eb901b55946d7bca372b97620cceb3e2a7dc793088b259839446a0a06"
     },
     "/static/js/features/command-registry/command_registry.js": {
-      "path": "/static/build/static-command-registry.830be109a443.js",
-      "hash": "32c35b3667473c865d352e15e7dded97f86d1a14adf78088b883454688d30ad2"
+      "path": "/static/build/static-command-registry.196a8b759eff.js",
+      "hash": "3b0820da89743cb534837c24f1755318a5ab51f5d7bd0d23ee9a331205097653"
+    },
+    "/static/js/features/findings/finding_triage_editor.js": {
+      "path": "/static/build/static-finding-triage-editor.807cec95e4d6.js",
+      "hash": "2d8d7c3e0bac8bdabb4e1405972e2093ee62f093fd6122109728b56dc7c8b3cd"
+    },
+    "/static/js/features/findings/findings_board_bridge.js": {
+      "path": "/static/build/static-findings-board-bridge.c35c63f747c4.js",
+      "hash": "10428b90f76b5fe6eccaad9ec13effbbbb9d9d4188896f727af741cf8a02a14c"
     },
     "/static/js/features/findings/findings_board_modal.js": {
-      "path": "/static/build/static-findings-board-modal.55564d7355e8.js",
-      "hash": "8d2390115cc6cbcad681a5a95588820db5b5e3f40b053cdab7b3a3f58238233b"
+      "path": "/static/build/static-findings-board-modal.b2608914d04d.js",
+      "hash": "edc6cef3c063687631acac29e56894b45d9efe75e7f3ebef9bdf0eb1b9d4926f"
     },
     "/static/js/features/history/history_run_details.js": {
-      "path": "/static/build/static-history-run-details.7bf05d7d5645.js",
-      "hash": "543973d7ee00e42c31de75d1c358839eb5899bc93416b54b52ec69376288ac22"
+      "path": "/static/build/static-history-run-details.7c2bcd0a287f.js",
+      "hash": "028cd4f624ed5d1558470dac31b6f91fe92fbd70d84c752d9de5dfe9688aa177"
     },
     "/static/js/features/mobile/mobile_running_indicator.js": {
-      "path": "/static/build/static-mobile-running-indicator.8d9ca4f6a399.js",
-      "hash": "58ed3edd258c9754019a6fea9f0a20d55de5cbb10fdecc199d5405903e90647c"
+      "path": "/static/build/static-mobile-running-indicator.b1cc6b62ae08.js",
+      "hash": "0824614f2282aa6ed294d3ce4c8a435e0ad7d87540e7753e5ac794e92a4e16db"
     },
     "/static/js/features/preferences/notification_channels.js": {
-      "path": "/static/build/static-notification-channels.2b9587c95e0e.js",
-      "hash": "2b6ed86e9fcc5b40504d3ebf6ecec5eb83b3021f638166e8ace625664dd5bac4"
+      "path": "/static/build/static-notification-channels.54ed50c1aa29.js",
+      "hash": "bc3007ba35d8da51de37859d2032a416dac6e938520bd920f4aa56042a9805c1"
     },
     "/static/js/features/preferences/secrets_panel.js": {
-      "path": "/static/build/static-secrets-panel.fb0b838ed149.js",
-      "hash": "f7aa6498e0939f3cda926d407b25070b03904efd5c07f2cad423332eeedb1579"
+      "path": "/static/build/static-secrets-panel.9cf526a76d41.js",
+      "hash": "8341f7626a5f620eaa544f18cec56b388d288e943c3bc64259a23cc924244f78"
     },
     "/static/js/features/preferences/session_token_controls.js": {
-      "path": "/static/build/static-session-token-controls.de374c77448d.js",
-      "hash": "3da2f5258117637ea1d5ccf7bbcd4a20be1eb5bcff6c7713e6d1fbbac343bbde"
+      "path": "/static/build/static-session-token-controls.7f893d406bc0.js",
+      "hash": "7eda8649247d23075ca1239c99c137c51733cac467e5c457179ccfdc18600698"
     },
     "/static/js/features/preferences/teams_panel.js": {
-      "path": "/static/build/static-teams-panel.a32dbf10c76a.js",
-      "hash": "e1f5631311e0f6b3706e688b2bd3371f99be1a8603f5e86c210be865fa39959f"
+      "path": "/static/build/static-teams-panel.a09762af70b8.js",
+      "hash": "9378400df00ecaaa5951b8ed6931fe709099c7fe0824d7b7cd340adc673405f7"
     },
     "/static/js/features/projects/project_activity.js": {
-      "path": "/static/build/static-project-activity.72add8dc776e.js",
-      "hash": "ea61875544dae64a9923051ffd7488fd6f386b4bab18b382d144013abc4f2c4d"
+      "path": "/static/build/static-project-activity.5e5838b0b115.js",
+      "hash": "b5c9e95e8729ecea5b59b2eb77aaf1fb35c98e76a0e93cb52b5fa46fc00e5a44"
     },
     "/static/js/features/projects/project_artifacts.js": {
-      "path": "/static/build/static-project-artifacts.45d4b1b322d9.js",
-      "hash": "0ec0e6767079d662831691542cd537129dd77c9dc501dbf471528a2827c42f91"
+      "path": "/static/build/static-project-artifacts.6cb7e11e2c24.js",
+      "hash": "cfe88b56bc712ad85b6f5ea88fcb78878b12ee775c9435cf974db8ddc0747903"
     },
     "/static/js/features/projects/project_details.js": {
-      "path": "/static/build/static-project-details.4c2cc5eba16f.js",
-      "hash": "4c2cc5eba16f3b0e6f565c4e45b0c84e6311216485133427145ebc375bcc7afc"
+      "path": "/static/build/static-project-details.c05bb55f6102.js",
+      "hash": "90aba13678298840ff2b844def714c1471ecd970f5ab9268a3ac150bbd61b065"
     },
     "/static/js/features/projects/project_entities.js": {
-      "path": "/static/build/static-project-entities.d0a1682585ba.js",
-      "hash": "0fbfbe350f6bc172207878189b6b34e191550dc67c7b02a74650076f54dfa8a7"
+      "path": "/static/build/static-project-entities.3e275dbe2a02.js",
+      "hash": "5670c70c78e6f1cd2212894477531da9470fc869f7f9fe696408932e4abaf61a"
     },
     "/static/js/features/projects/project_entity_editor.js": {
-      "path": "/static/build/static-project-entity-editor.9307c52daec4.js",
-      "hash": "9307c52daec496322ef6b29403640ab50d7e92ff1a0eab88941053601c06e548"
+      "path": "/static/build/static-project-entity-editor.c361b3ecc9a8.js",
+      "hash": "e90f18ff6f6bad29967fcb1388a29f53ea5da5219dab5a08a52c1d24da018f9c"
     },
     "/static/js/features/projects/project_filters.js": {
-      "path": "/static/build/static-project-filters.83f4c2a5518b.js",
-      "hash": "83f4c2a5518bacb05e4f8d2c149e03ccad80f492ea8034616ad57f2a31ba3fd9"
+      "path": "/static/build/static-project-filters.2e9d353295c9.js",
+      "hash": "74d0064931866e9cd9c9285b4c78cc37303ec5a567c8e3221754512299126a43"
     },
     "/static/js/features/projects/project_findings.js": {
-      "path": "/static/build/static-project-findings.8aea6bed2a37.js",
-      "hash": "55d8fadbef5cb74b231957cd86e7029e7adc51b0577466648bf6e9e860cf37b5"
+      "path": "/static/build/static-project-findings.4e7778ae7980.js",
+      "hash": "fa32dce134f7c639d9cdbffd34d416a7ab3fe0ac5c785650a1595926f9405be0"
     },
     "/static/js/features/projects/project_findings_board.js": {
-      "path": "/static/build/static-project-findings-board.48c5f36c7395.js",
-      "hash": "48c5f36c7395660a57b12877b05f0e4a2e079feee31d0f20d5e4cdc5767c5744"
+      "path": "/static/build/static-project-findings-board.6794ea163d64.js",
+      "hash": "2dd60371421fcd2775725f83b399761d77bd2d07aa1c230a262e4f76b3daeb15"
     },
     "/static/js/features/projects/project_findings_data.js": {
-      "path": "/static/build/static-project-findings-data.ed8a048ee260.js",
-      "hash": "9b6c162518fd2e7f51bc929b873afff69cbfbf605b9d6e3b5588130490c5709b"
+      "path": "/static/build/static-project-findings-data.551d77b9ca80.js",
+      "hash": "d2e8d344853b836c6cdfc2f38d77e0ec691004b64fa1acf2b3f22b7c9be0c70c"
     },
     "/static/js/features/projects/project_list.js": {
-      "path": "/static/build/static-project-list.0ee4f93e0786.js",
-      "hash": "0ee4f93e07866d7dd8fb6d8d008922c75bbc2c1c00cb9ad94dce362383b831cd"
+      "path": "/static/build/static-project-list.b83e6d66105f.js",
+      "hash": "4f11ea7955f1c5cdb4ab334b427ae2b7bbe7dc76597f6e628424add26dcec899"
     },
     "/static/js/features/projects/project_mobile_compare.js": {
-      "path": "/static/build/static-project-mobile-compare.fda73331c5ee.js",
-      "hash": "bded995048304365e3e5a46c4d693d3bf030cf2076b5ba6de210620722acced1"
+      "path": "/static/build/static-project-mobile-compare.78ace9da9f80.js",
+      "hash": "e45ec2bf54e836d38462cdbc7d59e8f2f72e92d83afae047eaf73893639403a4"
     },
     "/static/js/features/projects/project_mobile_detail.js": {
-      "path": "/static/build/static-project-mobile-detail.e109e1728f53.js",
-      "hash": "211f3450889f9e3b8db91d73294b5d2cc038e920616d65b59d301cca20ac7c2d"
+      "path": "/static/build/static-project-mobile-detail.221d450ca018.js",
+      "hash": "02ddd547a94d10a8385ad3e701a1425455b91c518b431bed5a7dc90e052cb0f4"
     },
     "/static/js/features/projects/project_mobile_shell.js": {
-      "path": "/static/build/static-project-mobile-shell.c7b6c0a90095.js",
-      "hash": "c7b6c0a90095cb406649a8e789c22a09e595eb9a8f6ed238d0081f860e4c49d5"
+      "path": "/static/build/static-project-mobile-shell.9605a64748b0.js",
+      "hash": "d6c130661587c862fd0e03f4ebfbecf00650a45f7476fc0bed9c0b251582309d"
     },
     "/static/js/features/projects/project_monitoring.js": {
-      "path": "/static/build/static-project-monitoring.5a7bb5ec27ce.js",
-      "hash": "15ad4a29dfa5b01843e5adcc0288577ace1b724661a65253f3ef0ce960fae9f9"
+      "path": "/static/build/static-project-monitoring.14a24f9a32dc.js",
+      "hash": "b1cfaa554f26e1a16178f2f50223a9011d4efda87b6736fd22f2ab766b1e2a67"
     },
     "/static/js/features/projects/project_navigation.js": {
-      "path": "/static/build/static-project-navigation.da9288d1814d.js",
-      "hash": "b162b7ed2013696cb191242ba4d67fd007a412a2db2cf5007a8e5b9267d9e359"
+      "path": "/static/build/static-project-navigation.9acb235c8761.js",
+      "hash": "0a78d7aec181017e788d3ea77dfa633f44a98d45c49fc28824c27e15e94b9ca4"
     },
     "/static/js/features/projects/project_nested_sheets.js": {
-      "path": "/static/build/static-project-nested-sheets.3d2f1c7c1e3d.js",
-      "hash": "0380fbee1dcae9a69b4127fbff578e15ebb57d1d9ae329f34658ee4bc39c02d9"
+      "path": "/static/build/static-project-nested-sheets.7f704705a54a.js",
+      "hash": "300b5dcc2df4398e1128e28257bb53d6bcd6f1a66d4514f4dd43613fca6af4d2"
     },
     "/static/js/features/projects/project_overview.js": {
-      "path": "/static/build/static-project-overview.1d20c7d458cc.js",
-      "hash": "1d20c7d458cc9a4bcc641cd88dd018e7fbeef1b0489cd5f01732fc4a03a00a76"
+      "path": "/static/build/static-project-overview.de0a6551042c.js",
+      "hash": "0d81fdb0ece2a6329e8b42035f7ff39038a44f4e51eebbac522fba5033d14e43"
     },
     "/static/js/features/projects/project_packages.js": {
-      "path": "/static/build/static-project-packages.6207c2f37bb5.js",
-      "hash": "42c1eed6a892657c44e70b5e401a8476fbbeed26417e90514a79567e3f1ead28"
+      "path": "/static/build/static-project-packages.01cd209877d5.js",
+      "hash": "94079be567706a1bf1b39074f82132716b3adc14ff59f327f261acc6ee99fd14"
     },
     "/static/js/features/projects/project_report.js": {
-      "path": "/static/build/static-project-report.519f1f6c45bd.js",
-      "hash": "afaf4a46369c4db03ce17e3a3e15e642d74d435e9ab1a2f27589c6fbd9833f4f"
+      "path": "/static/build/static-project-report.28be89d679aa.js",
+      "hash": "8560e0ecb8fc7192e130fa071f61a23dada6e1893d146965217c60bdac5e7e6f"
     },
     "/static/js/features/projects/project_runs.js": {
-      "path": "/static/build/static-project-runs.3785c593b9c3.js",
-      "hash": "d34eb6e519bea3f7bece8cb29f8bab6a6ac78418122831ffe41ba190fd0466cd"
+      "path": "/static/build/static-project-runs.25d92368327a.js",
+      "hash": "107908421d508dd82e370801f88b1c0ec77615bff9de47e5badae26f819b9845"
     },
     "/static/js/features/projects/project_targets.js": {
-      "path": "/static/build/static-project-targets.d12194d53c4e.js",
-      "hash": "689aa85a8b3ef75c1ef8618155f156b773f72878cc8371a5981cfdd909c0128e"
+      "path": "/static/build/static-project-targets.30d0d9e15705.js",
+      "hash": "c86ecabc8821636ac624ad1cd061c8d48abd32b7e7bb3e045dc79da70ef4f700"
     },
     "/static/js/features/projects/project_workspace_actions.js": {
-      "path": "/static/build/static-project-workspace-actions.690b330f3b14.js",
-      "hash": "55019044af2623445f25f1e7129701806a62c86f761b30a3332e89b15f0baa89"
+      "path": "/static/build/static-project-workspace-actions.90bae758bc3b.js",
+      "hash": "e8e10d3cf06e32804a2169f1a06c9f588ed25cb8f86dad166fe6585647320768"
     },
     "/static/js/features/projects/project_workspace_bootstrap.js": {
-      "path": "/static/build/static-project-workspace-bootstrap.abc5aef77f63.js",
-      "hash": "abc5aef77f6330e3f72171e1cf20f902127f420a88bc870ca36ea6d269d4707d"
+      "path": "/static/build/static-project-workspace-bootstrap.63d762e4ddeb.js",
+      "hash": "e3a1435a958f6801b8ae4ea7c990578966014fd4794b0ce66c425c47c8c3565f"
     },
     "/static/js/features/projects/project_workspace_events.js": {
-      "path": "/static/build/static-project-workspace-events.25f27ca819bc.js",
-      "hash": "5f185f601cb6f8b50f6ee0a2b278f57f2266c6913a96b8aace6991c02e87405e"
+      "path": "/static/build/static-project-workspace-events.c79425864a32.js",
+      "hash": "9e7e5ce43e416ba08b7c8fb28a28084d638ccae87920ef122ea17fb6a64ecd1c"
     },
     "/static/js/features/projects/project_workspace_lifecycle.js": {
-      "path": "/static/build/static-project-workspace-lifecycle.eae3cd4b4fb3.js",
-      "hash": "eae3cd4b4fb3d3b4a87f042de8f458fb08e882994e58024eed72b3bde79313ad"
+      "path": "/static/build/static-project-workspace-lifecycle.93f360483a16.js",
+      "hash": "b030a42a3017538606cb97a29ada257cc3aa1cb1971fc3e1d5072dd3babd6e6c"
     },
     "/static/js/features/projects/project_workspace_renderer.js": {
-      "path": "/static/build/static-project-workspace-renderer.0b9236a01172.js",
-      "hash": "0b9236a01172dfa9a0f2d1ebb7da0d098d7966f8b4269830b8be3772cfc007ae"
+      "path": "/static/build/static-project-workspace-renderer.21f3ee6f8d8f.js",
+      "hash": "e4bbdd6b2ee44adc955d69e76c49f58fff20173f898057842d48aab780afd139"
     },
     "/static/js/features/projects/project_workspace_shell.js": {
-      "path": "/static/build/static-project-workspace-shell.431dbfb652aa.js",
-      "hash": "379a6eea07da82982741ee82af8e4274e6adc8231c935be6cf50f3d85990591e"
+      "path": "/static/build/static-project-workspace-shell.3a67920b55f8.js",
+      "hash": "5a956b73efabe845cf079683353b329eb84cd4e696dced062caa0112617f51f4"
     },
     "/static/js/features/run-comparison/history_compare_controls.js": {
-      "path": "/static/build/static-history-compare-controls.0247a4e22bfc.js",
-      "hash": "d946145a3c7a097c139d6b0484d8fc6b5a19346aa7b93a7122fe0b35cfb8fec3"
+      "path": "/static/build/static-history-compare-controls.96e99e3bb892.js",
+      "hash": "0940042dce0c0a71d77423ec827bfc2428bdff7e77133a13911a91723826eeee"
     },
     "/static/js/features/run-comparison/history_compare_core.js": {
-      "path": "/static/build/static-history-compare-core.7c4e93e3fc4c.js",
-      "hash": "82a8fca0aa247081f3ef732370cbef0de9bb9573f05c352da161ce76bb6245ab"
+      "path": "/static/build/static-history-compare-core.8d9286632f79.js",
+      "hash": "dcb92a8872935e101bd3eb674a88637dc4a24b974f75aa9ff04f78786dde283b"
     },
     "/static/js/features/run-comparison/history_compare_launcher.js": {
-      "path": "/static/build/static-history-compare-launcher.1f139d6818c2.js",
-      "hash": "9af01e27a583ed9df7cb943158246c2769ec0285569f418e5c41bdc1e5fd89fc"
+      "path": "/static/build/static-history-compare-launcher.47758ce88586.js",
+      "hash": "8e8a79576f9581395dfee9c14e656bfe9f27e42bd2d445ee41c33910d44030a2"
     },
     "/static/js/features/run-comparison/history_compare_navigation.js": {
-      "path": "/static/build/static-history-compare-navigation.97e89e68031b.js",
-      "hash": "dbbe662b51786e471ed94822c26cd133bc8db2922c9fea5d07dc8dc4052b8641"
+      "path": "/static/build/static-history-compare-navigation.0d2de80357a5.js",
+      "hash": "5ec938b0fc6ace4c8af6c30787e96aed394c63db98a4bdd5e87ed61d169c8a6a"
     },
     "/static/js/features/run-comparison/history_compare_overlay.js": {
-      "path": "/static/build/static-history-compare-overlay.4c6b66f6822c.js",
-      "hash": "5b183c009c26bf35ee21c46e0e3f86781b6a7820562ba1f26192f2d54a888ddd"
+      "path": "/static/build/static-history-compare-overlay.c2c28193294d.js",
+      "hash": "082f07e07cf1e6ef27db3a6c585472061c8eb329f0c810e1e4f40ab2ad4175c5"
     },
     "/static/js/features/run-comparison/history_compare_renderer.js": {
-      "path": "/static/build/static-history-compare-renderer.cf23ee02f483.js",
-      "hash": "6adc67e8cf1d86b3caff8478ae440d16e390ca7ec18fb7eab6f94e883ea1f2df"
+      "path": "/static/build/static-history-compare-renderer.242c4da75068.js",
+      "hash": "bee9ce3e69af15bce0cecba2f6010d9f8968d92938ad542b7e548aa271538343"
     },
     "/static/js/features/schedules/schedules_modal.js": {
-      "path": "/static/build/static-schedules-modal.52d95c6a2784.js",
-      "hash": "380703f620451d0505c98acb6e1c7ae1f73f27f9c07f6ebb131c69f2791000ee"
+      "path": "/static/build/static-schedules-modal.2af33c9ea724.js",
+      "hash": "726487232c9af94cd0123f27b1a2ac29d09aaa650de94957f3319a64a4677416"
     },
     "/static/js/features/status-monitor/status_monitor_core.js": {
-      "path": "/static/build/static-status-monitor-core.4f4b596d51d7.js",
-      "hash": "4f1bdafd050c81f96bae17e8bbf8bb3bc6651e6751fb84743f3a79e152d0f301"
+      "path": "/static/build/static-status-monitor-core.ba646f531614.js",
+      "hash": "7ad29c1f7387c4ae107f47b3d63e57c50af1f4aa1adf28b6f40481c701eb72bd"
     },
     "/static/js/features/status-monitor/status_monitor_data.js": {
-      "path": "/static/build/static-status-monitor-data.c1100f8a3521.js",
-      "hash": "d45d11a49509e5157af9919f9317b0129f6e93bd8b19c92fa870c86eef3d9c88"
+      "path": "/static/build/static-status-monitor-data.601dcf0b0d28.js",
+      "hash": "733eabe5dae309ced5036b4f6e2f85b952a0153b844bcaed79e26ead3eb077f8"
     },
     "/static/js/features/status-monitor/status_monitor_resources.js": {
-      "path": "/static/build/static-status-monitor-resources.d0b608883176.js",
-      "hash": "63b068fa1d8379806d205c926393157884cd736e9f482cd29007a492f484951e"
+      "path": "/static/build/static-status-monitor-resources.f1b739e40867.js",
+      "hash": "a73bcf430a4623e98aadb92a844ef493ee0648d7be88314db5177e3d6dea4e3b"
+    },
+    "/static/js/features/tour/tour_cli.js": {
+      "path": "/static/build/static-tour-cli.2cacd78cd08e.js",
+      "hash": "f3b4f2d6a3d35e30f4c53a8faa3f86ebf1983ff7a4eee3d5bb0973478dfb6e7a"
     },
     "/static/js/features/watchers/watchers_modal.js": {
-      "path": "/static/build/static-watchers-modal.054f8157e0cd.js",
-      "hash": "eb45ef17b300d0a4c290dd19fb9e9801108f010d0dc88b29d1efab6d43d11cb1"
+      "path": "/static/build/static-watchers-modal.9be588302912.js",
+      "hash": "69c16cc7506f93a60076ada0f68e7b8c7ee8042584224d4aca871842e78b4b96"
     },
     "/static/js/features/workflows/workflows.js": {
-      "path": "/static/build/static-workflows.13521e955625.js",
-      "hash": "1940e33a83c8bd025b1335a9670811d16c3032be088c06b2a02bd1f9cc5c6b91"
+      "path": "/static/build/static-workflows.b5b651fcad56.js",
+      "hash": "c298f2ac293994b6a8291cf00e9ce589bf47b0826ded20b9051bbdab5b7a741d"
+    },
+    "/static/js/features/workspace/workspace_drag_drop.js": {
+      "path": "/static/build/static-workspace-drag-drop.2a8ef6a720c2.js",
+      "hash": "cd5bc2514b1cec8acb60a94553d3095774d66fd0458e2b478c364eb798525705"
     },
     "/static/js/pty.js": {
-      "path": "/static/build/static-pty.55e88cbe4bb5.js",
-      "hash": "1243d5b9fd349e88a3a096284d64d26954291aac9c07b7afd6536f4e0d62b839"
+      "path": "/static/build/static-pty.062727784ca8.js",
+      "hash": "57fb5263f0ad406e222e6aa6aa9c08be7d8174bd763df285f84e833ccaeca943"
     },
     "/static/js/status_monitor.js": {
-      "path": "/static/build/static-status-monitor.25f4097ccd5d.js",
-      "hash": "2d9b85c986ba1dd3fe42961ff885a797c10335f09246310731189e0f3d5b20a3"
+      "path": "/static/build/static-status-monitor.1675186eab36.js",
+      "hash": "4d4b1bcdd402ae6dae908b0109dcea092dc77029923c895d56fcd0b830043bb4"
     },
     "/static/js/tour_modal.js": {
-      "path": "/static/build/static-tour-modal.5f08dfa1db05.js",
-      "hash": "eb865b13f91303686c3394af9ae3ac0627d5828a79dd97e3420e6d11631c04ac"
+      "path": "/static/build/static-tour-modal.b70e3e47a7a2.js",
+      "hash": "dc887c49baabd006e93ce145fc21dff3405b41594cdde706cd2131929d7baea3"
+    },
+    "/static/js/workspace.js": {
+      "path": "/static/build/static-workspace.90f06cd46991.js",
+      "hash": "8a4c6df07c66958f75062570bafb1c7f7019e240ebee29131dba53ed7a1777aa"
+    },
+    "/static/css/features/atlas-mobile.css": {
+      "path": "/static/build/static-atlas-mobile.36e1c88ff62c.css",
+      "hash": "36e1c88ff62c24877a0307de8c3fe6b39f854423a91229ad1bf9b8d7042c892c"
+    },
+    "/static/css/features/atlas.css": {
+      "path": "/static/build/static-atlas.7596c0cd3757.css",
+      "hash": "7596c0cd37571476ca7f9caadeb91c2c6680ae00dfdd9c4fd03ce88580432a7b"
+    },
+    "/static/css/features/command-registry.css": {
+      "path": "/static/build/static-command-registry.d11acc8c2718.css",
+      "hash": "d11acc8c2718bc0f21fa296cdbe8eee8d13f6db4bfb6dac6ddec8f66833ecea9"
+    },
+    "/static/css/features/projects.css": {
+      "path": "/static/build/static-projects.e20250eebf97.css",
+      "hash": "e20250eebf970a9aff3064c68bcaa4e0446d808244a0dec73a0fd93e10f21418"
+    },
+    "/static/css/features/run-comparison.css": {
+      "path": "/static/build/static-run-comparison.4a23942692a2.css",
+      "hash": "4a23942692a2d9fed3c58ec9e04624a8c6b6f250c6954c41b8e2147fdacc9095"
+    },
+    "/static/css/features/schedules.css": {
+      "path": "/static/build/static-schedules.0205310e7bce.css",
+      "hash": "0205310e7bcefc0091ed4ca1bcfea6d6ce4c5271c0c061aa28d4aab5afde3116"
+    },
+    "/static/css/features/status-monitor.css": {
+      "path": "/static/build/static-status-monitor.1c00d10f1f05.css",
+      "hash": "1c00d10f1f05d82287da32378029979bfa1bb6deaf9b368d4faaa1649e053104"
+    },
+    "/static/css/features/watchers.css": {
+      "path": "/static/build/static-watchers.f7a0f2d0ccb7.css",
+      "hash": "f7a0f2d0ccb716049aa4301e99b8e8a730fa1e7829c7cc90263cb36c82c7789a"
+    },
+    "/static/css/features/workflows.css": {
+      "path": "/static/build/static-workflows.edd48bf98077.css",
+      "hash": "edd48bf98077ab8f8011084f02e58a06a1262f9d9f9173d7036bf6e91c7c02e2"
+    },
+    "/static/css/features/workspace.css": {
+      "path": "/static/build/static-workspace.a65e7c3c9b25.css",
+      "hash": "a65e7c3c9b25f8ba201b5abbc284b892b5978edfe5bd616da604b2239b34561e"
     },
     "/static/css/styles.css": {
       "path": "/static/build/static-styles.5ebac6464907.css",
@@ -705,29 +623,33 @@
       "path": "/static/build/static-favicon.8185782f11d9.ico",
       "hash": "8185782f11d9cc03a4d5b5160564e0a8a9ee4787fbac1fbfd02410e14dd5cee8"
     },
+    "/static/js/features/workspace/workspace_viewer_formats.js": {
+      "path": "/static/build/static-workspace-viewer-formats.0f2803d919cb.js",
+      "hash": "0f2803d919cb1721ba87194977ae835918ec163f493c265edeebeec61fe91000"
+    },
     "/vendor/ansi_up.js": {
       "path": "/static/build/vendor-ansi-up.61ad065722eb.js",
       "hash": "61ad065722eb1e36fe3a8c70fe497e9c0165754c1eb3fd119ed7d6cdf429aa1c"
     },
-    "/vendor/fonts/JetBrainsMono-300.ttf": {
-      "path": "/static/build/font-jetbrainsmono-300.62bbab00e0b0.ttf",
-      "hash": "62bbab00e0b0faffb38a3d111341a814f8731fd50778aa0b495d3293b8290aaf"
+    "/vendor/fonts/JetBrainsMono-300.woff2": {
+      "path": "/static/build/font-jetbrainsmono-300.a8af6d17917c.woff2",
+      "hash": "a8af6d17917caa4da6619c3e1cf59d3c18913e0bbad9a10470fa8b39a0ca8426"
     },
-    "/vendor/fonts/JetBrainsMono-400.ttf": {
-      "path": "/static/build/font-jetbrainsmono-400.44ce4a84f20d.ttf",
-      "hash": "44ce4a84f20d60f24539bd0cef11f79c29e38609e0f8adf18551c9794a5d9dc3"
+    "/vendor/fonts/JetBrainsMono-400.woff2": {
+      "path": "/static/build/font-jetbrainsmono-400.1c116ecdbf23.woff2",
+      "hash": "1c116ecdbf2367d757f972bf78baa1bbf36e20d369109a19206aed47597af7cd"
     },
-    "/vendor/fonts/JetBrainsMono-700.ttf": {
-      "path": "/static/build/font-jetbrainsmono-700.a1d92abc6b02.ttf",
-      "hash": "a1d92abc6b02a87faed23d98067ab1027e8e95242fd7c9978a072ea383b89d1a"
+    "/vendor/fonts/JetBrainsMono-700.woff2": {
+      "path": "/static/build/font-jetbrainsmono-700.ae1902d8a78f.woff2",
+      "hash": "ae1902d8a78f40261a38f57a75c5ba2b5342f414deecfb827c2e4e75bd7b4479"
     },
-    "/vendor/fonts/Syne-700.ttf": {
-      "path": "/static/build/font-syne-700.668763da807c.ttf",
-      "hash": "668763da807c01fb3ec0f21e053d58cb4ec37a5cc37ab07617317c907df92a99"
+    "/vendor/fonts/Syne-700.woff2": {
+      "path": "/static/build/font-syne-700.ffdf7a16a49d.woff2",
+      "hash": "ffdf7a16a49dd18b62c57e1914c04878d5afea33fa038c655a2631ea7e05f755"
     },
-    "/vendor/fonts/Syne-800.ttf": {
-      "path": "/static/build/font-syne-800.f37df4c4dbb0.ttf",
-      "hash": "f37df4c4dbb0b722d4b462aa2c5e1ad246abdb7fcdc736ae0867bc84cc66da34"
+    "/vendor/fonts/Syne-800.woff2": {
+      "path": "/static/build/font-syne-800.d300743a4aef.woff2",
+      "hash": "d300743a4aef453227948440e8b0818023c0acc1a6661cb6dbd6ba1f3fdf184d"
     },
     "/vendor/jspdf.umd.min.js": {
       "path": "/static/build/vendor-jspdf-umd-min.e6551fcdc32f.js",

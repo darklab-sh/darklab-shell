@@ -37,6 +37,60 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "httping --help",
+      "expected_text": [
+        "HTTPing v4.4.0",
+        "-g x / --url"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "httping -c 4 -g https://darklab.sh",
+      "expected_text": [
+        "PING darklab.sh:443",
+        "4 connects, 4 ok"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "httping -G -c 4 -g https://darklab.sh",
+      "expected_text": [
+        "PING darklab.sh:443",
+        "4 connects, 4 ok"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 1,
+      "command": "tcping --help",
+      "expected_text": [
+        "Try running",
+        "[optional flags]"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "tcping -c 4 ip.darklab.sh 443",
+      "expected_text": [
+        "TCPinging ip.darklab.sh on port 443",
+        "4 probes transmitted on port 443"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "tcping -c 4 -t 2 ip.darklab.sh 80",
+      "expected_text": [
+        "TCPinging ip.darklab.sh on port 80",
+        "4 probes transmitted on port 80"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "nc -zv ip.darklab.sh 80",
       "expected_text": [
         "open"

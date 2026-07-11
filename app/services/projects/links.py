@@ -4,6 +4,8 @@ Project link mutation helpers.
 
 from __future__ import annotations
 
+from typing import Any
+
 import config as _config
 from core.database import (
     validate_project_entity_type,
@@ -11,7 +13,14 @@ from core.database import (
 )
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.atlas.scope import entity_exists_in_scope
+from services.atlas.scope import entity_exists_in_scope, metadata_owner_params, metadata_owner_sql
+from services.cleanup_reasons import (
+    CleanupSampleCollector,
+    build_cleanup_reason_summary,
+    empty_cleanup_bucket_counts,
+    increment_cleanup_reason,
+    set_cleanup_bucket_count,
+)
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     MAX_BULK_RUN_ACTION_ITEMS,
@@ -20,7 +29,10 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
 )
-from services.projects.models import row_to_link as _row_to_link
+from services.projects.models import (
+    PROJECT_TARGET_SOURCE_DETAIL_FLAG,
+    row_to_link as _row_to_link,
+)
 from services.projects.preferences import (
     clear_active_project_preference as _clear_active_project_preference,
     load_session_preferences as _load_session_preferences,
@@ -38,6 +50,10 @@ from services.projects.utils import (
 )
 from services.runs.kinds import RUN_KIND_EXTERNAL, is_project_linkable_run_kind, normalize_run_kind
 from services.workspace.files import WorkspaceError, resolve_workspace_path
+
+
+def _join_sql(*parts: str) -> str:
+    return "".join(parts)
 
 
 def _cfg_limit(key, default):
@@ -370,36 +386,47 @@ def _project_run_entity_link_stats(conn, project_id, entity_ids):
     return stats
 
 
-def _project_visible_finding_ids(conn, session_id, project_id, *, excluded_run_ids=None, excluded_entity_ids=None):
+def _project_visible_finding_ids(
+    conn,
+    session_id,
+    project_id,
+    *,
+    team_id="",
+    excluded_run_ids=None,
+    excluded_entity_ids=None,
+):
     run_ids = [str(run_id or "") for run_id in (excluded_run_ids or []) if str(run_id or "")]
     entity_ids = [str(entity_id or "") for entity_id in (excluded_entity_ids or []) if str(entity_id or "")]
     run_exclusion_sql = ""
     entity_exclusion_sql = ""
-    params = [project_id, session_id]
+    run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
+    entity_owner_sql, entity_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="e")
+    finding_owner_sql, finding_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="f")
+    params = [project_id, *run_owner_params]
     if run_ids:
         placeholders = ",".join("?" for _ in run_ids)
         run_exclusion_sql = f" AND l.entity_id NOT IN ({placeholders})"  # nosec
         params.extend(run_ids)
-    params.extend([project_id, session_id])
+    params.extend([project_id, *entity_owner_params])
     if entity_ids:
         placeholders = ",".join("?" for _ in entity_ids)
         entity_exclusion_sql = f" AND l.entity_id NOT IN ({placeholders})"  # nosec
         params.extend(entity_ids)
-    params.append(session_id)
-    rows = conn.execute(
+    params.extend(finding_owner_params)
+    visible_finding_sql = _join_sql(
         "WITH project_runs AS ("
         "  SELECT l.entity_id AS run_id FROM project_links l "
         "  JOIN runs r ON r.id = l.entity_id "
-        "  WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ?"
-        + run_exclusion_sql +  # nosec B608
+        "  WHERE l.project_id = ? AND l.entity_type = 'run' AND ", run_owner_sql,
+        run_exclusion_sql,
         "), project_entities AS ("
         "  SELECT l.entity_id FROM project_links l "
         "  JOIN entities e ON e.id = l.entity_id "
-        "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ?"
-        + entity_exclusion_sql +  # nosec B608
+        "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND ", entity_owner_sql,
+        entity_exclusion_sql,
         ") "
         "SELECT DISTINCT f.id FROM findings f "
-        "WHERE f.session_id = ? AND COALESCE(f.suppressed, FALSE) = FALSE AND ("
+        "WHERE ", finding_owner_sql, " AND COALESCE(f.suppressed, FALSE) = FALSE AND ("
         "  EXISTS ("
         "    SELECT 1 FROM findings_occurrences scope_fo "
         "    JOIN project_runs pr ON pr.run_id = scope_fo.run_id "
@@ -414,23 +441,81 @@ def _project_visible_finding_ids(conn, session_id, project_id, *, excluded_run_i
         "    WHERE pe.entity_id = COALESCE(f.entity_id, f.target_id)"
         "  )"
         ")",
-        params,
-    ).fetchall()
+    )
+    rows = conn.execute(visible_finding_sql, params).fetchall()
     return {str(row["id"]) for row in rows if row["id"]}
 
 
-def _attach_project_run_entity_unlink_finding_stats(conn, stats, session_id, project_id, run_ids, removable_ids, curated_ids):
-    current_finding_ids = _project_visible_finding_ids(conn, session_id, project_id)
+def _project_cleanup_sample_display_values(
+    conn,
+    session_id,
+    ids_by_kind,
+    *,
+    team_id="",
+) -> dict[str, dict[str, Any]]:
+    display_values: dict[str, dict[str, Any]] = {}
+    entity_ids = [str(entity_id or "") for entity_id in ids_by_kind.get("entities", []) if str(entity_id or "")]
+    if entity_ids:
+        placeholders = ",".join("?" for _ in entity_ids)
+        entity_owner_sql, entity_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="e")
+        rows = conn.execute(
+            "SELECT e.id, e.type, e.canonical_value FROM entities e "  # nosec
+            f"WHERE {entity_owner_sql} AND e.id IN ({placeholders})",
+            [*entity_owner_params, *entity_ids],
+        ).fetchall()
+        display_values["entities"] = {
+            str(row["id"]): {
+                "display_value": row["canonical_value"],
+                "item_type": row["type"],
+            }
+            for row in rows
+            if row["id"]
+        }
+
+    finding_ids = [str(finding_id or "") for finding_id in ids_by_kind.get("findings", []) if str(finding_id or "")]
+    if finding_ids:
+        placeholders = ",".join("?" for _ in finding_ids)
+        finding_owner_sql, finding_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="f")
+        rows = conn.execute(
+            "SELECT f.id, f.title FROM findings f "  # nosec
+            f"WHERE {finding_owner_sql} AND f.id IN ({placeholders})",
+            [*finding_owner_params, *finding_ids],
+        ).fetchall()
+        display_values["findings"] = {
+            str(row["id"]): {
+                "display_value": row["title"],
+            }
+            for row in rows
+            if row["id"]
+        }
+    return display_values
+
+
+def _attach_project_run_entity_unlink_finding_stats(
+    conn,
+    stats,
+    session_id,
+    project_id,
+    run_ids,
+    removable_ids,
+    curated_ids,
+    *,
+    team_id="",
+    sample_collector=None,
+):
+    current_finding_ids = _project_visible_finding_ids(conn, session_id, project_id, team_id=team_id)
     after_run_finding_ids = _project_visible_finding_ids(
         conn,
         session_id,
         project_id,
+        team_id=team_id,
         excluded_run_ids=run_ids,
     )
     after_removable_finding_ids = _project_visible_finding_ids(
         conn,
         session_id,
         project_id,
+        team_id=team_id,
         excluded_run_ids=run_ids,
         excluded_entity_ids=removable_ids,
     )
@@ -438,13 +523,23 @@ def _attach_project_run_entity_unlink_finding_stats(conn, stats, session_id, pro
         conn,
         session_id,
         project_id,
+        team_id=team_id,
         excluded_run_ids=run_ids,
         excluded_entity_ids=[*removable_ids, *curated_ids],
     )
+    curated_finding_ids = after_removable_finding_ids - after_curated_finding_ids
     stats["run_findings"] = len(current_finding_ids - after_run_finding_ids)
     stats["removable_findings"] = len(after_run_finding_ids - after_removable_finding_ids)
-    stats["curated_findings"] = len(after_removable_finding_ids - after_curated_finding_ids)
+    stats["curated_findings"] = len(curated_finding_ids)
     stats["kept_curated_findings"] = stats["curated_findings"]
+    if sample_collector is not None:
+        for finding_id in curated_finding_ids:
+            sample_collector.record(
+                "kept_by_default",
+                "findings",
+                finding_id,
+                ("finding_attached_to_kept_entity",),
+            )
 
 
 def preview_project_run_entity_links(session_id, project_id, data, *, team_id=""):
@@ -468,8 +563,89 @@ def preview_project_run_entity_links(session_id, project_id, data, *, team_id=""
     return stats
 
 
-def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids, *, include_curated=False):
-    stats = {
+def _source_detail_flag_enabled(source_detail, key):
+    detail = dialect_for_backend(get_db_backend()).decode_json_dict(source_detail)
+    value = detail.get(key)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _project_run_entity_link_is_disposable(row):
+    return bool(_project_run_entity_link_disposable_reason(row))
+
+
+def _project_run_entity_link_disposable_reason(row):
+    source = str(row["source"] or "")
+    review_state = str(row["review_state"] or "confirmed")
+    confidence = float(row["confidence"] or 1.0)
+    source_detail = row["source_detail"]
+    has_default_project_link = (
+        abs(confidence - 1.0) < 0.0001
+        and review_state == "confirmed"
+        and dialect_for_backend(get_db_backend()).decode_json_dict(source_detail) == {}
+    )
+    if has_default_project_link:
+        return "default_project_link"
+    if (
+        source == "auto_command"
+        and abs(confidence - 1.0) < 0.0001
+        and review_state == "pending"
+        and _source_detail_flag_enabled(source_detail, PROJECT_TARGET_SOURCE_DETAIL_FLAG)
+    ):
+        return "auto_target_project_link"
+    return ""
+
+
+def _project_run_entity_unlink_reason_summary(
+    stats,
+    reason_counts,
+    *,
+    sample_collector=None,
+    sample_display_values=None,
+):
+    bucket_counts = empty_cleanup_bucket_counts()
+    set_cleanup_bucket_count(bucket_counts, "disposable", "entities", stats["removable"])
+    set_cleanup_bucket_count(
+        bucket_counts,
+        "disposable",
+        "findings",
+        stats["run_findings"] + stats["removable_findings"],
+    )
+    set_cleanup_bucket_count(bucket_counts, "kept_by_default", "entities", stats["curated"])
+    set_cleanup_bucket_count(bucket_counts, "kept_by_default", "findings", stats["curated_findings"])
+    if stats["run_findings"]:
+        increment_cleanup_reason(
+            reason_counts,
+            "source_run_removed",
+            "disposable",
+            "findings",
+            stats["run_findings"],
+        )
+    if stats["removable_findings"]:
+        increment_cleanup_reason(
+            reason_counts,
+            "finding_attached_to_removed_entity",
+            "disposable",
+            "findings",
+            stats["removable_findings"],
+        )
+    if stats["curated_findings"]:
+        increment_cleanup_reason(
+            reason_counts,
+            "finding_attached_to_kept_entity",
+            "kept_by_default",
+            "findings",
+            stats["curated_findings"],
+        )
+    samples = None
+    if sample_collector is not None:
+        samples = sample_collector.build(bucket_counts, sample_display_values or {})
+    return build_cleanup_reason_summary(bucket_counts, reason_counts, samples=samples)
+
+
+def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids, *, include_curated=False, team_id=""):
+    stats: dict[str, Any] = {
         "available": 0,
         "removable": 0,
         "curated": 0,
@@ -482,11 +658,27 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         "kept_curated_findings": 0,
         "run_count": len(run_ids),
     }
+    stats["cleanup_reasons"] = build_cleanup_reason_summary(empty_cleanup_bucket_counts(), {})
     if not run_ids:
         return stats, []
     placeholders = ",".join("?" for _ in run_ids)
-    rows = conn.execute(
-        "SELECT DISTINCT e.id, l.confidence, l.review_state, l.source_detail, "
+    run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
+    entity_owner_sql, entity_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="e")
+    label_owner_sql = metadata_owner_sql("lbl", team_id)
+    label_owner_params = metadata_owner_params(session_id, team_id)
+    note_owner_sql = metadata_owner_sql("note", team_id)
+    note_owner_params = metadata_owner_params(session_id, team_id)
+    child_label_owner_sql = metadata_owner_sql("child_label", team_id)
+    child_label_owner_params = metadata_owner_params(session_id, team_id)
+    child_note_owner_sql = metadata_owner_sql("child_note", team_id)
+    child_note_owner_params = metadata_owner_params(session_id, team_id)
+    child_finding_owner_sql, child_finding_owner_params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias="child_f",
+    )
+    unlink_candidate_sql = _join_sql(
+        "SELECT DISTINCT e.id, l.source, l.confidence, l.review_state, l.source_detail, "  # nosec
         "EXISTS ("
         "  SELECT 1 FROM entity_run_links other_erl "
         "  WHERE other_erl.entity_id = e.id "
@@ -500,20 +692,20 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         ") AS has_other_projects, "
         "EXISTS ("
         "  SELECT 1 FROM entity_labels lbl "
-        "  WHERE lbl.session_id = ? "
+        "  WHERE ", label_owner_sql, " "
         "  AND lbl.entity_type = 'atlas_entity' "
         "  AND lbl.entity_id = e.id"
         ") AS has_labels, "
         "EXISTS ("
         "  SELECT 1 FROM entity_notes note "
-        "  WHERE note.session_id = ? "
+        "  WHERE ", note_owner_sql, " "
         "  AND note.entity_type = 'atlas_entity' "
         "  AND note.entity_id = e.id "
         "  AND trim(note.body) != ''"
         ") AS has_note, "
         "EXISTS ("
         "  SELECT 1 FROM findings child_f "
-        "  WHERE child_f.session_id = e.session_id "
+        "  WHERE ", child_finding_owner_sql, " "
         "  AND child_f.entity_id = e.id "
         "  AND ("
         "    COALESCE(NULLIF(child_f.status, ''), 'new') != 'new' "
@@ -525,12 +717,14 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         "    ) "
         "    OR EXISTS ("
         "      SELECT 1 FROM entity_labels child_label "
-        "      WHERE child_label.entity_type = 'finding' "
+        "      WHERE ", child_label_owner_sql, " "
+        "      AND child_label.entity_type = 'finding' "
         "      AND child_label.entity_id = child_f.id"
         "    ) "
         "    OR EXISTS ("
         "      SELECT 1 FROM entity_notes child_note "
-        "      WHERE child_note.entity_type = 'finding' "
+        "      WHERE ", child_note_owner_sql, " "
+        "      AND child_note.entity_type = 'finding' "
         "      AND child_note.entity_id = child_f.id"
         "    )"
         "  )"
@@ -541,41 +735,70 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         "JOIN project_links l ON l.project_id = ? "
         "AND l.entity_type = 'atlas_entity' "
         "AND l.entity_id = e.id "
-        "WHERE r.session_id = ? AND e.session_id = ? "  # nosec
+        "WHERE ", run_owner_sql, " AND ", entity_owner_sql, " "
         f"AND erl.run_id IN ({placeholders})",
+    )
+    rows = conn.execute(
+        unlink_candidate_sql,
         [
             *run_ids,
             project_id,
-            session_id,
-            session_id,
+            *label_owner_params,
+            *note_owner_params,
+            *child_finding_owner_params,
+            *child_label_owner_params,
+            *child_note_owner_params,
             project_id,
-            session_id,
-            session_id,
+            *run_owner_params,
+            *entity_owner_params,
             *run_ids,
         ],
     ).fetchall()
     removable_ids = []
     curated_ids = []
+    reason_counts = {}
+    sample_collector = CleanupSampleCollector()
     for row in rows:
         stats["available"] += 1
-        source_detail = str(row["source_detail"] or "").strip()
-        has_default_project_link = (
-            abs(float(row["confidence"] or 1.0) - 1.0) < 0.0001
-            and str(row["review_state"] or "confirmed") == "confirmed"
-            and source_detail in {"", "{}", "null"}
-        )
+        disposable_reason = _project_run_entity_link_disposable_reason(row)
         is_curated = any((
             int(row["has_other_runs"] or 0) > 0,
             int(row["has_other_projects"] or 0) > 0,
             int(row["has_labels"] or 0) > 0,
             int(row["has_note"] or 0) > 0,
             int(row["has_curated_findings"] or 0) > 0,
-            not has_default_project_link,
+            not disposable_reason,
         ))
         if is_curated:
             curated_ids.append(str(row["id"]))
+            reason_codes = []
+            if int(row["has_other_runs"] or 0) > 0:
+                increment_cleanup_reason(reason_counts, "seen_in_other_runs", "kept_by_default", "entities")
+                reason_codes.append("seen_in_other_runs")
+            if int(row["has_other_projects"] or 0) > 0:
+                increment_cleanup_reason(reason_counts, "other_project_links", "kept_by_default", "entities")
+                reason_codes.append("other_project_links")
+            if int(row["has_labels"] or 0) > 0:
+                increment_cleanup_reason(reason_counts, "entity_label", "kept_by_default", "entities")
+                reason_codes.append("entity_label")
+            if int(row["has_note"] or 0) > 0:
+                increment_cleanup_reason(reason_counts, "entity_note", "kept_by_default", "entities")
+                reason_codes.append("entity_note")
+            if int(row["has_curated_findings"] or 0) > 0:
+                increment_cleanup_reason(
+                    reason_counts,
+                    "finding_attached_to_kept_entity",
+                    "kept_by_default",
+                    "entities",
+                )
+                reason_codes.append("finding_attached_to_kept_entity")
+            if not disposable_reason:
+                increment_cleanup_reason(reason_counts, "custom_project_link", "kept_by_default", "entities")
+                reason_codes.append("custom_project_link")
+            sample_collector.record("kept_by_default", "entities", row["id"], reason_codes)
             continue
         removable_ids.append(str(row["id"]))
+        increment_cleanup_reason(reason_counts, disposable_reason, "disposable", "entities")
     stats["removable"] = len(removable_ids)
     stats["curated"] = len(curated_ids)
     stats["kept_curated"] = 0 if include_curated else len(curated_ids)
@@ -590,9 +813,23 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids,
         run_ids,
         removable_ids if not include_curated else removable_ids[:stats["removable"]],
         curated_ids,
+        team_id=team_id,
+        sample_collector=sample_collector,
     )
     if include_curated:
         stats["kept_curated_findings"] = 0
+    sample_display_values = _project_cleanup_sample_display_values(
+        conn,
+        session_id,
+        sample_collector.ids_by_kind(),
+        team_id=team_id,
+    )
+    stats["cleanup_reasons"] = _project_run_entity_unlink_reason_summary(
+        stats,
+        reason_counts,
+        sample_collector=sample_collector,
+        sample_display_values=sample_display_values,
+    )
     return stats, removable_ids
 
 
@@ -609,7 +846,7 @@ def preview_project_run_entity_unlinks(session_id, project_id, data, *, team_id=
         run_maps = _bulk_project_run_maps(conn, session_id, run_ids, team_id=team_id)
         if any(run_id not in run_maps["owned"] for run_id in run_ids):
             raise ProjectWorkspaceNotFound("run not found for this session")
-        stats, _ = _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids)
+        stats, _ = _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids, team_id=team_id)
     return stats
 
 
@@ -639,6 +876,7 @@ def unlink_project_run_entities(session_id, project_id, run_ids, *, include_cura
             project_id,
             owned_run_ids,
             include_curated=include_curated,
+            team_id=team_id,
         )
         if removable_ids:
             placeholders = ",".join("?" for _ in removable_ids)

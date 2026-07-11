@@ -52,14 +52,18 @@ function pythonForE2EFixture() {
 }
 
 export async function browserSessionId(page) {
-  return page.evaluate(() => (
-    typeof SESSION_ID === 'string' && SESSION_ID
-      ? SESSION_ID
-      : localStorage.getItem('session_id')
-  ))
+  await waitForE2ETestHooks(page)
+  return page.evaluate(() => {
+    if (typeof window.getSessionId === 'function') return window.getSessionId()
+    if (typeof window.SESSION_ID === 'string' && window.SESSION_ID) return window.SESSION_ID
+    return localStorage.getItem('session_id')
+  })
 }
 
 export function seedExternalHistoryRuns(testInfo, { sessionId, commands }) {
+  if (!sessionId) {
+    throw new Error('Cannot seed external history runs without a browser session id')
+  }
   const dataDir = e2eDataDirForProject(testInfo)
   const script = String.raw`
 import json
@@ -459,6 +463,24 @@ export function makeTestIp(offset = 0) {
   return `198.18.${thirdOctet}.${fourthOctet}`
 }
 
+async function waitForE2ETestHooks(page, { timeout = 15_000 } = {}) {
+  await page.waitForFunction(
+    async () => {
+      if (navigator.webdriver !== true) return true
+      if (typeof window.apiFetch === 'function' && typeof window.clearTab === 'function') {
+        return true
+      }
+      const ready = window.__darklabE2ETestHooksReady
+      if (ready && typeof ready.then === 'function') {
+        await ready.catch(() => false)
+      }
+      return typeof window.apiFetch === 'function' && typeof window.clearTab === 'function'
+    },
+    undefined,
+    { timeout },
+  )
+}
+
 /**
  * Wait until the welcome boot path has either finished or claimed the tab,
  * then optionally cancel it or request an immediate settle and wait for the
@@ -468,6 +490,8 @@ export async function ensurePromptReady(
   page,
   { cancelWelcome = false, timeout = 15_000, waitForAutocomplete = false } = {},
 ) {
+  await waitForE2ETestHooks(page, { timeout })
+
   await page.waitForFunction(
     () => {
       const activeTab = typeof window.APP_STATE_API?.getActiveTab === 'function'
@@ -775,6 +799,28 @@ export async function waitForHistoryRuns(page, minRuns) {
       }
     },
     minRuns,
+    { timeout: 20_000 },
+  )
+
+  return page.evaluate(() => window.__e2eLastHistoryRuns || [])
+}
+
+export async function waitForHistoryCommands(page, commands) {
+  await page.waitForFunction(
+    async (expectedCommands) => {
+      try {
+        const resp = await apiFetch('/history?page_size=100&type=runs')
+        const data = await resp.json()
+        const runs = data.runs || []
+        window.__e2eLastHistoryRuns = runs
+        return expectedCommands.every((command) => (
+          runs.some((run) => run.command === command)
+        ))
+      } catch {
+        return false
+      }
+    },
+    commands,
     { timeout: 20_000 },
   )
 

@@ -5,7 +5,7 @@ default:
 variables:
   CI_DEFAULT_IMAGE: "python:3.14.6-slim"
   CI_PYTHON_E2E_IMAGE: "python:3.14.6"
-  CI_NODE_IMAGE: "node:26.4.0-slim"
+  CI_NODE_IMAGE: "node:26.5.0-slim"
   CI_DOCKER_IMAGE: "docker:29.6.1"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
@@ -46,7 +46,7 @@ test-js-e2e:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -q nodejs iputils-ping
+    - curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && apt-get install -y -q nodejs iputils-ping
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
     - npm ci
     - npx playwright install --with-deps chromium
@@ -216,7 +216,7 @@ container-smoke-test:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache python3 py3-pytest py3-yaml docker-cli-compose
+    - apk add --no-cache python3 py3-pytest py3-yaml py3-pydantic py3-tldextract docker-cli-compose
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual

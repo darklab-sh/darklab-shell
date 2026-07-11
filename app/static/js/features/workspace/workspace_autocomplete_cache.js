@@ -20,6 +20,10 @@ async function refreshWorkspaceFileCache() {
       : null;
   if (!isEnabled || !isEnabled() || !fetcher) return state.files || [];
   try {
+    if (typeof state.loadFilesPayload === 'function') {
+      await state.loadFilesPayload();
+      return state.files || [];
+    }
     const resp = await fetcher('/workspace/files');
     const data = typeof state.parseJson === 'function'
       ? await state.parseJson(resp)

@@ -200,6 +200,28 @@ COMMON_DETAIL_KEYS = frozenset({
     "triggers",
 })
 
+HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "prune_atlas_requested",
+    "prune_curated_atlas_requested",
+    "atlas_removed_entity_count",
+    "atlas_removed_finding_count",
+    "atlas_removed_curated_entity_count",
+    "atlas_removed_curated_finding_count",
+    "atlas_kept_entity_count",
+    "atlas_kept_finding_count",
+})
+
+PROJECT_UNLINK_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "include_entities_requested",
+    "include_curated_entities_requested",
+    "unlinked_entity_count",
+    "unlinked_finding_count",
+    "unlinked_curated_entity_count",
+    "unlinked_curated_finding_count",
+    "kept_entity_count",
+    "kept_finding_count",
+})
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -221,7 +243,10 @@ def _spec(
 
 EVENT_SPECS: dict[str, EventSpec] = {
     AuditEventType.HISTORY_DELETE.value: _spec(
-        AuditEventType.HISTORY_DELETE, AuditTargetType.RUN, RecordingMode.FAIL_CLOSED
+        AuditEventType.HISTORY_DELETE,
+        AuditTargetType.RUN,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=HISTORY_DELETE_DETAIL_KEYS,
     ),
     AuditEventType.SNAPSHOT_DELETE.value: _spec(
         AuditEventType.SNAPSHOT_DELETE, AuditTargetType.SNAPSHOT, RecordingMode.FAIL_CLOSED
@@ -236,7 +261,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.FILE_DELETE, AuditTargetType.FILE, RecordingMode.FAIL_CLOSED
     ),
     AuditEventType.PROJECT_UNLINK.value: _spec(
-        AuditEventType.PROJECT_UNLINK, AuditTargetType.PROJECT, RecordingMode.FAIL_CLOSED
+        AuditEventType.PROJECT_UNLINK,
+        AuditTargetType.PROJECT,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=PROJECT_UNLINK_DETAIL_KEYS,
     ),
     AuditEventType.PROJECT_DELETE.value: _spec(
         AuditEventType.PROJECT_DELETE, AuditTargetType.PROJECT, RecordingMode.FAIL_CLOSED

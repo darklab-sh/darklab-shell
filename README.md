@@ -40,7 +40,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Shodan InternetDB, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, RouteViews, FOFA, and ZoomEye, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
-- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, ports, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Port entities are app-captured evidence from scanner output, so they stay separate from provider-backed intel lookups while still linking back to their host; URL entities also keep a host link so URL evidence can roll up through the matching domain or IP. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run or project, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs and project scopes can be cleared from visible chips, source runs can be cleaned from Atlas without deleting their transcripts while keeping curated rows by default, and the Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
+- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, ports, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Port entities are app-captured evidence from scanner output, so they stay separate from provider-backed intel lookups while still linking back to their host; URL entities also keep a host link so URL evidence can roll up through the matching domain or IP. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run or project, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs and project scopes can be cleared from visible chips, source runs can be cleaned from Atlas without deleting their transcripts, and cleanup confirmations explain which rows are disposable, kept by default, or not eligible for that cleanup with compact examples when useful. Reviewed, labeled, noted, or Project-linked single-source rows are kept by default; imported rows and rows still seen elsewhere are not eligible for that cleanup. The Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
 - **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. File writes, folder creation, moves, and deletes create audit-log rows with path/count/size metadata but not file contents. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
 - **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, packages, and reports without copying the source records.
   - Active projects can auto-link completed runs and the Atlas entities those runs produce. URL targets discovered from command arguments create Atlas URL rows and host links alongside the target, so commands such as `curl https://ip.darklab.sh` can be reviewed from both the URL and host context. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
@@ -204,6 +204,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 |------|---------|
 | `ping` | ICMP reachability |
 | `curl` / `wget` | HTTP/HTTPS requests |
+| `httping` | HTTP/HTTPS reachability and request timing |
 | `dig` / `nslookup` / `host` | DNS lookups |
 | `whois` | Domain & IP registration info |
 | `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
@@ -224,6 +225,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `cdncheck` | CDN, cloud, and WAF provider classification for hosts and IPs (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
+| `tcping` | TCP reachability and latency checks for service ports when ICMP is blocked |
 | `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
 | `masscan` | High-speed TCP port scanner; requires raw sockets (container has `NET_RAW`/`NET_ADMIN`) |
 | `assetfinder` | Fast passive domain and IP discovery using public sources |
@@ -285,6 +287,10 @@ When Files are enabled, `wget` downloads go to the active Files folder by defaul
 
 When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active personal/team workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/tlsx`, `/tools/cdncheck`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, `tlsx` and `cdncheck` result files, and `naabu` auxiliary input files.
 
+#### wpscan
+
+`wpscan` runs normally without an API token. Save `WPSCAN_API_TOKEN` in the encrypted secrets vault when you want API-backed vulnerability data; the app passes it to the WPScan process without putting it in the command or transcript. Inline `--api-token` values are blocked so the token can't be saved in history, snapshots, or logs.
+
 #### trufflehog
 
 `trufflehog` is available for secret scanning against managed inputs. Use `trufflehog filesystem --directory <folder> --json` for a folder in Files, or `trufflehog git https://... --json` for an HTTPS Git repository. Local Git paths, SSH Git URLs, custom clone directories, and no-cleanup/trust-local-config modes are blocked so scans stay in the app's managed runtime boundary.
@@ -306,6 +312,10 @@ docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --bu
 The production overlay adds reverse-proxy-aware environment values, GELF Docker log transport, an external Docker network model, persistent workspace storage at `/workspaces`, scanner-friendly `ulimits` and network sysctls, and optional Gunicorn sizing through `.env`.
 
 The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
+
+Use [`scripts/backup_system.py`](scripts/backup_system.py) for scheduled operator backups. It captures the selected database backend, `/data` artifacts, app-owned secret-key files, local config, `.env`, optional deployment-specific files, and enabled workspace storage. The script records the app's logical paths and the physical host or Docker sources it copies, writes a redacted manifest plus checksums, and is safe to run from cron as a host user that can read the selected bind mounts or Docker sources. Its dry run checks explicit input paths before writing anything, each completed run gets its own output path instead of replacing an earlier backup, and retention runs print concise examined/removed/failure totals for cron logs.
+
+Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
 
@@ -590,7 +600,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
 │   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
 │   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
-│   │   │   └── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   │   ├── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
+│   │   │   ├── v0040_personal_scope_team_id_normalization.py # Personal-scope team-id normalization for partial indexes
+│   │   │   ├── v0041_project_atlas_sort_indexes.py # Project and Atlas sort-order indexes
+│   │   │   └── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
 │   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
 │   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
 │   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
@@ -628,6 +641,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
 │   │   ├── assets/
 │   │   │   ├── __init__.py     # Asset service package marker
+│   │   │   ├── client_log.py   # Browser log sanitizing and detail allowlist helpers
 │   │   │   └── diagnostics.py  # Asset manifest and frontend bundle diagnostics helpers
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
@@ -659,6 +673,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── queries.py      # Audit event filtering and row serialization helpers
 │   │   │   ├── recorder.py     # Bounded audit recorder with hashed session identity
 │   │   │   └── retention.py    # Audit retention pruning and disabled-state startup warning
+│   │   ├── cleanup_reasons.py  # Shared cleanup preview reason labels, bucket summaries, and sample helpers
 │   │   ├── commands/
 │   │   │   ├── __init__.py     # Command service package marker
 │   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar
@@ -715,12 +730,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
+│   │   │   ├── cleanup_logging.py # Structured cleanup fields for History INFO and audit events
 │   │   │   ├── insights.py     # History activity, command-mix, and run-constellation insight helpers
-│   │   │   ├── mutations.py    # History delete, export, and snapshot persistence helpers
+│   │   │   ├── mutations.py    # History run delete and bulk-export mutation helpers
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
 │   │   │   ├── queries.py      # History list, search, run metadata, and compare query helpers
 │   │   │   ├── run_metadata.py # Shared run-history metadata, artifact, count, and table-introspection helpers
-│   │   │   └── search.py       # Backend-aware run-history search SQL helpers
+│   │   │   ├── search.py       # Backend-aware run-history search SQL helpers
+│   │   │   └── snapshots.py    # Snapshot create, lookup, and delete persistence helpers
 │   │   ├── intel/
 │   │   │   ├── __init__.py     # External intel service package marker
 │   │   │   ├── abuseipdb.py    # AbuseIPDB provider normalization
@@ -788,6 +805,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── artifact_queries.py # Project artifact page, detail, and target-filter query helpers
 │   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
 │   │   │   ├── auto_promote.py # Project Atlas auto-promote rule matching and apply helpers
+│   │   │   ├── cleanup_logging.py # Structured cleanup fields for Project unlink INFO and audit events
 │   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
 │   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes
 │   │   │   ├── crud.py         # Project create, update, delete, and cleanup helpers
@@ -795,7 +813,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
 │   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
 │   │   │   ├── list_metrics.py # Project list count and finding-summary query helpers
-│   │   │   ├── list_queries.py # Project list and switcher query helpers
+│   │   │   ├── list_queries.py # Project list and paged-list query helpers
+│   │   │   ├── list_switcher.py # Project switcher query helpers
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
 │   │   │   ├── migration.py    # Project workspace session migration helpers
 │   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
@@ -803,6 +822,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── overview.py     # Project overview payload assembly, target identity, and status helpers
 │   │   │   ├── overview_app.py # Project overview app-scan, app-port, URL-host, and provenance helpers
 │   │   │   ├── overview_intel.py # Project overview intel extraction and certificate status helpers
+│   │   │   ├── owner_clauses.py # Shared project owner predicates for list and summary queries
 │   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
 │   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
 │   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
@@ -827,6 +847,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── state.py        # Redis-backed PTY metadata, cleanup, scope, and snapshot reload helpers
 │   │   │   ├── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
 │   │   │   └── wire.py         # PTY Redis key, event-id, and payload decode helpers
+│   │   ├── query_debug.py      # Debug-only query timing log helper
 │   │   ├── reports/
 │   │   │   ├── __init__.py     # Public report helper exports
 │   │   │   ├── composition.py  # Report composition context helpers
@@ -921,7 +942,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── paths.py        # Workspace directory, validation, symlink, and path-resolution helpers
 │   │       └── settings.py     # Workspace settings and owner directory naming helpers
 │   ├── static/
-│   │   ├── build/             # Committed generated bundles, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
+│   │   ├── build/             # Committed generated bundles, precompressed siblings, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
 │   │   ├── css/
 │   │   │   ├── core/
 │   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
@@ -951,6 +972,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── favicon.ico         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
+│   │   ├── fragments/
+│   │   │   ├── atlas_overlay.html # First-use Atlas modal shell
+│   │   │   └── project_workspace.html # First-use Projects modal shell and nested editors
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
 │   │       ├── autocomplete.js # Command autocomplete dropdown
@@ -972,7 +996,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
 │   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
 │   │       ├── e2e_test_hooks.js # Test-only browser hooks used by Playwright and unit harnesses
+│   │       ├── e2e_test_hooks_loader.js # Tiny Playwright-only hook loader that keeps test globals out of normal startup
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
+│   │       ├── export_html_bridge.js # Lightweight export HTML bridge for lazy styled HTML/PDF exports
 │   │       ├── export_pdf.js   # Lazy-loaded shared PDF export module
 │   │       ├── features/
 │   │       │   ├── atlas/
@@ -991,7 +1017,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── command_registry_bridge.js # Command registry ESM bridge for lazy command catalog UI
 │   │       │   │   └── faq_helpers.js # FAQ command chips, allowed-command summary, and limits rendering
 │   │       │   ├── findings/
+│   │       │   │   ├── finding_triage_bridge.js # Lightweight finding-triage bridge for lazy remediation controls
 │   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
+│   │       │   │   ├── findings_board_bridge.js # Lightweight Findings Board bridge for Atlas and lazy modal launches
 │   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
 │   │       │   ├── history/
 │   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
@@ -1092,7 +1120,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── theme/
 │   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
 │   │       │   ├── tour/
-│   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   │   ├── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   │   └── tour_cli_bridge.js # Lightweight terminal tour bridge that loads the full tour command on first use
 │   │       │   ├── watchers/
 │   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
@@ -1123,6 +1152,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── tabs_bridge.js # Tabs ESM bridge for tab lifecycle helpers
 │   │       ├── tour_modal.js   # Lazy-loaded desktop visual onboarding tour carousel
 │   │       ├── ui/
+│   │       │   ├── cleanup_reasons.js # Shared cleanup-preview reason copy and sample details for History, Project, and Atlas confirmations
 │   │       │   ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
 │   │       │   ├── overlay_actions_bridge.js # Overlay action ESM bridge for shared overlay controls
 │   │       │   ├── ui_action_sheet.js # Shared mobile action-sheet primitive for contextual row/detail actions
@@ -1144,7 +1174,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
 │   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
 │   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
-│   │       └── workspace_bridge.js # Files panel ESM bridge for lightweight shell close actions
+│   │       └── workspace_bridge.js # Files panel ESM bridge for lazy open/close and file actions
 │   ├── templates/
 │       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
 │       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
@@ -1181,8 +1211,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
 ├── scripts/
+│   ├── backup_system.py       # Cron-friendly operator backup helper for SQLite/Postgres, /data artifacts, config, secrets material, and workspaces
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
-│   ├── build_assets.mjs       # Generates committed frontend bundles in app/static/build/ (run via npm run assets:sync)
+│   ├── build_assets.mjs       # Generates committed minified frontend bundles in app/static/build/ (run via npm run assets:sync)
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
@@ -1275,6 +1306,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
 │   │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
 │   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
+│   │       ├── project_active_context.test.js # Active Project context request sharing and reload behavior
 │   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
 │   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
 │   │       ├── project_overview.test.js # Project Overview rollups, provider caveats, tempo, deliverables, activity, cert badges, and deep-link coverage
@@ -1313,6 +1345,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
 │   │   ├── test_architecture.py # Architecture boundary guards for blueprint persistence access
 │   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
+│   │   ├── test_backup_system.py # Operator backup script coverage for SQLite/Postgres, config extras, and workspace sources
 │   │   ├── test_check_versions.py # Dependency version-check helper coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
 │   │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage

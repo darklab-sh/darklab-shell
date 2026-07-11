@@ -4,8 +4,8 @@ import {
   DarklabAtlasEntityRow as importedAtlasEntityRow,
   formatPortEntityMetadata as importedFormatPortEntityMetadata,
 } from '../atlas/atlas_entity_row.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
 import { DarklabAtlasTabs as importedAtlasTabs } from '../atlas/atlas_tabs.js';
-import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
 import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,

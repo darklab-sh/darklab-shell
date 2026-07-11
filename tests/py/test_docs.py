@@ -893,12 +893,16 @@ def _template_static_url_violations() -> list[str]:
 
 
 def _git_tracked_files() -> list[str]:
-    """Return files tracked by git (committed to the index)."""
+    """Return git-tracked files that still exist in the current checkout."""
     result = subprocess.run(
         ["git", "ls-files", "--cached"],
         capture_output=True, text=True, cwd=str(_REPO_ROOT), check=True,
     )
-    return [line for line in result.stdout.splitlines() if line]
+    return [
+        line
+        for line in result.stdout.splitlines()
+        if line and (_REPO_ROOT / line).exists()
+    ]
 
 
 def _git_untracked_files() -> list[str]:

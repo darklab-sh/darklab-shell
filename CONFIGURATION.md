@@ -127,7 +127,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
-| `asset_bundle_mode` | `bundle` | Frontend asset rendering mode. `bundle` renders content-hashed files from `app/static/build/` for bundles, lazy modules, fonts, favicon, and standalone vendor/static assets, and fails if the committed build output is missing or incomplete; `source` keeps local edit-and-refresh work direct by linking ordered CSS sources and emitting each ES module entry so the browser follows its imports. `ASSET_BUNDLE_MODE` can also override this setting |
+| `asset_bundle_mode` | `bundle` | Frontend asset rendering mode. `bundle` renders content-hashed files from `app/static/build/` for bundles, lazy modules, fonts, favicon, and standalone vendor/static assets, uses minified ESM build output, serves precompressed Brotli or gzip siblings when the browser supports them, and fails if the committed build output is missing or incomplete; `source` keeps local edit-and-refresh work direct by linking ordered CSS sources and emitting ES module entries plus lazy JS modules as unversioned source URLs so the browser follows each import graph with one URL identity. Classic vendor assets still use direct versioned URLs. `ASSET_BUNDLE_MODE` can also override this setting |
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
@@ -468,7 +468,7 @@ commands:
 
 `help.flags` marks invocations whose output should stay visible but should not create findings or Atlas entities. Help invocations also bypass required-secret preflight for that command root, so users can run safe `--help` commands before configuring provider keys. An example can opt into the default container smoke corpus with `smoke.profile: unauthenticated` when it is safe to run without provider credentials or workspace setup. Use `smoke.profile: manual` for useful examples that should stay visible to users but are too network-dependent, noisy, or data-sensitive for the default smoke corpus.
 
-`requires_secrets` names encrypted secrets from the active personal or team scope that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
+`requires_secrets` names encrypted secrets from the active personal or team scope that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; `ipinfo` uses this for `IPINFO_TOKEN` and `wpscan` uses it for `WPSCAN_API_TOKEN` because both tools can still run without a token. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 
 Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current personal or team scope, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row. Personal secrets are not inherited by team scope; team owners and admins create shared team secrets explicitly.
 
@@ -952,6 +952,50 @@ The production overlay adds:
 
 Application log format and Docker log transport are separate controls. To emit GELF-shaped application logs, set `log_format: gelf` in `config.yaml` or `config.local.yaml`. To send container stdout/stderr through Docker's GELF driver, use the production overlay and set `DOCKER_GELF_ADDRESS`.
 
+### Docker Labels
+
+The Docker image and Compose container include a small static label set for Docker-native inventory tools such as CheckMK's Docker plugin. These labels are meant for quick identification. Use `/metrics` for live values such as health, database size, queue state, and connection-pool state.
+
+Image labels are set by the Dockerfile:
+
+| Label | Value |
+|-------|-------|
+| `org.opencontainers.image.title` | `darklab_shell` |
+| `org.opencontainers.image.description` | Short app description |
+| `org.opencontainers.image.source` | Source repository URL |
+| `org.opencontainers.image.url` | Project URL |
+| `org.opencontainers.image.vendor` | `darklab.sh` |
+| `org.opencontainers.image.version` | App version from the `APP_VERSION` build arg |
+| `org.opencontainers.image.revision` | Git revision from the `VCS_REF` build arg |
+| `org.opencontainers.image.created` | Build timestamp from the `BUILD_DATE` build arg |
+| `sh.darklab.app.name` | `darklab_shell` |
+| `sh.darklab.app.version` | App version from the same build arg |
+| `sh.darklab.git.revision` | Git revision from the same build arg |
+| `sh.darklab.python.version` | Python base image version |
+
+The base Compose service adds container labels for runtime configuration that is fixed when the container starts:
+
+| Label | Value |
+|-------|-------|
+| `sh.darklab.config.database_backend` | `${DATABASE_BACKEND:-sqlite}` |
+| `sh.darklab.metrics.path` | `/metrics` |
+
+For release builds, pass the same metadata values you want Docker inventory to show:
+
+```bash
+docker compose build \
+  --build-arg APP_VERSION=2.5.0 \
+  --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
+  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+To check the labels on a running container:
+
+```bash
+docker inspect darklab_shell \
+  --format '{{ index .Config.Labels "sh.darklab.config.database_backend" }}'
+```
+
 ---
 
 ## Workspace Storage Recipes
@@ -1021,6 +1065,67 @@ Use the same app config as the bind-mount example:
 workspace_enabled: true
 workspace_backend: volume
 ```
+
+---
+
+## Operator Backups
+
+Use [`scripts/backup_system.py`](scripts/backup_system.py) when you want a scheduled backup that matches the deployment the app is actually running with. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
+
+Basic cron-friendly example:
+
+```bash
+python scripts/backup_system.py \
+  --env-file .env \
+  --output-dir /backups/darklab_shell \
+  --keep-days 14
+```
+
+Run the script as a host user that can read every physical source it needs to copy. On Linux Docker hosts, production bind mounts commonly require root because `/data` and `/workspaces` are owned by the container's numeric app users and are not world-readable. Docker group access is still useful for Compose Postgres dumps, Docker volume exports, and container-only sources, but it does not grant read access to locked-down host bind-mount directories.
+
+For SQLite, the script writes a consistent `database/history.db` snapshot with SQLite's online backup API, then copies the rest of `data_dir` while leaving the live `history.db`, `history.db-wal`, and `history.db-shm` files out of the copied `data/` directory. When the script runs from the Docker host, it keeps the app's logical `data_dir` separate from the physical backup source, so the bundled `/data` mount resolves to the host `./data` directory declared in Compose. For Postgres, it writes `database/postgres.dump` with `pg_dump --format=custom --no-owner --no-acl`. Compose-managed Postgres backups run `pg_dump` inside the Postgres container with `docker compose exec -T`, so the host does not need `pg_dump` installed. Local host `pg_dump` is used only for host-reachable database URLs or when `--postgres-dump-mode local` is set.
+
+The backup includes:
+
+- the database dump or SQLite snapshot
+- `data_dir` contents, including run-output artifacts, body-store files, package/report jobs, and the app-owned `.secrets_master_key` file when it exists
+- `app/conf/**/*.yaml`, `app/conf/**/*.local.*`, root `docker-compose*.yml` / `docker-compose*.yaml`, and `.env` when present or supplied with `--env-file`
+- files named with repeatable `--extra-file`, such as a local Compose override or systemd unit
+- enabled workspaces when a physical source can be resolved
+
+`data_dir` and workspace backups distinguish the app's logical path from the host or Docker source that needs to be copied:
+
+- The bundled Compose `/data` bind mount is copied from the host path mapped to `/data`.
+- `--data-source bind:/path` can override the data source when a deployment stores app data outside the Compose files.
+- Docker volume or container-only `data_dir` sources can be copied for Postgres deployments; SQLite backups need a host-readable bind path so the online snapshot can read the live database safely.
+
+- Bind mounts are copied from the host path Docker maps to `WORKSPACE_ROOT`.
+- Docker named volumes are exported through Docker. When the app container is available, auto-detection uses `docker cp` from the mounted path; explicit `--workspace-source volume:<name>` uses a short-lived helper container.
+- Tmpfs or container-only workspaces are skipped with a warning unless `--include-ephemeral-workspaces` is set.
+
+The script does not always need the app containers to be running. SQLite backups of the bundled Compose stack can run from the host while containers are stopped because `/data` resolves to the host bind mount. Local config files, `.env`, and explicit host paths also do not need running containers. Compose Postgres dumps, `container:name:/path` sources, and `--include-ephemeral-workspaces` do need the relevant container to be running; when it is not available, the script reports that service or container as unavailable instead of treating the logical container path as a host directory. In `--postgres-dump-mode auto`, a `DATABASE_URL` host that matches a Compose service name, such as `postgres`, is treated as a container-network address and dumped through `docker compose exec`. A remote or host-reachable URL keeps using local `pg_dump` even if the supplied stack also has a running Postgres service.
+
+When a deployment uses Compose overrides, pass the same Compose files in the same order you use for `docker compose`. The first file supplies the Compose project directory for relative bind mounts, so the production override's `./workspaces:/workspaces` path resolves to repo-root `./workspaces` when you pass `docker-compose.yml` first. The script reads `WORKSPACE_ROOT` from the supplied Compose stack when `--compose-file` is explicit; `--workspace-root` can override the logical app path, and `--workspace-source` can override the physical copy source.
+
+Use these flags when auto-detection needs help:
+
+```bash
+python scripts/backup_system.py \
+  --env-file .env \
+  --compose-file docker-compose.yml \
+  --compose-file examples/docker-compose.prod.yml \
+  --extra-file docker-compose.local.yml \
+  --data-source bind:/srv/darklab/data \
+  --output-dir /backups/darklab_shell
+```
+
+`--data-source` and `--workspace-source` accept `bind:/path`, `volume:name`, or `container:name:/path`. `--workspace-root /path` records the logical app path when it cannot be read from config or Compose. `--include-workspaces never` skips workspace files intentionally. `--dry-run` validates explicitly requested env and extra files, then prints the resolved backend, Postgres dump mode, data directory mapping, Compose files, workspace source, warnings, and skipped items without creating the output directory or lock file. Missing `--extra-file` paths are accepted only when `--ignore-missing-extra-file` is also set.
+
+Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
+
+When `--keep-days` is set, the manifest records the cutoff, candidates examined, removal candidates, and inspection failures. Retention runs only after the new backup is published, then prints the actual removed and failure totals for cron logs. Candidate metadata or removal failures are warnings rather than silent skips. Expected operator errors stay concise; unexpected script failures also print a traceback with the failing function and line.
+
+Backups contain sensitive material: `.env`, encrypted secret rows, the app-owned secrets key file, and local deployment files may all be present. Store the backup directory with owner-only permissions, keep archives off shared paths, and do not publish `manifest.json` even though it redacts known secret values.
 
 ---
 

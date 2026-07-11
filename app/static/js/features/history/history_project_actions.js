@@ -5,6 +5,11 @@ import { showToast as importedShowToast } from '../../core/utils.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import {
+  applyProjectRunEntityUnlinkPreview,
+  setCleanupNodeHidden,
+} from '../../ui/cleanup_reasons.js';
+import { bindDisclosure as importedBindDisclosure } from '../../ui/ui_disclosure.js';
+import {
   enhanceAppSelects as importedEnhanceAppSelects,
   syncAppSelect as importedSyncAppSelect,
 } from '../../ui/ui_helpers.js';
@@ -422,7 +427,7 @@ function _historyProjectRunEntityOptionContent({
   label.append(checkbox, text);
   wrap.append(label);
   const note = document.createElement('div');
-  note.className = 'history-project-run-entities-note u-hidden';
+  note.className = 'cleanup-reason-note history-project-run-entities-note u-hidden';
   wrap.appendChild(note);
   const curatedLabel = document.createElement('label');
   curatedLabel.className = 'form-check u-hidden';
@@ -433,21 +438,40 @@ function _historyProjectRunEntityOptionContent({
   const curatedText = document.createElement('span');
   curatedLabel.append(curatedCheckbox, curatedText);
   const curatedNote = document.createElement('div');
-  curatedNote.className = 'history-project-run-entities-note u-hidden';
+  curatedNote.className = 'cleanup-reason-note history-project-run-entities-note u-hidden';
   if (kind === 'remove') {
     wrap.append(curatedLabel, curatedNote);
   }
   const runFindingsNote = document.createElement('div');
-  runFindingsNote.className = 'history-project-run-entities-note u-hidden';
+  runFindingsNote.className = 'cleanup-reason-note history-project-run-entities-note u-hidden';
   if (kind === 'remove') {
     wrap.prepend(runFindingsNote);
   }
+  const notEligibleNote = document.createElement('div');
+  notEligibleNote.className = 'cleanup-reason-note history-project-run-entities-note u-hidden';
+  if (kind === 'remove') {
+    wrap.appendChild(notEligibleNote);
+  }
+  const sampleDetails = document.createElement('div');
+  sampleDetails.className = 'cleanup-sample-slot u-hidden';
+  if (kind === 'remove') {
+    wrap.appendChild(sampleDetails);
+  }
   return {
     wrap,
+    label,
     checkbox,
     text,
     note,
+    curatedLabel,
     curatedCheckbox,
+    curatedText,
+    curatedNote,
+    runFindingsNote,
+    notEligibleNote,
+    sampleDetails,
+    bindDisclosure: importedBindDisclosure,
+    setNodeHidden: setCleanupNodeHidden,
     includeEntities() {
       return !!checkbox.checked && !checkbox.disabled;
     },
@@ -460,59 +484,16 @@ function _historyProjectRunEntityOptionContent({
     setPreview(preview) {
       const runCount = Number(preview && preview.run_count || 0);
       if (kind === 'remove') {
-        const removable = Number(preview && preview.removable || 0);
-        const curated = Number(preview && (preview.curated ?? preview.kept_curated) || 0);
-        const runFindings = Number(preview && preview.run_findings || 0);
-        const removableFindings = Number(preview && preview.removable_findings || 0);
-        const curatedFindings = Number(preview && (preview.curated_findings ?? preview.kept_curated_findings) || 0);
-        const entityLabel = removable === 1 ? 'entity' : 'entities';
-        const curatedEntityLabel = curated === 1 ? 'entity' : 'entities';
-        const runFindingLabel = runFindings === 1 ? 'finding' : 'findings';
-        const removableFindingLabel = removableFindings === 1 ? 'finding' : 'findings';
-        const curatedFindingLabel = curatedFindings === 1 ? 'finding' : 'findings';
-        checkbox.checked = false;
-        checkbox.disabled = removable <= 0;
-        curatedCheckbox.checked = false;
-        curatedCheckbox.disabled = curated <= 0;
-        wrap.classList.toggle('u-hidden', removable <= 0 && curated <= 0 && runFindings <= 0);
-        runFindingsNote.classList.toggle('u-hidden', runFindings <= 0);
-        runFindingsNote.textContent = runFindings > 0
-          ? `Removing the run link will remove ${runFindings.toLocaleString()} ${runFindingLabel} from this project's Findings tab.`
-          : '';
-        label.classList.toggle('u-hidden', removable <= 0);
-        curatedLabel.classList.toggle('u-hidden', curated <= 0);
-        text.textContent = removable > 0
-          ? 'Also remove disposable same-run Atlas entities from this project'
-          : '';
-        note.classList.toggle('u-hidden', removable <= 0);
-        note.textContent = removable > 0
-          ? [
-            `This will unlink ${removable.toLocaleString()} ${entityLabel} found only in ${runCount > 1 ? 'these runs' : 'this run'}.`,
-            removableFindings > 0
-              ? `${removableFindings.toLocaleString()} related ${removableFindingLabel} will no longer appear in this project.`
-              : '',
-          ].filter(Boolean).join(' ')
-          : '';
-        curatedText.textContent = curated > 0
-          ? 'Also remove curated same-run Atlas entities from this project'
-          : '';
-        curatedNote.classList.toggle('u-hidden', curated <= 0);
-        curatedNote.textContent = curated > 0
-          ? [
-            `${curated.toLocaleString()} curated ${curatedEntityLabel}`,
-            curatedFindings > 0 ? `and ${curatedFindings.toLocaleString()} related ${curatedFindingLabel}` : '',
-            `will stay in this project unless this is checked. Curated means project-linked elsewhere, labeled, noted, reviewed, or carrying project target metadata.`,
-          ].filter(Boolean).join(' ')
-          : '';
+        applyProjectRunEntityUnlinkPreview(this, preview);
         return;
       }
       const count = Number(preview && preview.linkable || 0);
       const keptCurated = Number(preview && preview.kept_curated || 0);
       checkbox.checked = false;
       checkbox.disabled = count <= 0;
-      wrap.classList.toggle('u-hidden', count <= 0);
+      setCleanupNodeHidden(wrap, count <= 0);
       text.textContent = count > 0 ? labelForCount(count, runCount) : '';
-      note.classList.toggle('u-hidden', count <= 0 || keptCurated <= 0);
+      setCleanupNodeHidden(note, count <= 0 || keptCurated <= 0);
       note.textContent = keptCurated > 0
         ? `${keptCurated.toLocaleString()} curated ${keptCurated === 1 ? 'entity will' : 'entities will'} stay linked.`
         : '';

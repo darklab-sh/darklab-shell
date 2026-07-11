@@ -60,8 +60,8 @@ def delete_history_run(**kwargs):
     return _history_mutations.delete_history_run(**kwargs)
 
 
-def history_run_cleanup_preview(session_id: str, run_id: str):
-    return _history_mutations.history_run_cleanup_preview(session_id, run_id)
+def history_run_cleanup_preview(session_id: str, run_id: str, owner_scope=None):
+    return _history_mutations.history_run_cleanup_preview(session_id, run_id, owner_scope=owner_scope)
 
 
 def bulk_export_rows(owner_scope, run_ids: list[str], snapshot_ids: list[str]):

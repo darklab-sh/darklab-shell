@@ -148,6 +148,7 @@ const UI_DISCLOSURE_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/s
 const UI_DISMISSIBLE_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'), 'utf8'))
 const UI_OUTSIDE_CLICK_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_outside_click.js'), 'utf8'))
 const UI_FOCUS_TRAP_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'), 'utf8'))
+const UI_CLEANUP_REASONS_SRC = stripEsmExports(readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/cleanup_reasons.js'), 'utf8'))
 
 const APP_STATE_SEED_KEYS = [
   'tabs',
@@ -475,6 +476,8 @@ export function fromDomScript(relPath, globals, ...names) {
     '\n' +
     UI_FOCUS_TRAP_SRC +
     '\n' +
+    UI_CLEANUP_REASONS_SRC +
+    '\n' +
     stripEsmExports(readFileSync(resolve(REPO_ROOT, relPath), 'utf8'))
   const globalNames = ['__darklabExtractGlobals', ...Object.keys(globals)]
   const globalValues = [globals, ...Object.values(globals)]
@@ -525,6 +528,8 @@ export function fromDomScripts(relPaths, globals, returnExpr, initCode = '') {
     UI_OUTSIDE_CLICK_SRC +
     '\n' +
     UI_FOCUS_TRAP_SRC +
+    '\n' +
+    UI_CLEANUP_REASONS_SRC +
     '\n' +
     windowGlobalSeedSource(globals) +
     '\n' +

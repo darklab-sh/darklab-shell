@@ -25,6 +25,7 @@ from services.projects.list_metrics import (
     project_finding_owner_clause as _project_finding_owner_clause,
 )
 from services.projects import list_queries as _list_queries
+from services.projects.list_switcher import list_projects_switcher as _list_projects_switcher_impl
 from services.projects.models import (
     row_to_link as _row_to_link,
     row_to_project as _row_to_project,
@@ -72,7 +73,7 @@ def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0
 
 
 def list_projects_switcher(session_id, *, query="", limit=8, team_id=""):
-    return _list_queries.list_projects_switcher(session_id, query=query, limit=limit, team_id=team_id)
+    return _list_projects_switcher_impl(session_id, query=query, limit=limit, team_id=team_id)
 
 
 def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, offset=0, team_id=""):
@@ -144,29 +145,35 @@ def _project_run_count_maps(conn, session_id, run_ids, *, team_id=""):
     placeholders = ",".join("?" for _ in ids)
     finding_counts = {run_id: 0 for run_id in ids}
     artifact_counts = {run_id: 0 for run_id in ids}
+    finding_owner_sql, finding_owner_params = _project_finding_owner_clause(session_id, team_id, table_alias="f")
+    direct_finding_owner_sql, direct_finding_owner_params = _project_finding_owner_clause(session_id, team_id, table_alias="")
     finding_rows = conn.execute(
         "SELECT run_id, COUNT(DISTINCT finding_id) AS count FROM ("  # nosec
         "SELECT fo.run_id AS run_id, fo.finding_id AS finding_id "
         "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-        f"WHERE f.session_id = ? AND COALESCE(f.suppressed, FALSE) = FALSE AND fo.run_id IN ({placeholders}) "
+        f"WHERE 1 = 1 {finding_owner_sql}"
+        f"AND COALESCE(f.suppressed, FALSE) = FALSE AND fo.run_id IN ({placeholders}) "
         "UNION "
         "SELECT run_id, id AS finding_id FROM findings "
-        f"WHERE session_id = ? AND COALESCE(suppressed, FALSE) = FALSE AND run_id IN ({placeholders}) "
+        f"WHERE 1 = 1 {direct_finding_owner_sql}"
+        f"AND COALESCE(suppressed, FALSE) = FALSE AND run_id IN ({placeholders}) "
         "UNION "
         "SELECT first_run_id AS run_id, id AS finding_id FROM findings "
-        f"WHERE session_id = ? AND COALESCE(suppressed, FALSE) = FALSE AND first_run_id IN ({placeholders}) "
+        f"WHERE 1 = 1 {direct_finding_owner_sql}"
+        f"AND COALESCE(suppressed, FALSE) = FALSE AND first_run_id IN ({placeholders}) "
         "UNION "
         "SELECT last_run_id AS run_id, id AS finding_id FROM findings "
-        f"WHERE session_id = ? AND COALESCE(suppressed, FALSE) = FALSE AND last_run_id IN ({placeholders})"
+        f"WHERE 1 = 1 {direct_finding_owner_sql}"
+        f"AND COALESCE(suppressed, FALSE) = FALSE AND last_run_id IN ({placeholders})"
         ") grouped_findings WHERE run_id IS NOT NULL AND run_id != '' GROUP BY run_id",
         (
-            session_id,
+            *finding_owner_params,
             *ids,
-            session_id,
+            *direct_finding_owner_params,
             *ids,
-            session_id,
+            *direct_finding_owner_params,
             *ids,
-            session_id,
+            *direct_finding_owner_params,
             *ids,
         ),
     ).fetchall()
@@ -187,7 +194,7 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra
     if entity_type:
         type_filter += "AND e.type = ? "
     run_owner_sql, _run_owner_params = shared_owner_where("", team_id=team_id, table_alias="er")
-    entity_owner_sql = "" if team_id else "AND e.session_id = ? "
+    entity_owner_sql = "" if team_id else "AND e.session_id = ? AND e.team_id = '' "
     dialect = dialect_for_backend(get_db_backend())
     provider_list_expr = dialect.string_agg_distinct("eis.provider")
     value_order_expr = dialect.case_insensitive_order("e.canonical_value")

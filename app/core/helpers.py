@@ -200,9 +200,8 @@ def get_log_session_id(session_id=None):
 
 
 # ── Font manifest ──────────────────────────────────────────────────────────────
-# Single source of truth for vendored font files.  assets.py derives its route
-# allowlist from this list; permalinks.py uses it to generate @font-face CSS.
-# Adding or removing a font here automatically propagates to both surfaces.
+# Single source of truth for vendored font files. Browser-facing CSS uses WOFF2
+# while PDF export keeps TrueType files available for jsPDF.
 
 FONT_FILES = [
     ("JetBrains Mono", 300, "JetBrainsMono-300.ttf"),
@@ -210,6 +209,14 @@ FONT_FILES = [
     ("JetBrains Mono", 700, "JetBrainsMono-700.ttf"),
     ("Syne", 700, "Syne-700.ttf"),
     ("Syne", 800, "Syne-800.ttf"),
+]
+
+WEB_FONT_FILES = [
+    ("JetBrains Mono", 300, "JetBrainsMono-300.woff2"),
+    ("JetBrains Mono", 400, "JetBrainsMono-400.woff2"),
+    ("JetBrains Mono", 700, "JetBrainsMono-700.woff2"),
+    ("Syne", 700, "Syne-700.woff2"),
+    ("Syne", 800, "Syne-800.woff2"),
 ]
 
 

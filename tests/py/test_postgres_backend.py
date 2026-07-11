@@ -76,6 +76,16 @@ def _execute(conn: Any, sql: str, params: tuple[Any, ...] = (), *, backend: str)
     return conn.execute(sql, params)
 
 
+def _postgres_plan_text(rows: list[Any]) -> str:
+    lines: list[str] = []
+    for row in rows:
+        if isinstance(row, dict):
+            lines.append(str(row.get("QUERY PLAN") or ""))
+        else:
+            lines.append(str(row[0]))
+    return "\n".join(lines)
+
+
 def _create_smoke_schema(conn: Any, *, backend: str) -> None:
     json_type = "JSONB" if backend == "postgres" else "TEXT"
     statements = [
@@ -306,6 +316,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0037",
         "0038",
         "0039",
+        "0040",
+        "0041",
+        "0042",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -461,6 +474,177 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_atlas_finding_import_occurrences_batch",
         "idx_atlas_finding_import_occurrences_finding_seen",
     }.issubset({row["indexname"] for row in import_index_rows})
+
+
+@pytest.mark.postgres
+def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.atlas.scope import (
+        entity_scope_params,
+        entity_scope_sql,
+        finding_source_scope_params,
+        finding_source_scope_sql,
+    )
+    from services.projects.list_metrics import (
+        project_entity_owner_clause,
+        project_finding_owner_clause,
+    )
+    from services.projects.scope import shared_owner_where
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    compat = PostgresSqliteCompatConnection(conn)
+    for index in range(40):
+        project_id = "project-one-id" if index == 0 else f"project-{index}"
+        slug = "project-one" if index == 0 else f"project-{index}"
+        status = "archived" if index % 9 == 0 else "active"
+        compat.execute(
+            "INSERT INTO projects "
+            "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+            "VALUES (?, ?, '', ?, ?, '', ?, '', ?, ?)",
+            (
+                project_id,
+                "scope-session",
+                f"Project {index:02}",
+                slug,
+                status,
+                f"2026-01-{(index % 28) + 1:02}T00:00:00+00:00",
+                f"2026-02-{(index % 28) + 1:02}T00:00:00+00:00",
+            ),
+        )
+    conn.execute("ANALYZE projects")
+    conn.execute("SET enable_seqscan = off")
+    try:
+        atlas_entity_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT e.id FROM entities e WHERE "
+            + entity_scope_sql("e")
+            + " AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?",
+            (*entity_scope_params("scope-session"), "domain", 10),
+        ).fetchall())
+
+        atlas_finding_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT f.id FROM findings f WHERE "
+            + finding_source_scope_sql("f")
+            + " AND f.run_id = ? ORDER BY f.last_seen_at DESC LIMIT ?",
+            (*finding_source_scope_params("scope-session"), "run-1", 10),
+        ).fetchall())
+
+        project_owner_sql, project_owner_params = shared_owner_where("scope-session")
+        project_slug_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM projects WHERE "
+            + project_owner_sql
+            + " AND slug = ?",
+            (*project_owner_params, "project-one"),
+        ).fetchall())
+
+        project_entity_owner_sql, project_entity_owner_params = project_entity_owner_clause("scope-session")
+        project_entity_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT e.id FROM entities e WHERE 1 = 1 "
+            + project_entity_owner_sql
+            + "AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?",
+            (*project_entity_owner_params, "domain", 10),
+        ).fetchall())
+
+        project_finding_owner_sql, project_finding_owner_params = project_finding_owner_clause("scope-session")
+        project_finding_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT f.id FROM findings f WHERE 1 = 1 "
+            + project_finding_owner_sql
+            + "AND f.run_id = ? ORDER BY f.last_seen_at DESC LIMIT ?",
+            (*project_finding_owner_params, "run-1", 10),
+        ).fetchall())
+
+        atlas_entity_sort_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT e.id FROM entities e WHERE "
+            + entity_scope_sql("e")
+            + " ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
+            (*entity_scope_params("scope-session"), 10),
+        ).fetchall())
+
+        project_visible_sort_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM projects WHERE "
+            + project_owner_sql
+            + " AND status != 'archived' AND id != ? "
+            "ORDER BY LOWER(name) ASC, updated DESC, created DESC LIMIT ? OFFSET ?",
+            (*project_owner_params, "active-project", 10, 0),
+        ).fetchall())
+
+        project_archive_sort_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM projects WHERE "
+            + project_owner_sql
+            + " AND id != ? "
+            "ORDER BY CASE WHEN status = 'archived' THEN 1 ELSE 0 END, "
+            "LOWER(name) ASC, updated DESC, created DESC LIMIT ? OFFSET ?",
+            (*project_owner_params, "active-project", 10, 0),
+        ).fetchall())
+
+        atlas_finding_status_sort_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT f.id FROM findings f WHERE "
+            + finding_source_scope_sql("f")
+            + " ORDER BY CASE f.status "
+            "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
+            "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
+            "f.last_seen_at DESC, f.created DESC LIMIT ?",
+            (*finding_source_scope_params("scope-session"), 10),
+        ).fetchall())
+
+        team_first_run_finding_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM findings WHERE team_id = ? AND team_id != '' AND first_run_id = ? "
+            "ORDER BY last_seen_at DESC LIMIT ?",
+            ("team-one", "run-1", 10),
+        ).fetchall())
+
+        team_last_run_finding_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM findings WHERE team_id = ? AND team_id != '' AND last_run_id = ? "
+            "ORDER BY last_seen_at DESC LIMIT ?",
+            ("team-one", "run-1", 10),
+        ).fetchall())
+
+        artifact_created_path_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM run_file_artifacts WHERE run_id = ? "
+            "ORDER BY created ASC, workspace_path ASC LIMIT ?",
+            ("run-artifact-1", 10),
+        ).fetchall())
+
+        artifact_created_id_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT id FROM run_file_artifacts WHERE run_id = ? "
+            "ORDER BY created DESC, id DESC LIMIT ?",
+            ("run-artifact-1", 10),
+        ).fetchall())
+
+        output_artifact_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) SELECT rel_path FROM run_output_artifacts WHERE run_id = ?",
+            ("run-artifact-1",),
+        ).fetchall())
+    finally:
+        conn.execute("RESET enable_seqscan")
+        conn.commit()
+
+    assert entity_scope_sql("e") == "e.session_id = ? AND e.team_id = ''"
+    assert finding_source_scope_sql("f") == "f.session_id = ? AND f.team_id = ''"
+    assert project_owner_sql == "session_id = ? AND team_id = ''"
+    assert project_entity_owner_sql == "AND e.session_id = ? AND e.team_id = '' "
+    assert project_finding_owner_sql == "AND f.session_id = ? AND f.team_id = '' "
+    assert (
+        "idx_entities_session_type_last_seen" in atlas_entity_plan
+        or "idx_entities_session_last_seen_value" in atlas_entity_plan
+    )
+    assert "idx_findings_session_run_seen" in atlas_finding_plan
+    assert "idx_projects_personal_slug_unique" in project_slug_plan
+    assert (
+        "idx_entities_session_type_last_seen" in project_entity_plan
+        or "idx_entities_session_last_seen_value" in project_entity_plan
+    )
+    assert "idx_findings_session_run_seen" in project_finding_plan
+    assert "idx_entities_session_last_seen_value" in atlas_entity_sort_plan
+    assert "idx_projects_personal_visible_name_sort" in project_visible_sort_plan
+    assert "idx_projects_personal_archive_name_sort" in project_archive_sort_plan
+    assert "idx_findings_session_status_sort_seen" in atlas_finding_status_sort_plan
+    assert "idx_findings_team_first_run_seen" in team_first_run_finding_plan
+    assert "idx_findings_team_last_run_seen" in team_last_run_finding_plan
+    assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
+    assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
+    assert "run_output_artifacts_pkey" in output_artifact_plan
 
 
 @pytest.mark.postgres
@@ -1840,7 +2024,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers={"X-Session-ID": session_id},
         json={"run_ids": [run_id]},
     )
-    list_resp = client.get("/projects", headers={"X-Session-ID": session_id})
+    list_resp = client.get("/projects?include_counts=1", headers={"X-Session-ID": session_id})
     targets_resp = client.get(f"/projects/{project['id']}/targets", headers={"X-Session-ID": session_id})
     links_resp = client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id})
     findings_resp = client.get(
@@ -1867,7 +2051,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert link_resp.status_code == 201
     assert run_entity_preview_resp.status_code == 200
     assert json.loads(run_entity_preview_resp.data)["preview"]["available"] == 2
-    assert [item["id"] for item in json.loads(list_resp.data)["projects"]] == [project["id"]]
+    list_projects = json.loads(list_resp.data)["projects"]
+    assert [item["id"] for item in list_projects] == [project["id"]]
+    assert list_projects[0]["counts"]["runs"] == 1
+    assert list_projects[0]["counts"]["findings"] == 1
+    assert list_projects[0]["finding_summary"]["severities"] == {"high": 1}
     assert json.loads(targets_resp.data)["targets"][0]["source_detail"] == {"source": "manual"}
     assert json.loads(links_resp.data)["links"][0]["entity_id"] == run_id
     assert findings_review_resp.status_code == 200

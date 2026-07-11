@@ -4,7 +4,7 @@
 //
 // Server-rendered data is provided via window.PermData, set by the inline
 // <script> block in the template before this module loads.
-// Shared helpers come from ExportHtmlUtils (export_html.js), copyTextToClipboard,
+// Shared helpers come from ExportHtmlUtils, copyTextToClipboard,
 // showToast (utils.js), and the lazy PDF loader loaded before this file.
 import {
   copyTextToClipboard as importedCopyTextToClipboard,
@@ -12,9 +12,14 @@ import {
   showToast as importedShowToast,
 } from './core/utils.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
+import {
+  ExportHtmlUtils as importedExportHtmlUtils,
+  loadExportHtmlUtils as importedLoadExportHtmlUtils,
+} from './export_html_bridge.js';
 
 (function () {
-  var exportHtmlUtils = (typeof window !== 'undefined' && window.ExportHtmlUtils)
+  var exportHtmlUtils = (typeof importedExportHtmlUtils !== 'undefined' && importedExportHtmlUtils)
+    || (typeof window !== 'undefined' && window.ExportHtmlUtils)
     || {};
   var AnsiUpCtor = window.AnsiUp || null;
   var bindOutsideClickCloseFn = (typeof importedBindOutsideClickClose !== 'undefined' && importedBindOutsideClickClose)
@@ -232,6 +237,22 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
     return appName + '-' + exportHtmlUtils.exportTimestamp() + '.' + ext;
   }
 
+  async function ensureExportHtmlUtils() {
+    if (
+      exportHtmlUtils
+      && exportHtmlUtils.isLazyExportHtmlBridge !== true
+      && typeof exportHtmlUtils.buildTerminalExportHtml === 'function'
+    ) {
+      return exportHtmlUtils;
+    }
+    var load = (typeof importedLoadExportHtmlUtils !== 'undefined' && importedLoadExportHtmlUtils)
+      || window.loadExportHtmlUtils;
+    if (typeof load !== 'function') throw new Error('Export HTML formatter is not available.');
+    var loaded = await load();
+    exportHtmlUtils = loaded && loaded.ExportHtmlUtils ? loaded.ExportHtmlUtils : loaded;
+    return exportHtmlUtils;
+  }
+
   // ── Export actions ─────────────────────────────────────────────────────────
   function copyTxt() {
     var text = lines.map(function (entry, index) { return displayText(entry, index); }).join('\n');
@@ -243,8 +264,9 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
     downloadBlobAsAttachmentFn(new Blob([text], {type: 'text/plain'}), downloadName('txt'));
   }
 
-  function saveHtml() {
-    var exportModel = exportHtmlUtils.buildExportDocumentModel({
+  async function saveHtml() {
+    var htmlUtils = await ensureExportHtmlUtils();
+    var exportModel = htmlUtils.buildExportDocumentModel({
       appName: appName,
       title: label,
       label: label,
@@ -254,7 +276,7 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
       command: command,
       includeCommandOutcomeSummary: commandOutcomeSummariesEnabled,
     });
-    var result = exportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+    var result = htmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: function (entry, i) { return formatPrefix(i + 1, entry); },
       ansiToHtml: function (text) { return ansiUp.ansi_to_html(text); },
     });
@@ -262,8 +284,8 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
     var summaryHtml = result.summaryHtml;
     var prefixWidth = result.prefixWidth;
 
-    exportHtmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
-      var html = exportHtmlUtils.buildTerminalExportHtml({
+    htmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
+      var html = htmlUtils.buildTerminalExportHtml({
         appName: exportModel.appName,
         title: exportModel.title,
         metaLine: exportModel.metaLine,
@@ -288,6 +310,7 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
     var pdfUtils;
     var jsPDF;
     try {
+      await ensureExportHtmlUtils();
       pdfUtils = existingPdfUtils || await window.loadExportPdfUtils();
       jsPDF = typeof window.loadJsPdf === 'function'
         ? await window.loadJsPdf()
@@ -327,7 +350,7 @@ import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_
     var action = target.dataset.action;
     if (action === 'copy-txt') copyTxt();
     else if (action === 'save-txt') saveTxt();
-    else if (action === 'save-html') saveHtml();
+    else if (action === 'save-html') void saveHtml();
     else if (action === 'save-pdf') void savePdf();
     else return;
     var saveWrap = document.getElementById('perm-save-wrap');

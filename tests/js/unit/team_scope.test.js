@@ -71,6 +71,20 @@ describe('team scope selector', () => {
     document.body.replaceChildren()
   })
 
+  it('does not refresh team scopes on boot for anonymous personal sessions', async () => {
+    const apiFetch = defaultApiFetch()
+
+    await loadTeamScopeHarness({
+      apiFetch,
+      sessionId: 'anon_scope_boot',
+    })
+    document.dispatchEvent(new Event('DOMContentLoaded'))
+    await Promise.resolve()
+
+    const teamCalls = apiFetch.mock.calls.filter(([url]) => url === '/session/teams')
+    expect(teamCalls).toHaveLength(0)
+  })
+
   it('clears a stale stored team id after a successful team refresh', async () => {
     const sessionId = 'tok_scope_stale'
     const apiFetch = defaultApiFetch({

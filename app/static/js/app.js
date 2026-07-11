@@ -471,6 +471,7 @@ function focusCommandInputFromGesture({ preventScroll = true } = {}) {
 
 function _closeMajorOverlays(options = {}) {
   const skipProjectWorkspace = !!(options && options.skipProjectWorkspace);
+  const skipAtlas = !!(options && options.skipAtlas);
   if (typeof _appIsCommandCatalogOverlayOpenAdapter === 'function' && _appIsCommandCatalogOverlayOpenAdapter()) {
     if (typeof _appHideCommandCatalogOverlayAdapter === 'function') _appHideCommandCatalogOverlayAdapter();
   }
@@ -480,7 +481,7 @@ function _closeMajorOverlays(options = {}) {
   if (!skipProjectWorkspace && typeof importedIsProjectWorkspaceOpen === 'function' && importedIsProjectWorkspaceOpen()) {
     importedCloseProjectWorkspace({ refocus: false });
   }
-  if (typeof _appIsAtlasOverlayOpenAdapter === 'function' && _appIsAtlasOverlayOpenAdapter()) {
+  if (!skipAtlas && typeof _appIsAtlasOverlayOpenAdapter === 'function' && _appIsAtlasOverlayOpenAdapter()) {
     if (typeof _appCloseAtlasAdapter === 'function') _appCloseAtlasAdapter({ refocus: false });
   }
   if (typeof _appIsFindingsBoardOpenAdapter === 'function' && _appIsFindingsBoardOpenAdapter()) {

@@ -70,6 +70,7 @@ let _workspaceLoaded = false;
 let _workspaceCurrentDir = '';
 let _workspaceCurrentScopeKey = 'personal';
 const _workspaceDirByScope = new Map();
+let _workspaceFilesLoadPromise = null;
 let _workspaceOwner = {
   scope: 'personal',
   team_id: '',
@@ -155,6 +156,14 @@ function _publishWorkspaceState() {
     isEnabled: {
       configurable: true,
       value: isWorkspaceEnabled,
+    },
+    canWrite: {
+      configurable: true,
+      value: workspaceCanWrite,
+    },
+    loadFilesPayload: {
+      configurable: true,
+      value: (...args) => loadWorkspaceFilesPayload(...args),
     },
     movePath: {
       configurable: true,
@@ -1330,14 +1339,27 @@ function renderWorkspaceFiles(payload = {}) {
   renderWorkspaceBrowser();
 }
 
-async function refreshWorkspaceFiles() {
+async function loadWorkspaceFilesPayload(options = {}) {
   if (!isWorkspaceEnabled()) throw new Error('Files are disabled on this instance');
+  if (_workspaceFilesLoadPromise && options.force !== true) return _workspaceFilesLoadPromise;
+  const request = (async () => {
+    const resp = await _workspaceApiFetch()('/workspace/files');
+    const data = await _workspaceJson(resp);
+    renderWorkspaceFiles(data);
+    return data;
+  })();
+  _workspaceFilesLoadPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (_workspaceFilesLoadPromise === request) _workspaceFilesLoadPromise = null;
+  }
+}
+
+async function refreshWorkspaceFiles(options = {}) {
   setWorkspaceMessage('');
   if (workspaceSummary) workspaceSummary.textContent = 'Loading…';
-  const resp = await _workspaceApiFetch()('/workspace/files');
-  const data = await _workspaceJson(resp);
-  renderWorkspaceFiles(data);
-  return data;
+  return loadWorkspaceFilesPayload(options);
 }
 
 async function refreshWorkspaceFilesFromButton() {
@@ -1347,7 +1369,7 @@ async function refreshWorkspaceFilesFromButton() {
   workspaceRefreshBtn.title = 'Refreshing files';
   try {
     const viewedPath = _workspaceViewedPath;
-    await refreshWorkspaceFiles();
+    await refreshWorkspaceFiles({ force: true });
     if (viewedPath) {
       try {
         await refreshWorkspaceViewedFile({ suppressErrorToast: true });
@@ -1854,10 +1876,25 @@ if (typeof window !== 'undefined') {
   if (isWorkspaceEnabled()) setTimeout(() => { _workspaceFileCacheApi().refresh?.(); }, 0);
 }
 if (typeof importedSetRuntimeHandlers === 'function') {
-  importedSetRuntimeHandlers({ refreshWorkspaceFiles });
+  importedSetRuntimeHandlers({ refreshWorkspaceFiles, loadWorkspaceFilesPayload });
 }
 if (typeof importedSetWorkspaceHandlers === 'function') {
-  importedSetWorkspaceHandlers({ closeWorkspace });
+  importedSetWorkspaceHandlers({
+    closeWorkspace,
+    createWorkspaceDirectory,
+    downloadWorkspaceFile,
+    _formatWorkspaceBytes,
+    hideWorkspaceEditor,
+    hideWorkspaceViewer,
+    loadWorkspaceFilesPayload,
+    moveWorkspacePath,
+    openWorkspace,
+    openWorkspaceEditorFromCommand,
+    readWorkspaceFile,
+    refreshWorkspaceFiles,
+    showWorkspaceViewer,
+    workspaceCanWrite,
+  });
 }
 
 export {
@@ -1872,6 +1909,7 @@ export {
   openWorkspaceEditorFromCommand,
   readWorkspaceFile,
   refreshWorkspaceFiles,
+  loadWorkspaceFilesPayload,
   showWorkspaceViewer,
   workspaceCanWrite,
 };

@@ -2,9 +2,9 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
-import { openAtlas as importedOpenAtlas } from '../atlas/atlas_overlay.js';
+import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_modal.js';
-import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_editor.js';
+import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 import {
   hasHistoryRunModalStateHandler as importedHasHistoryRunModalStateHandler,
   openHistoryRunDetails as importedOpenHistoryRunDetails,
@@ -29,6 +29,14 @@ let exportedDarklabProjectWorkspaceEvents = null;
 
     function mobileView() {
       return String(ctx.mobileView?.() || 'list');
+    }
+
+    function entitiesController() {
+      return ctx.entitiesController?.() || null;
+    }
+
+    function filtersController() {
+      return ctx.filtersController?.() || null;
     }
 
     function projectRows() {
@@ -83,6 +91,30 @@ let exportedDarklabProjectWorkspaceEvents = null;
         if (finding) return finding;
       }
       return null;
+    }
+
+    function actionLogDetails(action, button) {
+      return {
+        event: 'PROJECT_WORKSPACE_ACTION_FAILED',
+        level: 'warning',
+        action: String(action || '').slice(0, 80),
+        project_id: String(button?.dataset?.projectId || selectedProjectId() || '').slice(0, 160),
+        target_id: String(button?.dataset?.targetId || '').slice(0, 160),
+        run_id: String(button?.dataset?.runId || '').slice(0, 160),
+        artifact_id: String(button?.dataset?.artifactId || '').slice(0, 160),
+        package_id: String(button?.dataset?.packageId || '').slice(0, 160),
+        workspace_tab: workspaceTab(),
+      };
+    }
+
+    function isCancellationError(err) {
+      const message = String(err && err.message ? err.message : err || '').toLowerCase();
+      return message.includes('cancel') || message.includes('abort');
+    }
+
+    function logActionFailed(action, button, err) {
+      if (isCancellationError(err) || typeof ctx.logClientError !== 'function') return;
+      ctx.logClientError('project workspace action failed', err, actionLogDetails(action, button));
     }
 
     function restoreHistoryRun() {
@@ -192,7 +224,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleInput(event) {
-      if (ctx.entitiesController?.().handleAutoPromoteInput(event)) return;
+      if (entitiesController()?.handleAutoPromoteInput(event)) return;
       const reportController = ctx.reportController?.();
       if (reportController && reportController.handleInput(event)) return;
       const packagesController = ctx.packagesController?.();
@@ -200,7 +232,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleChange(event) {
-      if (ctx.entitiesController?.().handleAutoPromoteChange(event)) return;
+      if (entitiesController()?.handleAutoPromoteChange(event)) return;
       const monitoringController = ctx.monitoringController?.();
       if (monitoringController && monitoringController.handleChange(event)) return;
       const reportController = ctx.reportController?.();
@@ -238,7 +270,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const projectId = String(sortControl.dataset.projectId || selectedProjectId() || '');
         if (!projectId) return;
-        ctx.filtersController?.().setFindingSort(projectId, String(sortControl.value || 'run'));
+        filtersController()?.setFindingSort(projectId, String(sortControl.value || 'run'));
         ctx.renderProjectExplorer();
         return;
       }
@@ -331,7 +363,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const projectId = String(noteStateControl.dataset.projectId || selectedProjectId() || '');
         if (!projectId) return;
-        ctx.filtersController?.().setFindingNoteState(projectId, noteStateControl.value);
+        filtersController()?.setFindingNoteState(projectId, noteStateControl.value);
         ctx.renderProjectExplorer();
         return;
       }
@@ -340,7 +372,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const projectId = String(orphanControl.dataset.projectId || selectedProjectId() || '');
         if (!projectId) return;
-        ctx.filtersController?.().setFindingOrphanFilter(projectId, orphanControl.value);
+        filtersController()?.setFindingOrphanFilter(projectId, orphanControl.value);
         ctx.renderProjectExplorer();
         return;
       }
@@ -423,15 +455,15 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleDocumentPickerClick(event) {
-      await ctx.entitiesController?.().handlePickerClick(event);
+      await entitiesController()?.handlePickerClick(event);
     }
 
     function handleDocumentPickerInput(event) {
-      ctx.entitiesController?.().handlePickerInput(event);
+      entitiesController()?.handlePickerInput(event);
     }
 
     function handleDocumentPickerChange(event) {
-      ctx.entitiesController?.().handlePickerChange(event);
+      entitiesController()?.handlePickerChange(event);
     }
 
     function handleDocumentFilterMenuClick(event) {
@@ -544,7 +576,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         else ctx.renderProjectExplorer();
         return;
       }
-      if (await ctx.entitiesController?.().handleAutoPromoteClick(event)) return;
+      if (await entitiesController()?.handleAutoPromoteClick(event)) return;
       const activityController = ctx.activityController?.();
       if (
         event.target.closest?.('[data-project-activity-action]')
@@ -714,7 +746,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(noteStateClear.dataset.projectId || selectedProjectId() || '');
-        ctx.filtersController?.().setFindingNoteState(projectId, 'all');
+        filtersController()?.setFindingNoteState(projectId, 'all');
         ctx.renderProjectExplorer();
         return;
       }
@@ -723,7 +755,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(orphanClear.dataset.projectId || selectedProjectId() || '');
-        ctx.filtersController?.().setFindingOrphanFilter(projectId, 'hide');
+        filtersController()?.setFindingOrphanFilter(projectId, 'hide');
         ctx.renderProjectExplorer();
         return;
       }
@@ -732,7 +764,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(allFilterClear.dataset.projectId || selectedProjectId() || '');
-        ctx.filtersController?.().clearAllFilters(projectId);
+        filtersController()?.clearAllFilters(projectId);
         ctx.renderProjectExplorer();
         return;
       }
@@ -758,8 +790,8 @@ let exportedDarklabProjectWorkspaceEvents = null;
         if (nextTab !== 'details') ctx.closeProjectTargetEditor();
         ctx.closeProjectEntityEditor();
         if (nextTab !== 'entities') {
-          ctx.entitiesController?.().setSelectMode(false);
-          ctx.entitiesController?.().clearSelection();
+          entitiesController()?.setSelectMode(false);
+          entitiesController()?.clearSelection();
         }
         if (nextTab !== 'findings') {
           ctx.setFindingSelectMode(false);
@@ -778,9 +810,9 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.preventDefault();
         event.stopPropagation();
         const projectId = String(entityTabBtn.dataset.projectId || selectedProjectId() || '');
-        ctx.entitiesController?.().setActiveTab(entityTabBtn.dataset.projectEntityTab || 'ip');
-        ctx.entitiesController?.().clearSelection();
-        await Promise.resolve(ctx.entitiesController?.().ensureFilteredCounts(projectId));
+        entitiesController()?.setActiveTab(entityTabBtn.dataset.projectEntityTab || 'ip');
+        entitiesController()?.clearSelection();
+        await Promise.resolve(entitiesController()?.ensureFilteredCounts(projectId));
         ctx.renderProjectExplorer();
         if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
         return;
@@ -791,12 +823,12 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         if (entityPageBtn.disabled) return;
         const projectId = String(entityPageBtn.dataset.projectId || selectedProjectId() || '');
-        const page = ctx.entitiesController?.().page(projectId) || { limit: 50, offset: 0 };
+        const page = entitiesController()?.page(projectId) || { limit: 50, offset: 0 };
         const nextOffset = projectPageOffset(page, entityPageBtn.dataset.projectEntitiesPage);
-        ctx.entitiesController?.().setPageOffset(projectId, nextOffset);
-        ctx.entitiesController?.().clearSelection();
+        entitiesController()?.setPageOffset(projectId, nextOffset);
+        entitiesController()?.clearSelection();
         await runProjectPager(entityPageBtn, () => (
-          ctx.entitiesController?.().load(projectId, { offset: nextOffset, skipFinalRender: true })
+          entitiesController()?.load(projectId, { offset: nextOffset, skipFinalRender: true })
         ));
         return;
       }
@@ -804,7 +836,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
       if (entityCheckbox) {
         event.stopPropagation();
         const entityId = String(entityCheckbox.dataset.projectEntitySelect || '');
-        ctx.entitiesController?.().toggleSelected(entityId, !!entityCheckbox.checked);
+        entitiesController()?.toggleSelected(entityId, !!entityCheckbox.checked);
         ctx.renderProjectExplorer();
         return;
       }
@@ -963,7 +995,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         } else if (action === 'open-project-entity') {
           const summary = ctx.projectSummary?.(projectId);
           const entityId = String(btn.dataset.entityId || '');
-          const entity = ctx.entitiesController?.().byId(summary, entityId) || {
+          const entity = entitiesController()?.byId(summary, entityId) || {
             id: entityId,
             type: String(btn.dataset.entityType || ''),
             canonical_value: String(btn.dataset.entityValue || ''),
@@ -989,7 +1021,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
           return;
         } else if (action === 'toggle-project-entity-row') {
           const entityId = String(btn.dataset.entityId || '');
-          ctx.entitiesController?.().toggleSelected(entityId);
+          entitiesController()?.toggleSelected(entityId);
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'toggle-project-entity-select') {
@@ -998,8 +1030,8 @@ let exportedDarklabProjectWorkspaceEvents = null;
             denyTeamScopeAction('change team projects');
             return;
           }
-          ctx.entitiesController?.().setSelectMode(nextMode);
-          if (!nextMode) ctx.entitiesController?.().clearSelection();
+          entitiesController()?.setSelectMode(nextMode);
+          if (!nextMode) entitiesController()?.clearSelection();
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'select-all-project-entities') {
@@ -1007,11 +1039,11 @@ let exportedDarklabProjectWorkspaceEvents = null;
             denyTeamScopeAction('change team projects');
             return;
           }
-          ctx.entitiesController?.().selectAllForActiveTab(ctx.projectSummary?.(projectId));
+          entitiesController()?.selectAllForActiveTab(ctx.projectSummary?.(projectId));
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'clear-project-entities') {
-          ctx.entitiesController?.().clearSelection();
+          entitiesController()?.clearSelection();
           ctx.renderProjectExplorer();
           return;
         } else if (action === 'bulk-unlink-project-entities') {
@@ -1029,7 +1061,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
             body: JSON.stringify({ entity_type: 'atlas_entity', entity_ids: [...selectedEntityIds()] }),
           });
           selectedEntityIds().clear();
-          ctx.entitiesController?.().setSelectMode(false);
+          entitiesController()?.setSelectMode(false);
           await ctx.refreshProjectWorkspace();
           ctx.setProjectWorkspaceMessage('Entities unlinked from project.');
           return;
@@ -1052,7 +1084,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
           return;
         } else if (action === 'export-project-entities-csv' || action === 'export-project-entities-jsonl') {
           const format = action === 'export-project-entities-jsonl' ? 'jsonl' : 'csv';
-          await ctx.entitiesController?.().exportEntities(projectId, format);
+          await entitiesController()?.exportEntities(projectId, format);
           return;
         } else if (action === 'open-entity-picker') {
           ctx.openProjectEntityPicker(projectId);
@@ -1255,14 +1287,35 @@ let exportedDarklabProjectWorkspaceEvents = null;
         } else if (action === 'unlink-run') {
           const runId = String(btn.dataset.runId || '').trim();
           if (!projectId || !runId) throw new Error('Run link is missing its identifier.');
-          const confirmed = await ctx.confirmProjectRunUnlink(btn.dataset.runCommand || '');
+          const confirmed = await ctx.confirmProjectRunUnlink(projectId, runId, btn.dataset.runCommand || '');
           if (!confirmed) return;
-          await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/links`, {
+          const unlinkResp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/links`, {
             method: 'DELETE',
-            body: JSON.stringify({ entity_type: 'run', entity_id: runId }),
+            body: JSON.stringify({
+              entity_type: 'run',
+              entity_id: runId,
+              ...(confirmed.includeEntities ? { include_entities: true } : {}),
+              ...(confirmed.includeCuratedEntities ? { include_curated_entities: true } : {}),
+            }),
           });
+          let unlinkData = {};
+          try {
+            unlinkData = typeof unlinkResp?.json === 'function'
+              ? await unlinkResp.json()
+              : (unlinkResp || {});
+          } catch (_) {
+            unlinkData = {};
+          }
           await ctx.refreshProjectWorkspace();
-          ctx.setProjectWorkspaceMessage('Run removed from project.');
+          const removedEntities = Number(unlinkData && unlinkData.unlinked_entities && unlinkData.unlinked_entities.removed || 0);
+          const removedCurated = Number(unlinkData && unlinkData.unlinked_entities && unlinkData.unlinked_entities.removed_curated || 0);
+          const entityLabel = removedEntities === 1 ? 'entity' : 'entities';
+          const curatedText = removedCurated > 0
+            ? `, including ${removedCurated.toLocaleString()} curated`
+            : '';
+          ctx.setProjectWorkspaceMessage(removedEntities > 0
+            ? `Run and ${removedEntities.toLocaleString()} same-run Atlas ${entityLabel}${curatedText} removed from project.`
+            : 'Run removed from project.');
           return;
         } else if (action === 'open-finding') {
           const runId = String(btn.dataset.runId || '').trim();
@@ -1351,6 +1404,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         await ctx.refreshProjectWorkspace();
         if (successMessage) ctx.setProjectWorkspaceMessage(successMessage);
       } catch (err) {
+        logActionFailed(action, btn, err);
         ctx.setProjectWorkspaceMessage(err.message || 'Project action failed.', { error: true });
       }
     }

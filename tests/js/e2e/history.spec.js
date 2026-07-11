@@ -7,6 +7,7 @@ import {
   openHistory,
   openHistoryWithEntries,
   waitForHistoryRuns,
+  waitForHistoryCommands,
   closeHistory,
   createShareSnapshot,
   clickHistoryRunMenuAction,
@@ -18,6 +19,7 @@ import {
 // Use fake shell commands — they bypass the allowlist and complete instantly.
 const CMD_A = 'hostname'
 const CMD_B = 'date'
+const COMPARE_PANE_SCROLL_TEST_HEIGHT = '48px'
 
 function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
@@ -131,6 +133,99 @@ print(json.dumps({
   return JSON.parse(result.stdout)
 }
 
+function seedHistoryCleanupFixture(testInfo, { sessionId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+sys.path.insert(0, str(Path.cwd() / "app"))
+from services.atlas.materializer import materialize_run_entities
+from services.projects.findings import record_run_findings
+
+data_dir, session_id = sys.argv[1:3]
+run_id = "run_cleanup_e2e_" + uuid.uuid4().hex[:16]
+other_run_id = "run_cleanup_other_e2e_" + uuid.uuid4().hex[:16]
+command = "nmap cleanup.playwright.example"
+disposable_value = "disposable.cleanup.playwright.example"
+kept_value = "CVE-2026-4242"
+not_eligible_value = "192.0.2.42"
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+conn.row_factory = sqlite3.Row
+try:
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 0, 0)",
+        (run_id, session_id, command, json.dumps([command, "cleanup fixture output"])),
+    )
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), 0, ?, 0, 1, 0, 0)",
+        (other_run_id, session_id, "nmap shared.cleanup.playwright.example", json.dumps([not_eligible_value])),
+    )
+    materialized = materialize_run_entities(
+        conn,
+        session_id,
+        run_id,
+        [{
+            "text": " ".join((disposable_value, kept_value, not_eligible_value)),
+            "entities": [
+                {"type": "domain", "value": disposable_value, "canonical_value": disposable_value},
+                {"type": "cve", "value": kept_value, "canonical_value": kept_value},
+                {"type": "ip", "value": not_eligible_value, "canonical_value": not_eligible_value},
+            ],
+        }],
+        seen_at="2026-07-10T12:00:00+00:00",
+        command=command,
+    )
+    materialize_run_entities(
+        conn,
+        session_id,
+        other_run_id,
+        [{
+            "text": not_eligible_value,
+            "entities": [{"type": "ip", "value": not_eligible_value, "canonical_value": not_eligible_value}],
+        }],
+        seen_at="2026-07-10T12:01:00+00:00",
+        command="nmap shared.cleanup.playwright.example",
+    )
+    entity_ids = {item["type"]: item["id"] for item in materialized}
+    conn.execute(
+        "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+        "VALUES (?, ?, 'atlas_entity', ?, 'keep-e2e', 'manual', datetime('now'))",
+        ("lbl_cleanup_e2e_" + uuid.uuid4().hex[:16], session_id, entity_ids["cve"]),
+    )
+    record_run_findings(conn, session_id, run_id, [{
+        "text": "443/tcp open https on " + disposable_value,
+        "signals": ["findings"],
+        "line_index": 0,
+        "entities": [{"type": "domain", "value": disposable_value, "canonical_value": disposable_value}],
+    }])
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "runId": run_id,
+    "command": command,
+    "disposableValue": disposable_value,
+    "keptValue": kept_value,
+    "notEligibleValue": not_eligible_value,
+}))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed History cleanup fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 async function createProjectWithLinkedRuns(page, name, runIds) {
   return page.evaluate(async ({ projectName, linkedRunIds }) => {
     const createdResp = await apiFetch('/projects', {
@@ -228,19 +323,33 @@ async function selectVisibleHistoryRuns(page, commands) {
 
 async function forceComparePaneOverflow(overlay) {
   const panes = overlay.locator('.history-compare-pane')
-  await panes.evaluateAll((paneElements) => {
+  await panes.evaluateAll((paneElements, height) => {
     paneElements.forEach((pane) => {
-      pane.style.height = '90px'
-      pane.style.maxHeight = '90px'
+      pane.style.alignSelf = 'start'
+      pane.style.minHeight = '0'
+      pane.style.height = height
+      pane.style.maxHeight = height
       pane.style.overflowY = 'auto'
+      let spacer = pane.querySelector(':scope > [data-e2e-compare-scroll-spacer]')
+      if (!spacer) {
+        spacer = document.createElement('div')
+        spacer.dataset.e2eCompareScrollSpacer = '1'
+        spacer.setAttribute('aria-hidden', 'true')
+        pane.appendChild(spacer)
+      }
+      // Keep overflow deterministic when flex rows settle differently on a loaded worker.
+      const spacerHeight = Math.max(160, pane.clientHeight * 2)
+      spacer.style.flex = `0 0 ${spacerHeight}px`
+      spacer.style.height = `${spacerHeight}px`
     })
-  })
+  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
   await expect.poll(() => panes.evaluateAll((paneElements) => (
     paneElements.every((pane) => pane.scrollHeight > pane.clientHeight)
   ))).toBe(true)
 }
 
 async function expectSplitPaneScrollSync(overlay) {
+  await forceComparePaneOverflow(overlay)
   const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split) => {
     const left = split.querySelector('.history-compare-pane[data-side="a"]')
     const right = split.querySelector('.history-compare-pane[data-side="b"]')
@@ -254,6 +363,7 @@ async function expectSplitPaneScrollSync(overlay) {
         rightScrollable: false,
       }
     }
+    await nextFrame()
     const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
       ? window.useMobileTerminalViewportMode()
       : false
@@ -297,7 +407,6 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.leftChangedText)
   await expect(overlay.locator('.history-compare-pane[data-side="b"]')).toContainText(fixture.rightChangedText)
 
-  await forceComparePaneOverflow(overlay)
   await expectSplitPaneScrollSync(overlay)
 
   const rightPane = overlay.locator('.history-compare-pane[data-side="b"]')
@@ -438,15 +547,24 @@ test.describe('history drawer', () => {
         return
       }
       if (url.pathname === '/atlas') {
-        await json({ total: 0, counts: {} })
+        await json({ total: 1, counts: { ip: 1 } })
         return
       }
       if (url.pathname === '/atlas/entities') {
         await json({
-          entities: [],
+          entities: [
+            {
+              id: 'ent-run-details-ip-e2e',
+              type: 'ip',
+              canonical_value: '203.0.113.44',
+              occurrence_count: 40,
+              run_count: 5,
+              project_link_count: 1,
+            },
+          ],
           limit: 50,
           offset: 0,
-          total: 0,
+          total: 1,
           has_more: false,
         })
         return
@@ -561,6 +679,36 @@ test.describe('history drawer', () => {
     await expect(body).toContainText('No AI summary has been generated for this run.')
     await expect(body).toContainText('No AI next-command suggestions have been generated for this run.')
 
+    await page.locator('[data-history-run-tab="entities"]').click()
+    const entityRow = page.locator('[data-history-run-entity-id="ent-run-details-ip-e2e"]')
+    await expect(entityRow).toBeVisible()
+    await expect(entityRow.locator('.atlas-entity-value')).toHaveText('203.0.113.44')
+    await expect(entityRow.locator('.atlas-entity-badges')).toContainText('1 projects')
+    const entityLayout = await entityRow.evaluate((row) => {
+      const main = row.querySelector('.atlas-entity-main')
+      const badges = row.querySelector('.atlas-entity-badges')
+      const rowRect = row.getBoundingClientRect()
+      const mainRect = main?.getBoundingClientRect()
+      const badgeRect = badges?.getBoundingClientRect()
+      const styles = getComputedStyle(row)
+      return {
+        display: styles.display,
+        alignItems: styles.alignItems,
+        mainRight: mainRect?.right || 0,
+        badgeLeft: badgeRect?.left || 0,
+        badgeTop: badgeRect?.top || 0,
+        rowBottom: rowRect.bottom,
+      }
+    })
+    expect(entityLayout.display).toBe('flex')
+    expect(entityLayout.alignItems).toBe('center')
+    expect(entityLayout.badgeLeft).toBeGreaterThan(entityLayout.mainRight - 1)
+    expect(entityLayout.badgeTop).toBeLessThan(entityLayout.rowBottom)
+    await expect.poll(() => page.evaluate(() => (
+      [...document.styleSheets].some(sheet => String(sheet.href || '').includes('/static/css/features/atlas.css'))
+    ))).toBe(false)
+    await page.locator('[data-history-run-tab="summary"]').click()
+
     await page.locator('[data-history-run-action="ai-summary"]').click()
     await expect(body).toContainText('HTTPS is open on darklab.sh.')
     await expect(body).toContainText('443/tcp open https')
@@ -637,6 +785,77 @@ test.describe('history drawer', () => {
     // The starred chip should be gone
     await expect(page.locator('.hist-chip.starred')).toHaveCount(0)
     await expect(page.locator('.hist-chip')).toHaveCount(0)
+  })
+
+  test('run cleanup confirmation uses live preview defaults samples and selected flags', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedHistoryCleanupFixture(testInfo, { sessionId })
+    await waitForHistoryCommands(page, [fixture.command])
+    await openHistory(page)
+    const runRow = page.locator('.history-entry').filter({ hasText: fixture.command }).first()
+    await expect(runRow).toBeVisible()
+
+    await runRow.locator('[data-action="delete"]').click()
+    const confirmHost = page.locator('#confirm-host')
+    await expect(confirmHost).toBeVisible()
+    const disposableCheckbox = confirmHost.locator('[data-history-atlas-cleanup]')
+    const curatedCheckbox = confirmHost.locator('[data-history-atlas-cleanup-curated]')
+    await expect(disposableCheckbox).toBeVisible()
+    await expect(curatedCheckbox).toBeVisible()
+    await expect(disposableCheckbox).not.toBeChecked()
+    await expect(curatedCheckbox).not.toBeChecked()
+    await expect(confirmHost).toContainText('only sourced by this run')
+    await expect(confirmHost).toContainText('kept by default')
+    await expect(confirmHost).toContainText('not eligible for this cleanup')
+    await expect(confirmHost).toContainText('labeled')
+    await expect(confirmHost).toContainText('seen elsewhere')
+
+    const sampleToggle = confirmHost.locator('.cleanup-sample-toggle')
+    const samplePanel = confirmHost.locator('.cleanup-sample-panel')
+    await expect(sampleToggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(samplePanel).toBeHidden()
+    await sampleToggle.click()
+    await expect(sampleToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(samplePanel).toBeVisible()
+    await expect(samplePanel).toContainText('Kept by default entities')
+    await expect(samplePanel).toContainText('Not eligible entities')
+    await expect(samplePanel).toContainText(fixture.keptValue)
+    await expect(samplePanel).toContainText(fixture.notEligibleValue)
+
+    await disposableCheckbox.check()
+    await expect(curatedCheckbox).not.toBeChecked()
+    const deleteResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'DELETE' && url.pathname === `/history/${fixture.runId}`
+    })
+    await confirmHost.locator('[data-confirm-action-id="one"]').click()
+    const deleteResponse = await deleteResponsePromise
+    expect(deleteResponse.ok()).toBe(true)
+    const deleteUrl = new URL(deleteResponse.url())
+    expect(deleteUrl.searchParams.get('prune_atlas')).toBe('1')
+    expect(deleteUrl.searchParams.has('prune_curated_atlas')).toBe(false)
+    expect((await deleteResponse.json()).atlas_cleanup).toEqual({ entities: 1, findings: 1 })
+    await expect(confirmHost).toBeHidden()
+    await expect(runRow).toHaveCount(0)
+
+    const atlasState = await page.evaluate(async () => {
+      const [domainsResp, cvesResp, ipsResp, summaryResp] = await Promise.all([
+        apiFetch('/atlas/entities?type=domain&orphan_filter=all', { cache: 'no-store' }),
+        apiFetch('/atlas/entities?type=cve&orphan_filter=all', { cache: 'no-store' }),
+        apiFetch('/atlas/entities?type=ip&orphan_filter=all', { cache: 'no-store' }),
+        apiFetch('/atlas?orphan_filter=all', { cache: 'no-store' }),
+      ])
+      const [domains, cves, ips, summary] = await Promise.all([
+        domainsResp.json(), cvesResp.json(), ipsResp.json(), summaryResp.json(),
+      ])
+      return {
+        domains: domains.total,
+        cves: cves.total,
+        ips: ips.total,
+        findings: summary.findings,
+      }
+    })
+    expect(atlasState).toEqual({ domains: 0, cves: 1, ips: 1, findings: 0 })
   })
 
   test('toggling the history star keeps the desktop drawer open', async ({ page }) => {
@@ -814,7 +1033,7 @@ test.describe('history drawer', () => {
     ]
     const sessionId = await browserSessionId(page)
     seedExternalHistoryRuns(testInfo, { sessionId, commands: bulkCommands })
-    const runs = await waitForHistoryRuns(page, 2)
+    const runs = await waitForHistoryCommands(page, bulkCommands)
     const selectedRunIds = runs
       .filter(run => bulkCommands.includes(run.command))
       .map(run => String(run.id))
@@ -874,11 +1093,7 @@ test.describe('history drawer', () => {
 
   test('run comparison split view works from history and project entry points', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
-    const sessionId = await page.evaluate(() => (
-      typeof SESSION_ID === 'string' && SESSION_ID
-        ? SESSION_ID
-        : localStorage.getItem('session_id')
-    ))
+    const sessionId = await browserSessionId(page)
     const fixture = seedCompareFixture(testInfo, { sessionId })
 
     await openHistoryWithEntries(page)

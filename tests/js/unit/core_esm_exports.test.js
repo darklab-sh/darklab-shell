@@ -547,6 +547,89 @@ describe('core ESM exports', () => {
     }
   })
 
+  it('keeps Project Runs loading when summary counts invalidate a stale empty page', async () => {
+    const container = document.createElement('div')
+    const responses = [
+      { runs: [], total: 0, limit: 50, offset: 0 },
+      {
+        runs: [{
+          id: 'run-1',
+          command: 'nmap stale-cache.example',
+          started: '2026-07-07T12:00:00Z',
+          created: '2026-07-07T12:01:00Z',
+          exit_code: 0,
+          output_line_count: 12,
+        }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      },
+    ]
+    const apiFetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => responses.shift() || responses.at(-1),
+    }))
+    const emptyProjectPanel = (text) => {
+      const panel = document.createElement('div')
+      panel.className = 'project-empty-panel'
+      panel.textContent = text
+      return panel
+    }
+    const makeProjectButton = (label, action, projectId) => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.projectAction = action
+      button.dataset.projectId = projectId
+      button.textContent = label
+      return button
+    }
+    const runItems = summary => (Array.isArray(summary?.runs) ? summary.runs : [])
+    const controller = DarklabProjectRuns.createProjectRunsController({
+      apiFetch,
+      projectResponseError: async () => new Error('Could not load project runs.'),
+      projectRunItems: runItems,
+      projectComparableRuns: runItems,
+      projectFindingItems: () => [],
+      projectFindingsLoaded: () => true,
+      projectArtifactItems: () => [],
+      projectArtifactsVisible: () => false,
+      projectTargetFilterActive: () => false,
+      projectRunFilterActive: () => false,
+      filteredProjectRuns: (_projectId, summary) => runItems(summary),
+      entityLabelValues: () => [],
+      entityMetadataChips: () => [],
+      formatDate: value => String(value || ''),
+      makeProjectButton,
+      bindProjectRuntimePressable: () => {},
+      emptyProjectPanel,
+      projectItemRow: ({ title, meta, detail, accessory }) => {
+        const row = document.createElement('div')
+        row.className = 'project-explorer-item'
+        row.textContent = [title, meta, detail].filter(Boolean).join(' ')
+        if (accessory) row.appendChild(accessory)
+        return row
+      },
+      renderProjectExplorer: () => {},
+      setProjectWorkspaceMessage: () => {},
+      logClientError: () => {},
+    })
+
+    await controller.load('project-1', { skipFinalRender: true })
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+
+    const summary = { counts: { runs: 1 }, runs: [] }
+    controller.renderRuns(container, 'project-1', summary)
+    expect(container.textContent).toContain('Loading runs...')
+    expect(container.textContent).not.toContain('No linked runs yet.')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+
+    container.replaceChildren()
+    controller.renderRuns(container, 'project-1', summary)
+    expect(container.textContent).toContain('nmap stale-cache.example')
+    expect(container.textContent).not.toContain('No linked runs yet.')
+  })
+
   it('exports representative owner APIs without requiring browser-global mirrors', async () => {
     expect(appendLine).toBeTypeOf('function')
     expect(buildExportMetaLine).toBeTypeOf('function')

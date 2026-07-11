@@ -345,7 +345,7 @@ The app now standardizes on TCP connect scans for nmap. `rewrite_command()` inje
 
 **Go tools are installed with `GOBIN=/usr/local/bin` so they are accessible to the `scanner` user.**
 
-Go tools such as `nuclei`, `subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `tlsx`, `cdncheck`, `amass`, `assetfinder`, `gobuster`, `ffuf`, `trufflehog`, and `puredns` are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
+Go tools such as `nuclei`, `subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `tlsx`, `cdncheck`, `amass`, `assetfinder`, `gobuster`, `ffuf`, `tcping`, `trufflehog`, and `puredns` are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
 
 ### TruffleHog Output Redaction
 

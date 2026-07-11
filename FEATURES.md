@@ -18,6 +18,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Output Search](#output-search)
 - [Command Findings](#command-findings)
 - [Session Entity Atlas](#session-entity-atlas)
+- [Cleanup Confirmations](#cleanup-confirmations)
 - [Copy, Save, and Export](#copy-save-and-export)
 - [Tabs & Run History](#tabs--run-history)
 - [AI Assists](#ai-assists)
@@ -43,6 +44,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
+- [Operator Backups](#operator-backups)
 - [Session Tokens](#session-tokens)
 - [Team-Mode](#team-mode)
 - [Encrypted Secrets](#encrypted-secrets)
@@ -447,7 +449,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - Select mode adds checkboxes on the visible page for any Atlas tab. You can suppress or restore selected noisy rows without deleting source data, delete selected findings directly, or delete selected entities and their attached findings in one confirmed action.
 - Entity tokens in saved and live transcripts can open Atlas directly. Long-pressing or right-clicking a token opens quick actions for copying the value, refreshing intel, editing metadata in Atlas, or refocusing the transcript line.
 - **Refresh intel** fetches current app-native intel for provider-backed entities, shows a progress panel while slower providers run, and stores normalized provider snapshots back on the entity. Port entities are app-captured scanner evidence, so they don't offer provider refresh.
-- **Clean Atlas** on a source run removes that run's Atlas links while keeping the run transcript in History. Disposable single-source rows can be removed at the same time, while curated rows are kept by default when they have a project link, project-visible finding relationship, label, note, or review state. Cleanup confirmations include a separate opt-in when you really do want to delete those curated single-source rows too.
+- **Clean Atlas** removes a source run's Atlas links while keeping its History transcript. The shared [Cleanup Confirmations](#cleanup-confirmations) rules explain what else can be removed and what stays protected.
 - **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
 - Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
 - Entity tabs can export the current Atlas filter as CSV or JSONL. Exports include summary fields, port host/service metadata, suppression state, labels, notes, project names, and provider names that have cached intel, but they leave raw provider response bodies out.
@@ -507,6 +509,30 @@ Runnable Generic JSONL example:
 
 ---
 
+## Cleanup Confirmations
+
+**Purpose:** make optional Atlas cleanup predictable anywhere a run or project link is being removed.
+
+Cleanup previews use the same three groups across History, Projects, and Atlas:
+
+- **Disposable** rows only depend on the source or link being removed and have no saved curation that needs protection. You can opt into removing them with the surrounding action.
+- **Kept by default** rows have a project link, project-visible finding relationship, label, note, or review state. They remain unless you select the separate option for kept single-source rows.
+- **Not eligible** rows still have another source or were imported independently, so the current cleanup cannot remove them.
+
+Optional cleanup checkboxes start unchecked. Confirmations show counts and reasons before anything changes, and compact samples for kept-by-default or not-eligible rows stay collapsed until you open them.
+
+**History:** deleting a run always removes its transcript. The confirmation can also remove disposable Atlas entities and findings that only came from that run, with a separate opt-in for kept single-source rows.
+
+**Projects:** removing one or more runs from a Project can also remove disposable same-run Atlas entity links from that Project. The confirmation separately counts kept links, rows that aren't eligible, and related findings that will leave the Project Findings view.
+
+**Atlas:** **Clean Atlas** removes a source run's Atlas links without deleting its History transcript. Deleting an entity or finding can also offer a same-source sibling cleanup; the selected row is handled by the delete action itself and doesn't block eligible sibling cleanup.
+
+**Limits:** cleanup stays inside the active personal or team scope. Not-eligible rows can't be forced through these cleanup options; remove their other source or relationship first when that is appropriate.
+
+**Related files:** `app/services/atlas/cleanup.py`, `app/services/cleanup_reasons.py`, `app/static/js/ui/cleanup_reasons.js`, `app/static/js/features/history/history_mutations.js`, `app/static/js/features/history/history_project_actions.js`, `app/static/js/features/projects/project_workspace_actions.js`, `app/static/js/features/atlas/atlas_overlay.js`.
+
+---
+
 ## Copy, Save, and Export
 
 **Purpose:** keep copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) consistent across the desktop HUD, Run Details, mobile menu, and permalink page.
@@ -539,7 +565,7 @@ Runnable Generic JSONL example:
 - Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and start with labels such as `shell 1`, `shell 2`, and `shell 3`. Commands that keep running past the brief visual grace period show temporarily in the tab label, then the tab returns to its stable label when the command finishes. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
 - The **⧖ history** button opens a slide-out drawer listing persisted session history with a `type` filter for **all**, **runs: all**, **runs: built-in**, **runs: external**, and **snapshots**. Run rows open Run Details on click; each row also has a toggleable **star** plus **copy command**, **restore**, **permalink**, **delete**, and project-aware **more** actions for external runs. External run rows show their Atlas entity and finding counts when structured Atlas data exists. Snapshot rows show the snapshot label and created time plus **open** / **copy link** / **edit** / **delete** actions. Run and snapshot rows surface existing label badges and note indicators so project/workflow context is visible without opening another modal. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists server-side per session and follows named session tokens.
 - Select mode adds checkboxes for completed runs and saved snapshots on the visible page. **Select all**, **Clear**, and the top-level **Actions** menu let you add selected external runs to the active project, add them to a chosen project, remove them from linked projects, export selected history as readable text or JSONL, or delete selected history items in one pass. Bulk project actions skip runs that are already in the requested state instead of failing the whole request, export files call out skipped rows inside the download, and running rows are not selectable for bulk delete.
-- The History row and Run Details **more** menus are project-aware for external runs: unlinked runs offer **add to active project** and **add to project**, while runs that are already linked to one or more projects show **remove from project** instead. Removing a run from a project can also remove same-run disposable Atlas entity links from that project, with a separate checkbox for curated entity links and counts for findings that will leave the Project Findings tab. Built-in runs stay in History without project-link actions.
+- The History row and Run Details **more** menus are project-aware for external runs: unlinked runs offer **add to active project** and **add to project**, while runs that are already linked to one or more projects show **remove from project** instead. Run removal follows the shared [Cleanup Confirmations](#cleanup-confirmations) rules for optional Atlas entity-link cleanup. Built-in runs stay in History without project-link actions.
 - When AI assists are enabled, Run Details can show a summary card and next-command suggestions for completed external runs. See [AI Assists](#ai-assists) for the full behavior and privacy model.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button in History prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
@@ -892,8 +918,10 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `secret set NAME` opens the same browser-owned value prompt from the terminal. The command line contains only the name; the value is entered in the modal and is not echoed.
 - `secret list` shows stored names and their consumer environment bindings. It never prints values.
 - `secret unset NAME` deletes one stored secret in the active scope. `secret show-consumers` and its `providers` alias show intel provider readiness with the same usable versus needs-configuration summary as the Provider Status modal.
-- Command registry entries can declare `requires_secrets`. When a matching command runs, the backend decrypts the needed value in memory and passes it to the subprocess environment. Missing required secrets stop the run before launch with a clear message.
+- Command registry entries can declare `requires_secrets`. When a matching command runs, the backend decrypts the needed value in memory and passes it to the subprocess environment. Missing required secrets stop the run before launch with a clear message; optional secrets let registered commands keep running normally when no value is saved.
 - Secret declarations can also map a user-friendly secret name to a vendor-required environment name. For example, VirusTotal CLI runs accept either `VT_API_KEY` or the native `VTCLI_APIKEY` stored secret, and the app passes the value to `vt` as `VTCLI_APIKEY`.
+
+**WPScan:** `wpscan` runs without an API token and uses `WPSCAN_API_TOKEN` for API-backed vulnerability data when that value is saved through Options → Secrets or `secret set WPSCAN_API_TOKEN`. The app passes the token only to the WPScan process, and inline `--api-token` values are blocked so they can't enter command history, transcripts, snapshots, or logs.
 
 **Limits:** stored values are replace-only. The app does not reveal or copy a saved secret back out of the vault.
 
@@ -954,7 +982,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
-**Related files:** `app/services/workspace/files.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/services/commands/builtins.py` (`file` built-in), `app/services/commands/registry.py` (workspace flag validation and rewrite).
+**Related files:** `app/services/workspace/files.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` and `app/static/js/workspace_bridge.js` (Files panel and first-use browser bridge), `app/services/commands/builtins.py` (`file` built-in), `app/services/commands/registry.py` (workspace flag validation and rewrite).
 
 ---
 
@@ -966,7 +994,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - Projects group top-level source records by link rather than copy. Current project links support completed runs and Atlas entities; Targets are the curated `domain`, `url`, and `ip` set used for scope tracking, while the Entities tab shows every linked Atlas entity type. Domain targets accept DNS names, URL targets accept full HTTP(S) URLs, and IP targets accept single IPv4 or IPv6 addresses. Legacy `host` target inputs from older API/import callers are still accepted as compatibility aliases and saved as `domain` or `ip`; the target editor and new validation messages only present `domain`, `url`, and `ip`. Run-owned artifacts surface through linked runs, and findings surface through linked runs or linked Atlas entities. Project list rows show run, finding, artifact, and package counts before you open a project, and the Findings tab label can show prefetched new/high counts when that project has triage work waiting. When team scope is active, team-owned Projects and team-owned run links are visible to other members of that team. Snapshots and manually selected workspace files stay in their history/files surfaces and are intentionally not project-linked.
 - The desktop rail and mobile menu open the Projects modal for creating, selecting, clearing, archiving, deleting, and reviewing projects. The active-project HUD shows current project context and opens a compact switcher for quickly choosing or clearing the active project without leaving the terminal. Project changes broadcast across same-session tabs.
-- Active projects can automatically link completed external command runs and, when enabled, the Atlas entities those runs produce. Project Entities rules can also preview and save recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes, then apply those matches manually or to new runs as they finish. A rule set to apply automatically watches every new run in the same personal or team scope and adds matches to the project that owns the rule, even when that project is not the active project for the command. If a rule matches entities for the active project, those entities are added as confirmed rule-created links instead of waiting in the normal confirm/dismiss queue. Broad patterns and regex rules are rejected instead of quietly linking too much. Manual run-link actions confirm first and can also add the Atlas entities found in those runs, with the entity count shown before anything is saved. When automatic entity linking reaches the project link limit, the run stream reports the skipped entity count. Removing a run from a project can also remove same-run disposable Atlas entity links, while curated entity links are counted separately and kept unless you opt in; the confirmation also shows how many related findings will stop appearing in the project. Built-in runs stay in history without project links or project-derived findings, and **Link last run** backfills the most recent eligible run when needed. In the terminal, `project link run last` resolves within the current tab so parallel tabs don't steal each other's latest run.
+- Active projects can automatically link completed external command runs and, when enabled, the Atlas entities those runs produce. Project Entities rules can also preview and save recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes, then apply those matches manually or to new runs as they finish. A rule set to apply automatically watches every new run in the same personal or team scope and adds matches to the project that owns the rule, even when that project is not the active project for the command. If a rule matches entities for the active project, those entities are added as confirmed rule-created links instead of waiting in the normal confirm/dismiss queue. Broad patterns and regex rules are rejected instead of quietly linking too much. Manual run-link actions confirm first and can also add the Atlas entities found in those runs, with the entity count shown before anything is saved. When automatic entity linking reaches the project link limit, the run stream reports the skipped entity count. Removing a run from a project follows the shared [Cleanup Confirmations](#cleanup-confirmations) rules for optional same-run Atlas entity-link cleanup. Built-in runs stay in history without project links or project-derived findings, and **Link last run** backfills the most recent eligible run when needed. In the terminal, `project link run last` resolves within the current tab so parallel tabs don't steal each other's latest run.
 - Project details expose project labels, project notes stored through `entity_notes` with `entity_type='project'`, editable Atlas-backed targets, linked Atlas entities, linked runs, findings, artifacts, and packages. Team-owned projects share linked-run artifacts and evidence packages with team members, while package and artifact rows keep creator/member context when it is available. Artifact previews, downloads, and package archives read files from the source run's personal or team Files workspace, so a teammate can open artifacts from a team run without switching into the run creator's personal workspace. Suppressed Atlas entities and findings stay hidden from default project views until they're restored in Atlas. The Findings tab pages through large result sets, shows each finding's source command, and keeps its tab count tied to the full server-side total, including findings attached through linked runs or linked Atlas entities. Command, severity, scope, run, target, review-state, verification-status, label, and note filters help narrow busy projects without loading every finding at once; verification status uses `not_started`, `ready_to_verify`, `verified`, `needs_retest`, or `not_applicable`. The list view keeps visible-page bulk review, the inline board groups the current filtered findings into review lanes, and the larger board modal gives the same project a roomier drag/drop triage surface. Finding rows open the matching Atlas finding, **See in run** jumps back to the exact raw output line, and rows/cards can open the shared triage editor for remediation and verification handoff work. Board cards show the saved verification/remediation badges after triage changes. Labels and notes remain editable for linked runs, findings, Atlas entities, run file artifacts, workspace files, and packages through the shared entity metadata editor.
 - The Overview tab gives each project a target-first attack-surface summary. It rolls up target count, app-captured open ports and services, cached-provider open ports and services, app/provider port drift, app-captured scan coverage, coverage gaps, finding review progress, verification progress, recent run/triage/artifact tempo, deliverables status, targets with critical or high findings, certificate status, provider highlights, recent project activity, and recent-change state, then lets you jump into the existing workspace tabs with the selected target and high-signal filters already applied. App-captured ports and services are shown first when available, with long port lists summarized so the Overview stays readable. Provider-backed ports, services, certificates, and highlights are labeled as cached data, with stale/no-intel states and the latest checked time shown on each target row when available. URL targets use their stored Atlas host link when available, so host-level ports and services show up without reparsing the URL each time. The target worklist keeps findings and severity visible, skips repeated empty-state rows, and includes an optional filter for hiding unscanned targets that have no findings.
 - App-captured scan coverage comes from supported scanner families: nmap, masscan, rustscan, naabu, and `nc` port checks. Curl connection lines can add positive port evidence when the transcript reports a connection, but they are not counted as scan-coverage observations. Quiet scans are counted as "scanned with no app-captured ports" only when darklab_shell can associate the run with a concrete project target.
@@ -1376,6 +1404,30 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ---
 
+## Operator Backups
+
+**Purpose:** scheduled, deployment-aware backups for self-hosted operators.
+
+**Behavior:**
+
+- `scripts/backup_system.py` loads the effective app config and optional `.env` file before it decides what to back up.
+- SQLite deployments get a consistent `history.db` snapshot through SQLite's backup API. Postgres deployments get a custom-format `pg_dump` archive.
+- The backup includes `data_dir`, local config files, `.env` when present, optional `--extra-file` paths, and enabled workspaces.
+- Data and workspace backup use the physical storage source, not just the app's logical path: bind mounts copy the host path, Docker named volumes are exported through Docker, and tmpfs/container-only workspaces require an explicit opt-in.
+- Locked-down host bind mounts must be readable by the user running the script. On Linux production hosts, that often means running the backup as root or choosing a Docker volume/container source instead of a host path.
+- Each backup writes a redacted manifest, checksums, restore notes, and either a `.tar.gz` archive or an unpacked directory when `--compress none` is used.
+- Large files are checksummed without loading the whole file into memory, and collision-safe output names keep closely timed backups from replacing each other.
+- Dry runs validate requested env and extra-file paths before writing an output directory or lock file.
+- Retention runs record their cutoff and candidate scan in the manifest, then report examined, removed, and failed counts after the new backup is safely published. Unexpected script failures include a traceback for unattended-job diagnosis.
+
+**Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
+
+**Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for cron examples and Docker/Compose flags.
+
+**Related files:** `scripts/backup_system.py`, `app/config.py`, `docker-compose.yml`.
+
+---
+
 ## Session Tokens
 
 **Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, and saved user options follow an operator across browsers and workstations without introducing a login layer.
@@ -1480,6 +1532,8 @@ If a session has run history, workspace files, project workspace records, user w
 - Two output formats are supported: `text` (human-readable `key=value` pairs for local development) and `gelf` (JSON compatible with log aggregators).
 - Each event carries structured context fields — session ID, command root, run ID, status — rather than interpolated strings, so log lines are machine-parseable without regex.
 - Event names are stable (e.g. `RUN_START`, `RUN_END`, `RUN_KILL`, `DIAG_VIEWED`, `UNTRUSTED_PROXY`), letting aggregators filter by name without string matching.
+- Browser reports preserve `DEBUG`, `INFO`, `WARNING`, and `ERROR` semantics on the server. Only warning/error reports increment the client-error metric, and safe correlation fields such as artifact IDs are allowlisted explicitly.
+- History deletion and Project unlink events include bounded cleanup flags and entity/finding counts in both INFO logs and audit details, without sample values or raw finding/entity text.
 
 **Limits:** field names and level semantics are stable, but specific numeric codes and free-form `message` strings are not part of the contract. Downstream consumers should key off event names and structured fields, not prose.
 

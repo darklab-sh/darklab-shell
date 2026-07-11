@@ -56,7 +56,7 @@ import {
   isHistoryPanelOpen,
   showPanelOverlay,
 } from './ui/ui_helpers.js';
-import { openWorkspace } from './workspace.js';
+import { openWorkspace } from './workspace_bridge.js';
 import {
   _readRecentValues,
   getAutocompleteMatches,

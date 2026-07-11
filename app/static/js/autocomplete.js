@@ -433,8 +433,29 @@ function acExpandSharedPrefix(items) {
   return true;
 }
 
-function _scheduleAutocompleteRefreshAfterAccept(insertValue) {
-  if (!String(insertValue || '').endsWith('/')) return;
+function _acceptedSuggestionShouldRefresh(insertValue, suggestion) {
+  const value = String(insertValue || '');
+  if (value.endsWith('/')) return true;
+  const trimmed = value.trim();
+  if (!trimmed
+      || trimmed !== value
+      || /[\s|;&]/.test(trimmed)
+      || trimmed.startsWith('-')
+      || trimmed.startsWith('+')) {
+    return false;
+  }
+  if (!suggestion || typeof suggestion !== 'object') return true;
+  const replaceStart = Number(suggestion.replaceStart);
+  const replaceEnd = Number(suggestion.replaceEnd);
+  return !!(
+    Number.isFinite(replaceStart)
+    && Number.isFinite(replaceEnd)
+    && replaceStart === 0
+  );
+}
+
+function _scheduleAutocompleteRefreshAfterAccept(insertValue, suggestion = null) {
+  if (!_acceptedSuggestionShouldRefresh(insertValue, suggestion)) return;
   setTimeout(() => {
     const input = _autocompleteVisibleInput();
     if (input && typeof input.dispatchEvent === 'function') {
@@ -479,7 +500,7 @@ function acAccept(s) {
     _autocompleteSetComposerValue(s, s.length, s.length);
   }
   _autocompleteRefocusComposer();
-  _scheduleAutocompleteRefreshAfterAccept(acceptedInsertValue);
+  _scheduleAutocompleteRefreshAfterAccept(acceptedInsertValue, s);
 }
 
 if (typeof window !== 'undefined') {

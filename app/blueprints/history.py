@@ -105,6 +105,11 @@ def _team_capability_error_response(exc: TeamPermissionDenied):
     return jsonify({"error": "team_forbidden", "message": str(exc)}), 403
 
 
+def _scope_error_response(exc: RequestScopeError):
+    payload, status = scope_error_payload(exc)
+    return jsonify(payload), status
+
+
 def _require_team_capability(owner_scope, capability: Capability):
     if not owner_scope.is_team:
         return None
@@ -255,8 +260,7 @@ def get_history():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     query, structured_filters = structured_filters_from_params(
         request.args,
         query=_normalize_history_filter_text(request.args.get("q")),
@@ -331,8 +335,7 @@ def get_history_commands():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     limit = _parse_history_int(
         request.args.get("limit"),
         CFG["recent_commands_limit"],
@@ -359,8 +362,7 @@ def get_history_stats():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     payload = session_history_stats(session_id, owner_scope)
     log.debug("HISTORY_STATS_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id),
@@ -375,8 +377,7 @@ def get_history_insights():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     requested_days = _normalize_history_filter_text(request.args.get("days")).lower()
     days = (
         None
@@ -398,8 +399,7 @@ def get_active_history_runs():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     client_id = str(request.headers.get("X-Client-ID", "") or "").strip()[:128]
     runs = active_runs_for_session(session_id, client_id=client_id, team_id=owner_scope.team_id)
     include_scheduled = _truthy_request_arg("include_scheduled")
@@ -637,8 +637,7 @@ def history_run_ai_assists(run_id):
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     try:
         assists = list_run_assists(session_id, run_id, team_id=owner_scope.team_id)
     except AIAssistRouteError as exc:
@@ -657,8 +656,7 @@ def history_run_ai_summary(run_id):
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
     if capability_response:
         return capability_response
@@ -685,8 +683,7 @@ def history_run_ai_next_commands(run_id):
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     capability_response = _require_team_capability(owner_scope, Capability.RUN_COMMANDS)
     if capability_response:
         return capability_response
@@ -854,14 +851,13 @@ def delete_run(run_id):
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     capability_response = _require_history_mutation_capability(owner_scope)
     if capability_response is not None:
         return capability_response
     prune_atlas = str(request.args.get("prune_atlas") or "").strip().lower() in {"1", "true", "yes"}
     prune_curated_atlas = str(request.args.get("prune_curated_atlas") or "").strip().lower() in {"1", "true", "yes"}
-    deleted_count, atlas_cleanup = delete_history_run(
+    deleted_count, atlas_cleanup, cleanup_log_fields = delete_history_run(
         session_id=session_id,
         owner_scope=owner_scope,
         run_id=run_id,
@@ -872,6 +868,7 @@ def delete_run(run_id):
     if deleted_count:
         log.info("HISTORY_DELETED", extra={
             "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
+            **cleanup_log_fields,
         })
     else:
         log.debug("HISTORY_DELETE_MISS", extra={
@@ -884,7 +881,11 @@ def delete_run(run_id):
 def history_run_atlas_cleanup_preview(run_id):
     """Preview non-curated Atlas rows that can be removed with a run."""
     session_id = get_session_id()
-    preview = load_history_run_cleanup_preview(session_id, run_id)
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        return _scope_error_response(exc)
+    preview = load_history_run_cleanup_preview(session_id, run_id, owner_scope=owner_scope)
     if preview is None:
         return jsonify({"error": "run not found"}), 404
     return jsonify({"ok": True, "cleanup": public_cleanup_preview(preview)})
@@ -1129,8 +1130,7 @@ def bulk_export_history():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     run_ids, snapshot_ids, export_format, error_response = _normalize_bulk_export_payload(
         request.get_json(silent=True) or {},
     )
@@ -1205,8 +1205,7 @@ def bulk_delete_history():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     capability_response = _require_history_mutation_capability(owner_scope)
     if capability_response is not None:
         return capability_response
@@ -1244,8 +1243,7 @@ def clear_history():
     try:
         owner_scope = current_request_scope(session_id, request)
     except RequestScopeError as exc:
-        payload, status = scope_error_payload(exc)
-        return jsonify(payload), status
+        return _scope_error_response(exc)
     capability_response = _require_history_mutation_capability(owner_scope)
     if capability_response is not None:
         return capability_response

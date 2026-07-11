@@ -257,14 +257,48 @@ function describeFetchError(err, context = 'server') {
   return _sessionCore().describeFetchError(err, context);
 }
 
-function logClientError(context, err, details = null) {
-  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-    console.warn(`[client] ${context}`, err);
+function _sanitizeClientLogSrc(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw, SESSION_GLOBAL?.location?.href || 'http://localhost/');
+    const version = parsed.searchParams.get('v');
+    return version ? `${parsed.pathname}?v=${encodeURIComponent(version)}` : parsed.pathname;
+  } catch (_) {
+    return raw.split('?', 1)[0].slice(0, 300);
   }
-  const message = (err && typeof err.message === 'string') ? err.message : String(err || '');
+}
+
+function _sanitizeClientLogMessage(value) {
+  return String(value || '').replace(/((?:https?:\/\/|\/)[^\s'"<>]+)/g, (match) => (
+    _sanitizeClientLogSrc(match)
+  ));
+}
+
+function _clientLogConsoleMethod(details) {
+  const level = String(details && details.level || 'warning').toLowerCase();
+  if (level === 'debug') return 'debug';
+  if (level === 'error') return 'error';
+  if (level === 'info') return 'info';
+  return 'warn';
+}
+
+function logClientError(context, err, details = null) {
+  const consoleMethod = _clientLogConsoleMethod(details);
+  const consoleLog = typeof console !== 'undefined' && (console[consoleMethod] || console.warn);
+  if (typeof consoleLog === 'function') {
+    consoleLog.call(console, `[client] ${context}`, err);
+  }
+  const message = _sanitizeClientLogMessage(
+    (err && typeof err.message === 'string') ? err.message : String(err || ''),
+  );
   const body = { context, message };
   if (details && typeof details === 'object' && !Array.isArray(details)) {
-    body.details = details;
+    body.details = { ...details };
+    if (err && typeof err === 'object') {
+      if (!body.details.error_name && typeof err.name === 'string') body.details.error_name = err.name;
+      if (!body.details.status && typeof err.status !== 'undefined') body.details.status = err.status;
+    }
     if (typeof details.event === 'string') body.event = details.event;
     if (typeof details.level === 'string') body.level = details.level;
   }

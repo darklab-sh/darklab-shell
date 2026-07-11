@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, TypeVar
 
 from core.database_access import get_db_backend, get_db_connect
@@ -79,6 +80,7 @@ from services.projects.metadata import (
     attach_finding_triage_details,
     finding_triage_verification_status_filter_sql_and_params,
 )
+from services.query_debug import log_atlas_entities_list_debug, log_atlas_findings_list_debug, query_debug_started
 from services.storage.transactions import run_read, run_transaction
 
 
@@ -94,6 +96,7 @@ ENTITY_DETAIL_RUN_LIMIT = 50
 ENTITY_DETAIL_FINDING_LIMIT = 50
 ENTITY_DETAIL_RELATED_URL_LIMIT = 25
 _T = TypeVar("_T")
+log = logging.getLogger("shell")
 
 
 def run_atlas_read(callback: Callable[[Any], _T]) -> _T:
@@ -118,10 +121,19 @@ def atlas_entities_for_owner(
     team_id: str,
     limit: int,
     offset: int,
+    include_total: bool = True,
     **filters: str,
 ) -> dict[str, Any]:
     return run_atlas_read(
-        lambda conn: list_entities(conn, session_id, team_id=team_id, limit=limit, offset=offset, **filters)
+        lambda conn: list_entities(
+            conn,
+            session_id,
+            team_id=team_id,
+            limit=limit,
+            offset=offset,
+            include_total=include_total,
+            **filters,
+        )
     )
 
 
@@ -157,6 +169,7 @@ def atlas_findings_for_owner(
     suppression_filter: str,
     limit: int,
     offset: int,
+    include_total: bool = True,
 ) -> dict[str, Any]:
     return run_atlas_read(
         lambda conn: list_findings(
@@ -171,6 +184,8 @@ def atlas_findings_for_owner(
             suppression_filter=suppression_filter,
             limit=limit,
             offset=offset,
+            include_total=include_total,
+            include_counts=include_total,
         )
     )
 
@@ -422,15 +437,13 @@ def list_findings(
     suppression_filter: str = "hide",
     limit: int = 50,
     offset: int = 0,
+    include_total: bool = False,
+    include_counts: bool | None = None,
 ) -> dict[str, Any]:
+    debug_started_at = query_debug_started(log)
     search = str(query or "").strip()
     search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
-    search_columns = [
-        "f.title",
-        "f.raw_line",
-        "f.tool_root",
-        "e.canonical_value",
-    ]
+    search_columns = ["f.title", "f.raw_line", "f.tool_root", "e.canonical_value"]
     metadata_params = _metadata_owner_params(session_id, team_id)
     search_exprs = _finding_metadata_search_exprs(team_id)
     search_clause = _atlas_search_clause(search_columns, search_exprs)
@@ -472,6 +485,10 @@ def list_findings(
         *_suppression_params(normalized_suppression_filter),
         *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
     ]
+    page_limit = max(1, min(int(limit or 50), 200))
+    page_offset = max(0, int(offset or 0))
+    if include_counts is None:
+        include_counts = include_total
     total_sql = _sql_join((
         "SELECT COUNT(*) AS count FROM findings f ",
         "LEFT JOIN entities e ON e.id = f.entity_id ",
@@ -494,9 +511,8 @@ def list_findings(
         _suppression_clause("f"),
         _orphan_finding_clause("f", team_id),
     ))
-    total = int(conn.execute(total_sql, params).fetchone()["count"] or 0)
-    page_limit = max(1, min(int(limit or 50), 200))
-    page_offset = max(0, int(offset or 0))
+    total = int(conn.execute(total_sql, params).fetchone()["count"] or 0) if include_total else 0
+    fetch_limit = page_limit if include_total else page_limit + 1
     rows_sql = _sql_join((
         "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, ",
         "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, ",
@@ -537,45 +553,57 @@ def list_findings(
     ))
     rows = conn.execute(
         rows_sql,
-        [*_run_scope_params(session_id, team_id), *params, page_limit, page_offset],
+        [*_run_scope_params(session_id, team_id), *params, fetch_limit, page_offset],
     ).fetchall()
+    has_more = False
+    if include_total:
+        has_more = page_offset + len(rows) < total
+        total_exact = True
+    else:
+        has_more = len(rows) > page_limit
+        if has_more:
+            rows = rows[:page_limit]
+        total = page_offset + len(rows) + (1 if has_more else 0)
+        total_exact = not has_more
     counts = {status: 0 for status in sorted(FINDING_REVIEW_STATES, key=lambda item: FINDING_STATUS_ORDER.get(item, 99))}
-    status_counts_sql = _sql_join((
-        "SELECT f.status, COUNT(*) AS count FROM findings f WHERE ",
-        finding_scope_sql,
-        " ",
-        _suppression_clause("f"),
-        _orphan_finding_clause("f", team_id),
-        "GROUP BY f.status",
-    ))
-    count_rows = conn.execute(
-        status_counts_sql,
-        [
-            *finding_scope_params,
-            *_suppression_params(normalized_suppression_filter),
-            *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
-        ],
-    ).fetchall()
+    count_rows = []
+    if include_counts:
+        status_counts_sql = _sql_join((
+            "SELECT f.status, COUNT(*) AS count FROM findings f WHERE ",
+            finding_scope_sql,
+            " ",
+            _suppression_clause("f"),
+            _orphan_finding_clause("f", team_id),
+            "GROUP BY f.status",
+        ))
+        count_rows = conn.execute(
+            status_counts_sql,
+            [
+                *finding_scope_params,
+                *_suppression_params(normalized_suppression_filter),
+                *_orphan_finding_params(session_id, normalized_orphan_filter, team_id),
+            ],
+        ).fetchall()
     findings = [_row_to_finding(row) for row in rows]
-    sources_by_finding = _finding_import_sources_by_id(
-        conn,
-        session_id,
-        [finding["id"] for finding in findings],
-        team_id=team_id,
-    )
+    sources_by_finding = _finding_import_sources_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)
-    return {
+    result = {
         "findings": findings,
         "total": total,
         "limit": page_limit,
         "offset": page_offset,
+        "has_more": has_more,
+        "total_exact": total_exact,
         "counts": counts,
+        "counts_exact": bool(include_counts),
     }
+    log_atlas_findings_list_debug(log, debug_started_at, locals(), row_count=len(findings))
+    return result
 
 
 def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "") -> dict[str, Any] | None:
@@ -653,7 +681,9 @@ def list_entities(
     suppression_filter: str = "hide",
     limit: int = 50,
     offset: int = 0,
+    include_total: bool = False,
 ) -> dict[str, Any]:
+    debug_started_at = query_debug_started(log)
     normalized_type = str(entity_type or "").strip().lower()
     if normalized_type not in ATLAS_ENTITY_TYPES:
         normalized_type = ""
@@ -693,6 +723,8 @@ def list_entities(
         *_suppression_params(normalized_suppression_filter),
         *_orphan_entity_params(session_id, normalized_orphan_filter, team_id),
     ]
+    page_limit = max(1, min(int(limit or 50), 200))
+    page_offset = max(0, int(offset or 0))
     total_sql = _sql_join((
         "SELECT COUNT(*) AS count ",
         "FROM entities e ",
@@ -721,19 +753,12 @@ def list_entities(
         _suppression_clause("e"),
         _orphan_entity_clause("e", team_id),
     ))
-    total = int(conn.execute(total_sql, common_params).fetchone()["count"] or 0)
-    page_limit = max(1, min(int(limit or 50), 200))
-    page_offset = max(0, int(offset or 0))
+    total = int(conn.execute(total_sql, common_params).fetchone()["count"] or 0) if include_total else 0
+    fetch_limit = page_limit if include_total else page_limit + 1
     rows_sql = _sql_join((
-        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
-        "e.first_seen_at, e.last_seen_at, ",
-        "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created, "
-        "COUNT(DISTINCT entity_run.id) AS run_count ",
+        "WITH page_entities AS (",
+        "SELECT e.id, e.last_seen_at, e.canonical_value ",
         "FROM entities e ",
-        "LEFT JOIN entity_run_links erl ON erl.entity_id = e.id ",
-        "LEFT JOIN runs entity_run ON entity_run.id = erl.run_id AND ",
-        _run_scope_sql("entity_run", team_id),
-        " ",
         "WHERE ",
         entity_scope_sql,
         " ",
@@ -758,13 +783,34 @@ def list_entities(
         ")) ",
         _suppression_clause("e"),
         _orphan_entity_clause("e", team_id),
-        "GROUP BY e.id ",
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ? OFFSET ?",
+        ") ",
+        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
+        "e.first_seen_at, e.last_seen_at, ",
+        "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created, "
+        "(SELECT COUNT(DISTINCT entity_run.id) ",
+        " FROM entity_run_links erl ",
+        " JOIN runs entity_run ON entity_run.id = erl.run_id AND ",
+        _run_scope_sql("entity_run", team_id),
+        " WHERE erl.entity_id = e.id) AS run_count ",
+        "FROM page_entities page ",
+        "JOIN entities e ON e.id = page.id ",
+        "ORDER BY page.last_seen_at DESC, page.canonical_value ASC",
     ))
     rows = conn.execute(
         rows_sql,
-        [*_run_scope_params(session_id, team_id), *common_params, page_limit, page_offset],
+        [*common_params, fetch_limit, page_offset, *_run_scope_params(session_id, team_id)],
     ).fetchall()
+    has_more = False
+    if include_total:
+        has_more = page_offset + len(rows) < total
+        total_exact = True
+    else:
+        has_more = len(rows) > page_limit
+        if has_more:
+            rows = rows[:page_limit]
+        total = page_offset + len(rows) + (1 if has_more else 0)
+        total_exact = not has_more
     list_metadata = _list_metadata_for_entities(conn, session_id, [str(row["id"]) for row in rows], team_id=team_id)
     entities = []
     for row in rows:
@@ -774,12 +820,16 @@ def list_entities(
         item["labels"] = metadata.get("labels", [])
         item["project_link_count"] = int(metadata.get("project_link_count") or 0)
         entities.append(item)
-    return {
+    result = {
         "entities": entities,
         "total": total,
         "limit": page_limit,
         "offset": page_offset,
+        "has_more": has_more,
+        "total_exact": total_exact,
     }
+    log_atlas_entities_list_debug(log, debug_started_at, locals(), row_count=len(entities))
+    return result
 
 
 def entity_detail(

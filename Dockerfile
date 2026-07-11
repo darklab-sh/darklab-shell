@@ -1,38 +1,56 @@
 FROM python:3.14.6-slim
 
 ARG TARGETARCH
-ARG GO_VERSION=1.26.4
-ARG GO_LINUX_AMD64_SHA256=1153d3d50e0ac764b447adfe05c2bcf08e889d42a02e0fe0259bd47f6733ad7f
-ARG GO_LINUX_ARM64_SHA256=ef758ae7c6cf9267c9c0ef080b8965f453d89ab2d25d9eb22de4405925238768
+ARG GO_VERSION=1.26.5
+ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
 ARG GO_BUILD_PARALLELISM=2
 ARG OPENSSL_VERSION=3.6.2
 ARG OPENSSL_SHA256=aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f
 ARG SSLSCAN_VERSION=2.2.2
-ARG NUCLEI_VERSION=v3.10.0
+ARG NUCLEI_VERSION=v3.11.0
 ARG SUBFINDER_VERSION=v2.14.0
-ARG HTTPX_VERSION=v1.9.0
+ARG HTTPX_VERSION=v1.10.0
 ARG DNSX_VERSION=v1.2.3
 ARG NAABU_VERSION=v2.6.1
 ARG KATANA_VERSION=v1.6.1
 ARG TLSX_VERSION=v1.2.2
-ARG CDNCHECK_VERSION=v1.2.42
+ARG CDNCHECK_VERSION=v1.2.43
 ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
 ARG FFUF_VERSION=v2.1.0
-ARG TRUFFLEHOG_VERSION=v3.95.7
+ARG TRUFFLEHOG_VERSION=v3.95.8
 ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
 ARG TESTSSL_VERSION=v3.2.3
 ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
-ARG WPSCAN_VERSION=4.0.0
+ARG TCPING_VERSION=v2.7.1
+ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=latest
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
-ARG URLSCAN_CLI_VERSION=v2026.06.12
+ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=81.0.0
+ARG APP_VERSION=2.5.0
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG PYTHON_VERSION=3.14.6
+
+LABEL org.opencontainers.image.title="darklab_shell" \
+      org.opencontainers.image.description="Self-hosted browser shell for network diagnostics and security recon" \
+      org.opencontainers.image.source="https://gitlab.com/darklab.sh/darklab_shell" \
+      org.opencontainers.image.url="https://shell.darklab.sh/" \
+      org.opencontainers.image.vendor="darklab.sh" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      sh.darklab.app.name="darklab_shell" \
+      sh.darklab.app.version="${APP_VERSION}" \
+      sh.darklab.git.revision="${VCS_REF}" \
+      sh.darklab.python.version="${PYTHON_VERSION}"
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -46,7 +64,7 @@ RUN apt-get install -y --no-install-recommends \
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
-                        ca-certificates perl zlib1g-dev unzip inetutils-telnet
+                        ca-certificates perl zlib1g-dev unzip inetutils-telnet httping
 
 # Update the man page database
 RUN mandb -c
@@ -115,6 +133,7 @@ RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@${AMAS
 RUN go install github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}
 RUN go install github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
 RUN go install github.com/ffuf/ffuf/v2@${FFUF_VERSION}
+RUN go install github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog \
     && go -C /tmp/trufflehog install \
