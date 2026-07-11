@@ -11,6 +11,7 @@ _CLIENT_LOG_STRING_DETAIL_LIMITS = {
     "action": 80,
     "asset_name": 120,
     "asset_type": 120,
+    "artifact_id": 160,
     "bundle": 120,
     "controller_name": 160,
     "error_name": 120,

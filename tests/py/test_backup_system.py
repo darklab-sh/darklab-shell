@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
 import errno
+import hashlib
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import sys
+import tarfile
 
 import pytest
 
@@ -160,6 +165,55 @@ def test_missing_extra_file_fails_unless_operator_allows_it(tmp_path, monkeypatc
         "none",
     ])
     assert rc == 0
+
+
+def test_dry_run_rejects_missing_requested_inputs_before_writing(tmp_path, monkeypatch, capsys):
+    _clean_env(monkeypatch)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    conf_dir = tmp_path / "conf"
+    _write_config(conf_dir, f"data_dir: {data_dir}\nworkspace_enabled: false\n")
+    missing_env = tmp_path / "missing.env"
+    missing_extra_env = tmp_path / "missing-extra.env"
+    missing_extra = tmp_path / "missing.local.yml"
+
+    for option, missing_path in (
+        ("--env-file", missing_env),
+        ("--env-file-extra", missing_extra_env),
+        ("--extra-file", missing_extra),
+    ):
+        output_dir = tmp_path / f"dry-run-{option.removeprefix('--')}"
+        rc = backup_system.main([
+            "--conf-dir",
+            str(conf_dir),
+            "--output-dir",
+            str(output_dir),
+            option,
+            str(missing_path),
+            "--dry-run",
+        ])
+
+        assert rc == 2
+        assert not output_dir.exists()
+        assert str(missing_path) in capsys.readouterr().err
+
+    allowed_output = tmp_path / "dry-run-allowed"
+    rc = backup_system.main([
+        "--conf-dir",
+        str(conf_dir),
+        "--output-dir",
+        str(allowed_output),
+        "--extra-file",
+        str(missing_extra),
+        "--ignore-missing-extra-file",
+        "--dry-run",
+    ])
+
+    assert rc == 0
+    assert not allowed_output.exists()
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["dry_run"] is True
+    assert {"kind": "extra", "source": str(missing_extra), "reason": "missing"} in plan["excluded"]
 
 
 def test_unreadable_data_dir_reports_root_guidance_and_cleans_lock(tmp_path, monkeypatch, capsys):
@@ -438,6 +492,238 @@ def test_postgres_backup_uses_pg_dump_environment_without_password_argument(tmp_
     compose_file.write_text("services:\n  postgres:\n    image: postgres:18-alpine\n", encoding="utf-8")
     with pytest.raises(backup_system.BackupError, match="compose pg_dump failed"):
         backup_system.backup_postgres(unavailable_ctx, compose_cfg, tmp_path / "auto-postgres.dump", [compose_file])
+
+
+def test_postgres_auto_mode_keeps_remote_urls_on_local_pg_dump(tmp_path, monkeypatch):
+    ctx = backup_system.BackupContext(
+        args=backup_system.parse_args([
+            "--output-dir",
+            str(tmp_path / "backups"),
+            "--pg-dump-command",
+            "/usr/local/bin/pg_dump",
+        ]),
+        output_dir=tmp_path / "backups",
+    )
+    cfg = {"database_url": "postgresql://darklab:secret@db.example.com:5432/darklab_shell"}
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services:\n  postgres:\n    image: postgres:18-alpine\n", encoding="utf-8")
+    container_checks = []
+    calls = []
+
+    monkeypatch.setattr(backup_system, "_compose_service_names", lambda ctx_arg, compose_files: {"postgres"})
+
+    def running_container(ctx_arg, compose_files, service):
+        container_checks.append(service)
+        return "running-postgres-container"
+
+    def fake_run(ctx_arg, command, **kwargs):
+        calls.append((kwargs.get("label"), list(command)))
+        Path(command[command.index("--file") + 1]).write_bytes(b"remote postgres dump")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(backup_system, "_compose_service_container", running_container)
+    monkeypatch.setattr(backup_system, "_run", fake_run)
+    destination = tmp_path / "remote-postgres.dump"
+
+    backup_system.backup_postgres(ctx, cfg, destination, [compose_file])
+
+    assert destination.read_bytes() == b"remote postgres dump"
+    assert container_checks == []
+    assert calls == [("pg_dump", [
+        "/usr/local/bin/pg_dump",
+        "--format=custom",
+        "--no-owner",
+        "--no-acl",
+        "--file",
+        str(destination),
+    ])]
+
+
+def test_checksum_hashing_reads_large_files_in_chunks():
+    read_sizes = []
+
+    class RecordingReader(io.BytesIO):
+        def read(self, size: int | None = -1) -> bytes:
+            read_sizes.append(size)
+            return super().read(size)
+
+    payload = b"abcdefghij"
+    reader = RecordingReader(payload)
+
+    class FakePath:
+        def open(self, mode):
+            assert mode == "rb"
+            return reader
+
+    digest = backup_system._sha256_file(FakePath(), chunk_size=4)
+
+    assert digest == hashlib.sha256(payload).hexdigest()
+    assert read_sizes == [4, 4, 4, 4]
+
+
+@pytest.mark.parametrize("compress", ("gzip", "none"))
+def test_same_timestamp_backups_get_unique_paths_without_overwriting(tmp_path, monkeypatch, compress):
+    _clean_env(monkeypatch)
+    data_dir = tmp_path / "data"
+    _write_sqlite_database(data_dir / "history.db")
+    conf_dir = tmp_path / "conf"
+    _write_config(conf_dir, f"data_dir: {data_dir}\nworkspace_enabled: false\n")
+    output_dir = tmp_path / "backups"
+
+    class FixedDatetime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 7, 10, 12, 34, 56, 123456, tzinfo=tz)
+
+    monkeypatch.setattr(backup_system, "datetime", FixedDatetime)
+    argv = [
+        "--conf-dir",
+        str(conf_dir),
+        "--output-dir",
+        str(output_dir),
+        "--compress",
+        compress,
+    ]
+
+    assert backup_system.main(argv) == 0
+    first_backup = _backup_dirs(output_dir)[0]
+    first_contents = first_backup.read_bytes() if first_backup.is_file() else _manifest(first_backup)
+    assert backup_system.main(argv) == 0
+
+    backups = _backup_dirs(output_dir)
+    assert len(backups) == 2
+    second_backup = next(path for path in backups if path != first_backup)
+    assert first_backup.name.startswith("darklab-backup-20260710-123456.123456Z")
+    assert second_backup.name.startswith("darklab-backup-20260710-123456.123456Z-1")
+    assert (first_backup.read_bytes() if first_backup.is_file() else _manifest(first_backup)) == first_contents
+    if compress == "gzip":
+        stage = tmp_path / "existing-archive-stage"
+        stage.mkdir()
+        (stage / "sentinel.txt").write_text("must not replace", encoding="utf-8")
+        with pytest.raises(backup_system.BackupError, match="destination already exists"):
+            backup_system._archive_stage(stage, first_backup, "collision")
+        assert first_backup.read_bytes() == first_contents
+
+
+def test_default_gzip_archive_contains_valid_restore_payload_and_checksums(tmp_path, monkeypatch):
+    _clean_env(monkeypatch)
+    data_dir = tmp_path / "data"
+    _write_sqlite_database(data_dir / "history.db")
+    (data_dir / "run-output").mkdir()
+    (data_dir / "run-output" / "artifact.txt").write_text("archive payload\n", encoding="utf-8")
+    conf_dir = tmp_path / "conf"
+    _write_config(conf_dir, f"data_dir: {data_dir}\nworkspace_enabled: false\n")
+    output_dir = tmp_path / "backups"
+
+    rc = backup_system.main([
+        "--conf-dir",
+        str(conf_dir),
+        "--output-dir",
+        str(output_dir),
+    ])
+
+    assert rc == 0
+    archives = list(output_dir.glob("darklab-backup-*.tar.gz"))
+    assert len(archives) == 1
+    archive = archives[0]
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o600
+    top_level = archive.name.removesuffix(".tar.gz")
+    with tarfile.open(archive, "r:gz") as tar:
+        names = set(tar.getnames())
+        required = {
+            f"{top_level}/RESTORE.md",
+            f"{top_level}/manifest.json",
+            f"{top_level}/checksums.sha256",
+            f"{top_level}/database/history.db",
+            f"{top_level}/data/run-output/artifact.txt",
+        }
+        assert required <= names
+        checksum_file = tar.extractfile(f"{top_level}/checksums.sha256")
+        assert checksum_file is not None
+        checksum_rows = checksum_file.read().decode("utf-8").splitlines()
+        assert checksum_rows
+        for row in checksum_rows:
+            expected_digest, relative_path = row.split("  ", 1)
+            member_file = tar.extractfile(f"{top_level}/{relative_path}")
+            assert member_file is not None
+            assert hashlib.sha256(member_file.read()).hexdigest() == expected_digest
+    assert not any(path.name.startswith(".darklab-backup-") for path in output_dir.iterdir())
+    assert not (output_dir / ".backup.lock").exists()
+
+
+def test_retention_reports_removed_backups_and_inspection_failures(tmp_path, monkeypatch, capsys):
+    _clean_env(monkeypatch)
+    data_dir = tmp_path / "data"
+    _write_sqlite_database(data_dir / "history.db")
+    conf_dir = tmp_path / "conf"
+    _write_config(conf_dir, f"data_dir: {data_dir}\nworkspace_enabled: false\n")
+    output_dir = tmp_path / "backups"
+    output_dir.mkdir()
+    old_backup = output_dir / "darklab-backup-old"
+    old_backup.mkdir()
+    recent_backup = output_dir / "darklab-backup-recent"
+    recent_backup.mkdir()
+    broken_backup = output_dir / "darklab-backup-broken.tar.gz"
+    broken_backup.write_bytes(b"broken metadata")
+    old_timestamp = datetime.now().timestamp() - (3 * 86400)
+    os.utime(old_backup, (old_timestamp, old_timestamp))
+    original_stat = Path.stat
+
+    def stat_with_failure(path, *args, **kwargs):
+        if path == broken_backup:
+            raise OSError("metadata unavailable")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stat_with_failure)
+    rc = backup_system.main([
+        "--conf-dir",
+        str(conf_dir),
+        "--output-dir",
+        str(output_dir),
+        "--keep-days",
+        "1",
+        "--compress",
+        "none",
+    ])
+
+    captured = capsys.readouterr()
+    monkeypatch.setattr(Path, "stat", original_stat)
+    assert rc == 0
+    assert not old_backup.exists()
+    assert recent_backup.exists()
+    assert broken_backup.exists()
+    created_backup = next(
+        path
+        for path in output_dir.iterdir()
+        if path not in {recent_backup, broken_backup} and path.name.startswith("darklab-backup-")
+    )
+    retention = _manifest(created_backup)["retention"]
+    assert retention == {
+        "enabled": True,
+        "keep_days": 1,
+        "cutoff": retention["cutoff"],
+        "candidates_examined": 3,
+        "removal_candidates": 1,
+        "inspection_failures": 1,
+    }
+    assert retention["cutoff"].endswith("+00:00")
+    assert "could not inspect retention candidate darklab-backup-broken.tar.gz" in captured.err
+    assert "Retention: examined 3 backup(s), removed 1, failures 1." in captured.out
+
+
+def test_unexpected_backup_failures_print_traceback(tmp_path, monkeypatch, capsys):
+    def fail_unexpectedly(ctx):
+        raise RuntimeError("archive metadata exploded")
+
+    monkeypatch.setattr(backup_system, "_prepare_requested_inputs", fail_unexpectedly)
+
+    rc = backup_system.main(["--output-dir", str(tmp_path / "backups")])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "backup failed: RuntimeError: archive metadata exploded" in captured.err
+    assert "Traceback (most recent call last)" in captured.err
+    assert "fail_unexpectedly" in captured.err
 
 
 def test_workspace_volume_source_with_container_exports_with_docker_cp(tmp_path, monkeypatch):

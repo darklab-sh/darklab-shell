@@ -9967,15 +9967,16 @@ class TestProjectRoutes:
             json={"run_ids": [run_id]},
             headers={"X-Session-ID": session_id},
         )
-        unlink_resp = client.delete(
-            f"/projects/{project['id']}/links",
-            json={
-                "entity_type": "run",
-                "entity_id": run_id,
-                "include_entities": True,
-            },
-            headers={"X-Session-ID": session_id},
-        )
+        with mock.patch.object(project_routes.log, "info") as mock_unlink_info:
+            unlink_resp = client.delete(
+                f"/projects/{project['id']}/links",
+                json={
+                    "entity_type": "run",
+                    "entity_id": run_id,
+                    "include_entities": True,
+                },
+                headers={"X-Session-ID": session_id},
+            )
 
         assert link_resp.status_code == 201
         assert preview_resp.status_code == 200
@@ -10024,6 +10025,27 @@ class TestProjectRoutes:
         unlink_data = json.loads(unlink_resp.data)
         assert unlink_data["unlinked_entities"]["removed"] == 1
         assert unlink_data["unlinked_entities"]["kept_curated"] == 1
+        unlink_log_call = next(
+            call for call in mock_unlink_info.call_args_list if call.args[0] == "PROJECT_LINK_REMOVED"
+        )
+        cleanup_log_fields = {
+            "include_entities_requested": True,
+            "include_curated_entities_requested": False,
+            "unlinked_entity_count": 1,
+            "unlinked_finding_count": 1,
+            "unlinked_curated_entity_count": 0,
+            "unlinked_curated_finding_count": 0,
+            "kept_entity_count": 1,
+            "kept_finding_count": 0,
+        }
+        for key, value in cleanup_log_fields.items():
+            assert unlink_log_call.kwargs["extra"][key] == value
+        project_unlink_audit = _audit_event_rows(
+            target_id=project["id"],
+            event_type="project.unlink",
+        )[-1]
+        for key, value in cleanup_log_fields.items():
+            assert project_unlink_audit["details"][key] == value
         with db_connect() as conn:
             run_link_count = conn.execute(
                 "SELECT COUNT(*) AS count FROM project_links "
@@ -12201,6 +12223,36 @@ class TestClientLogRoute:
         assert debug_extra["context"] == "TEAM_SCOPE_CHANGED"
         assert debug_extra["client_message"] == '{"scope":"team"}'
 
+    def test_routes_supported_levels_and_counts_only_warning_and_error_metrics(self):
+        client = get_client()
+        metrics = mock.Mock()
+        with (
+            mock.patch.object(shell_assets, "_app_metrics", return_value=metrics),
+            mock.patch.object(shell_assets.log, "debug") as mock_debug,
+            mock.patch.object(shell_assets.log, "info") as mock_info,
+            mock.patch.object(shell_assets.log, "warning") as mock_warning,
+            mock.patch.object(shell_assets.log, "error") as mock_error,
+        ):
+            for level in ("debug", "info", "warn", "warning", "error", "unknown"):
+                resp = client.post("/log", json={
+                    "event": "CLIENT_LEVEL_TEST",
+                    "level": level,
+                    "context": f"level-{level}",
+                })
+                assert resp.status_code == 200
+
+        assert len([call for call in mock_debug.call_args_list if call.args[0] == "CLIENT_LEVEL_TEST"]) == 1
+        assert len([call for call in mock_info.call_args_list if call.args[0] == "CLIENT_LEVEL_TEST"]) == 1
+        assert len([call for call in mock_warning.call_args_list if call.args[0] == "CLIENT_LEVEL_TEST"]) == 3
+        assert len([call for call in mock_error.call_args_list if call.args[0] == "CLIENT_LEVEL_TEST"]) == 1
+        assert metrics.record_client_error.call_count == 4
+        assert [call.args[0] for call in metrics.record_client_error.call_args_list] == [
+            "level-warn",
+            "level-warning",
+            "level-error",
+            "level-unknown",
+        ]
+
     def test_accepts_safe_asset_failure_context_without_query_values(self):
         client = get_client()
         with mock.patch.object(shell_assets.log, "error") as mock_error:
@@ -12219,6 +12271,7 @@ class TestClientLogRoute:
                     "phase": "load",
                     "asset_name": "shell-bootstrap",
                     "asset_type": "module",
+                    "artifact_id": "rfa_project_artifact_123",
                     "error_name": "TypeError",
                     "export_name": "DarklabProjectWorkspaceShell",
                     "controller_name": "createProjectWorkspaceShellController",
@@ -12227,6 +12280,7 @@ class TestClientLogRoute:
                     "route": "/projects",
                     "status": 404,
                     "expected_global": True,
+                    "raw_artifact_path": "/private/workspace/secret.txt",
                 },
             })
         assert resp.status_code == 200
@@ -12239,6 +12293,7 @@ class TestClientLogRoute:
         assert extra["client_details"] == {
             "asset_name": "shell-bootstrap",
             "asset_type": "module",
+            "artifact_id": "rfa_project_artifact_123",
             "bundle": "shell-bootstrap",
             "controller_name": "createProjectWorkspaceShellController",
             "error_name": "TypeError",
@@ -12253,6 +12308,7 @@ class TestClientLogRoute:
             "expected_global": True,
         }
         assert "secret" not in json.dumps(extra)
+        assert "raw_artifact_path" not in extra["client_details"]
 
 
 # ── /status ───────────────────────────────────────────────────────────────────
@@ -15300,10 +15356,11 @@ class TestAtlasRoutes:
             f"/history/{run_id}/atlas-cleanup-preview",
             headers={"X-Session-ID": session_id},
         )
-        delete_resp = client.delete(
-            f"/history/{run_id}?prune_atlas=1",
-            headers={"X-Session-ID": session_id},
-        )
+        with mock.patch.object(history_routes.log, "info") as mock_history_delete_info:
+            delete_resp = client.delete(
+                f"/history/{run_id}?prune_atlas=1",
+                headers={"X-Session-ID": session_id},
+            )
 
         assert preview_resp.status_code == 200
         preview = json.loads(preview_resp.data)["cleanup"]
@@ -15334,6 +15391,24 @@ class TestAtlasRoutes:
         }
         assert "disposable" not in preview["cleanup_reasons"]["samples"]
         assert delete_resp.status_code == 200
+        history_delete_log_call = next(
+            call for call in mock_history_delete_info.call_args_list if call.args[0] == "HISTORY_DELETED"
+        )
+        cleanup_log_fields = {
+            "prune_atlas_requested": True,
+            "prune_curated_atlas_requested": False,
+            "atlas_removed_entity_count": 1,
+            "atlas_removed_finding_count": 1,
+            "atlas_removed_curated_entity_count": 0,
+            "atlas_removed_curated_finding_count": 0,
+            "atlas_kept_entity_count": 1,
+            "atlas_kept_finding_count": 0,
+        }
+        for key, value in cleanup_log_fields.items():
+            assert history_delete_log_call.kwargs["extra"][key] == value
+        history_delete_audit = _audit_event_rows(target_id=run_id, event_type="history.delete")[-1]
+        for key, value in cleanup_log_fields.items():
+            assert history_delete_audit["details"][key] == value
         with db_connect() as conn:
             rows = conn.execute(
                 "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",

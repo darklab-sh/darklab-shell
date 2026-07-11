@@ -6,17 +6,18 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.5.0] - Unreleased
+## [2.5.0] - 2026-07-11
 
 ### Added
 
 - **Operators can create comprehensive deployment backups** — `scripts/backup_system.py` now creates cron-friendly backups that resolve the effective app config, snapshot SQLite with the online backup API or dump Postgres with `pg_dump`, include `data_dir`, config overlays, `.env`, repeatable `--extra-file` paths, and enabled workspaces, then write restore notes, checksums, and a redacted manifest before archiving.
   - **Data storage:** the script records both the logical app `data_dir` and the physical backup source, so a host-run backup of the bundled Compose stack copies the host `./data` bind mount instead of falling back to the host's local `/tmp` path.
   - **Workspace storage:** the script records both the logical app `workspace_root` and the physical backup source, copying bind mounts from the host path and exporting Docker named volumes through Docker while requiring explicit opt-in for tmpfs/container-only workspaces even when the same tmpfs path exists on the host. When operators pass the same ordered Compose files they use for deployment, the script reads `WORKSPACE_ROOT` and resolves relative workspace bind mounts against the base Compose project directory; `--workspace-root` remains available when the logical app path needs to be supplied directly. If ephemeral workspace backup is requested while the app container is stopped, dry runs and backups report the unavailable container instead of claiming a host bind source.
-  - **Container-aware failures:** host-readable SQLite bind-mount backups continue to work with containers stopped. Auto Postgres backups now treat Compose-service DSN hosts such as `postgres` as container-network targets and run `pg_dump` through `docker compose exec` instead of falling back to host `pg_dump`.
+  - **Container-aware database selection:** host-readable SQLite bind-mount backups continue to work with containers stopped. Auto Postgres backups use `docker compose exec` only when the database URL names a service in the supplied Compose stack; remote and host-reachable URLs keep using local `pg_dump` even when the bundled Postgres container is also running.
   - **Source permissions:** unreadable host bind sources now fail with backup-specific root/bind-mount guidance instead of a raw Python `PermissionError`, while failed runs still remove their lock file.
   - **Lock cleanup:** failed backup runs release and remove their `.backup.lock` file before returning, so a handled failure does not leave a stale lock path behind.
-  - **Tests:** added pytest coverage for SQLite snapshot behavior, Compose bind-mounted `data_dir` resolution, production Compose workspace override detection, live database exclusion from copied `data_dir`, extra/env file inclusion, missing extra-file failure handling, unreadable bind-mount source guidance with lock cleanup, tmpfs workspace skips, stopped-container ephemeral workspace handling, bind-mounted workspace copies, Docker-volume copy command shaping, local Postgres `pg_dump` environment handling, Compose Postgres dump command shaping, Compose-network Postgres auto-mode selection, Compose Postgres stopped-service messaging, and manifest redaction.
+  - **Reliable output and preflight:** large files are checksummed in bounded chunks, microsecond backup names gain an exclusive sequence when needed, existing archives are never replaced, and `--dry-run` rejects the same missing env and extra-file inputs as a real backup before it creates an output directory or lock file.
+  - **Tests:** added pytest coverage for SQLite snapshot behavior, Compose bind-mounted `data_dir` resolution, production Compose workspace override detection, live database exclusion from copied `data_dir`, extra/env file inclusion, dry-run input validation, missing extra-file opt-outs, unreadable bind-mount source guidance with lock cleanup, tmpfs workspace skips, stopped-container ephemeral workspace handling, bind-mounted workspace copies, Docker-volume copy command shaping, local and Compose Postgres dump selection, remote Postgres URL isolation from a running Compose service, chunked checksums, collision-safe archive and directory output, default gzip restore contents and checksum validation, retention reporting, stopped-service messaging, and manifest redaction.
 
 - **HTTP and TCP ping tools are available in the shell** — The Docker image now includes Debian's packaged `httping` plus a pinned upstream `tcping` Go install, with command registry entries for examples, help, target/port autocomplete, and container smoke coverage for the recommended syntax.
 
@@ -24,11 +25,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Bundled security tools are current for this release** — Container images now ship Go 1.26.5, Nuclei 3.11.0, httpx 1.10.0, cdncheck 1.2.43, TruffleHog 3.95.8, WPScan 4.0.1, and urlscan-cli 2026.07.07.
+
 - **Initial shell startup and first-open surfaces are lighter** — The initial page now ships less inactive UI, while first-use surfaces still open with the same polished behavior.
   - Feature-owned styles for Projects, Atlas, Command Registry, Run Comparison, Schedules, Status Monitor, Watchers, Workflows, and Files load with their first-use modules instead of blocking the first shell paint.
   - Atlas and Projects mount their large modal shells from first-use HTML fragments, while Schedules, Watchers, and Findings Board create their modal shells when their feature modules load.
-  - Finding triage, styled HTML/PDF export, terminal tour commands, Files, and Playwright-only test hooks use lighter bridges or runtime gates so their full controllers stay off the initial shell path until needed.
-  - Source asset mode keeps JS module URLs unversioned, generated bundle-mode ESM ships minified code with linked source maps, and hashed build assets serve committed Brotli/gzip siblings by content negotiation.
+  - Finding triage, styled HTML/PDF export, terminal tour commands, and Files use lighter bridges or runtime gates so their full controllers stay off the initial shell path until needed.
+  - Source asset mode keeps JS module URLs unversioned, generated bundle-mode ESM ships minified code with linked source maps, and hashed build assets serve committed Brotli/gzip siblings by content negotiation. Compression uses a stable source-size rule so committed asset checks stay consistent across supported CI environments.
   - Browser-facing fonts use WOFF2 on the shell path, `ansi_up.js` defers, and jsPDF still gets the TrueType files it needs for PDF export.
   - Projects starts controller imports, the first project list, and active-project context together; Atlas shows its overlay shell immediately, starts its summary/list requests early, and keeps detail/mobile/board controllers out of the first-open path.
   - **Tests:** route, browser-unit, asset, source-mode Playwright, and mobile Playwright coverage verifies the lighter shell, lazy fragments/styles, bundle/source URL contracts, compression, source maps, first-open behavior, and Files/triage/export/tour bridge boundaries.
@@ -51,12 +54,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Container smoke CI installs the app import dependencies it collects through** — The GitLab smoke job now installs Alpine's `py3-pydantic` and `py3-tldextract` packages before running `scripts/container_smoke_test.sh`, so the pytest wrapper can import the config schema and output-signal helpers before it starts the Docker-backed smoke container.
-  - **Tests:** verified `docker:29.6.1` can collect `tests/py/test_container_smoke_test.py` after installing `python3`, `py3-pytest`, `py3-yaml`, `py3-pydantic`, `py3-tldextract`, and `docker-cli-compose`.
+- **Operational logs now preserve severity, cleanup scope, and backup diagnostics** — Browser lifecycle events, destructive cleanup, and scheduled backups now leave an accurate troubleshooting trail without recording cleanup samples or raw artifact data.
+  - Browser `debug`, `info`, `warn`/`warning`, and `error` reports keep their intended server log levels; normal INFO events no longer increment the client-error metric, unknown levels fall back to WARNING, and bounded artifact IDs survive client-log sanitization.
+  - History deletion and Project unlink INFO/audit events record the requested cleanup flags plus removed, curated, and kept entity/finding counts after cleanup completes.
+  - Unexpected backup failures print their traceback, while `--keep-days` records its cutoff and candidate scan in the manifest, warns about inspection/removal failures, and prints examined, removed, and failure totals after a successful backup is published.
+  - **Maintainability:** cleanup field shaping and snapshot persistence live in focused History and Project service modules, keeping the route and mutation modules inside their architecture size budgets.
+  - **Tests:** route and backup coverage verifies the client level/metric matrix, artifact ID allowlisting, cleanup INFO/audit fields, retention summaries and inspection warnings, and unexpected-exception tracebacks.
 
 - **Accepted command autocomplete roots now keep examples visible** — Choosing a command root such as `ping` from a partial match like `pin` now refreshes autocomplete after insertion, so the same example commands appear as when the root is typed manually.
-
-- **Run comparison e2e coverage is less flaky** — The history/project compare test now forces a smaller split-pane scroll area before checking scroll sync, so the test no longer depends on borderline rendered row heights.
 
 - **First-open modal behavior stays polished after the startup trim** — The lazy shell changes now preserve the pre-trim visual and interaction details.
   - Theme selector alignment, Run Details entity rows, Project Runs/Findings placeholders, main-terminal Atlas entity highlights, and Atlas entity tab auto-selection render correctly on first load.
@@ -68,16 +73,14 @@ Entries favor clear outcomes first, then implementation and test details when th
   - Project cleanup, Project unlink, run deletion, and Atlas sibling-cleanup confirmations now explain disposable, kept-by-default, and not-eligible Atlas cleanup buckets with grouped reason labels; Project Runs tab removals still send the selected cleanup flags before summarizing removed entity counts.
   - Cleanup confirmations now treat explicit zero-count reason buckets as authoritative, so stale legacy compatibility counts cannot bring back empty Atlas cleanup checkboxes.
   - History run deletion now leaves optional Atlas cleanup unchecked by default, matching Atlas and Project cleanup confirmations.
-  - Cleanup confirmation option visibility now uses one shared helper, keeping the hidden-state contract consistent across History and Projects.
-  - Cleanup confirmation reason notes now share one muted text treatment across Atlas, History, and Projects while preserving each modal's spacing.
-  - Cleanup preview payloads and confirmations now carry compact display-only samples for kept-by-default and not-eligible cleanup rows, including Project unlink previews, using owner-scoped display values instead of raw IDs or output snippets.
+  - Cleanup previews and confirmations carry compact display-only samples for kept-by-default and not-eligible rows, including Project unlink previews, and keep those samples collapsed until opened.
   - Kept-by-default run cleanup no longer deletes a parent Atlas entity when that would indirectly delete a child finding that is not eligible for the cleanup.
   - Atlas entity/finding sibling cleanup previews no longer count the row being explicitly deleted as not eligible, so selected rows do not block cleanup of their same-run siblings.
   - Team-scoped History cleanup previews and deletes now classify team-owned Project links and metadata by team ownership, so cross-member Project links keep the same Atlas rows in preview and apply.
   - Team-scoped History cleanup now applies the same team ownership scope during deletion, so Atlas rows previewed for cleanup are removed even when the row was first created by a different teammate.
   - Team-scoped Project run unlink previews now keep entity links when a reviewed child finding belongs to another teammate in the same team.
   - Pending command-discovered Project targets are treated as disposable same-run entities unless another keep signal exists, so fresh command targets do not pull same-run findings into the kept-by-default cleanup bucket.
-  - Atlas cleanup browser-unit fixtures now use the same cleanup reason codes and labels emitted by the backend, keeping the confirmation-copy coverage aligned with production payloads.
+  - **Tests:** a live History Playwright flow verifies all three preview buckets, unchecked cleanup defaults, sample disclosure, selected request flags, and the resulting Atlas entity and finding state.
 
 - **Optimized Project and API paths keep their old behavior** — The performance work preserves the important edge cases around paging and team scope.
   - API v1 team Project finding lists include cross-member findings reachable through authorized team Project run/entity links, matching Project count and finding-summary rollups.
@@ -85,9 +88,6 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Command-discovered `nc` Project targets keep hosts and ports separate** — `nc -zv` now treats the first positional value as the target host and later positional values as ports.
   - `nc -zv` command-discovered Project targets now treat positional ports as ports instead of hostnames, so values like `80` no longer become Atlas domain entities.
-
-- **Build asset checks are deterministic across CI environments** — Compression sidecars now use a stable source-size rule before they are committed or checked.
-  - Build asset compression sidecars are generated from a deterministic source-size rule, so tiny source maps do not look stale on CI when Node/zlib patch versions disagree about whether gzip saves a byte.
 
 ---
 
@@ -146,7 +146,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - Search discoverability refresh no longer crashes in jsdom teardown or other partial DOM environments when the global `Element` constructor is temporarily unavailable.
 - Existing SQLite databases that reached the current schema before the unified migration ledger now stamp cleanly when the only drift is SQLite's legacy inability to add `watcher_fires` table-level `CHECK` constraints after table creation.
 - Scheduler recovery no longer misreports Redis as unavailable on startup. The scheduler worker now initializes the same process-level Redis state as the web workers before it fires missed schedules, and the run broker reads that Redis state dynamically instead of keeping a stale import-time copy.
-- E2E coverage no longer depends on external DNS resolving `darklab.sh` before the status monitor and session-token autocomplete checks can finish.
+- E2E coverage is more deterministic: status-monitor and session-token autocomplete checks no longer depend on external DNS resolving `darklab.sh`, run-comparison scroll-sync coverage uses test-owned overflow so flex/grid settlement on a loaded worker cannot invalidate its precondition, and Atlas browser flows wait for the lazy-loaded controller to be ready before interacting with it.
 - Command output flags now prepare workspace write targets as `scanner:appuser` files, so scanner tools can truncate app-created placeholders without hitting permission errors.
 - The Commands modal category strip now hides the native horizontal scrollbar and uses tab-style arrow scrollers when the category list overflows.
 - Generic command-output hostname extraction now uses an offline Public Suffix List gate plus conservative file-context checks, so dotted code identifiers such as `classlist.add` and `document.queryselector` no longer become Atlas domains while real domains and URL/scanner-specific capture paths keep their existing behavior.

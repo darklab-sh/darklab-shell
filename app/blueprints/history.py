@@ -857,7 +857,7 @@ def delete_run(run_id):
         return capability_response
     prune_atlas = str(request.args.get("prune_atlas") or "").strip().lower() in {"1", "true", "yes"}
     prune_curated_atlas = str(request.args.get("prune_curated_atlas") or "").strip().lower() in {"1", "true", "yes"}
-    deleted_count, atlas_cleanup = delete_history_run(
+    deleted_count, atlas_cleanup, cleanup_log_fields = delete_history_run(
         session_id=session_id,
         owner_scope=owner_scope,
         run_id=run_id,
@@ -868,6 +868,7 @@ def delete_run(run_id):
     if deleted_count:
         log.info("HISTORY_DELETED", extra={
             "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
+            **cleanup_log_fields,
         })
     else:
         log.debug("HISTORY_DELETE_MISS", extra={

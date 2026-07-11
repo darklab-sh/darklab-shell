@@ -1557,6 +1557,10 @@ body.mobile-terminal-mode .output-follow-btn {
   padding-right: 4px;
 }
 
+.cleanup-sample-panel.u-hidden {
+  display: none;
+}
+
 .cleanup-sample-group-title {
   margin-bottom: 4px;
   color: color-mix(in srgb, var(--text) 76%, var(--muted));

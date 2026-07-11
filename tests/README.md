@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,036
+- behavior tests: 4,046
 - docs/inventory meta-tests: 63
-- `pytest`: 2343 (2293 behavior + 50 meta)
+- `pytest`: 2352 (2302 behavior + 50 meta)
 - `vitest`: 1485 (1472 behavior + 13 meta)
-- `playwright`: 271 behavior
-- total: 4,099
+- `playwright`: 272 behavior
+- total: 4,109
 
 This document is organized in two parts:
 
@@ -1230,9 +1230,16 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, and excludes live SQLite files from the copied data directory. |
 | `test_extra_and_env_files_are_included_without_logging_secret_values` | Verifies env files and repeatable extra files are included while secret-bearing values stay out of the manifest. |
 | `test_missing_extra_file_fails_unless_operator_allows_it` | Verifies explicit extra files fail loudly when missing unless the operator opts into ignoring missing paths. |
+| `test_dry_run_rejects_missing_requested_inputs_before_writing` | Verifies dry runs reject missing primary env, extra env, and extra-file inputs before creating output state while honoring the missing-extra-file opt-out. |
 | `test_unreadable_data_dir_reports_root_guidance_and_cleans_lock` | Verifies unreadable host data directories return root/bind-mount guidance and still clean up the backup lock. |
 | `test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit` | Verifies tmpfs workspace backups are skipped without opt-in even when the same host path exists, unavailable app containers are reported when ephemeral backup is requested, production Compose workspace overrides resolve to the base project bind path, and explicit bind sources still copy the physical host path. |
 | `test_postgres_backup_uses_pg_dump_environment_without_password_argument` | Verifies local Postgres backups pass credentials through the `pg_dump` environment, Compose-network URLs select containerized `pg_dump`, and Compose Postgres backups run inside the service container instead of falling back to host `pg_dump`. |
+| `test_postgres_auto_mode_keeps_remote_urls_on_local_pg_dump` | Verifies a remote Postgres URL keeps using local `pg_dump` even when the supplied Compose stack also has a running Postgres service. |
+| `test_checksum_hashing_reads_large_files_in_chunks` | Verifies backup checksums read large files in bounded chunks instead of loading each file into memory at once. |
+| `test_same_timestamp_backups_get_unique_paths_without_overwriting` | Verifies compressed and unpacked backups with the same timestamp receive distinct output paths without changing the first backup. |
+| `test_default_gzip_archive_contains_valid_restore_payload_and_checksums` | Verifies the default gzip backup contains its restore payload, carries valid checksums, uses private permissions, and leaves no staging or lock files behind. |
+| `test_retention_reports_removed_backups_and_inspection_failures` | Verifies retention records its bounded candidate scan in the manifest, warns about metadata failures, and reports actual removals after publication. |
+| `test_unexpected_backup_failures_print_traceback` | Verifies unexpected backup defects retain a traceback in unattended-job error output. |
 | `test_workspace_volume_source_with_container_exports_with_docker_cp` | Verifies Docker-volume workspace backups use `docker cp` from the mounted app container path when container metadata is available. |
 
 #### `test_check_versions.py`
@@ -1836,7 +1843,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
-| `TestClientLogRoute.test_accepts_safe_asset_failure_context_without_query_values` | Verifies asset failure client logs preserve safe asset context while dropping arbitrary query values. |
+| `TestClientLogRoute.test_routes_supported_levels_and_counts_only_warning_and_error_metrics` | Verifies browser DEBUG/INFO/WARN/WARNING/ERROR levels route correctly, unknown values fall back safely, and only warning/error reports increment client-error metrics. |
+| `TestClientLogRoute.test_accepts_safe_asset_failure_context_without_query_values` | Verifies asset failure client logs preserve safe asset and artifact correlation IDs while dropping arbitrary fields and query values. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
 | `TestStatusRoute.test_uptime_is_non_negative_integer` | Uptime is a non-negative integer count of seconds since app boot. |
@@ -4390,6 +4398,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `the history restore button loads output into a tab without touching the composer` | Verifies that the per-row `restore` action button loads the run's output into a tab and leaves `#cmd` empty — the pre-swap "click row to restore" behavior now lives on an explicit button. |
 | `the history restore button switches to an existing tab instead of duplicating it` | Verifies that clicking `restore` for a run whose output is already open activates the existing tab rather than opening a duplicate. |
 | `deleting a starred entry removes it from the chip bar` | Verifies that deleting a starred entry removes it from the chip bar. |
+| `run cleanup confirmation uses live preview defaults samples and selected flags` | Verifies a live History cleanup preview shows disposable, kept-by-default, and not-eligible rows, keeps cleanup unchecked by default, reveals bounded samples, sends only the selected flag, and leaves the expected Atlas state. |
 | `toggling the history star keeps the desktop drawer open` | Verifies that desktop starring behaves like a toggle and does not collapse the drawer while you are working through history entries. |
 | `clear all history removes all chips including starred ones` | Verifies that clear all history removes all chips including starred ones. |
 | `clicking outside the drawer closes the history panel` | Verifies that clicking outside the drawer closes the history panel. |

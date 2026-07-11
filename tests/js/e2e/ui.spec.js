@@ -15,6 +15,13 @@ import {
 
 const PROJECT_LINK_RUN_COMMAND = 'dig projects.playwright.example +short'
 
+async function expectAtlasInteractionReady(page, { timeout = 15_000 } = {}) {
+  const overlay = page.locator('#atlas-overlay')
+  await expect(overlay).toHaveClass(/\bopen\b/, { timeout })
+  await expect(overlay).toHaveAttribute('data-interaction-ready', '1', { timeout })
+  return overlay
+}
+
 async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {}) {
   const host = page.locator('#confirm-host')
   const action = host.locator(`[data-confirm-action-id="${actionId}"]`)
@@ -1131,7 +1138,7 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
 
     await page.locator('.rail-nav [data-action="atlas"]').click()
-    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expectAtlasInteractionReady(page)
     await page.locator('[data-atlas-tab="domain"]').click()
     await expect(page.locator('[data-atlas-tab="domain"]')).toHaveClass(/\bis-active\b/)
     await page.locator('#atlas-search').fill(fixture.entityValue)
@@ -1169,7 +1176,7 @@ test.describe('project workspace modal', () => {
     })}\n`
 
     await page.locator('.rail-nav [data-action="atlas"]').click()
-    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expectAtlasInteractionReady(page)
     await page.locator('#atlas-import-btn').click()
     await expect(page.locator('#atlas-import-overlay')).toHaveClass(/\bopen\b/)
     await page.locator('#atlas-import-format').selectOption('nuclei_jsonl')

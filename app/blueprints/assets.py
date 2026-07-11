@@ -179,7 +179,14 @@ def client_log():
     event = str(data.get("event") or "CLIENT_ERROR").strip().upper()[:80]
     if not event.replace("_", "").isalnum():
         event = "CLIENT_ERROR"
-    level = str(data.get("level") or "warning").strip().lower()
+    requested_level = str(data.get("level") or "warning").strip().lower()
+    level = {
+        "debug": "debug",
+        "info": "info",
+        "warn": "warning",
+        "warning": "warning",
+        "error": "error",
+    }.get(requested_level, "warning")
     extra: dict[str, object] = {
         "ip": get_client_ip(),
         "session": get_log_session_id(),
@@ -191,6 +198,8 @@ def client_log():
         extra["client_details"] = client_details
     if level == "debug":
         log.debug(event, extra=extra)
+    elif level == "info":
+        log.info(event, extra=extra)
     elif level == "error":
         _app_metrics().record_client_error(context or event or "unknown")
         log.error(event, extra=extra)

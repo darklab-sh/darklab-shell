@@ -215,7 +215,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `testssl` / `testssl.sh` | TLS/SSL vulnerability scanning |
 | `dnsrecon` | DNS enumeration and zone transfer testing |
 | `nikto` | Web server vulnerability scanning |
-| `wpscan` | WordPress vulnerability scanning; uses optional `WPSCAN_API_TOKEN` from the encrypted secrets vault for API-backed vulnerability data |
+| `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Fast CVE/misconfiguration scanner using community templates |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
 | `amass` | OWASP subdomain enumeration, asset discovery, tracking, and visualization |
@@ -247,7 +247,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `urlscan-cli` | urlscan.io URL submission, result lookup, and search; requires `URLSCAN_API_KEY` in the encrypted secrets vault |
 | `chaos` | ProjectDiscovery Chaos subdomain lookups; requires `PDCP_API_KEY` in the encrypted secrets vault |
 
-The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, live TLS certificate data, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye; `intel url <url>` checks URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye use encrypted secrets from the active personal or team scope; FOFA requires `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls require an F-point balance; ZoomEye uses `ZOOMEYE_API_KEY` against the regional `api.zoomeye.ai` API and requires available resource credits; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys. WPScan is CLI-backed, so regular scans run without a token and API-backed vulnerability data uses `WPSCAN_API_TOKEN` when stored. Live TLS rows show the certificate currently served on port 443, while crt.sh rows include certificate-transparency history when the public service responds; temporary crt.sh timeouts or 5xx responses are shown as provider outages instead of implying the domain has no certificate data.
+The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, live TLS certificate data, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye; `intel url <url>` checks URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye use encrypted secrets from the active personal or team scope; FOFA requires `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls require an F-point balance; ZoomEye uses `ZOOMEYE_API_KEY` against the regional `api.zoomeye.ai` API and requires available resource credits; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys. Live TLS rows show the certificate currently served on port 443, while crt.sh rows include certificate-transparency history when the public service responds; temporary crt.sh timeouts or 5xx responses are shown as provider outages instead of implying the domain has no certificate data.
 
 ### Tool Notes
 
@@ -287,6 +287,10 @@ When Files are enabled, `wget` downloads go to the active Files folder by defaul
 
 When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active personal/team workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/tlsx`, `/tools/cdncheck`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, `tlsx` and `cdncheck` result files, and `naabu` auxiliary input files.
 
+#### wpscan
+
+`wpscan` runs normally without an API token. Save `WPSCAN_API_TOKEN` in the encrypted secrets vault when you want API-backed vulnerability data; the app passes it to the WPScan process without putting it in the command or transcript. Inline `--api-token` values are blocked so the token can't be saved in history, snapshots, or logs.
+
 #### trufflehog
 
 `trufflehog` is available for secret scanning against managed inputs. Use `trufflehog filesystem --directory <folder> --json` for a folder in Files, or `trufflehog git https://... --json` for an HTTPS Git repository. Local Git paths, SSH Git URLs, custom clone directories, and no-cleanup/trust-local-config modes are blocked so scans stay in the app's managed runtime boundary.
@@ -309,7 +313,7 @@ The production overlay adds reverse-proxy-aware environment values, GELF Docker 
 
 The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
-Use [`scripts/backup_system.py`](scripts/backup_system.py) for scheduled operator backups. It captures the selected database backend, `/data` artifacts, app-owned secret-key files, local config, `.env`, optional deployment-specific files, and enabled workspace storage. The script records the app's logical paths and the physical host or Docker sources it copies, writes a redacted manifest plus checksums, and is safe to run from cron as a host user that can read the selected bind mounts or Docker sources.
+Use [`scripts/backup_system.py`](scripts/backup_system.py) for scheduled operator backups. It captures the selected database backend, `/data` artifacts, app-owned secret-key files, local config, `.env`, optional deployment-specific files, and enabled workspace storage. The script records the app's logical paths and the physical host or Docker sources it copies, writes a redacted manifest plus checksums, and is safe to run from cron as a host user that can read the selected bind mounts or Docker sources. Its dry run checks explicit input paths before writing anything, each completed run gets its own output path instead of replacing an earlier backup, and retention runs print concise examined/removed/failure totals for cron logs.
 
 Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
 
@@ -726,12 +730,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
+│   │   │   ├── cleanup_logging.py # Structured cleanup fields for History INFO and audit events
 │   │   │   ├── insights.py     # History activity, command-mix, and run-constellation insight helpers
-│   │   │   ├── mutations.py    # History delete, export, and snapshot persistence helpers
+│   │   │   ├── mutations.py    # History run delete and bulk-export mutation helpers
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
 │   │   │   ├── queries.py      # History list, search, run metadata, and compare query helpers
 │   │   │   ├── run_metadata.py # Shared run-history metadata, artifact, count, and table-introspection helpers
-│   │   │   └── search.py       # Backend-aware run-history search SQL helpers
+│   │   │   ├── search.py       # Backend-aware run-history search SQL helpers
+│   │   │   └── snapshots.py    # Snapshot create, lookup, and delete persistence helpers
 │   │   ├── intel/
 │   │   │   ├── __init__.py     # External intel service package marker
 │   │   │   ├── abuseipdb.py    # AbuseIPDB provider normalization
@@ -799,6 +805,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── artifact_queries.py # Project artifact page, detail, and target-filter query helpers
 │   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
 │   │   │   ├── auto_promote.py # Project Atlas auto-promote rule matching and apply helpers
+│   │   │   ├── cleanup_logging.py # Structured cleanup fields for Project unlink INFO and audit events
 │   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
 │   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes
 │   │   │   ├── crud.py         # Project create, update, delete, and cleanup helpers

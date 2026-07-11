@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import traceback
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -32,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT / "app"
 DEFAULT_BACKUP_PREFIX = "darklab-backup"
 DEFAULT_SQLITE_NAME = "history.db"
+CHECKSUM_CHUNK_SIZE = 1024 * 1024
 SENSITIVE_KEY_RE = re.compile(
     r"(?:^|[_-])(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|database[_-]?url|dsn)(?:$|[_-])",
     re.I,
@@ -70,6 +72,8 @@ class BackupContext:
     excluded: list[dict[str, Any]] = field(default_factory=list)
     commands: list[dict[str, Any]] = field(default_factory=list)
     env_files_loaded: list[str] = field(default_factory=list)
+    requested_inputs_prepared: bool = False
+    retention: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -275,7 +279,9 @@ def _copy_file(ctx: BackupContext, source: Path, stage: Path, *, category: str, 
         raise
     if source_stat is None:
         if missing_ok:
-            ctx.excluded.append({"kind": category, "source": str(source), "reason": "missing"})
+            excluded = {"kind": category, "source": str(source), "reason": "missing"}
+            if excluded not in ctx.excluded:
+                ctx.excluded.append(excluded)
             return None
         raise BackupError(f"requested file does not exist: {source}")
     if not stat.S_ISREG(source_stat.st_mode):
@@ -470,16 +476,15 @@ def _postgres_url_uses_compose_service(
 
 def _postgres_dump_plan(ctx: BackupContext, cfg: Mapping[str, Any], compose_files: Sequence[Path]) -> dict[str, Any]:
     mode = ctx.args.postgres_dump_mode
-    compose_container = (
-        _compose_service_container(ctx, compose_files, ctx.args.postgres_service)
-        if mode in {"auto", "compose"} and compose_files
-        else ""
-    )
     database_url = _database_url(cfg)
     compose_network_url = _postgres_url_uses_compose_service(ctx, cfg, compose_files)
+    use_compose = mode == "compose" or (mode == "auto" and compose_network_url)
+    compose_container = (
+        _compose_service_container(ctx, compose_files, ctx.args.postgres_service)
+        if use_compose and compose_files
+        else ""
+    )
     if mode == "compose":
-        planned_mode = "compose"
-    elif mode == "auto" and compose_container:
         planned_mode = "compose"
     elif mode == "auto" and compose_network_url:
         planned_mode = "compose"
@@ -1355,6 +1360,7 @@ def build_manifest(
         "excluded": ctx.excluded,
         "commands": ctx.commands,
         "warnings": ctx.warnings,
+        "retention": ctx.retention,
         "totals": {
             "files": file_count,
             "bytes": total_bytes,
@@ -1377,6 +1383,14 @@ def write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.chmod(0o600)
 
 
+def _sha256_file(path: Path, *, chunk_size: int = CHECKSUM_CHUNK_SIZE) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def write_checksums(stage: Path) -> None:
     rows: list[str] = []
     for path in sorted(stage.rglob("*")):
@@ -1389,7 +1403,7 @@ def write_checksums(stage: Path) -> None:
             continue
         if not path.is_file():
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = _sha256_file(path)
         rows.append(f"{digest}  {path.relative_to(stage).as_posix()}")
     checksum_path = stage / "checksums.sha256"
     checksum_path.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
@@ -1397,12 +1411,24 @@ def write_checksums(stage: Path) -> None:
 
 
 def _archive_stage(stage: Path, archive_path: Path, top_level: str) -> None:
-    tmp_archive = archive_path.with_suffix(archive_path.suffix + ".tmp")
-    with tarfile.open(tmp_archive, "w:gz") as tar:
-        for item in sorted(stage.iterdir()):
-            tar.add(item, arcname=str(Path(top_level) / item.name), recursive=True)
-    tmp_archive.chmod(0o600)
-    tmp_archive.replace(archive_path)
+    descriptor, tmp_name = tempfile.mkstemp(
+        prefix=f".{archive_path.name}.",
+        suffix=".tmp",
+        dir=archive_path.parent,
+    )
+    os.close(descriptor)
+    tmp_archive = Path(tmp_name)
+    try:
+        with tarfile.open(tmp_archive, "w:gz") as tar:
+            for item in sorted(stage.iterdir()):
+                tar.add(item, arcname=str(Path(top_level) / item.name), recursive=True)
+        tmp_archive.chmod(0o600)
+        try:
+            os.link(tmp_archive, archive_path)
+        except FileExistsError as exc:
+            raise BackupError(f"backup destination already exists: {archive_path}") from exc
+    finally:
+        tmp_archive.unlink(missing_ok=True)
 
 
 def _check_output_permissions(ctx: BackupContext, output_dir: Path) -> None:
@@ -1439,49 +1465,127 @@ def _backup_lock(ctx: BackupContext) -> Iterator[None]:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _prune_old_backups(ctx: BackupContext) -> None:
+def _retention_plan(ctx: BackupContext) -> tuple[dict[str, Any], list[tuple[Path, bool]]]:
     keep_days = ctx.args.keep_days
+    summary: dict[str, Any] = {
+        "enabled": keep_days is not None and keep_days >= 0,
+        "keep_days": keep_days,
+        "cutoff": "",
+        "candidates_examined": 0,
+        "removal_candidates": 0,
+        "inspection_failures": 0,
+    }
     if keep_days is None or keep_days < 0:
-        return
+        return summary, []
     cutoff = datetime.now(timezone.utc).timestamp() - (keep_days * 86400)
+    summary["cutoff"] = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
+    candidates: list[tuple[Path, bool]] = []
     for path in ctx.output_dir.iterdir():
         if not path.name.startswith(f"{DEFAULT_BACKUP_PREFIX}-"):
             continue
+        summary["candidates_examined"] += 1
         try:
-            if path.stat().st_mtime >= cutoff:
+            path_stat = path.stat()
+            if path_stat.st_mtime >= cutoff:
                 continue
-        except OSError:
+        except OSError as exc:
+            summary["inspection_failures"] += 1
+            _warn(ctx, f"could not inspect retention candidate {path.name}: {type(exc).__name__}: {exc}")
             continue
-        if path.is_dir():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
+        candidates.append((path, stat.S_ISDIR(path_stat.st_mode)))
+    summary["removal_candidates"] = len(candidates)
+    return summary, candidates
+
+
+def _apply_retention_plan(
+    ctx: BackupContext,
+    summary: dict[str, Any],
+    candidates: Sequence[tuple[Path, bool]],
+) -> None:
+    if not summary.get("enabled"):
+        return
+    removed = 0
+    removal_failures = 0
+    for path, is_directory in candidates:
+        try:
+            if is_directory:
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            removed += 1
+        except OSError as exc:
+            removal_failures += 1
+            _warn(ctx, f"could not remove retention candidate {path.name}: {type(exc).__name__}: {exc}")
+    summary["removed"] = removed
+    summary["removal_failures"] = removal_failures
+    failures = int(summary.get("inspection_failures") or 0) + removal_failures
+    summary["failures"] = failures
+    _info(
+        f"Retention: examined {int(summary.get('candidates_examined') or 0)} backup(s), "
+        f"removed {removed}, failures {failures}."
+    )
+
+
+def _prepare_requested_inputs(ctx: BackupContext) -> None:
+    if ctx.requested_inputs_prepared:
+        return
+
+    env_paths = [Path(path).expanduser().resolve() for path in (ctx.args.env_file_multi or [])]
+    if ctx.args.env_file:
+        env_paths.append(Path(ctx.args.env_file).expanduser().resolve())
+
+    for path in env_paths:
+        source_stat = _stat_readable_source(path, kind="env file", missing_ok=True)
+        if source_stat is None:
+            raise BackupError(f"env file does not exist: {path}")
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise BackupError(f"env file is not a file: {path}")
+
+    for extra in ctx.args.extra_file or []:
+        path = Path(extra).expanduser().resolve()
+        source_stat = _stat_readable_source(path, kind="extra", missing_ok=True)
+        if source_stat is None:
+            if ctx.args.ignore_missing_extra_file:
+                ctx.excluded.append({"kind": "extra", "source": str(path), "reason": "missing"})
+                continue
+            raise BackupError(f"requested file does not exist: {path}")
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise BackupError(f"requested path is not a file: {path}")
+
+    for path in env_paths:
+        try:
+            load_env_file(path)
+        except OSError as exc:
+            if _is_permission_error(exc):
+                _raise_unreadable_source("env file", path, exc)
+            raise
+        ctx.env_files_loaded.append(str(path))
+    ctx.requested_inputs_prepared = True
+
+
+def _available_backup_name(ctx: BackupContext) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S.%fZ")
+    base_name = f"{DEFAULT_BACKUP_PREFIX}-{timestamp}"
+    extension = "" if ctx.args.compress == "none" else ".tar.gz"
+    candidate = base_name
+    sequence = 1
+    while (ctx.output_dir / f"{candidate}{extension}").exists():
+        candidate = f"{base_name}-{sequence}"
+        sequence += 1
+    return candidate
 
 
 def create_backup(ctx: BackupContext) -> Path:
     os.umask(0o077)
+    _prepare_requested_inputs(ctx)
     _check_output_permissions(ctx, ctx.output_dir)
-
-    for env_file in ctx.args.env_file_multi or []:
-        path = Path(env_file).expanduser().resolve()
-        if not path.exists():
-            raise BackupError(f"env file does not exist: {path}")
-        load_env_file(path)
-        ctx.env_files_loaded.append(str(path))
-    if ctx.args.env_file:
-        path = Path(ctx.args.env_file).expanduser().resolve()
-        if not path.exists():
-            raise BackupError(f"env file does not exist: {path}")
-        load_env_file(path)
-        ctx.env_files_loaded.append(str(path))
 
     app_config, cfg = _import_app_config(ctx.args.conf_dir)
     compose_files = _default_compose_files(ctx.args)
     data_source = resolve_data_dir_source(ctx, app_config, cfg, compose_files)
     workspace_source = resolve_workspace_source(ctx, cfg, compose_files)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
-    backup_name = f"{DEFAULT_BACKUP_PREFIX}-{timestamp}"
+    backup_name = _available_backup_name(ctx)
     stage = Path(tempfile.mkdtemp(prefix=f".{backup_name}.", dir=ctx.output_dir))
     stage.chmod(0o700)
 
@@ -1518,6 +1622,7 @@ def create_backup(ctx: BackupContext) -> Path:
             copy_workspace(ctx, workspace_source, stage)
         include_config_files(ctx, stage, compose_files)
         write_restore_notes(stage)
+        ctx.retention, retention_candidates = _retention_plan(ctx)
 
         manifest = build_manifest(
             ctx,
@@ -1533,14 +1638,16 @@ def create_backup(ctx: BackupContext) -> Path:
 
         if ctx.args.compress == "none":
             final_dir = ctx.output_dir / backup_name
-            stage.replace(final_dir)
+            if final_dir.exists():
+                raise BackupError(f"backup destination already exists: {final_dir}")
+            stage.rename(final_dir)
             result = final_dir
         else:
             archive_path = ctx.output_dir / f"{backup_name}.tar.gz"
             _archive_stage(stage, archive_path, backup_name)
             shutil.rmtree(stage)
             result = archive_path
-        _prune_old_backups(ctx)
+        _apply_retention_plan(ctx, ctx.retention, retention_candidates)
         return result
     except Exception:
         shutil.rmtree(stage, ignore_errors=True)
@@ -1548,16 +1655,7 @@ def create_backup(ctx: BackupContext) -> Path:
 
 
 def build_dry_run_plan(ctx: BackupContext) -> dict[str, Any]:
-    for env_file in ctx.args.env_file_multi or []:
-        path = Path(env_file).expanduser().resolve()
-        if path.exists():
-            load_env_file(path)
-            ctx.env_files_loaded.append(str(path))
-    if ctx.args.env_file:
-        path = Path(ctx.args.env_file).expanduser().resolve()
-        if path.exists():
-            load_env_file(path)
-            ctx.env_files_loaded.append(str(path))
+    _prepare_requested_inputs(ctx)
     app_config, cfg = _import_app_config(ctx.args.conf_dir)
     compose_files = _default_compose_files(ctx.args)
     data_source = resolve_data_dir_source(ctx, app_config, cfg, compose_files)
@@ -1643,6 +1741,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     ctx = BackupContext(args=args, output_dir=output_dir)
     try:
+        _prepare_requested_inputs(ctx)
         if args.dry_run:
             plan = build_dry_run_plan(ctx)
             print(json.dumps(plan, indent=2, sort_keys=True))
@@ -1651,13 +1750,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = create_backup(ctx)
         _info(f"Backup written to {result}")
         if ctx.warnings:
-            _info(f"Completed with {len(ctx.warnings)} warning(s). See manifest.json for details.")
+            _info(f"Completed with {len(ctx.warnings)} warning(s). Review the warning output and manifest.json.")
         return 0
     except BackupError as exc:
         print(f"backup failed: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
         print(f"backup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        traceback.print_exc()
         return 1
 
 

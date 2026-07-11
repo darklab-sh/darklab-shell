@@ -133,6 +133,99 @@ print(json.dumps({
   return JSON.parse(result.stdout)
 }
 
+function seedHistoryCleanupFixture(testInfo, { sessionId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+sys.path.insert(0, str(Path.cwd() / "app"))
+from services.atlas.materializer import materialize_run_entities
+from services.projects.findings import record_run_findings
+
+data_dir, session_id = sys.argv[1:3]
+run_id = "run_cleanup_e2e_" + uuid.uuid4().hex[:16]
+other_run_id = "run_cleanup_other_e2e_" + uuid.uuid4().hex[:16]
+command = "nmap cleanup.playwright.example"
+disposable_value = "disposable.cleanup.playwright.example"
+kept_value = "CVE-2026-4242"
+not_eligible_value = "192.0.2.42"
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+conn.row_factory = sqlite3.Row
+try:
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 0, 0)",
+        (run_id, session_id, command, json.dumps([command, "cleanup fixture output"])),
+    )
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), 0, ?, 0, 1, 0, 0)",
+        (other_run_id, session_id, "nmap shared.cleanup.playwright.example", json.dumps([not_eligible_value])),
+    )
+    materialized = materialize_run_entities(
+        conn,
+        session_id,
+        run_id,
+        [{
+            "text": " ".join((disposable_value, kept_value, not_eligible_value)),
+            "entities": [
+                {"type": "domain", "value": disposable_value, "canonical_value": disposable_value},
+                {"type": "cve", "value": kept_value, "canonical_value": kept_value},
+                {"type": "ip", "value": not_eligible_value, "canonical_value": not_eligible_value},
+            ],
+        }],
+        seen_at="2026-07-10T12:00:00+00:00",
+        command=command,
+    )
+    materialize_run_entities(
+        conn,
+        session_id,
+        other_run_id,
+        [{
+            "text": not_eligible_value,
+            "entities": [{"type": "ip", "value": not_eligible_value, "canonical_value": not_eligible_value}],
+        }],
+        seen_at="2026-07-10T12:01:00+00:00",
+        command="nmap shared.cleanup.playwright.example",
+    )
+    entity_ids = {item["type"]: item["id"] for item in materialized}
+    conn.execute(
+        "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+        "VALUES (?, ?, 'atlas_entity', ?, 'keep-e2e', 'manual', datetime('now'))",
+        ("lbl_cleanup_e2e_" + uuid.uuid4().hex[:16], session_id, entity_ids["cve"]),
+    )
+    record_run_findings(conn, session_id, run_id, [{
+        "text": "443/tcp open https on " + disposable_value,
+        "signals": ["findings"],
+        "line_index": 0,
+        "entities": [{"type": "domain", "value": disposable_value, "canonical_value": disposable_value}],
+    }])
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "runId": run_id,
+    "command": command,
+    "disposableValue": disposable_value,
+    "keptValue": kept_value,
+    "notEligibleValue": not_eligible_value,
+}))
+`
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed History cleanup fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 async function createProjectWithLinkedRuns(page, name, runIds) {
   return page.evaluate(async ({ projectName, linkedRunIds }) => {
     const createdResp = await apiFetch('/projects', {
@@ -237,6 +330,17 @@ async function forceComparePaneOverflow(overlay) {
       pane.style.height = height
       pane.style.maxHeight = height
       pane.style.overflowY = 'auto'
+      let spacer = pane.querySelector(':scope > [data-e2e-compare-scroll-spacer]')
+      if (!spacer) {
+        spacer = document.createElement('div')
+        spacer.dataset.e2eCompareScrollSpacer = '1'
+        spacer.setAttribute('aria-hidden', 'true')
+        pane.appendChild(spacer)
+      }
+      // Keep overflow deterministic when flex rows settle differently on a loaded worker.
+      const spacerHeight = Math.max(160, pane.clientHeight * 2)
+      spacer.style.flex = `0 0 ${spacerHeight}px`
+      spacer.style.height = `${spacerHeight}px`
     })
   }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
   await expect.poll(() => panes.evaluateAll((paneElements) => (
@@ -245,7 +349,8 @@ async function forceComparePaneOverflow(overlay) {
 }
 
 async function expectSplitPaneScrollSync(overlay) {
-  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split, height) => {
+  await forceComparePaneOverflow(overlay)
+  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split) => {
     const left = split.querySelector('.history-compare-pane[data-side="a"]')
     const right = split.querySelector('.history-compare-pane[data-side="b"]')
     const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
@@ -257,13 +362,6 @@ async function expectSplitPaneScrollSync(overlay) {
         mobileMode: false,
         rightScrollable: false,
       }
-    }
-    for (const pane of [left, right]) {
-      pane.style.alignSelf = 'start'
-      pane.style.minHeight = '0'
-      pane.style.height = height
-      pane.style.maxHeight = height
-      pane.style.overflowY = 'auto'
     }
     await nextFrame()
     const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
@@ -292,7 +390,7 @@ async function expectSplitPaneScrollSync(overlay) {
       mobileMode,
       rightScrollable: rightMax > 0,
     }
-  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
+  })
   expect(scrollState.mobileMode, 'split compare scroll sync is only active in desktop mode').toBe(false)
   expect(scrollState.leftScrollable, 'left compare pane should be scrollable before testing sync').toBe(true)
   expect(scrollState.rightScrollable, 'right compare pane should be scrollable before testing sync').toBe(true)
@@ -309,7 +407,6 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
   await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.leftChangedText)
   await expect(overlay.locator('.history-compare-pane[data-side="b"]')).toContainText(fixture.rightChangedText)
 
-  await forceComparePaneOverflow(overlay)
   await expectSplitPaneScrollSync(overlay)
 
   const rightPane = overlay.locator('.history-compare-pane[data-side="b"]')
@@ -688,6 +785,77 @@ test.describe('history drawer', () => {
     // The starred chip should be gone
     await expect(page.locator('.hist-chip.starred')).toHaveCount(0)
     await expect(page.locator('.hist-chip')).toHaveCount(0)
+  })
+
+  test('run cleanup confirmation uses live preview defaults samples and selected flags', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedHistoryCleanupFixture(testInfo, { sessionId })
+    await waitForHistoryCommands(page, [fixture.command])
+    await openHistory(page)
+    const runRow = page.locator('.history-entry').filter({ hasText: fixture.command }).first()
+    await expect(runRow).toBeVisible()
+
+    await runRow.locator('[data-action="delete"]').click()
+    const confirmHost = page.locator('#confirm-host')
+    await expect(confirmHost).toBeVisible()
+    const disposableCheckbox = confirmHost.locator('[data-history-atlas-cleanup]')
+    const curatedCheckbox = confirmHost.locator('[data-history-atlas-cleanup-curated]')
+    await expect(disposableCheckbox).toBeVisible()
+    await expect(curatedCheckbox).toBeVisible()
+    await expect(disposableCheckbox).not.toBeChecked()
+    await expect(curatedCheckbox).not.toBeChecked()
+    await expect(confirmHost).toContainText('only sourced by this run')
+    await expect(confirmHost).toContainText('kept by default')
+    await expect(confirmHost).toContainText('not eligible for this cleanup')
+    await expect(confirmHost).toContainText('labeled')
+    await expect(confirmHost).toContainText('seen elsewhere')
+
+    const sampleToggle = confirmHost.locator('.cleanup-sample-toggle')
+    const samplePanel = confirmHost.locator('.cleanup-sample-panel')
+    await expect(sampleToggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(samplePanel).toBeHidden()
+    await sampleToggle.click()
+    await expect(sampleToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(samplePanel).toBeVisible()
+    await expect(samplePanel).toContainText('Kept by default entities')
+    await expect(samplePanel).toContainText('Not eligible entities')
+    await expect(samplePanel).toContainText(fixture.keptValue)
+    await expect(samplePanel).toContainText(fixture.notEligibleValue)
+
+    await disposableCheckbox.check()
+    await expect(curatedCheckbox).not.toBeChecked()
+    const deleteResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'DELETE' && url.pathname === `/history/${fixture.runId}`
+    })
+    await confirmHost.locator('[data-confirm-action-id="one"]').click()
+    const deleteResponse = await deleteResponsePromise
+    expect(deleteResponse.ok()).toBe(true)
+    const deleteUrl = new URL(deleteResponse.url())
+    expect(deleteUrl.searchParams.get('prune_atlas')).toBe('1')
+    expect(deleteUrl.searchParams.has('prune_curated_atlas')).toBe(false)
+    expect((await deleteResponse.json()).atlas_cleanup).toEqual({ entities: 1, findings: 1 })
+    await expect(confirmHost).toBeHidden()
+    await expect(runRow).toHaveCount(0)
+
+    const atlasState = await page.evaluate(async () => {
+      const [domainsResp, cvesResp, ipsResp, summaryResp] = await Promise.all([
+        apiFetch('/atlas/entities?type=domain&orphan_filter=all', { cache: 'no-store' }),
+        apiFetch('/atlas/entities?type=cve&orphan_filter=all', { cache: 'no-store' }),
+        apiFetch('/atlas/entities?type=ip&orphan_filter=all', { cache: 'no-store' }),
+        apiFetch('/atlas?orphan_filter=all', { cache: 'no-store' }),
+      ])
+      const [domains, cves, ips, summary] = await Promise.all([
+        domainsResp.json(), cvesResp.json(), ipsResp.json(), summaryResp.json(),
+      ])
+      return {
+        domains: domains.total,
+        cves: cves.total,
+        ips: ips.total,
+        findings: summary.findings,
+      }
+    })
+    expect(atlasState).toEqual({ domains: 0, cves: 1, ips: 1, findings: 0 })
   })
 
   test('toggling the history star keeps the desktop drawer open', async ({ page }) => {
