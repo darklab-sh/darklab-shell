@@ -8257,11 +8257,12 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     session_id,
                     "nmap darklab.sh",
+                    "2026-07-11T00:02:00+00:00",
                     json.dumps([
                         {
                             "text": "443/tcp open https",
@@ -8283,22 +8284,24 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     baseline_run_id,
                     session_id,
                     "nmap darklab.sh",
+                    "2026-07-11T00:01:00+00:00",
                     json.dumps([{"text": "80/tcp open http", "cls": "", "line_index": 0}]),
                     1,
                 ),
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     outside_run_id,
                     session_id,
                     "httpx https://outside.darklab.sh",
+                    "2026-07-11T00:00:00+00:00",
                     json.dumps([{"text": "outside project", "cls": "", "line_index": 0}]),
                     1,
                 ),

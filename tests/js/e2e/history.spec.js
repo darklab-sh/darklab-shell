@@ -321,10 +321,23 @@ async function selectVisibleHistoryRuns(page, commands) {
   }
 }
 
-async function forceComparePaneOverflow(overlay) {
-  const panes = overlay.locator('.history-compare-pane')
-  await panes.evaluateAll((paneElements, height) => {
-    paneElements.forEach((pane) => {
+async function expectSplitPaneScrollSync(overlay) {
+  const scrollState = await overlay.evaluate(async (overlayElement, height) => {
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    await nextFrame()
+    const split = overlayElement.querySelector('.history-compare-split')
+    const left = split?.querySelector('.history-compare-pane[data-side="a"]')
+    const right = split?.querySelector('.history-compare-pane[data-side="b"]')
+    if (!left || !right) {
+      return {
+        actual: 0,
+        expected: 0,
+        leftScrollable: false,
+        mobileMode: false,
+        rightScrollable: false,
+      }
+    }
+    for (const pane of [left, right]) {
       pane.style.alignSelf = 'start'
       pane.style.minHeight = '0'
       pane.style.height = height
@@ -337,33 +350,10 @@ async function forceComparePaneOverflow(overlay) {
         spacer.setAttribute('aria-hidden', 'true')
         pane.appendChild(spacer)
       }
-      // Keep overflow deterministic when flex rows settle differently on a loaded worker.
       const spacerHeight = Math.max(160, pane.clientHeight * 2)
       spacer.style.flex = `0 0 ${spacerHeight}px`
       spacer.style.height = `${spacerHeight}px`
-    })
-  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
-  await expect.poll(() => panes.evaluateAll((paneElements) => (
-    paneElements.every((pane) => pane.scrollHeight > pane.clientHeight)
-  ))).toBe(true)
-}
-
-async function expectSplitPaneScrollSync(overlay) {
-  await forceComparePaneOverflow(overlay)
-  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split) => {
-    const left = split.querySelector('.history-compare-pane[data-side="a"]')
-    const right = split.querySelector('.history-compare-pane[data-side="b"]')
-    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
-    if (!left || !right) {
-      return {
-        actual: 0,
-        expected: 0,
-        leftScrollable: false,
-        mobileMode: false,
-        rightScrollable: false,
-      }
     }
-    await nextFrame()
     const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
       ? window.useMobileTerminalViewportMode()
       : false
@@ -390,7 +380,7 @@ async function expectSplitPaneScrollSync(overlay) {
       mobileMode,
       rightScrollable: rightMax > 0,
     }
-  })
+  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
   expect(scrollState.mobileMode, 'split compare scroll sync is only active in desktop mode').toBe(false)
   expect(scrollState.leftScrollable, 'left compare pane should be scrollable before testing sync').toBe(true)
   expect(scrollState.rightScrollable, 'right compare pane should be scrollable before testing sync').toBe(true)

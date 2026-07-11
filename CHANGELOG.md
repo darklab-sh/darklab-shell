@@ -6,6 +6,20 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.6.0] - Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+- **Test coverage is more deterministic** — Route and browser fixtures no longer depend on second-resolution clocks or a transient comparison layout.
+  - Project route coverage for `project link last` gives its fixture runs explicit timestamps, so crossing a clock boundary no longer makes the test select a different run.
+  - History comparison scroll-sync coverage waits for pending layout work, then creates and measures test-owned overflow on the currently mounted panes without yielding between those steps.
+
+---
+
 ## [2.5.0] - 2026-07-11
 
 ### Added
