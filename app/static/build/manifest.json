@@ -44,13 +44,13 @@
     },
     "diag": {
       "type": "css",
-      "path": "/static/build/diag.ef52b2e069db.css",
-      "hash": "ef52b2e069db387ef1ec57f87c53077bf590259ac2a2ff0b7f0992d15cd9228d",
+      "path": "/static/build/diag.490e5845b2c9.css",
+      "hash": "490e5845b2c9f3bba0ae93efbeb142c2cf1614871cf0f0635b97704287d81366",
       "sources": [
         "/static/css/diag.css"
       ],
       "source_hashes": {
-        "/static/css/diag.css": "09d6b907da33467eb0f7e10980dc71a670086732fd0083e8b3d815f140601ba8"
+        "/static/css/diag.css": "0f1ffa06219f1a4a443068b94eef40eaf01d170ff3ba97f8068fed0d1b839343"
       }
     },
     "shell-bootstrap": {

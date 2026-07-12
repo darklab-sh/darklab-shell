@@ -263,6 +263,30 @@
     </div>
   </section>
 
+  <section class="diag-section diag-summary-card s-raw-packets">
+    <div class="diag-section-title">Raw-packet Scanning</div>
+    <div class="diag-summary-body">
+      <div class="diag-summary-value">
+        {% if data.raw_packets.active %}
+          <span class="diag-dot ok"></span><span class="diag-ok">ready</span>
+        {% elif data.raw_packets.configured %}
+          <span class="diag-dot fail"></span><span class="diag-fail">unavailable</span>
+        {% else %}
+          <span class="diag-dot warn"></span><span class="diag-warn">disabled</span>
+        {% endif %}
+      </div>
+      <div class="diag-summary-meta">
+        {{ data.raw_packets.reason|replace('_', ' ') }}
+        {% if not data.raw_packets.configured %} · runtime {{ 'available' if data.raw_packets.available else data.raw_packets.availability_reason|replace('_', ' ') }}{% endif %}
+      </div>
+      <div class="diag-summary-pills">
+        {% for tool, status in data.raw_packets.tools.items() %}
+          <span class="{{ 'diag-ok' if status.active else ('diag-warn' if status.available else 'diag-muted') }}">{{ tool }} {{ 'ready' if status.active else ('available' if status.available else status.availability_reason|replace('_', ' ')) }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
   <section class="diag-section s-ai diag-ai-panel" data-diag-ai-panel>
     <div class="diag-section-title">AI Assists</div>
     <table class="diag-table">

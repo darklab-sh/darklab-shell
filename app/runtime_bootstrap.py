@@ -12,6 +12,7 @@ from typing import Any
 from config import APP_CONF_DIR, get_config_load_summary, resolve_effective_cfg
 from core.logging_setup import configure_logging
 from services.metrics_environment import setup_prometheus_multiproc_dir
+from services.commands.raw_packets import RAW_PACKET_TOOLS, raw_packet_runtime_status
 
 log = logging.getLogger("shell")
 
@@ -27,6 +28,31 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
     active_cfg = resolve_effective_cfg(cfg)
     conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
     load_summary = get_config_load_summary()
+    raw_packet_statuses = {
+        tool: raw_packet_runtime_status(active_cfg, tool=tool)
+        for tool in RAW_PACKET_TOOLS
+    }
+    raw_packet_configured = bool(active_cfg.get("raw_packet_scanning_enabled", False))
+    active_tools = [tool for tool, status in raw_packet_statuses.items() if status["active"]]
+    unavailable_tools = [
+        tool for tool, status in raw_packet_statuses.items()
+        if raw_packet_configured and not status["active"]
+    ]
+    if not raw_packet_configured:
+        raw_packet_state = "disabled"
+    elif len(active_tools) == len(RAW_PACKET_TOOLS):
+        raw_packet_state = "ready"
+    elif active_tools:
+        raw_packet_state = "partial"
+    else:
+        raw_packet_state = "unavailable"
+    raw_packet_fields = {
+        f"raw_packet_{tool}_{field}": (
+            bool(status[field]) if field == "active" else str(status[field])
+        )
+        for tool, status in raw_packet_statuses.items()
+        for field in ("active", "reason")
+    }
     log.info(
         "CONFIG_LOADED",
         extra={
@@ -34,6 +60,11 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             "local_overlay": (conf_dir / "config.local.yaml").exists(),
             "database_backend": str(active_cfg.get("database_backend") or ""),
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
+            "raw_packet_scanning_configured": raw_packet_configured,
+            "raw_packet_scanning_state": raw_packet_state,
+            "raw_packet_scanning_active_tools": ",".join(active_tools),
+            "raw_packet_scanning_unavailable_tools": ",".join(unavailable_tools),
+            **raw_packet_fields,
             "log_level": str(active_cfg.get("log_level") or ""),
             "log_format": str(active_cfg.get("log_format") or ""),
             "warning_count": int(load_summary.get("warning_count") or 0),
@@ -42,6 +73,17 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             "legacy_key_migrated": bool(load_summary.get("legacy_key_migrated", False)),
         },
     )
+    if raw_packet_configured:
+        for tool in unavailable_tools:
+            status = raw_packet_statuses[tool]
+            log.warning(
+                "RAW_PACKET_SCANNING_UNAVAILABLE",
+                extra={
+                    "tool": tool,
+                    "reason": str(status["reason"]),
+                    "availability_reason": str(status["availability_reason"]),
+                },
+            )
 
 
 def setup_metrics_environment(cfg: Mapping[str, Any] | None = None) -> str:

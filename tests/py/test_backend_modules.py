@@ -2362,6 +2362,7 @@ class TestLoadConfig:
             "DATABASE_POSTGRES_JIT": "true",
             "WORKSPACE_ROOT": "/env/workspaces",
             "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
+            "RAW_PACKET_SCANNING_ENABLED": "true",
             "AI_BASE_URL_ALLOWED_CIDRS": "192.0.2.0/24,not-a-cidr",
         }):
             with open(os.path.join(tmp, "config.yaml"), "w") as f:
@@ -2379,6 +2380,7 @@ class TestLoadConfig:
         assert cfg["database_postgres_jit"] is True
         assert cfg["workspace_root"] == "/env/workspaces"
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
+        assert cfg["raw_packet_scanning_enabled"] is True
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
         warning.assert_has_calls([
             mock.call(
@@ -2617,6 +2619,7 @@ class TestLoadConfig:
                     full_output_max_mb: 25mb
                     output_preview_max_mb: 2MB
                     ai_enabled: yes
+                    raw_packet_scanning_enabled: invalid
                     database_postgres_jit: "true"
                     ai_max_concurrent: "4"
                     audit_export_max_rows: 999999
@@ -2631,18 +2634,30 @@ class TestLoadConfig:
         assert cfg["output_preview_max_mb"] == 2
         assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
         assert cfg["ai_enabled"] is True
+        assert cfg["raw_packet_scanning_enabled"] is False
         assert cfg["database_postgres_jit"] is True
         assert cfg["ai_max_concurrent"] == 4
         assert cfg["audit_export_max_rows"] == 200000
-        warning.assert_called_once_with(
-            "CONFIG_VALUE_CLAMPED",
-            extra={
-                "key": "audit_export_max_rows",
-                "source": os.path.join(tmp, "config.yaml"),
-                "reason": "above_maximum",
-                "maximum": 200000,
-            },
-        )
+        warning.assert_has_calls([
+            mock.call(
+                "CONFIG_VALUE_CLAMPED",
+                extra={
+                    "key": "audit_export_max_rows",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "above_maximum",
+                    "maximum": 200000,
+                },
+            ),
+            mock.call(
+                "CONFIG_VALUE_DEFAULTED",
+                extra={
+                    "key": "raw_packet_scanning_enabled",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "invalid_bool",
+                    "fallback": False,
+                },
+            ),
+        ], any_order=True)
 
     def test_config_yaml_non_mapping_root_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2992,9 +3007,47 @@ class TestLoadConfig:
         info.assert_called_once()
         assert info.call_args.args == ("CONFIG_LOADED",)
         assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_configured"] is False
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_state"] == "disabled"
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_active_tools"] == ""
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_unavailable_tools"] == ""
+        assert info.call_args.kwargs["extra"]["raw_packet_nmap_reason"] == "disabled"
+        assert info.call_args.kwargs["extra"]["raw_packet_naabu_reason"] == "disabled"
+        assert info.call_args.kwargs["extra"]["raw_packet_masscan_reason"] == "disabled"
         assert "warning_count" in info.call_args.kwargs["extra"]
         assert "schema_field_count" in info.call_args.kwargs["extra"]
         assert "env_key_count" in info.call_args.kwargs["extra"]
+
+        statuses = {
+            "nmap": {"active": True, "reason": "ready", "availability_reason": "ready"},
+            "naabu": {
+                "active": False,
+                "reason": "scanner_binary_missing",
+                "availability_reason": "scanner_binary_missing",
+            },
+            "masscan": {
+                "active": False,
+                "reason": "packet_socket_egress_policy_required",
+                "availability_reason": "packet_socket_egress_policy_required",
+            },
+        }
+        with (
+            mock.patch.object(runtime_bootstrap.log, "warning") as warning,
+            mock.patch.object(runtime_bootstrap.log, "info") as info,
+            mock.patch(
+                "runtime_bootstrap.raw_packet_runtime_status",
+                side_effect=lambda _cfg, *, tool: statuses[tool],
+            ),
+        ):
+            runtime_bootstrap.log_loaded_config(build_test_config({"raw_packet_scanning_enabled": True}))
+
+        startup_extra = info.call_args.kwargs["extra"]
+        assert startup_extra["raw_packet_scanning_state"] == "partial"
+        assert startup_extra["raw_packet_scanning_active_tools"] == "nmap"
+        assert startup_extra["raw_packet_scanning_unavailable_tools"] == "naabu,masscan"
+        warnings = [call for call in warning.call_args_list if call.args == ("RAW_PACKET_SCANNING_UNAVAILABLE",)]
+        assert [call.kwargs["extra"]["tool"] for call in warnings] == ["naabu", "masscan"]
+        assert warnings[0].kwargs["extra"]["reason"] == "scanner_binary_missing"
 
     def test_startup_active_run_cleanup_uses_redis_lock(self, monkeypatch):
         class FalseyRedis(process._FakeRedisClient):
@@ -15382,12 +15435,23 @@ class TestEntrypointWorkspaceRepair:
         compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
         shell_env = TestAIRuntimeWiring._compose_environment(compose["services"]["shell"])
 
-        assert "RESTRICTED_COMMAND_INPUT_CIDRS" in entrypoint
-        assert "iptables -C OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
-        assert "iptables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
-        assert "ip6tables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert 'from config import CFG' in entrypoint
+        assert 'CFG.get("restricted_command_input_cidrs", [])' in entrypoint
+        assert '*:*) firewall_cmd="ip6tables"' in entrypoint
+        assert '*) firewall_cmd="iptables"' in entrypoint
+        assert '"$firewall_cmd" -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT' in entrypoint
+        assert '"$firewall_cmd" -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT' in entrypoint
         assert "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" in entrypoint
+        assert 'exit 1' in entrypoint
+        assert 'RAW_PACKET_FIREWALL_READY_FILE="/tmp/darklab-raw-packet-firewall.ready"' in entrypoint
+        assert 'chmod 0444 "$RAW_PACKET_FIREWALL_READY_FILE"' in entrypoint
         assert shell_env["RESTRICTED_COMMAND_INPUT_CIDRS"] == "${RESTRICTED_COMMAND_INPUT_CIDRS:-}"
+        assert shell_env["RAW_PACKET_SCANNING_ENABLED"] == "${RAW_PACKET_SCANNING_ENABLED:-false}"
+        assert "--dst-type LOCAL" in entrypoint
+        assert "add_scanner_local_app_port_rule iptables ipv4 127.0.0.1" in entrypoint
+        assert "add_scanner_local_app_port_rule ip6tables ipv6 ::1" in entrypoint
+        assert '-p tcp --dport "${APP_PORT:-8888}" -j REJECT' in entrypoint
+        assert 'scanner -p tcp --dport "${APP_PORT:-8888}"' not in entrypoint
 
     def test_docker_static_metadata_labels_match_runtime_config_contract(self):
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
@@ -15511,6 +15575,23 @@ class TestAIRuntimeWiring:
 
 
 class TestDerivedCommandRegistry:
+    @staticmethod
+    def _raw_packet_ready_status():
+        return {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "tools": {
+                tool: {
+                    "available": True,
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": f"/usr/bin/{tool}",
+                }
+                for tool in ("nmap", "naabu", "masscan")
+            },
+        }
+
     def test_commands_registry_loader_normalizes_policy_and_autocomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "commands.yaml"
@@ -16582,6 +16663,7 @@ class TestDerivedCommandRegistry:
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = {
+                "raw_packet_scanning_enabled": True,
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
@@ -16750,7 +16832,11 @@ class TestDerivedCommandRegistry:
             with mock.patch("services.commands.registry.load_command_policy", return_value=command_policy), \
                  mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=allow_grouping), \
                  mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=workspace_flags), \
-                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations):
+                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations), \
+                 mock.patch(
+                     "services.commands.raw_packets._raw_packet_system_readiness",
+                     return_value=self._raw_packet_ready_status(),
+                 ):
                 for command, (reads, writes) in cases.items():
                     result = commands.validate_command(command, session_id=session_id, cfg=cfg)
                     assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
@@ -16810,6 +16896,7 @@ class TestDerivedCommandRegistry:
         with tempfile.TemporaryDirectory() as tmp:
             workspace_root = Path(tmp) / "work space;$(subshell)&`tick`"
             cfg = {
+                "raw_packet_scanning_enabled": True,
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": str(workspace_root),
@@ -16821,7 +16908,10 @@ class TestDerivedCommandRegistry:
             session_id = "quote-sensitive-paths"
             write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
 
-            with _patched_command_validation_helpers():
+            with _patched_command_validation_helpers(), mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=self._raw_packet_ready_status(),
+            ):
                 result = commands.validate_command(
                     "masscan -iL 'targets & dollars $.txt' -oL 'masscan output $.txt' -p 80",
                     session_id=session_id,

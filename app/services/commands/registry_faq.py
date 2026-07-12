@@ -378,19 +378,19 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             ),
         },
         {
-            "question": "Why does naabu use connect scan mode?",
+            "question": "Can nmap and naabu use SYN scan mode?",
             "category": "Tool-specific behavior",
             "answer": (
-                "naabu defaults to raw SYN scanning which requires libpcap and elevated privileges "
-                "not reliably available inside the container. It automatically runs with -scan-type c "
-                "instead, using TCP connect scanning like nmap -sT. Results are the same."
+                "They use TCP connect mode by default. Operators on supported Linux Docker hosts can "
+                "enable raw-packet scanning. Once capability checks pass, nmap and naabu can use SYN "
+                "mode without Docker privileged mode; explicit connect scans still work."
             ),
             "answer_html": (
-                "<code>naabu</code> defaults to raw SYN packet scanning via libpcap, which requires "
-                "privileges that aren't reliably available in this environment. It automatically runs "
-                "with <code>-scan-type c</code>, switching to TCP connect mode (equivalent to "
-                "<code>nmap -sT</code>). Open ports are detected the same way — only the underlying "
-                "method differs."
+                "<code>nmap</code> and <code>naabu</code> use TCP connect mode by default. Operators on "
+                "supported Linux Docker hosts can enable raw-packet scanning. Once the runtime capability "
+                "checks pass, Nmap keeps its SYN default and Naabu uses SYN mode without Docker privileged "
+                "mode. Explicit <code>nmap -sT</code> and <code>naabu -scan-type c</code> commands still "
+                "use connect mode."
             ),
         },
     ]

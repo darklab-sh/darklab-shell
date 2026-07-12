@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,046
+- behavior tests: 4,050
 - docs/inventory meta-tests: 63
-- `pytest`: 2352 (2302 behavior + 50 meta)
+- `pytest`: 2356 (2306 behavior + 50 meta)
 - `vitest`: 1485 (1472 behavior + 13 meta)
 - `playwright`: 272 behavior
-- total: 4,109
+- total: 4,113
 
 This document is organized in two parts:
 
@@ -260,7 +260,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists and still matches the Docker runtime inputs, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild; otherwise the cache refreshes itself when `Dockerfile`, `app/requirements.txt`, or `entrypoint.sh` changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. Required-secret tools can still contribute registry-declared help examples when those examples are marked with `smoke.profile: unauthenticated`, which catches broken CLI imports without needing provider keys. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
+`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists and still matches the Docker runtime inputs, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild; otherwise the cache refreshes itself when `Dockerfile`, `app/requirements.txt`, or `entrypoint.sh` changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. Required-secret tools can still contribute registry-declared help examples when those examples are marked with `smoke.profile: unauthenticated`, which catches broken CLI imports without needing provider keys. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. Raw-packet readiness is enabled inside the isolated smoke project, where Nmap, Naabu, and Masscan scan test-owned services. The HTTP targets deliberately listen on `8888`, proving the scanner can reach that port on remote containers while both connect and raw-IP attempts against the local app stay blocked. A second app service applies a restricted CIDR to a hostname-resolved target, confirms Nmap's raw traffic is rejected while an adjacent target remains reachable, keeps Naabu in connect mode, and denies Masscan's packet-socket path. The fixture removes stale `darklab_shell-test-*` Compose containers, networks, and volumes before startup and after teardown so interrupted local runs don't leave test resources behind. It catches drift between surfaced commands and actual tool behavior, including renamed flags, changed output, missing tools, broken workspace path rewriting, or lost Linux scanner capabilities. It's not part of the default fast loop; run it after Dockerfile, packaged-tool, base-image, command-registry example, workspace file-flag, interactive PTY example, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -1264,6 +1264,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_smoke_image_cache_status_requires_matching_label` | Verifies that the smoke fixture reuses only cache images with the expected build-input label. |
 | `test_smoke_image_cache_status_rebuilds_when_image_is_missing` | Verifies that a missing stable smoke cache image triggers a rebuild. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
+| `test_container_smoke_test_raw_syn_scan_reaches_remote_app_port` | Verifies capability-backed Nmap reaches test-owned services while connect and raw-IP attempts against the local app stay blocked and link-layer bypass requests are denied. |
+| `test_container_smoke_test_raw_naabu_and_masscan_find_test_owned_port` | Verifies capability-backed Naabu SYN and Masscan runs find a test-owned open port without permission errors. |
+| `test_container_smoke_test_restricted_hostname_raw_traffic_is_blocked` | Verifies restricted hostname traffic is blocked through Nmap's raw-IP path, an adjacent target stays reachable, Naabu uses connect mode, and Masscan stays denied. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_interactive_expectations_cover_all_pty_examples` | Checks that the interactive smoke-test expectation fixture covers every PTY-gated command example. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that each smoke command matches expected output, retrying transient failures with `RUN_CONTAINER_SMOKE_TEST_RETRIES` before failing. |
@@ -2539,6 +2542,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSyntheticPostFilterParsing.test_applies_jq_selector_and_output_caps` | Checks jq selection output and the output row cap. |
 | `TestDenyPrefix.test_deny_takes_priority` | Checks deny takes priority handling. |
 | `TestDenyPrefix.test_allow_still_works_without_denied_flag` | Checks that allow still works without denied flag. |
+| `TestDenyPrefix.test_raw_packet_opt_in_requires_readiness_and_keeps_managed_boundaries` | Verifies raw Nmap, Naabu, and Masscan modes require operator-enabled readiness, preserve explicit connect scans, and keep managed privilege and restricted-target boundaries. |
+| `TestDenyPrefix.test_raw_packet_nmap_option_matrix_tracks_runtime_state` | Verifies spaced, attached, and equals-form Nmap packet controls require active raw readiness while privilege, spoofing, and link-layer bypass options stay blocked. |
+| `TestDenyPrefix.test_raw_packet_readiness_probes_fail_closed_and_clear_cached_state` | Verifies proc-status and file-capability probes fail closed, readiness reasons remain tool-specific, and cached readiness can be refreshed. |
 | `TestDenyPrefix.test_deny_exact_match` | Checks deny exact match handling. |
 | `TestDenyPrefix.test_deny_prefix_with_more_args` | Checks that deny prefix with more args. |
 | `TestDenyPrefix.test_empty_deny_list_has_no_effect` | Checks that empty deny list has no effect. |

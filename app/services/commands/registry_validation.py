@@ -5,12 +5,6 @@ import re
 import shlex
 import shutil
 
-NMAP_DENIED_RAW_FLAGS = {"-sS"}
-NMAP_SCAN_MODE_FLAGS = {
-    "-sA", "-sF", "-sI", "-sL", "-sM", "-sN", "-sO", "-sS",
-    "-sT", "-sU", "-sW", "-sX", "-sY", "-sZ", "-sn",
-}
-
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
 # Both use >>? so > and >> are matched without allowing whitespace between them.
@@ -45,27 +39,6 @@ def command_root(command: str) -> str | None:
     if not parts:
         return None
     return parts[0].strip().lower() or None
-
-
-def nmap_scan_mode_from_token(token: str) -> str | None:
-    for flag in NMAP_SCAN_MODE_FLAGS:
-        if token == flag or token.startswith(f"{flag}="):
-            return flag
-        if token.startswith(flag) and token.startswith("-s") and len(token) > len(flag):
-            return flag
-    return None
-
-
-def nmap_raw_scan_restriction_reason(command: str) -> str:
-    tokens = split_command_argv(command)
-    if not tokens or tokens[0].lower() != "nmap":
-        return ""
-    if "--privileged" in tokens:
-        return "nmap raw-socket mode is not supported; use TCP connect scans with -sT."
-    for token in tokens[1:]:
-        if nmap_scan_mode_from_token(token) in NMAP_DENIED_RAW_FLAGS:
-            return "nmap SYN scans (-sS) are not supported; use TCP connect scans with -sT."
-    return ""
 
 
 def resolve_runtime_command(command_name: str) -> str | None:

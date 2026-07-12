@@ -140,6 +140,9 @@ services:
       # Comma-separated CIDRs that command validation rejects and the scanner
       # user cannot reach at the container OUTPUT layer.
       - RESTRICTED_COMMAND_INPUT_CIDRS=${RESTRICTED_COMMAND_INPUT_CIDRS:-}
+      # Opt-in only. Runtime readiness still requires the container capability
+      # bounding set and scanner binary file capabilities to be intact.
+      - RAW_PACKET_SCANNING_ENABLED=${RAW_PACKET_SCANNING_ENABLED:-false}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s

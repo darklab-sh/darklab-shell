@@ -65,6 +65,7 @@ class ModuleSizeBudget:
 
 _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
+    ModuleSizeBudget("app/services/commands/registry_adaptations.py", 87, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_autocomplete.py", 564, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_cache.py", 104, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_catalog.py", 359, "split-package-ratchet"),

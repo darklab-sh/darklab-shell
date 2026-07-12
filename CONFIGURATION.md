@@ -31,7 +31,7 @@ The application settings table below is the operator reference. The schema contr
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
 | Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
-| Forgiving booleans | `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
+| Forgiving booleans | `raw_packet_scanning_enabled`, `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
 | Normalized lists | CIDR lists and `output_entity_extra_domain_suffixes` drop invalid entries with key/source warning logs. Redaction rules are normalized through the same snapshot-share rule validator used at runtime |
@@ -160,6 +160,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `ai_feature_next_commands` | `false` | Feature flag for Run Details AI next-command drafts. Accepted suggestions can be copied after validation |
 | `ai_feature_run_suggestions` | `false` | Feature flag for Run buttons on accepted AI suggestions. The button submits through the normal composer path, so command policy still applies |
 | `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved. In Compose deployments, `RESTRICTED_COMMAND_INPUT_CIDRS` overrides this value and also feeds the scanner-user egress block |
+| `raw_packet_scanning_enabled` | `false` | Opts approved scanners into capability-backed raw-packet modes when Linux runtime readiness passes. Ordinary Nmap and Naabu commands keep their connect-mode defaults when disabled or unavailable. This setting does not enable Docker privileged mode |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
@@ -438,7 +439,7 @@ commands:
       allow:
         - nmap
       deny:
-        - nmap -sU
+        - nmap --privileged
     help:
       flags:
         - -h
@@ -503,6 +504,7 @@ How the keys work:
     - `suggest` adds concrete insertable examples for that value slot
     - `closes: true` suppresses further autocomplete after that token is accepted
     - `feature_required: workspace` hides workspace-only flags, examples, and value suggestions unless Files are enabled
+    - `feature_required: raw_packet_scanning` hides Nmap raw-mode suggestions unless the operator opt-in and Nmap runtime readiness checks are both active; tool-specific gates such as `raw_packet_scanning_masscan` use that scanner's readiness
 - `arguments`
   - unflagged argument slots like `<target>`, `<url>`, `<domain>`, or `<port>`
   - these appear both at `command ` and while the user types the argument value
@@ -528,9 +530,9 @@ commands:
     category: Port & Service Scanning
     knowledge:
       notes:
-        - Runs unprivileged, so a TCP connect scan (-sT) is injected when no scan type is given.
+        - Uses TCP connect scans by default; operators can opt in to capability-backed SYN and raw scan modes.
       gotchas:
-        - -sS, -O, and --privileged are denied because the container has no raw-socket access.
+        - Raw scan modes require operator opt-in and passing runtime capability checks; --privileged stays app-managed.
       safe_defaults:
         - Use -sT for connect scans and add -Pn to skip host discovery on filtered hosts.
       common_flags:
@@ -757,6 +759,7 @@ cp .env.example .env
 # APP_PORT=8888
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
+# RAW_PACKET_SCANNING_ENABLED=false
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -809,6 +812,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
+| `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -837,6 +841,34 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
 
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production overlay currently defaults `WEB_CONCURRENCY` to `8` when that variable is not set. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
+
+---
+
+## Raw-Packet Scanning
+
+Raw-packet scanning is off by default. To enable it in the bundled Compose deployment, set this in `.env` and recreate the shell container:
+
+```env
+RAW_PACKET_SCANNING_ENABLED=true
+```
+
+```bash
+docker compose up -d --force-recreate shell
+```
+
+The app checks the Linux capability bounding set, `no-new-privileges`, and each approved scanner binary's effective/permitted `CAP_NET_RAW` file capability before activating raw mode. `CONFIG_LOADED` reports aggregate and per-tool readiness, and an explicit opt-in that can't activate emits `RAW_PACKET_SCANNING_UNAVAILABLE` at WARN. `/diag` reports configured, available, and active states plus the failed prerequisite category. A failed scanner readiness check does not stop the app: Nmap and Naabu keep their connect-mode paths, while raw-only Masscan returns a short readiness error.
+
+When ready, Nmap receives `NMAP_PRIVILEGED=1` from the app's trusted runtime adaptation. This tells Nmap to use the capability already attached to its binary; it does not grant Docker privileged mode. The app does not set `privileged: true`, run commands as root, use host networking, or require Macvlan/IPvlan. User-supplied Nmap `--privileged`, source/decoy/MAC spoofing, and link-layer `--send-eth` remain blocked.
+
+The scanner-user firewall blocks the app port only for destinations local to the container, so a remote authorized host can still be scanned on the same port. At startup, the entrypoint reads the app's effective normalized `restricted_command_input_cidrs` from `config.yaml`, `config.local.yaml`, and environment overrides. Every corresponding OUTPUT rule must install or the container stops. A root-owned marker records the installed list, and raw Nmap remains inactive unless it matches; active Nmap adds `--send-ip`. Naabu and Masscan can use packet sockets that do not share that path, so their raw modes stay unavailable whenever restricted CIDRs are configured. There is no setting that treats separate host or Docker bridge firewall rules as readiness proof.
+
+To verify the setup against a system you are authorized to scan, run an explicit SYN scan in the browser and check for a SYN/ACK reason:
+
+```text
+nmap -sS -Pn -p 80 --reason <authorized-target>
+```
+
+An explicit `nmap -sT ...` remains a connect scan even when raw mode is active.
 
 ---
 

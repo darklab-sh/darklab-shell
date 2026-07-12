@@ -10,9 +10,20 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Linux Docker deployments can opt in to raw-packet scanning without privileged containers** — Operators can set `RAW_PACKET_SCANNING_ENABLED=true` to let the unprivileged scanner user run capability-backed Nmap SYN/raw modes, Naabu SYN scans, and Masscan after runtime readiness checks pass.
+  - Nmap receives the app-managed `NMAP_PRIVILEGED=1` environment value and keeps its normal SYN default instead of receiving forced `-sT`; plain connect scans stay unchanged, mixed connect/raw options fail clearly, and privilege, source/decoy/MAC spoofing, and link-layer bypass options remain blocked.
+  - Raw-only examples and flags stay hidden across autocomplete and the Command Registry until the matching scanner readiness is active. Nmap's scan, packet-shaping, OS detection, traceroute, and raw host-discovery options use one readiness gate instead of special-case allowlist exemptions; Masscan keeps only its help path visible while inactive.
+  - Startup and `/diag` distinguish configured, available, and active states across the approved scanners, including missing Linux capabilities, stripped binary file capabilities, and `no-new-privileges` failures. Ordinary Nmap and Naabu commands retain connect-mode fallbacks when raw readiness is unavailable.
+  - `CONFIG_LOADED` records an aggregate readiness state plus bounded per-tool state/reason fields, and an explicit but unavailable opt-in emits `RAW_PACKET_SCANNING_UNAVAILABLE` at WARN. Raw-readiness command denials have their own classification, while `RUN_START` adds `scan_transport` only for scanner runs and recognizes separated or attached Naabu modes.
+  - Deployments with restricted CIDRs load the same effective normalized list in the root entrypoint, require every scanner-user OUTPUT rule to install, and activate raw Nmap only when a protected marker matches before forcing `--send-ip`. Packet-socket Naabu/Masscan modes stay unavailable whenever restricted CIDRs are configured, regardless of separately managed host or bridge firewall rules.
+  - Container smoke coverage scans test-owned services with Nmap, Naabu, and Masscan, keeps connect and raw-IP access to the local app blocked, and verifies hostname-resolved restricted Nmap traffic can't reach a service that remains available to an adjacent target.
+  - Focused registry, readiness, diagnostics, and policy coverage verifies disabled/ready/restricted catalog parity, fail-closed proc and file-capability probes, cache refreshes, protected-firewall-marker enforcement, expanded Nmap raw-option gating, and always-blocked spoofing paths.
+
 ### Changed
 
 ### Fixed
+
+- **Scanner firewall rules no longer reserve the app port on every remote host** — The scanner-user app-port guard now matches only destinations local to the container, with IPv4/IPv6 address fallbacks for runtimes without address-type matching. Authorized remote targets using port `8888` can be SYN-scanned without repeated `sendto(...): Operation not permitted` failures while loopback and container-local app access stay blocked.
 
 - **Test coverage is more deterministic** — Route and browser fixtures no longer depend on second-resolution clocks or a transient comparison layout.
   - Project route coverage for `project link last` gives its fixture runs explicit timestamps, so crossing a clock boundary no longer makes the test select a different run.

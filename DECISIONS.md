@@ -329,7 +329,7 @@ Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (D
 
 ### nmap Capabilities
 
-**nmap file capabilities (`setcap`) are used instead of running the container privileged.**
+**Raw scanning is an operator opt-in built on file capabilities, not a privileged container.**
 
 nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN scans:
 
@@ -337,9 +337,11 @@ nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN sc
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
-This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
+This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container. The container stays on its normal bridge network and never uses Docker `privileged: true`.
 
-The app now standardizes on TCP connect scans for nmap. `rewrite_command()` injects `-sT` when no scan mode is explicit, while command validation blocks `-sS` and nmap's own `--privileged` flag so users do not hit confusing raw-socket permission failures after launch.
+The default remains TCP connect scanning. `rewrite_command()` injects `-sT` when no scan mode is explicit unless `raw_packet_scanning_enabled` is configured and runtime checks confirm Linux `CAP_NET_RAW`, executable file capabilities, and a compatible executable policy. Ready deployments use a fixed `NMAP_PRIVILEGED=1` environment value so Nmap recognizes the file capabilities and keeps its SYN default. Explicit `-sT` stays unchanged, and user-supplied `--privileged` is always blocked.
+
+The scanner app-port firewall matches only destinations local to the container. A broad destination-port rule looked like a raw-socket failure during multi-host scans because it rejected every remote port `8888` send with `EPERM`. Restricted CIDRs come from the app's effective normalized config and use required scanner-user OUTPUT rules plus a matching root-owned readiness marker; raw Nmap forces `--send-ip`, while `--send-eth` stays blocked. Packet-socket Naabu and Masscan remain unavailable whenever restricted CIDRs are configured because those packets do not cross the owner-matched OUTPUT path. The app does not accept an operator attestation for separate host or bridge firewall rules.
 
 ### Go Binary Installation
 
@@ -539,7 +541,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 **sudo resets HOME.** `sudo -u scanner` resets the `HOME` environment variable to the target user's home directory from `/etc/passwd`. For `scanner` (a no-login system user) this is `/home/scanner`, which doesn't exist on the read-only filesystem. All tools that write config/cache to `$HOME` fail. The fix is `sudo -u scanner env HOME=/tmp` to explicitly set HOME before the command runs.
 
-**nmap --privileged vs Docker --privileged.** These are different things. nmap's `--privileged` flag tells nmap to assume it has raw socket access. Docker's `--privileged` gives the container full host access. We use nmap's flag (auto-injected) combined with `setcap` on the binary and `cap_add` in compose — not Docker's privileged mode.
+**NMAP_PRIVILEGED vs Docker --privileged.** These are different things. `NMAP_PRIVILEGED=1` tells Nmap to assume it has raw socket access from its existing file capabilities. Docker's `--privileged` gives the container broad host access. The app sets the Nmap environment value only after operator opt-in and readiness checks; Docker privileged mode and user-supplied Nmap `--privileged` remain off-limits.
 
 **`env` doesn't use `--` as a terminator.** `sudo -u scanner env HOME=/tmp -- sh -c "..."` fails because `env` treats `--` as a literal command name. The correct form is `sudo -u scanner env HOME=/tmp sh -c "..."`.
 

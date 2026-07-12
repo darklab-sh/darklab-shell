@@ -37,21 +37,21 @@ from services.commands.registry_faq import (
     render_faq_markup as render_faq_markup,  # noqa: F401 - compatibility seam
 )
 from services.commands.registry_content import TourPayload
+from services.commands.features import feature_enabled
 from services.commands.postfilters import parse_synthetic_postfilter as parse_synthetic_postfilter
 from services.commands.registry_validation import (
     command_root as command_root,
     is_allowed_by_policy,
     is_denied,
-    nmap_raw_scan_restriction_reason,
     resolve_runtime_command as _resolve_runtime_command,
     runtime_missing_command_message as _runtime_missing_command_message,
     split_chained_commands as _split_chained_commands,
     split_command_argv,
 )
+from services.commands.raw_packets import nmap_raw_scan_restriction_reason
 from services.teams.scope import OwnerContext
 
 log = logging.getLogger("shell")
-
 _HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _CONF = os.path.join(_HERE, "conf")
 COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
@@ -307,9 +307,9 @@ def command_secret_consumers(registry: dict | None = None) -> list[dict[str, obj
     return registry_catalog.command_secret_consumers(registry or load_commands_registry())
 
 
-def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
+def command_catalog_from_registry(registry: dict | None = None, cfg=None) -> list[dict[str, object]]:
     """Return user-facing command reference data from the external command registry."""
-    return registry_catalog.command_catalog_from_registry(registry or load_commands_registry())
+    return registry_catalog.command_catalog_from_registry(registry or load_commands_registry(), cfg)
 
 
 def pipe_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
@@ -322,9 +322,14 @@ def pipe_catalog_from_registry(registry: dict | None = None) -> list[dict[str, o
     return registry_catalog.pipe_catalog_from_registry(registry or load_commands_registry())
 
 
-def command_catalog_entry(root: str, subcommand: str | None = None, registry: dict | None = None) -> dict[str, object] | None:
+def command_catalog_entry(
+    root: str,
+    subcommand: str | None = None,
+    registry: dict | None = None,
+    cfg=None,
+) -> dict[str, object] | None:
     """Return catalog details for one command root, optionally scoped to a subcommand."""
-    return registry_catalog.command_catalog_entry(root, subcommand, registry or load_commands_registry())
+    return registry_catalog.command_catalog_entry(root, subcommand, registry or load_commands_registry(), cfg)
 
 
 def load_builtin_autocomplete_registry():
@@ -540,17 +545,7 @@ def load_autocomplete_context_from_commands_registry(cfg=None) -> dict:
 
 
 def _feature_enabled(feature, cfg=None):
-    normalized = str(feature or "").strip().lower()
-    if not normalized:
-        return True
-    active_cfg = app_config.CFG if cfg is None else cfg
-    if normalized == "tour":
-        return bool(active_cfg.get("tour_enabled", True))
-    if normalized == "workspace":
-        return bool(active_cfg.get("workspace_enabled", False))
-    if normalized in {"interactive_pty", "pty"}:
-        return bool(active_cfg.get("interactive_pty_enabled", False))
-    return True
+    return feature_enabled(feature, cfg)
 
 
 def is_feature_required_enabled(feature_required: object, cfg=None) -> bool:
@@ -1090,10 +1085,11 @@ def _runtime_environment_value(template: str, tokens: list[str], env_spec: dict[
     return registry_runtime.runtime_environment_value(template, tokens, env_spec)
 
 
-def _apply_workspace_runtime_environment(command: str) -> str:
+def _apply_workspace_runtime_environment(command: str, cfg: Mapping[str, Any] | None = None) -> str:
     return registry_runtime.apply_workspace_runtime_environment(
         command,
         runtime_adaptations_by_root=_runtime_adaptations_by_root,
+        cfg=cfg or app_config.CFG,
     )
 
 

@@ -11,9 +11,9 @@ from services.commands.registry_validation import (
     SHELL_CHAIN_RE,
     is_allowed_by_policy,
     is_denied,
-    nmap_raw_scan_restriction_reason,
     split_command_argv,
 )
+from services.commands.raw_packets import raw_packet_command_restriction_reason
 from services.teams.scope import OwnerContext
 
 
@@ -44,12 +44,10 @@ def validate_command(
         return result_cls(True, display_command=command, exec_command=command)
     if extra_allowed_prefixes:
         allowed = [*allowed, *extra_allowed_prefixes]
-
     synthetic_postfilter, postfilter_error = parse_synthetic_postfilter(command)
     if postfilter_error:
         return result_cls(False, postfilter_error, display_command=command, exec_command=command)
     command_to_validate = synthetic_postfilter["base_command"] if synthetic_postfilter else command
-
     if not synthetic_postfilter and SHELL_CHAIN_RE.search(command):
         return result_cls(
             False,
@@ -57,7 +55,6 @@ def validate_command(
             display_command=command,
             exec_command=command_to_validate,
         )
-
     if PATH_DATA_RE.search(command_to_validate):
         return result_cls(
             False, "Access to /data is not permitted.",
@@ -73,16 +70,6 @@ def validate_command(
             False, "Connections to the local host are not permitted.",
             display_command=command, exec_command=command_to_validate,
         )
-
-    nmap_raw_reason = nmap_raw_scan_restriction_reason(command_to_validate)
-    if nmap_raw_reason:
-        return result_cls(
-            False,
-            nmap_raw_reason,
-            display_command=command,
-            exec_command=command_to_validate,
-        )
-
     restricted_reason = restricted_inline_input_reason(command_to_validate, cfg)
     if restricted_reason:
         return result_cls(
@@ -96,6 +83,15 @@ def validate_command(
         return result_cls(
             False,
             f"Command not allowed: '{command.strip()}'",
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
+    raw_packet_reason = raw_packet_command_restriction_reason(command_to_validate, cfg)
+    if raw_packet_reason:
+        return result_cls(
+            False,
+            raw_packet_reason,
             display_command=command,
             exec_command=command_to_validate,
         )
@@ -148,8 +144,6 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    command_tokens = split_command_argv(command_to_validate.strip())
-
     if denied and is_denied(command_to_validate.strip(), denied, exempt_flags=exempt_flags):
         return result_cls(
             False,
@@ -158,6 +152,7 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
+    command_tokens = split_command_argv(command_to_validate.strip())
     if not is_allowed_by_policy(command_tokens, allowed, allow_grouping):
         return result_cls(
             False,
@@ -166,7 +161,7 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    exec_command = apply_workspace_runtime_environment(exec_command)
+    exec_command = apply_workspace_runtime_environment(exec_command, cfg)
 
     return result_cls(
         True,

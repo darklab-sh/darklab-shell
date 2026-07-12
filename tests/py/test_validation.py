@@ -10,6 +10,8 @@ import unittest.mock as mock
 
 from blueprints.run import _SyntheticPostFilterProcessor
 import services.commands.registry as commands
+import services.commands.raw_packets as raw_packets
+from services.commands.raw_packets import raw_packet_runtime_status
 from services.commands.registry import (
     command_root,
     is_command_allowed,
@@ -26,6 +28,18 @@ from services.commands.registry import (
 ALLOW = ["ping", "nmap", "dig", "curl", "mtr", "traceroute", "nuclei"]
 DENY  = []
 _VALIDATION_REGISTRY_HELPERS = None
+
+
+def _catalog_values(catalog: dict[str, object], field: str) -> list[str]:
+    entries = catalog.get(field)
+    assert isinstance(entries, list)
+    values: list[str] = []
+    for entry in entries:
+        assert isinstance(entry, dict)
+        value = entry.get("value")
+        assert isinstance(value, str)
+        values.append(value)
+    return values
 
 
 def _validation_registry_helpers():
@@ -540,6 +554,510 @@ class TestDenyPrefix:
     def test_allow_still_works_without_denied_flag(self):
         ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert ok
+
+    def test_raw_packet_opt_in_requires_readiness_and_keeps_managed_boundaries(self):
+        assert raw_packets._has_effective_permitted_file_capability(
+            "/usr/bin/nmap cap_net_admin,cap_net_raw=eip",
+            "cap_net_raw",
+        )
+        assert not raw_packets._has_effective_permitted_file_capability(
+            "/usr/bin/nmap cap_net_raw=ip",
+            "cap_net_raw",
+        )
+        assert not raw_packets._has_effective_permitted_file_capability(
+            "/usr/bin/nmap cap_net_raw=i",
+            "cap_net_raw",
+        )
+        ready = {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "restricted_cidr_firewall_ready": True,
+            "restricted_cidr_firewall_cidrs": ("192.0.2.0/24",),
+            "tools": {
+                tool: {
+                    "available": True,
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": f"/usr/bin/{tool}",
+                }
+                for tool in ("nmap", "naabu", "masscan")
+            },
+        }
+        disabled_cfg = commands.app_config.CFG.with_overrides({"raw_packet_scanning_enabled": False})
+        raw_catalog_flags = {
+            "-sA", "-sF", "-sI", "-sM", "-sN", "-sO", "-sS", "-sU", "-sW", "-sX", "-sY", "-sZ",
+            "-A", "-O", "--osscan-guess", "--osscan-limit", "--traceroute",
+            "-PE", "-PP", "-PM", "-PS", "-PA", "-PU", "-PY", "-PR", "-PO",
+            "-f", "--mtu", "--send-ip",
+        }
+        disabled_flags = {
+            item["value"]
+            for item in commands.load_autocomplete_context_from_commands_registry(disabled_cfg)["nmap"]["flags"]
+        }
+        assert raw_catalog_flags.isdisjoint(disabled_flags)
+        disabled_catalog = commands.command_catalog_entry("nmap", cfg=disabled_cfg)
+        assert disabled_catalog is not None
+        assert raw_catalog_flags.isdisjoint(_catalog_values(disabled_catalog, "flags"))
+        disabled_masscan_catalog = commands.command_catalog_entry("masscan", cfg=disabled_cfg)
+        assert disabled_masscan_catalog is not None
+        assert _catalog_values(disabled_masscan_catalog, "examples") == ["masscan --help"]
+        disabled_nmap = commands.validate_command("nmap -p 80 example.com", cfg=disabled_cfg)
+        assert disabled_nmap.allowed
+        assert rewrite_command(disabled_nmap.exec_command, cfg=disabled_cfg)[0].startswith("nmap -sT ")
+        assert raw_packets.scan_transport("nmap example.com", disabled_cfg) == "connect"
+        assert raw_packets.scan_transport("naabu -host example.com", disabled_cfg) == "connect"
+        assert not commands.validate_command("nmap -sS -p 80 example.com", cfg=disabled_cfg).allowed
+        for raw_command in (
+            "nmap -PR example.com",
+            "nmap -PO example.com",
+            "nmap -f example.com",
+            "nmap --mtu 24 example.com",
+            "nmap --send-ip example.com",
+            "nmap -e eth0 example.com",
+            "nmap -g 53 example.com",
+            "nmap --data-length 12 example.com",
+            "nmap --badsum example.com",
+        ):
+            assert not commands.validate_command(raw_command, cfg=disabled_cfg).allowed
+        assert not commands.validate_command("masscan -p 80 192.0.2.1", cfg=disabled_cfg).allowed
+        disabled_naabu = commands.validate_command("naabu -host example.com -p 80", cfg=disabled_cfg)
+        assert rewrite_command(disabled_naabu.exec_command, cfg=disabled_cfg)[0].startswith("naabu -scan-type c ")
+
+        cfg = commands.app_config.CFG.with_overrides({"raw_packet_scanning_enabled": True})
+        with mock.patch(
+            "services.commands.raw_packets._raw_packet_system_readiness",
+            return_value=ready,
+        ):
+            disabled_status = raw_packet_runtime_status(disabled_cfg)
+            assert disabled_status["available"] is True
+            assert disabled_status["active"] is False
+            default_nmap = commands.validate_command("nmap -p 80 example.com", cfg=cfg)
+            assert default_nmap.allowed
+            assert default_nmap.exec_command == "nmap -p 80 example.com"
+            assert rewrite_command(default_nmap.exec_command, cfg=cfg)[0] == (
+                "env NMAP_PRIVILEGED=1 nmap -p 80 example.com"
+            )
+
+            syn_nmap = commands.validate_command("nmap -sS -p 80 example.com", cfg=cfg)
+            assert syn_nmap.allowed
+            assert "NMAP_PRIVILEGED=1" in rewrite_command(syn_nmap.exec_command, cfg=cfg)[0]
+            assert commands.validate_command("nmap -sU -O --traceroute example.com", cfg=cfg).allowed
+            assert commands.validate_command("nmap -PR -f --mtu 24 --send-ip example.com", cfg=cfg).allowed
+            assert not commands.validate_command("nmap -sT -O example.com", cfg=cfg).allowed
+            for blocked_option in ("-D decoy.example", "-S 192.0.2.10", "--spoof-mac 0", "--send-eth"):
+                rejected_option = commands.validate_command(f"nmap {blocked_option} example.com", cfg=cfg)
+                assert not rejected_option.allowed
+                assert "blocked" in rejected_option.reason
+            enabled_flags = {
+                item["value"]
+                for item in commands.load_autocomplete_context_from_commands_registry(cfg)["nmap"]["flags"]
+            }
+            assert raw_catalog_flags.issubset(enabled_flags)
+            enabled_catalog = commands.command_catalog_entry("nmap", cfg=cfg)
+            assert enabled_catalog is not None
+            assert raw_catalog_flags.issubset(_catalog_values(enabled_catalog, "flags"))
+            enabled_masscan_catalog = commands.command_catalog_entry("masscan", cfg=cfg)
+            assert enabled_masscan_catalog is not None
+            assert "masscan -p 80,443 8.8.8.8" in _catalog_values(
+                enabled_masscan_catalog,
+                "examples",
+            )
+            nmap_policy = next(
+                item for item in commands.load_commands_registry()["commands"] if item["root"] == "nmap"
+            )["policy"]
+            assert "nmap -sS" not in nmap_policy["deny"]
+            assert "nmap -O" not in nmap_policy["deny"]
+            assert not commands.validate_command("curl -O https://example.com", cfg=cfg).allowed
+
+            connect_nmap = commands.validate_command("nmap -sT -p 80 example.com", cfg=cfg)
+            assert connect_nmap.allowed
+            assert connect_nmap.exec_command == "nmap -sT -p 80 example.com"
+            assert rewrite_command(connect_nmap.exec_command, cfg=cfg)[0] == connect_nmap.exec_command
+
+            assert not commands.validate_command("nmap --privileged example.com", cfg=cfg).allowed
+            naabu = commands.validate_command("naabu -host example.com -p 80", cfg=cfg)
+            assert naabu.allowed
+            assert rewrite_command(naabu.exec_command, cfg=cfg)[0].startswith("naabu -scan-type s ")
+            connect_naabu = commands.validate_command(
+                "naabu -scan-type c -host example.com -p 80",
+                cfg=cfg,
+            )
+            assert rewrite_command(connect_naabu.exec_command, cfg=cfg)[0] == connect_naabu.exec_command
+            assert commands.validate_command("masscan -p 80 192.0.2.1", cfg=cfg).allowed
+            assert raw_packets.scan_transport("nmap -sS example.com", cfg) == "raw"
+            assert raw_packets.scan_transport("nmap -sT example.com", cfg) == "connect"
+            assert raw_packets.scan_transport("nmap -sL example.com", cfg) == ""
+            assert raw_packets.scan_transport("nmap -h", cfg) == ""
+            assert raw_packets.scan_transport("naabu -scan-type=s -host example.com", cfg) == "raw"
+            assert raw_packets.scan_transport("naabu -st=connect -host example.com", cfg) == "connect"
+            assert raw_packets.scan_transport("naabu -help", cfg) == ""
+            assert raw_packets.scan_transport("masscan -p 80 192.0.2.1", cfg) == "raw"
+            assert raw_packets.scan_transport("masscan --help", cfg) == ""
+            assert raw_packets.scan_transport("curl https://example.com", cfg) == ""
+
+            restricted_cfg = cfg.with_overrides({"restricted_command_input_cidrs": ["192.0.2.0/24"]})
+            assert not commands.validate_command(
+                "nmap -sS -p 80 192.0.2.1",
+                cfg=restricted_cfg,
+            ).allowed
+            restricted_hostname = commands.validate_command(
+                "nmap -sS -p 80 restricted.example",
+                cfg=restricted_cfg,
+            )
+            assert restricted_hostname.allowed
+            assert rewrite_command(
+                restricted_hostname.exec_command,
+                cfg=restricted_cfg,
+            )[0].startswith("env NMAP_PRIVILEGED=1 nmap --send-ip ")
+            assert not commands.validate_command(
+                "nmap -sS --send-eth restricted.example",
+                cfg=restricted_cfg,
+            ).allowed
+            assert not commands.validate_command(
+                "masscan -p 80 198.51.100.1",
+                cfg=restricted_cfg,
+            ).allowed
+            restricted_masscan_catalog = commands.command_catalog_entry("masscan", cfg=restricted_cfg)
+            assert restricted_masscan_catalog is not None
+            assert _catalog_values(restricted_masscan_catalog, "examples") == ["masscan --help"]
+
+        firewall_missing = {**ready, "restricted_cidr_firewall_ready": False}
+        with mock.patch(
+            "services.commands.raw_packets._raw_packet_system_readiness",
+            return_value=firewall_missing,
+        ):
+            firewall_status = raw_packet_runtime_status(restricted_cfg)
+            assert firewall_status["active"] is False
+            assert firewall_status["reason"] == "restricted_cidr_firewall_unavailable"
+            rejected = commands.validate_command("nmap -sS restricted.example", cfg=restricted_cfg)
+            assert not rejected.allowed
+            assert "firewall rules are not confirmed" in rejected.reason
+
+        unavailable = {**ready, "cap_net_raw_bounded": False}
+        with mock.patch(
+            "services.commands.raw_packets._raw_packet_system_readiness",
+            return_value=unavailable,
+        ):
+            rejected = commands.validate_command("nmap -sS -p 80 example.com", cfg=cfg)
+            assert not rejected.allowed
+            assert "CAP_NET_RAW" in rejected.reason
+            fallback = commands.validate_command("nmap -p 80 example.com", cfg=cfg)
+            assert fallback.allowed
+            assert rewrite_command(fallback.exec_command, cfg=cfg)[0].startswith("nmap -sT ")
+
+        for readiness, reason in (
+            ({**ready, "no_new_privileges": True}, "no-new-privileges"),
+            ({
+                **ready,
+                "tools": {
+                    **ready["tools"],
+                    "nmap": {
+                        **ready["tools"]["nmap"],
+                        "file_cap_net_raw": False,
+                    },
+                },
+            }, "file capability"),
+        ):
+            with mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=readiness,
+            ):
+                rejected = commands.validate_command("nmap -sS example.com", cfg=cfg)
+                assert not rejected.allowed
+                assert reason in rejected.reason
+
+    def test_raw_packet_nmap_option_matrix_tracks_runtime_state(self):
+        ready = {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "restricted_cidr_firewall_ready": True,
+            "restricted_cidr_firewall_cidrs": (),
+            "tools": {
+                tool: {
+                    "available": True,
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": f"/usr/bin/{tool}",
+                }
+                for tool in ("nmap", "naabu", "masscan")
+            },
+        }
+        disabled_cfg = commands.app_config.CFG.with_overrides({"raw_packet_scanning_enabled": False})
+        enabled_cfg = commands.app_config.CFG.with_overrides({"raw_packet_scanning_enabled": True})
+        raw_dependent_commands = (
+            "nmap -PR example.com",
+            "nmap -PO2 example.com",
+            "nmap -f example.com",
+            "nmap --mtu 24 example.com",
+            "nmap --mtu=24 example.com",
+            "nmap --send-ip example.com",
+            "nmap -e eth0 example.com",
+            "nmap -eeth0 example.com",
+            "nmap -g 53 example.com",
+            "nmap -g53 example.com",
+            "nmap --source-port 53 example.com",
+            "nmap --source-port=53 example.com",
+            "nmap --data abcd example.com",
+            "nmap --data=abcd example.com",
+            "nmap --data-string payload example.com",
+            "nmap --data-string=payload example.com",
+            "nmap --data-length 12 example.com",
+            "nmap --data-length=12 example.com",
+            "nmap --ip-options R example.com",
+            "nmap --ip-options=R example.com",
+            "nmap --ttl 64 example.com",
+            "nmap --ttl=64 example.com",
+            "nmap --badsum example.com",
+            "nmap --adler32 example.com",
+        )
+        always_denied_commands = (
+            "nmap --privileged example.com",
+            "nmap -D decoy.example example.com",
+            "nmap -Ddecoy.example example.com",
+            "nmap -S 192.0.2.10 example.com",
+            "nmap -S192.0.2.10 example.com",
+            "nmap --spoof-mac 0 example.com",
+            "nmap --spoof-mac=0 example.com",
+            "nmap --send-eth example.com",
+        )
+
+        for raw_command in raw_dependent_commands:
+            rejected = commands.validate_command(raw_command, cfg=disabled_cfg)
+            assert not rejected.allowed, raw_command
+            assert "raw-packet scanning is disabled" in rejected.reason
+
+        with mock.patch(
+            "services.commands.raw_packets._raw_packet_system_readiness",
+            return_value=ready,
+        ):
+            for raw_command in raw_dependent_commands:
+                assert commands.validate_command(raw_command, cfg=enabled_cfg).allowed, raw_command
+            for blocked_command in always_denied_commands:
+                rejected = commands.validate_command(blocked_command, cfg=enabled_cfg)
+                assert not rejected.allowed, blocked_command
+                assert "blocked" in rejected.reason
+
+    def test_raw_packet_readiness_probes_fail_closed_and_clear_cached_state(self, tmp_path):
+        status_path = tmp_path / "status"
+        status_path.write_text("CapBnd:\t0000000000002000\nNoNewPrivs:\t0\nIgnored line\n")
+        assert raw_packets._proc_status_fields(status_path) == {
+            "CapBnd": "0000000000002000",
+            "NoNewPrivs": "0",
+        }
+        assert raw_packets._proc_status_fields(tmp_path / "missing-status") == {}
+
+        getcap_result = mock.Mock(stdout="/usr/bin/nmap cap_net_raw=eip\n")
+        with (
+            mock.patch("services.commands.raw_packets.shutil.which", return_value="/usr/sbin/getcap"),
+            mock.patch("services.commands.raw_packets.subprocess.run", return_value=getcap_result) as run_getcap,
+        ):
+            assert raw_packets._file_capabilities("/usr/bin/nmap") == "/usr/bin/nmap cap_net_raw=eip"
+        run_getcap.assert_called_once_with(
+            ["/usr/sbin/getcap", "/usr/bin/nmap"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        with mock.patch("services.commands.raw_packets.shutil.which", return_value=None):
+            assert raw_packets._file_capabilities("/usr/bin/nmap") == ""
+        with (
+            mock.patch("services.commands.raw_packets.shutil.which", return_value="/usr/sbin/getcap"),
+            mock.patch(
+                "services.commands.raw_packets.subprocess.run",
+                side_effect=raw_packets.subprocess.TimeoutExpired(["getcap"], 2),
+            ),
+        ):
+            assert raw_packets._file_capabilities("/usr/bin/nmap") == ""
+
+        binary_paths = {tool: f"/usr/bin/{tool}" for tool in raw_packets.RAW_PACKET_TOOLS}
+        with (
+            mock.patch(
+                "services.commands.raw_packets._proc_status_fields",
+                return_value={"CapBnd": "not-hex", "NoNewPrivs": "1"},
+            ) as proc_status,
+            mock.patch(
+                "services.commands.raw_packets.shutil.which",
+                side_effect=lambda tool: binary_paths.get(tool),
+            ),
+            mock.patch(
+                "services.commands.raw_packets._file_capabilities",
+                return_value="cap_net_raw=eip",
+            ),
+            mock.patch(
+                "services.commands.raw_packets._restricted_cidr_firewall_state",
+                return_value=(True, ("192.0.2.0/24",)),
+            ),
+            mock.patch("services.commands.raw_packets.sys.platform", "linux"),
+        ):
+            raw_packets.clear_raw_packet_readiness_cache()
+            first = raw_packets._raw_packet_system_readiness()
+            second = raw_packets._raw_packet_system_readiness()
+            assert first is second
+            assert first["cap_net_raw_bounded"] is False
+            assert first["no_new_privileges"] is True
+            assert proc_status.call_count == 1
+            raw_packets.clear_raw_packet_readiness_cache()
+            raw_packets._raw_packet_system_readiness()
+            assert proc_status.call_count == 2
+        raw_packets.clear_raw_packet_readiness_cache()
+
+        with (
+            mock.patch(
+                "services.commands.raw_packets._proc_status_fields",
+                return_value={"CapBnd": "0000000000002000", "NoNewPrivs": "0"},
+            ),
+            mock.patch(
+                "services.commands.raw_packets.shutil.which",
+                side_effect=lambda tool: None if tool == "masscan" else binary_paths.get(tool),
+            ),
+            mock.patch(
+                "services.commands.raw_packets._file_capabilities",
+                return_value="cap_net_raw=eip",
+            ),
+            mock.patch(
+                "services.commands.raw_packets._restricted_cidr_firewall_state",
+                return_value=(False, ()),
+            ),
+            mock.patch("services.commands.raw_packets.sys.platform", "linux"),
+        ):
+            missing_binary_system = raw_packets._raw_packet_system_readiness()
+        assert missing_binary_system["tools"]["masscan"] == {
+            "available": False,
+            "binary_present": False,
+            "file_cap_net_raw": False,
+            "path": "",
+        }
+        raw_packets.clear_raw_packet_readiness_cache()
+
+        configured = {"raw_packet_scanning_enabled": True}
+        ready_system = {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "restricted_cidr_firewall_ready": True,
+            "restricted_cidr_firewall_cidrs": ("192.0.2.0/24",),
+            "tools": {
+                tool: {
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": binary_paths[tool],
+                }
+                for tool in raw_packets.RAW_PACKET_TOOLS
+            },
+        }
+        reason_cases = (
+            ({**ready_system, "linux": False}, "nmap", configured, "linux_required"),
+            ({**ready_system, "cap_net_raw_bounded": False}, "naabu", configured, "cap_net_raw_not_bounded"),
+            ({**ready_system, "no_new_privileges": True}, "masscan", configured, "no_new_privileges"),
+            (
+                {
+                    **ready_system,
+                    "tools": {
+                        **ready_system["tools"],
+                        "nmap": {"binary_present": False, "file_cap_net_raw": False, "path": ""},
+                    },
+                },
+                "nmap",
+                configured,
+                "scanner_binary_missing",
+            ),
+            (
+                {
+                    **ready_system,
+                    "tools": {
+                        **ready_system["tools"],
+                        "naabu": {
+                            "binary_present": True,
+                            "file_cap_net_raw": False,
+                            "path": binary_paths["naabu"],
+                        },
+                    },
+                },
+                "naabu",
+                configured,
+                "scanner_file_capability_missing",
+            ),
+            (
+                ready_system,
+                "nmap",
+                {**configured, "restricted_command_input_cidrs": ["198.51.100.0/24"]},
+                "restricted_cidr_firewall_unavailable",
+            ),
+            (
+                ready_system,
+                "masscan",
+                {**configured, "restricted_command_input_cidrs": ["192.0.2.0/24"]},
+                "packet_socket_egress_policy_required",
+            ),
+        )
+        shared_reason_cases = []
+        for tool in raw_packets.RAW_PACKET_TOOLS:
+            missing_binary_tools = {
+                **ready_system["tools"],
+                tool: {"binary_present": False, "file_cap_net_raw": False, "path": ""},
+            }
+            missing_capability_tools = {
+                **ready_system["tools"],
+                tool: {
+                    "binary_present": True,
+                    "file_cap_net_raw": False,
+                    "path": binary_paths[tool],
+                },
+            }
+            shared_reason_cases.extend((
+                ({**ready_system, "linux": False}, tool, configured, "linux_required"),
+                (
+                    {**ready_system, "cap_net_raw_bounded": False},
+                    tool,
+                    configured,
+                    "cap_net_raw_not_bounded",
+                ),
+                (
+                    {**ready_system, "no_new_privileges": True},
+                    tool,
+                    configured,
+                    "no_new_privileges",
+                ),
+                (
+                    {**ready_system, "tools": missing_binary_tools},
+                    tool,
+                    configured,
+                    "scanner_binary_missing",
+                ),
+                (
+                    {**ready_system, "tools": missing_capability_tools},
+                    tool,
+                    configured,
+                    "scanner_file_capability_missing",
+                ),
+            ))
+        shared_reason_cases.extend((
+            (
+                ready_system,
+                "naabu",
+                {**configured, "restricted_command_input_cidrs": ["192.0.2.0/24"]},
+                "packet_socket_egress_policy_required",
+            ),
+            (
+                ready_system,
+                "masscan",
+                {**configured, "restricted_command_input_cidrs": ["192.0.2.0/24"]},
+                "packet_socket_egress_policy_required",
+            ),
+        ))
+        for system_state, tool, cfg, expected_reason in (*reason_cases, *shared_reason_cases):
+            with mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=system_state,
+            ):
+                status = raw_packet_runtime_status(cfg, tool=tool)
+            assert status["configured"] is True
+            assert status["available"] is False
+            assert status["active"] is False
+            assert status["reason"] == expected_reason
 
     def test_deny_exact_match(self):
         ok, _ = _check("nmap -sU", allow=["nmap"], deny=["nmap -sU"])

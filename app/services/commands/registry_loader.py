@@ -9,6 +9,13 @@ import os
 import re
 import yaml
 
+from services.commands.registry_adaptations import (
+    copy_environment_conditions,
+    copy_inject_conditions,
+    environment_merge_key,
+    inject_merge_key,
+)
+
 
 log = logging.getLogger("shell")
 SECRET_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -241,8 +248,7 @@ def normalize_runtime_inject_flags(items) -> list[dict[str, object]]:
         notice = str(item.get("notice") or item.get("output_notice") or "").strip()
         if notice:
             normalized["notice"] = notice
-        if item.get("requires_workspace"):
-            normalized["requires_workspace"] = True
+        copy_inject_conditions(item, normalized)
         result.append(normalized)
     return result
 
@@ -291,6 +297,7 @@ def normalize_runtime_environment(items) -> list[dict[str, object]]:
         managed_flag = str(item.get("managed_directory_flag") or "").strip()
         if managed_flag:
             normalized["managed_directory_flag"] = managed_flag
+        copy_environment_conditions(item, normalized)
         result.append(normalized)
     return result
 
@@ -585,33 +592,23 @@ def merge_command_registry_entries(
             )
         if overlay_runtime.get("inject_flags"):
             existing_inject = {
-                (
-                    tuple(item.get("flags", []) or []),
-                    item.get("position"),
-                    tuple(item.get("unless_any", []) or []),
-                    tuple(item.get("unless_any_regex", []) or []),
-                )
+                inject_merge_key(item)
                 for item in runtime_adaptations.setdefault("inject_flags", [])
                 if isinstance(item, dict)
             }
             for inject in overlay_runtime.get("inject_flags", []) or []:
-                key = (
-                    tuple(inject.get("flags", []) or []),
-                    inject.get("position"),
-                    tuple(inject.get("unless_any", []) or []),
-                    tuple(inject.get("unless_any_regex", []) or []),
-                )
+                key = inject_merge_key(inject)
                 if key not in existing_inject:
                     runtime_adaptations.setdefault("inject_flags", []).append(deepcopy(inject))
                     existing_inject.add(key)
         if overlay_runtime.get("environment"):
             existing_env = {
-                (item.get("name"), item.get("value"), item.get("managed_directory_flag"))
+                environment_merge_key(item)
                 for item in runtime_adaptations.setdefault("environment", [])
                 if isinstance(item, dict)
             }
             for env_item in overlay_runtime.get("environment", []) or []:
-                key = (env_item.get("name"), env_item.get("value"), env_item.get("managed_directory_flag"))
+                key = environment_merge_key(env_item)
                 if key not in existing_env:
                     runtime_adaptations.setdefault("environment", []).append(deepcopy(env_item))
                     existing_env.add(key)

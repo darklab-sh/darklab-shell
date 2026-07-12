@@ -29,6 +29,7 @@ from services.commands.registry import (
     runtime_missing_command_message,
     split_command_argv,
 )
+from services.commands.raw_packets import scan_transport_log_context
 from services.runs.broker_worker import (
     BrokerOutputBatcher,  # noqa: F401 - compatibility seam for blueprints.run/tests
     brokered_real_run_worker,  # noqa: F401 - compatibility seam for blueprints.run/tests
@@ -152,20 +153,20 @@ def variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> 
 
 def cmd_denied_log_extra(client_ip: str, session_id: str, command: str, reason: str) -> dict[str, Any]:
     reason_text = str(reason or "")
-    deny_kind = "policy"
-    if "secret" in reason_text.lower() or "vault" in reason_text.lower():
+    deny_kind, rule_id = "policy", ""
+    if "raw-packet" in (reason_lower := reason_text.lower()) or "nmap raw mode" in reason_lower or " is blocked:" in reason_lower:
+        deny_kind = "raw_packet"
+        rule_id = "raw_packet_policy" if " is blocked:" in reason_lower else "raw_packet_readiness"
+    elif "secret" in reason_lower or "vault" in reason_lower:
         deny_kind = "secret"
-    elif "workspace" in reason_text.lower() or "path" in reason_text.lower():
+    elif "workspace" in reason_lower or "path" in reason_lower:
         deny_kind = "workspace"
-    elif "shell operators" in reason_text.lower():
+    elif "shell operators" in reason_lower:
         deny_kind = "shell_operator"
     return {
-        "ip": client_ip,
-        "session": get_log_session_id(session_id),
-        "cmd": command,
-        "reason": reason_text,
-        "deny_kind": deny_kind,
-        "rule_id": "",
+        "ip": client_ip, "session": get_log_session_id(session_id),
+        "cmd": command, "reason": reason_text,
+        "deny_kind": deny_kind, "rule_id": rule_id,
     }
 
 
@@ -425,7 +426,6 @@ def prepare_real_command(
         log.warning("CMD_DENIED", extra=cmd_denied_log_extra_fn(client_ip, session_id, original_command, validation.reason))
         raise RunPreparationError(validation.reason)
     execution_command = validation.exec_command or execution_command
-
     if effective_context is not None:
         command, notice = rewrite_command_fn(
             execution_command,
@@ -446,7 +446,6 @@ def prepare_real_command(
             "workspace_exec_path_count": len(validation.workspace_exec_paths),
             "runtime_env_names": runtime_env_names(command),
         })
-
     missing_runtime = runtime_missing_command_name_fn(command)
     if missing_runtime:
         log.warning("CMD_MISSING", extra={
@@ -641,6 +640,7 @@ def start_real_command_process(
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
+        **scan_transport_log_context(prepared_real.command, active_cfg),
     })
     if prepared_real.secret_env_names:
         emit_secret_event_fn(

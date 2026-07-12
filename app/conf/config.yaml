@@ -545,6 +545,15 @@
 # restricted_command_input_cidrs:
 #   - 169.254.169.254/32
 
+# ── Raw-packet scanning ─────────────────────────────────────────────────────
+
+# Opt in to capability-backed raw-packet modes for approved scanners. The app
+# keeps TCP-connect defaults unless both this setting and runtime capability
+# checks pass. This does not enable Docker privileged mode.
+# Server default if unset: false
+# In Compose deployments, RAW_PACKET_SCANNING_ENABLED overrides this value.
+# raw_packet_scanning_enabled: false
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
 # Whether the shared HTTP rate limiter is active at all. Set to false for

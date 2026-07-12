@@ -12987,6 +12987,10 @@ class TestDiagRoute:
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/terminal_export.css?v=' not in body
         assert '/static/css/diag.css?v=' not in body
+        diag_css = (Path(__file__).resolve().parents[2] / "app/static/css/diag.css").read_text()
+        assert '"raw      raw      raw      raw"' in diag_css
+        assert '"raw       raw"' in diag_css
+        assert '.diag-section.s-raw-packets { grid-area: raw; }' in diag_css
 
     def test_response_has_expected_top_level_keys(self):
         client = self._allowed_client()
@@ -13147,10 +13151,96 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         emitted = set(data["config"].keys())
+        assert data["raw_packets"]["configured"] is False
+        assert data["raw_packets"]["active"] is False
+        assert data["raw_packets"]["reason"] == "disabled"
+        assert set(data["raw_packets"]["tools"]) == {"nmap", "naabu", "masscan"}
         missing_from_groups = emitted - grouped
         assert not missing_from_groups, (
             f"config keys not in any group (would be invisible on /diag): {missing_from_groups}"
         )
+
+        ready = {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "restricted_cidr_firewall_ready": True,
+            "restricted_cidr_firewall_cidrs": (),
+            "tools": {
+                tool: {
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": f"/usr/bin/{tool}",
+                }
+                for tool in ("nmap", "naabu", "masscan")
+            },
+        }
+        enabled_cfg = {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "raw_packet_scanning_enabled": True,
+        }
+        with (
+            mock.patch.dict("config.CFG", enabled_cfg),
+            mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=ready,
+            ),
+        ):
+            ready_data = json.loads(client.get("/diag?format=json").data)
+            ready_body = client.get("/diag").get_data(as_text=True)
+        assert ready_data["raw_packets"]["configured"] is True
+        assert ready_data["raw_packets"]["available"] is True
+        assert ready_data["raw_packets"]["active"] is True
+        assert ready_data["raw_packets"]["reason"] == "ready"
+        assert re.search(r'class="diag-ok">ready</span>', ready_body)
+        for tool in ("nmap", "naabu", "masscan"):
+            assert re.search(fr'class="diag-ok">{tool} ready</span>', ready_body)
+
+        restricted_cfg = {
+            **enabled_cfg,
+            "restricted_command_input_cidrs": ["192.0.2.0/24"],
+        }
+        restricted_ready = {
+            **ready,
+            "restricted_cidr_firewall_cidrs": ("192.0.2.0/24",),
+        }
+        with (
+            mock.patch.dict("config.CFG", restricted_cfg),
+            mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=restricted_ready,
+            ),
+        ):
+            mixed_data = json.loads(client.get("/diag?format=json").data)
+            mixed_body = client.get("/diag").get_data(as_text=True)
+        assert mixed_data["raw_packets"]["active"] is True
+        assert mixed_data["raw_packets"]["tools"]["nmap"]["reason"] == "ready"
+        for tool in ("naabu", "masscan"):
+            assert mixed_data["raw_packets"]["tools"][tool]["active"] is False
+            assert mixed_data["raw_packets"]["tools"][tool]["reason"] == (
+                "packet_socket_egress_policy_required"
+            )
+            assert re.search(
+                fr'class="diag-muted">{tool} packet socket egress policy required</span>',
+                mixed_body,
+            )
+
+        unavailable = {**ready, "cap_net_raw_bounded": False}
+        with (
+            mock.patch.dict("config.CFG", enabled_cfg),
+            mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=unavailable,
+            ),
+        ):
+            unavailable_data = json.loads(client.get("/diag?format=json").data)
+            unavailable_body = client.get("/diag").get_data(as_text=True)
+        assert unavailable_data["raw_packets"]["configured"] is True
+        assert unavailable_data["raw_packets"]["available"] is False
+        assert unavailable_data["raw_packets"]["active"] is False
+        assert unavailable_data["raw_packets"]["reason"] == "cap_net_raw_not_bounded"
+        assert re.search(r'class="diag-fail">unavailable</span>', unavailable_body)
+        assert "cap net raw not bounded" in unavailable_body
 
     def test_html_response_renders_config_group_labels(self):
         client = self._allowed_client()
@@ -13160,6 +13250,7 @@ class TestDiagRoute:
             assert label in body, f"config group label '{label}' not rendered"
         assert "diag-config-group-label" in body
         assert "AI Assists" in body
+        assert "Raw-packet Scanning" in body
         assert "data-diag-ai-test-form" in body
 
     def test_ai_test_route_runs_prompt_and_rate_limits_repeats(self):

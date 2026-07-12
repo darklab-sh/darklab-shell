@@ -3,41 +3,17 @@
 from __future__ import annotations
 
 import os
-import re
 import shlex
 from typing import Any, Callable, Mapping
 
 from services.commands.registry_validation import split_command_argv
+from services.commands.registry_adaptations import runtime_adaptation_enabled, runtime_injection_blocked
 from services.teams.scope import OwnerContext, owner_context_for_scope
 from services.workspace.files import (
     ensure_owner_workspace,
     InvalidWorkspacePath,
     WorkspaceDisabled,
 )
-
-
-def runtime_injection_blocked(tokens: list[str], inject: dict[str, object]) -> bool:
-    raw_unless_any = inject.get("unless_any")
-    unless_any = [
-        str(item) for item in raw_unless_any
-        if str(item)
-    ] if isinstance(raw_unless_any, list) else []
-    for blocker in unless_any:
-        if any(
-            token == blocker or (blocker.startswith("--") and token.startswith(f"{blocker}="))
-            for token in tokens[1:]
-        ):
-            return True
-    raw_regexes = inject.get("unless_any_regex")
-    regexes = raw_regexes if isinstance(raw_regexes, list) else []
-    for raw_pattern in regexes:
-        pattern = str(raw_pattern)
-        try:
-            if any(re.search(pattern, token) for token in tokens[1:]):
-                return True
-        except re.error:
-            continue
-    return False
 
 
 def _workspace_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
@@ -104,7 +80,12 @@ def apply_runtime_inject_flags(
     for inject in inject_flags:
         if not isinstance(inject, dict):
             continue
-        if inject.get("requires_workspace") and not (session_id and active_cfg.get("workspace_enabled")):
+        if not runtime_adaptation_enabled(
+            inject,
+            active_cfg,
+            tool=tokens[0].lower(),
+            workspace_ready=bool(session_id and active_cfg.get("workspace_enabled")),
+        ):
             continue
         flags = runtime_injection_flags(inject, session_id=session_id, cfg=cfg, owner_context=owner_context)
         if not flags or runtime_injection_blocked(rewritten, inject):
@@ -147,6 +128,7 @@ def apply_workspace_runtime_environment(
     command: str,
     *,
     runtime_adaptations_by_root: Callable[[], dict[str, dict[str, object]]],
+    cfg: Mapping[str, Any] | None = None,
 ) -> str:
     tokens = split_command_argv(command)
     if not tokens:
@@ -158,12 +140,17 @@ def apply_workspace_runtime_environment(
         return command
 
     env_tokens = []
+    active_cfg = cfg or {}
     for env_spec in env_specs:
         if not isinstance(env_spec, dict):
             continue
         name = str(env_spec.get("name") or "").strip()
         template = str(env_spec.get("value") or "").strip()
         if not name or not template:
+            continue
+        if not runtime_adaptation_enabled(env_spec, active_cfg, tool=tokens[0].lower()):
+            continue
+        if runtime_injection_blocked(tokens, env_spec):
             continue
         value = runtime_environment_value(template, tokens, env_spec)
         if not value:

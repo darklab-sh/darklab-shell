@@ -1145,9 +1145,9 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 | --------- | --------- | -------- |
 | `curl` | Adds `--no-progress-meter` unless help, silent, or explicit progress flags are present | Keeps the terminal transcript readable when curl writes progress updates to stderr and the app streams stderr with stdout. Silent. |
 | `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
-| `nmap` | Adds `-sT` when no scan mode is explicit | Uses TCP connect scanning for reliable non-root container execution; `-sS` and `--privileged` are blocked. Silent. |
+| `nmap` | Adds `-sT` when raw readiness is inactive; adds trusted `NMAP_PRIVILEGED=1` when active | Keeps a reliable connect default while allowing operator-enabled capability-backed SYN/raw modes. User-supplied `--privileged` stays blocked. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates`; uses owner-scoped `XDG_CONFIG_HOME=<workspace>/tools` when Files are enabled | Redirects template storage to tmpfs while keeping useful ProjectDiscovery config/resume state under the active personal/team workspace's `tools/` folder. Output metadata records the template source for later Run Details, Atlas import, and evidence review. Silent. |
-| `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
+| `naabu` | Adds `-scan-type c` when raw readiness is inactive or `-scan-type s` when active | Keeps a connect fallback and selects SYN only after the operator opt-in and capability checks pass. Silent. |
 
 Session command variables are expanded inside the app before command policy validation and execution. `app/services/session/variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. The run-start path keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
 
@@ -1852,7 +1852,7 @@ The current event inventory is:
 | DEBUG | `CONFIG_LEGACY_KEY_MIGRATED` | config loading | legacy_key, target_key, source |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
+| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
 | INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
 | INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
 | INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
@@ -1869,7 +1869,7 @@ The current event inventory is:
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
 | INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, status, duration_ms |
-| INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
+| INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type, scan_transport (raw/connect scanner runs only) |
 | INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
 | INFO | `RUN_OUTPUT_ARTIFACT_FINALIZED` | full-output artifact capture | run_id, rel_path, artifact_bytes, lines, truncated, available |
@@ -1998,6 +1998,7 @@ The current event inventory is:
 | WARN | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
 | WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
 | WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason, deny_kind, rule_id |
+| WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, status |
 | WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
@@ -2210,13 +2211,19 @@ Workspace-specific permission, bind-mount, and cleanup behavior are covered in *
 
 ### nmap Scan Mode Model
 
-`nmap` can use raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features. In practice, those capabilities are not reliable for the app's unprivileged `scanner` execution path across Docker hosts and security profiles, even when the binary has file capabilities:
+`nmap` can use Linux file capabilities for SYN scans, OS fingerprinting, raw host discovery, UDP scanning, and traceroute while still running as the unprivileged `scanner` user:
 
 ```bash
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan
+setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu
 ```
 
-For predictable behavior, the app treats TCP connect scans as the supported `nmap` mode. `rewrite_command()` injects `-sT` when an `nmap` command does not already specify a scan mode. Command validation blocks `-sS` and explicit `--privileged` so users do not get confusing raw-socket `Operation not permitted` failures after launch.
+`raw_packet_scanning_enabled` is the deployment gate and defaults to `false`. `services.commands.raw_packets` combines that setting with Linux runtime checks for `CAP_NET_RAW` in the bounding set, `NoNewPrivs`, binary presence, and effective/permitted scanner file capabilities. Startup logs an aggregate state plus bounded per-tool state/reason fields, warns when an explicit opt-in cannot activate, and `/diag` exposes the same state without command text or targets.
+
+When readiness is inactive, `rewrite_command()` injects `-sT` when an Nmap command has no scan mode, and validation rejects raw-dependent scan, packet-shaping, OS, discovery, and traceroute options with a connect-mode alternative. When readiness is active, the same validator admits capability-gated options, command preparation wraps Nmap with `env NMAP_PRIVILEGED=1`, and the default scan type remains Nmap's SYN scan. Plain `-sT` remains unchanged, while mixed `-sT`/raw-option commands fail with a clear conflict. `--privileged`, source/decoy/MAC spoofing, and `--send-eth` are always blocked.
+
+The Docker bridge remains the supported network model. The root entrypoint loads the same effective normalized restricted CIDRs as the app, requires every scanner-user OUTPUT rule to install, and writes a protected readiness marker containing that exact list. Raw Nmap requires the marker to match before activation and adds `--send-ip`; `--send-eth` stays blocked. Packet-socket Naabu and Masscan are not activated alongside `restricted_command_input_cidrs`; externally managed host or bridge policies are not part of the readiness contract. The app-port firewall uses an address-type local-destination rule, with explicit IPv4/IPv6 address fallbacks, so it protects the local service without rejecting the same port on remote scan targets.
 
 ---
 
@@ -2248,12 +2255,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,046
+- behavior tests: 4,050
 - docs/inventory meta-tests: 63
-- `pytest`: 2352 (2302 behavior + 50 meta)
+- `pytest`: 2356 (2306 behavior + 50 meta)
 - `vitest`: 1485 (1472 behavior + 13 meta)
 - `playwright`: 272 behavior
-- total: 4,109
+- total: 4,113
 
 ### Testing Architecture
 

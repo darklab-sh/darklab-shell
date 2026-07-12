@@ -409,6 +409,7 @@ class ProjectDigestsConfig(_ConfigModel):
 
 
 _FORGIVING_BOOL_KEYS = {
+    "raw_packet_scanning_enabled",
     "database_postgres_jit",
     "audit_log_enabled",
     "ai_enabled",
@@ -417,6 +418,17 @@ _FORGIVING_BOOL_KEYS = {
     "ai_feature_summary",
     "ai_feature_next_commands",
     "ai_feature_run_suggestions",
+}
+_FORGIVING_BOOL_DEFAULTS = {
+    "raw_packet_scanning_enabled": False,
+    "database_postgres_jit": False,
+    "audit_log_enabled": True,
+    "ai_enabled": False,
+    "ai_allow_full_output": False,
+    "ai_require_private_base_url": True,
+    "ai_feature_summary": False,
+    "ai_feature_next_commands": False,
+    "ai_feature_run_suggestions": False,
 }
 _FORGIVING_INT_KEYS = {
     "database_pool_min",
@@ -757,7 +769,7 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
         raw_value = defaults.get(key)
         raw_source = _config_source(provenance, key)
         parsed_value = _parse_bool_value(raw_value)
-        fallback = bool(defaults[key])
+        fallback = _FORGIVING_BOOL_DEFAULTS[key]
         defaults[key] = _coerce_bool_value(raw_value, fallback)
         if _config_source_is_override(raw_source) and parsed_value is None:
             _warn_config_value_defaulted(key, provenance, reason="invalid_bool", fallback=fallback)
@@ -931,6 +943,7 @@ def load_config(conf_dir=None):
         "ai_feature_next_commands":   False,
         "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
+        "raw_packet_scanning_enabled": False,
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
@@ -1241,6 +1254,16 @@ def load_config(conf_dir=None):
             "RESTRICTED_COMMAND_INPUT_CIDRS",
         )
         applied_env_names.append("RESTRICTED_COMMAND_INPUT_CIDRS")
+    env_raw_packet_scanning_enabled = str(os.environ.get("RAW_PACKET_SCANNING_ENABLED") or "").strip()
+    if env_raw_packet_scanning_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "raw_packet_scanning_enabled",
+            env_raw_packet_scanning_enabled,
+            "RAW_PACKET_SCANNING_ENABLED",
+        )
+        applied_env_names.append("RAW_PACKET_SCANNING_ENABLED")
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         _set_config_value(defaults, provenance, "database_backend", env_database_backend, "DATABASE_BACKEND")

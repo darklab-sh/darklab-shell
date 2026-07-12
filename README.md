@@ -227,7 +227,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
 | `tcping` | TCP reachability and latency checks for service ports when ICMP is blocked |
 | `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
-| `masscan` | High-speed TCP port scanner; requires raw sockets (container has `NET_RAW`/`NET_ADMIN`) |
+| `masscan` | High-speed raw-packet TCP scanner; available when the operator enables raw-packet scanning and readiness passes |
 | `assetfinder` | Fast passive domain and IP discovery using public sources |
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
@@ -267,15 +267,19 @@ When Interactive PTY is enabled, use `mtr --interactive <host>` to open the live
 
 #### nmap
 
-nmap runs as the unprivileged `scanner` user, so the app standardizes on TCP connect scans for container reliability. If a user does not choose a scan mode, `-sT` is automatically injected before launch. Raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked because they depend on raw socket behavior that is not reliable in the app's non-root execution path.
+nmap runs as the unprivileged `scanner` user. By default, the app injects `-sT` when no scan mode is supplied and blocks raw-only options. Operators on Linux Docker hosts can set `RAW_PACKET_SCANNING_ENABLED=true` to opt in to capability-backed scanning. Once readiness passes, the app stops forcing `-sT`, sets the trusted `NMAP_PRIVILEGED=1` environment value, and lets Nmap use its normal SYN default or an explicit raw mode such as `-sS`. Plain `-sT` commands stay connect scans. User-supplied `--privileged`, source/decoy/MAC spoofing, and link-layer `--send-eth` remain blocked.
+
+This opt-in uses the existing `NET_RAW` capability and Nmap file capability. It does not enable Docker privileged mode, run scans as root, require host networking, or require Macvlan/IPvlan. `/diag` shows whether the setting is configured, available, and active. Rootless Docker, `no-new-privileges`, a stripped capability bounding set, or a binary that has lost its file capability leaves raw mode unavailable while connect scans continue to work.
+
+The container's scanner firewall blocks `${APP_PORT}` only when the destination is local to the container, so an authorized remote service using the same port can still be scanned. With `RESTRICTED_COMMAND_INPUT_CIDRS` set, the app forces Nmap's `--send-ip` path and blocks `--send-eth` so restricted traffic stays on the owner-matched OUTPUT path. Raw Naabu and Masscan are always held back when restricted CIDRs are configured; separately managed host or bridge firewall rules do not reactivate them.
 
 #### naabu
 
-naabu defaults to raw SYN packet scanning via libpcap/gopacket, which requires privileges that are not reliably available inside the container even with file capabilities. The app automatically injects `-scan-type c` into every naabu command that doesn't already include `-scan-type` or `-st`, switching to TCP connect mode (equivalent to `nmap -sT`). Results are identical; the only difference is the scanning method. If you explicitly want raw SYN mode and have confirmed it works in your environment, pass `-scan-type s` and the rewrite will not fire.
+naabu uses `-scan-type c` while raw-packet scanning is disabled or unavailable. When the operator opt-in and runtime checks pass, the app selects SYN mode unless the command explicitly requests connect mode. Deployments with restricted CIDRs keep Naabu in connect mode because packet-socket traffic does not cross the scanner-user OUTPUT rules.
 
 #### masscan
 
-masscan is a raw-packet-only scanner with no TCP connect fallback. It requires `CAP_NET_RAW`/`CAP_NET_ADMIN` and libpcap access. These are granted via `setcap` in the Dockerfile and `cap_add` in `docker-compose.yml`, but deep packet injection may still be restricted by the host kernel or container runtime. If masscan fails with an interface error, `rustscan` is a good alternative — it uses TCP connect scanning and works without raw socket access.
+masscan is a raw-packet-only scanner with no TCP connect fallback, so live scans require the operator opt-in and passing readiness checks. If raw mode is unavailable, RustScan or `nmap -sT` provides a connect-mode alternative. Masscan stays unavailable when restricted CIDRs are configured because its packet-socket traffic bypasses the scanner-user OUTPUT rules.
 
 #### wget
 
@@ -695,8 +699,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_watch.py # Watcher built-in command family
 │   │   │   ├── builtins_wordlist.py # Wordlist built-in command handler backed by the SecLists catalog service
 │   │   │   ├── builtins_workspace.py # Session file built-in command family and workspace aliases
+│   │   │   ├── features.py     # Shared command discovery and autocomplete feature gates
 │   │   │   ├── postfilters.py  # Synthetic pipe-helper post-filter parser for app-native pipelines
+│   │   │   ├── raw_packets.py  # Raw-packet scanner readiness, policy, diagnostics, and transport helpers
 │   │   │   ├── registry.py     # Public command-registry surface for loading, autocomplete, validation, and rewrites
+│   │   │   ├── registry_adaptations.py # Shared normalization and gates for declarative runtime adaptations
 │   │   │   ├── registry_autocomplete.py # Autocomplete context normalization, merging, and feature filtering
 │   │   │   ├── registry_cache.py # Read-only containers for cached command registry data
 │   │   │   ├── registry_catalog.py # Command catalog, secret-consumer, and interactive PTY registry shaping

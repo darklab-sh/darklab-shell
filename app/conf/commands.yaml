@@ -3399,10 +3399,10 @@ commands:
     category: Network Reconnaissance
     knowledge:
       notes:
-        - Injects -scan-type c (CONNECT) when no scan type is set because the container runs unprivileged.
+        - Uses CONNECT mode by default and switches to SYN mode only when the operator enables raw-packet scanning and runtime readiness passes.
         - Reads target/port/exclude lists (-l/-pf/-exclude-file) and writes -o output through the session workspace when Files are enabled.
       gotchas:
-        - SYN scans need raw sockets and are unavailable here; a CONNECT scan is used instead.
+        - SYN mode needs operator-enabled raw-packet readiness; use -scan-type c when capability-backed scanning is unavailable.
       safe_defaults:
         - Add -silent to trim banner and progress noise, and -p to scope ports rather than scanning the full range.
       common_flags:
@@ -3472,6 +3472,15 @@ commands:
             - -scan-type
             - c
           position: prepend
+          unless_raw_packets: true
+          unless_any:
+            - -scan-type
+            - -st
+        - flags:
+            - -scan-type
+            - s
+          position: prepend
+          requires_raw_packets: true
           unless_any:
             - -scan-type
             - -st
@@ -3924,6 +3933,16 @@ commands:
   - root: masscan
     description: Runs high-speed port scans across hosts or networks.
     category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - Masscan is raw-packet only and runs only when the operator enables raw-packet scanning and runtime readiness passes.
+      gotchas:
+        - If raw readiness is unavailable, use a connect-mode scanner such as RustScan or Nmap -sT.
+      safe_defaults:
+        - Start with a bounded target and port set plus a conservative --rate value.
+      common_flags:
+        - "-p — ports to scan"
+        - "--rate — packets per second"
     help:
       flags:
         - --help
@@ -3988,12 +4007,17 @@ commands:
           description: Show help and usage
         - value: masscan -p 80,443 8.8.8.8
           description: Fast scan of web ports
+          feature_required: raw_packet_scanning_masscan
+          smoke: manual
         - value: masscan --interactive -p 80,443 --rate 500 8.8.8.8
           description: Run a controlled interactive scan of web ports
           interactive: true
+          feature_required: raw_packet_scanning_masscan
         - value: masscan -p 80,443 -iL targets.txt -oL masscan-results.txt
           description: Scan targets from a session file and save list output
-          feature_required: workspace
+          feature_required:
+            - workspace
+            - raw_packet_scanning_masscan
       flags:
         - value: --help
           description: Show help and usage
@@ -4138,14 +4162,15 @@ commands:
     category: Vulnerability Scanning
     knowledge:
       notes:
-        - Runs unprivileged, so a TCP connect scan (-sT) is injected when no scan type is given.
+        - Uses TCP connect scans by default; operators can opt in to capability-backed SYN and raw scan modes.
         - Output flags (-oN/-oX/-oG) and input flags (-iL/--script-args-file) are rewritten into the session workspace when Files are enabled.
       gotchas:
-        - -sS, -O, and --privileged are denied because the container has no raw-socket access; use -sT for TCP connect scans.
+        - Raw scan modes require operator opt-in and passing runtime capability checks; --privileged remains app-managed and cannot be supplied by users.
       safe_defaults:
         - Use -sT for connect scans and add -Pn to skip host discovery on filtered hosts; scope ports with -p or --top-ports.
       common_flags:
         - "-sT — TCP connect scan"
+        - "-sS/-sU — capability-backed TCP SYN or UDP scan"
         - "-sV — service/version detection"
         - "-Pn — skip host discovery"
         - "-p — ports to scan"
@@ -4158,9 +4183,11 @@ commands:
       allow:
         - nmap
       deny:
-        - nmap -sS
-        - nmap -O
         - nmap --privileged
+        - nmap -D
+        - nmap -S
+        - nmap --spoof-mac
+        - nmap --send-eth
         - nmap -o
         - nmap -oN
         - nmap -oX
@@ -4200,6 +4227,7 @@ commands:
         - flags:
             - -sT
           position: prepend
+          unless_raw_packets: true
           unless_any:
             - -h
             - --help
@@ -4207,14 +4235,45 @@ commands:
             - --version
           unless_any_regex:
             - "^-s[AFILMNOSTUWXYZn]"
+        - flags:
+            - --send-ip
+          position: prepend
+          requires_raw_packets: true
+          requires_restricted_cidrs: true
+          unless_any:
+            - -h
+            - --help
+            - -V
+            - --version
+            - --send-ip
+        - flags:
+            - env
+            - NMAP_PRIVILEGED=1
+          position: command_prefix
+          requires_raw_packets: true
+          unless_any:
+            - -h
+            - --help
+            - -V
+            - --version
+            - -sT
+            - -sL
     autocomplete:
       examples:
         - value: nmap -h
           description: Show help and usage
         - value: nmap -sT -sV -p 80,443 ip.darklab.sh
           description: TCP connect scan with service version detection on web ports
-        - value: nmap -sT -A -T4 ip.darklab.sh
-          description: Aggressive TCP connect scan with service and script detection
+        - value: nmap -sT -sV --script default -T4 ip.darklab.sh
+          description: TCP connect scan with service and default script detection
+        - value: nmap -sS -Pn -p 80,443 ip.darklab.sh
+          description: SYN scan when the operator has enabled raw-packet readiness
+          feature_required: raw_packet_scanning
+          smoke: manual
+        - value: nmap -sS -sV -O --traceroute -p 22,80,443 ip.darklab.sh
+          description: SYN scan with service, OS, and route detection
+          feature_required: raw_packet_scanning
+          smoke: manual
         - value: nmap -sT -Pn --top-ports 100 ip.darklab.sh
           description: Top 100 ports, skip host discovery
         - value: nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt
@@ -4229,6 +4288,48 @@ commands:
           closes: true
         - value: -sT
           description: TCP connect scan
+        - value: -sS
+          description: SYN scan (requires operator-enabled raw-packet readiness)
+          feature_required: raw_packet_scanning
+        - value: -sU
+          description: UDP scan
+          feature_required: raw_packet_scanning
+        - value: -sA
+          description: TCP ACK scan
+          feature_required: raw_packet_scanning
+        - value: -sF
+          description: TCP FIN scan
+          feature_required: raw_packet_scanning
+        - value: -sI
+          description: Idle scan through a zombie host
+          takes_value: true
+          feature_required: raw_packet_scanning
+          value_hint:
+            placeholder: <zombie-host[:probe-port]>
+            hint_only: true
+            value_type: host
+            description: Idle-scan host and optional probe port
+        - value: -sM
+          description: TCP Maimon scan
+          feature_required: raw_packet_scanning
+        - value: -sN
+          description: TCP null scan
+          feature_required: raw_packet_scanning
+        - value: -sO
+          description: IP protocol scan
+          feature_required: raw_packet_scanning
+        - value: -sW
+          description: TCP window scan
+          feature_required: raw_packet_scanning
+        - value: -sX
+          description: TCP Xmas scan
+          feature_required: raw_packet_scanning
+        - value: -sY
+          description: SCTP INIT scan
+          feature_required: raw_packet_scanning
+        - value: -sZ
+          description: SCTP COOKIE ECHO scan
+          feature_required: raw_packet_scanning
         - value: -sV
           description: Service/version detection
         - value: -Pn
@@ -4274,6 +4375,56 @@ commands:
           description: Faster timing template
         - value: -A
           description: Aggressive detection bundle
+          feature_required: raw_packet_scanning
+        - value: -O
+          description: OS detection
+          feature_required: raw_packet_scanning
+        - value: --osscan-guess
+          description: Guess OS more aggressively
+          feature_required: raw_packet_scanning
+        - value: --osscan-limit
+          description: Limit OS detection to promising targets
+          feature_required: raw_packet_scanning
+        - value: --traceroute
+          description: Trace the network path to each host
+          feature_required: raw_packet_scanning
+        - value: -PE
+          description: ICMP echo host discovery
+          feature_required: raw_packet_scanning
+        - value: -PP
+          description: ICMP timestamp host discovery
+          feature_required: raw_packet_scanning
+        - value: -PM
+          description: ICMP address-mask host discovery
+          feature_required: raw_packet_scanning
+        - value: -PS
+          description: TCP SYN host discovery
+          feature_required: raw_packet_scanning
+        - value: -PA
+          description: TCP ACK host discovery
+          feature_required: raw_packet_scanning
+        - value: -PU
+          description: UDP host discovery
+          feature_required: raw_packet_scanning
+        - value: -PY
+          description: SCTP INIT host discovery
+          feature_required: raw_packet_scanning
+        - value: -PR
+          description: ARP host discovery
+          feature_required: raw_packet_scanning
+        - value: -PO
+          description: IP protocol host discovery
+          feature_required: raw_packet_scanning
+        - value: -f
+          description: Fragment IP packets
+          feature_required: raw_packet_scanning
+        - value: --mtu
+          description: Set a custom packet MTU
+          takes_value: true
+          feature_required: raw_packet_scanning
+        - value: --send-ip
+          description: Send through raw IP sockets
+          feature_required: raw_packet_scanning
         - value: -n
           description: Do not resolve DNS names
         - value: -vv

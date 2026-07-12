@@ -460,6 +460,16 @@ class TestCmdDeniedEvent:
         assert call.kwargs["extra"]["deny_kind"] == "policy"
         assert "rule_id" in call.kwargs["extra"]
 
+        from blueprints import run as run_routes
+        readiness = run_routes._cmd_denied_log_extra(
+            self._IP,
+            "log-test-session",
+            "nmap -sS example.com",
+            "nmap raw mode (-sS) requires raw-packet readiness",
+        )
+        assert readiness["deny_kind"] == "raw_packet"
+        assert readiness["rule_id"] == "raw_packet_readiness"
+
     def test_shell_operator_block_also_emits_cmd_denied(self):
         # Shell operator blocks are a special case of is_command_allowed returning False
         client = get_client()
@@ -680,6 +690,7 @@ class TestRunLifecycleEvents:
 
         calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_START"]
         assert len(calls) == 1
+        assert "scan_transport" not in calls[0].kwargs["extra"]
 
     def test_run_start_masks_token_session_id(self):
         client = get_client()

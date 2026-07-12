@@ -22,6 +22,7 @@ from services.assets.diagnostics import (
 from services.ai.client import AIClientError
 from services.ai.diagnostics import provider_probe as ai_provider_probe
 from services.commands.registry import command_root, load_command_policy
+from services.commands.raw_packets import raw_packet_diagnostics
 from services.runs.broker import broker_available, broker_mode, broker_unavailable_reason, memory_store_snapshot
 from services.runs.output_model import line_event_from_legacy
 
@@ -403,15 +404,12 @@ def diag():
           - "172.16.0.0/12"
     """
     client_ip = _require_diag_access()
-
     result: dict = {}
-
     # ── App ──────────────────────────────────────────────────────────────────
     result["app"] = {
         "version": APP_VERSION,
         "name": CFG.get("app_name", ""),
     }
-
     # ── Operational config ───────────────────────────────────────────────────
     result["config"] = {
         "rate_limit_enabled":         CFG.get("rate_limit_enabled"),
@@ -420,6 +418,7 @@ def diag():
         "rate_limit_per_minute":      CFG.get("rate_limit_per_minute"),
         "rate_limit_per_second":      CFG.get("rate_limit_per_second"),
         "command_timeout_seconds":    CFG.get("command_timeout_seconds"),
+        "raw_packet_scanning_enabled": CFG.get("raw_packet_scanning_enabled"),
         "heartbeat_interval_seconds": CFG.get("heartbeat_interval_seconds"),
         "high_volume_output_line_threshold": CFG.get("high_volume_output_line_threshold"),
         "high_volume_output_status_interval_lines": CFG.get("high_volume_output_status_interval_lines"),
@@ -462,6 +461,7 @@ def diag():
         "ai_feature_next_commands":   CFG.get("ai_feature_next_commands"),
         "ai_feature_run_suggestions": CFG.get("ai_feature_run_suggestions"),
     }
+    result["raw_packets"] = raw_packet_diagnostics(CFG)
 
     # ── AI assists ───────────────────────────────────────────────────────────
     result["ai"] = ai_provider_probe()
