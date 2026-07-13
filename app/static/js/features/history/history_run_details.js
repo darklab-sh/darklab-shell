@@ -34,6 +34,7 @@ import {
 } from '../../ui/ui_helpers.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
 import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
+import { openWorkflows as importedOpenWorkflows } from '../../controller_action_bridge.js';
 import { _closeHistoryRunActionMenus } from './history_actions.js';
 import { copyHistoryRunPermalink as importedCopyHistoryRunPermalink } from './history_links.js';
 import { refreshHistoryPanel as importedRefreshHistoryPanel } from './history_panel_bridge.js';
@@ -816,6 +817,47 @@ function _historyRunScheduleSummary(run) {
   return wrap;
 }
 
+function _historyRunWorkflowSummary(run) {
+  const provenance = run?.workflow_execution;
+  if (!provenance || typeof provenance !== 'object') return null;
+  const executionId = String(provenance.execution_id || run.workflow_execution_id || '').trim();
+  if (!executionId) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-workflow-summary';
+  const identity = document.createElement('span');
+  identity.className = 'history-run-workflow-label';
+  const currentStep = String(provenance.step?.step_id || run.workflow_step_id || '').trim();
+  identity.textContent = currentStep
+    ? `${provenance.title || 'Playbook'} · ${currentStep}`
+    : String(provenance.title || 'Playbook');
+  wrap.appendChild(identity);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-run-workflow-actions';
+  const view = document.createElement('button');
+  view.type = 'button';
+  view.className = 'btn btn-secondary btn-compact';
+  view.dataset.historyRunAction = 'open-workflow-execution';
+  view.textContent = 'View playbook';
+  view.title = `Open workflow execution ${executionId}`;
+  actions.appendChild(view);
+
+  const siblingSteps = Array.isArray(provenance.steps)
+    ? provenance.steps.filter(step => step?.run_id && String(step.run_id) !== String(run.id || ''))
+    : [];
+  siblingSteps.forEach((step) => {
+    const sibling = document.createElement('button');
+    sibling.type = 'button';
+    sibling.className = 'btn btn-ghost btn-compact';
+    sibling.dataset.historyRunAction = `open-workflow-run:${String(step.run_id)}`;
+    sibling.textContent = String(step.step_id || 'Step run');
+    sibling.title = `Open run ${step.run_id}`;
+    actions.appendChild(sibling);
+  });
+  wrap.appendChild(actions);
+  return wrap;
+}
+
 function _historyRunActionButton(label, action, { disabled = false, tone = 'secondary' } = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -1394,6 +1436,10 @@ function _renderHistoryRunSummary(body, run) {
   ];
   if (run.schedule_id) {
     summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', _historyRunScheduleSummary(run)));
+  }
+  const workflowSummary = _historyRunWorkflowSummary(run);
+  if (workflowSummary) {
+    summaryRows.splice(1, 0, _historyRunMetaRow('Playbook', workflowSummary));
   }
   summary.append(...summaryRows);
   body.appendChild(summary);
@@ -2559,6 +2605,16 @@ async function _handleHistoryRunModalAction(action) {
     } else if (run.schedule_id) {
       void _historyRunOpenSchedulesModal({ scheduleId: run.schedule_id });
     }
+  } else if (action === 'open-workflow-execution') {
+    const executionId = String(run.workflow_execution_id || run.workflow_execution?.execution_id || '').trim();
+    if (!executionId) return;
+    closeHistoryRunOverlay();
+    const openWorkflows = (typeof importedOpenWorkflows === 'function' && importedOpenWorkflows)
+      || _historyRunGlobalFunction('openWorkflows');
+    openWorkflows?.({ executionId });
+  } else if (action.startsWith('open-workflow-run:')) {
+    const siblingRunId = action.slice('open-workflow-run:'.length).trim();
+    if (siblingRunId) openHistoryRunDetails({ id: siblingRunId });
   } else if (action === 'permalink') {
     _historyRunCopyPermalink(run).catch(() => _historyRunShowToast('Failed to copy link', 'error'));
   } else if (action === 'compare') {

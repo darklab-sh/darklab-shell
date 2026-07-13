@@ -152,5 +152,6 @@ Useful places to inspect scheduler behavior:
 - [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](../tests/README.md) - test coverage appendix and focused test commands
 - [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

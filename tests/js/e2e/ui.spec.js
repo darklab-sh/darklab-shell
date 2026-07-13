@@ -1835,7 +1835,130 @@ test.describe('workflows modal', () => {
     await expect(page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-cmd')).toContainText('dig persist.example A')
   })
 
-  test('creates and edits a user workflow from the workflows modal', async ({ page }) => {
+  test('recent execution status can be canceled and restored after reopening', async ({ page }) => {
+    let canceled = false
+    let listReads = 0
+    await page.route('**/workflow-executions?*', async (route) => {
+      listReads += 1
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          executions: [{
+            id: 'wfx_e2e_active',
+            title: 'Resolve and scan',
+            status: canceled ? 'canceled' : 'running',
+            current_step_id: canceled ? '' : 'scan',
+            created: '2026-07-12 10:00:00',
+            finished: canceled ? '2026-07-12 10:00:05' : null,
+            steps: [
+              {
+                step_id: 'resolve',
+                status: 'succeeded',
+                run_id: 'run-resolve',
+                capture_names: ['resolved_ip'],
+                selected_transition: 'scan',
+                transition_reason: 'success',
+              },
+              {
+                step_id: 'scan',
+                status: canceled ? 'canceled' : 'running',
+                run_id: canceled ? '' : 'run-scan',
+                capture_names: [],
+              },
+            ],
+          }],
+        }),
+      })
+    })
+    await page.route('**/workflow-executions/wfx_e2e_active/cancel', async (route) => {
+      canceled = true
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ execution: { id: 'wfx_e2e_active', status: 'canceled' } }),
+      })
+    })
+
+    await openWorkflowsModal(page)
+    await page.locator('[data-workflows-view="executions"]').click()
+    const execution = page.locator('[data-workflow-execution-id="wfx_e2e_active"]')
+    await expect(execution).toContainText('Current step: scan')
+    await expect(execution).toContainText('Captured: resolved_ip')
+    await expect(execution).toContainText('to scan (success)')
+    await expect(execution.getByRole('button', { name: 'Attach to run run-scan' })).toBeVisible()
+    await execution.getByRole('button', { name: 'Cancel Resolve and scan' }).click()
+    await page.getByRole('button', { name: 'Cancel execution' }).click()
+
+    await expect(execution).toContainText('Canceled')
+    await expect(execution.getByRole('button', { name: 'Cancel Resolve and scan' })).toHaveCount(0)
+    await page.locator('.workflows-close').click()
+    await openWorkflowsModal(page)
+    await page.locator('[data-workflows-view="executions"]').click()
+    await expect(page.locator('[data-workflow-execution-id="wfx_e2e_active"]')).toContainText('Canceled')
+    expect(listReads).toBeGreaterThan(1)
+  })
+
+  test('runs a real capture-fed playbook and reopens its linked run', async ({ page }) => {
+    const sessionId = await browserSessionId(page)
+    const title = `Live capture playbook ${Date.now()}`
+    const workflowResponse = await page.request.post('/session/workflows', {
+      headers: { 'X-Session-ID': sessionId },
+      data: {
+        version: 2,
+        id: `live_capture_${Date.now()}`,
+        title,
+        inputs: [],
+        steps: [
+          {
+            id: 'read_help',
+            cmd: 'help',
+            captures: [{
+              name: 'help_heading',
+              source: 'first_nonempty_line',
+              required: true,
+            }],
+            next: { success: 'inspect_help', failure: 'stop' },
+          },
+          {
+            id: 'inspect_help',
+            cmd: 'help {{help_heading}}',
+            next: {
+              codes: { 1: 'complete' },
+              success: 'complete',
+              failure: 'stop',
+            },
+          },
+        ],
+      },
+    })
+    expect(workflowResponse.ok()).toBe(true)
+    await page.reload()
+
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('.workflow-catalog-item', { hasText: title }).click()
+    const workflowCard = page.locator('.workflow-card', { hasText: title })
+    await expect(workflowCard).toBeVisible()
+    await workflowCard.locator('.workflow-run-all').click()
+    await expect(page.locator('[data-workflows-view="executions"]')).toHaveAttribute('aria-selected', 'true')
+    const execution = page.locator('[data-workflow-execution-id]', { hasText: title }).first()
+    await expect(execution).toContainText('Completed', { timeout: 15_000 })
+    await expect(execution).toContainText('Captured: help_heading')
+    await expect(execution).toContainText('to inspect_help (success)')
+
+    await page.locator('.workflows-close').click()
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('[data-workflows-view="executions"]').click()
+    const restored = page.locator('[data-workflow-execution-id]', { hasText: title }).first()
+    await expect(restored).toContainText('Completed')
+    const openRun = restored.getByRole('button', { name: /Open run/ }).last()
+    await expect(openRun).toBeVisible()
+    await openRun.click()
+    await expect(page.locator('#history-run-overlay')).toBeVisible()
+    await expect(page.locator('#history-run-modal')).toContainText('RUN DETAILS')
+  })
+
+  test('creates, edits, and deletes a user workflow from the workflows modal', async ({ page }) => {
     // Two save-and-render cycles plus modal open/close exceeds the default 30s
     // budget on slow CI runners; give the test enough headroom.
     test.setTimeout(60_000)
@@ -1845,10 +1968,41 @@ test.describe('workflows modal', () => {
     await page.locator('#workflow-new-btn').click()
     await expect(page.locator('#workflow-editor-overlay')).toHaveClass(/\bopen\b/)
     await page.locator('#workflow-editor-title-input').fill('Saved Whois')
-    await page.locator('.workflow-editor-step-command').first().fill('whois {{domain}}')
-    await page.locator('.workflow-editor-step-note').first().fill('Lookup registration')
+    await page.locator('#workflow-editor-add-parameter').click()
+    const parameter = page.locator('[data-workflow-editor-parameter]').first()
+    await parameter.locator('.workflow-editor-parameter-id').fill('domain')
+    await parameter.locator('.workflow-editor-parameter-label').fill('Domain')
+    await parameter.locator('.workflow-editor-parameter-type').selectOption('domain')
+    await parameter.locator('.workflow-editor-parameter-required').check()
+    await parameter.locator('.workflow-editor-parameter-sensitive').check()
+    const firstEditorStep = page.locator('[data-workflow-editor-step]').first()
+    await firstEditorStep.locator('.workflow-editor-step-command').fill('whois {{domain}}')
+    await firstEditorStep.locator('.workflow-editor-step-note').fill('Lookup registration')
+    await firstEditorStep.locator('.workflow-editor-add-capture').click()
+    await firstEditorStep.locator('.workflow-editor-capture-name').fill('registration_line')
+    await firstEditorStep.locator('.workflow-editor-capture-required-input').check()
+    await page.locator('#workflow-editor-add-step').click()
+    const secondEditorStep = page.locator('[data-workflow-editor-step]').nth(1)
+    await secondEditorStep.locator('.workflow-editor-step-id').fill('inspect')
+    await secondEditorStep.locator('.workflow-editor-step-command').fill('printf %s {{registration_line}}')
     const createdWorkflow = await saveWorkflowEditorAndWait(page, 'POST')
     expect(createdWorkflow?.id).toBeTruthy()
+    expect(createdWorkflow?.version).toBe(2)
+    expect(createdWorkflow?.inputs?.[0]).toMatchObject({
+      id: 'domain',
+      type: 'domain',
+      required: true,
+      sensitive: true,
+    })
+    expect(createdWorkflow?.steps?.[0]).toMatchObject({
+      id: 'step_1',
+      captures: [{ name: 'registration_line', source: 'first_nonempty_line', required: true }],
+      next: { success: 'inspect', failure: 'stop' },
+    })
+    expect(createdWorkflow?.steps?.[1]).toMatchObject({
+      id: 'inspect',
+      next: { success: 'complete', failure: 'stop' },
+    })
 
     const userCard = page.locator(
       `#workflows-overlay .workflow-card.is-user-workflow[data-workflow-id="${createdWorkflow.id}"]`,
@@ -1858,12 +2012,67 @@ test.describe('workflows modal', () => {
     await expect(userCard.locator('.workflow-edit-btn')).toBeVisible()
     await expect(userCard.locator('.workflow-step-cmd').first()).toContainText('whois {{domain}}')
 
+    const editorExecution = {
+      id: 'wfx_editor_e2e',
+      title: 'Saved Whois',
+      status: 'running',
+      current_step_id: 'step_1',
+      created: '2026-07-13 12:00:00',
+      steps: [],
+    }
+    await page.route('**/workflow-executions**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ executions: [editorExecution] }),
+        })
+        return
+      }
+      if (route.request().method() !== 'POST') return route.fallback()
+      const request = route.request().postDataJSON()
+      expect(request).toMatchObject({
+        workflow_id: createdWorkflow.id,
+        inputs: { domain: 'example.com' },
+      })
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          execution: editorExecution,
+          launch: null,
+        }),
+      })
+    })
+    await userCard.locator('[data-workflow-input-id="domain"]').fill('example.com')
+    await userCard.locator('.workflow-run-all').click()
+    await expect(page.locator('[data-workflows-view="executions"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('[data-workflow-execution-id="wfx_editor_e2e"]')).toBeVisible()
+    await expect(page.locator('.tab-panel.active .output')).not.toContainText('wfx_editor_e2e')
+
+    await page.locator('[data-workflows-view="workflows"]').click()
     await userCard.locator('.workflow-edit-btn').click()
     await expect(page.locator('#workflow-editor-title')).toHaveText('EDIT WORKFLOW')
+    await expect(page.locator('.workflow-editor-parameter-id').first()).toHaveValue('domain')
+    await expect(page.locator('.workflow-editor-parameter-sensitive').first()).toBeChecked()
+    await expect(page.locator('.workflow-editor-step-id').first()).toHaveValue('step_1')
+    await expect(page.locator('.workflow-editor-capture-name').first()).toHaveValue('registration_line')
     await page.locator('.workflow-editor-step-command').first().fill('dig {{domain}} A')
     await saveWorkflowEditorAndWait(page, 'PUT')
 
     await expect(userCard.locator('.workflow-step-cmd').first()).toContainText('dig {{domain}} A')
+
+    const deleteResponse = page.waitForResponse((response) => (
+      response.url().includes(`/session/workflows/${createdWorkflow.id}`)
+      && response.request().method() === 'DELETE'
+    ))
+    await userCard.locator('.workflow-delete-btn').click()
+    await expect(page.locator('#confirm-host')).toContainText('Delete workflow "Saved Whois"?')
+    await page.locator('[data-confirm-action-id="delete"]').click()
+    expect((await deleteResponse).ok()).toBe(true)
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#workflows-overlay .workflow-card')).toBeVisible()
+    await expect(page.locator('#workflows-panel-workflows')).not.toContainText('Saved Whois')
+    await expect(page.locator('#rail-workflows-list .rail-item', { hasText: 'Saved Whois' })).toHaveCount(0)
   })
 
   test('rail workflow plus opens the new workflow editor without toggling the section', async ({ page }) => {
@@ -1913,6 +2122,7 @@ test.describe('workflows modal', () => {
 
     await ensurePromptReady(page)
     await openWorkflowsModal(page)
+    await page.locator('.workflow-catalog-item', { hasText: 'Subdomain HTTP Triage' }).click()
     const workflowCard = page.locator('.workflow-card', { hasText: 'Subdomain HTTP Triage' })
     await expect(workflowCard).toBeVisible()
     const input = workflowCard.locator('.workflow-input-control')
@@ -1936,21 +2146,67 @@ test.describe('workflows modal', () => {
     ])
   })
 
-  test('clicking a rail workflow opens the scoped modal without collapsing the rail list', async ({ page }) => {
+  test('rail browse and workflow entries open one workspace with global executions', async ({ page }) => {
     const section = page.locator('#rail-section-workflows')
     if (await section.evaluate((node) => node.classList.contains('closed'))) {
       await page.locator('#rail-workflows-header').click()
     }
-    const railItems = page.locator('#rail-workflows-list .rail-item')
+    const browseAll = page.locator('#rail-workflows-list .rail-workflows-browse-all')
+    const railItems = page.locator('#rail-workflows-list .rail-item:not(.rail-workflows-browse-all)')
+    await expect(browseAll).toBeVisible()
     await expect(railItems.first()).toBeVisible()
     const beforeCount = await railItems.count()
     expect(beforeCount).toBeGreaterThan(1)
 
-    await railItems.first().click()
+    const scopedWorkflows = await page.evaluate(() => (
+      (window.__workflowCatalogItems || []).slice(0, 2).map(item => ({
+        id: item.id,
+        title: item.title,
+      }))
+    ))
+    expect(scopedWorkflows).toHaveLength(2)
+    const executionReads = []
+    await page.route('**/workflow-executions?*', async (route) => {
+      const workflowId = new URL(route.request().url()).searchParams.get('workflow_id') || ''
+      executionReads.push(workflowId)
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          executions: [{
+            id: 'wfx_global_first',
+            workflow_id: scopedWorkflows[0].id,
+            title: scopedWorkflows[0].title,
+            status: 'completed',
+            created: '2026-07-13 10:00:00',
+            finished: '2026-07-13 10:00:01',
+            steps: [],
+          }],
+        }),
+      })
+    })
 
+    await railItems.nth(1).click()
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#workflows-modal .workflow-card')).toHaveCount(1)
-    await expect(page.locator('#rail-workflows-list .rail-item')).toHaveCount(beforeCount)
+    await expect(page.locator('.workflow-catalog-item')).toHaveCount(beforeCount)
+    await expect(page.locator('.workflow-title')).toHaveText(scopedWorkflows[1].title)
+    await expect(page.locator('[data-workflow-execution-id="wfx_global_first"]')).toBeHidden()
+
+    await page.locator('.workflows-close').click()
+    await browseAll.click()
+    await page.locator('.workflow-catalog-item', { hasText: scopedWorkflows[0].title }).click()
+    await expect(page.locator('.workflow-title')).toHaveText(scopedWorkflows[0].title)
+    await page.locator('.workflows-close').click()
+
+    await railItems.nth(1).click()
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#workflows-modal .workflow-card')).toHaveCount(1)
+    await expect(page.locator('.workflow-catalog-item')).toHaveCount(beforeCount)
+    await expect(page.locator('.workflow-title')).toHaveText(scopedWorkflows[1].title)
+    await expect(page.locator('#rail-workflows-list .rail-item:not(.rail-workflows-browse-all)')).toHaveCount(beforeCount)
+    await page.locator('[data-workflows-view="executions"]').click()
+    await expect(page.locator('[data-workflow-execution-id="wfx_global_first"]')).toBeVisible()
+    expect(executionReads).toEqual([''])
   })
 })
 

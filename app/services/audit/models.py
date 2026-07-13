@@ -35,6 +35,8 @@ class AuditTargetType(str, Enum):
     WATCHER = "watcher"
     SESSION_TOKEN = "session_token"
     IMPORT = "import"
+    WORKFLOW = "workflow"
+    WORKFLOW_EXECUTION = "workflow_execution"
 
 
 class AuditEventType(str, Enum):
@@ -97,6 +99,11 @@ class AuditEventType(str, Enum):
     SESSION_TOKEN_REVOKE = "session_token.revoke"
     SESSION_MIGRATE = "session.migrate"
     IMPORT_APPLY = "import.apply"
+    WORKFLOW_CREATE = "workflow.create"
+    WORKFLOW_UPDATE = "workflow.update"
+    WORKFLOW_DELETE = "workflow.delete"
+    WORKFLOW_EXECUTION_START = "workflow_execution.start"
+    WORKFLOW_EXECUTION_CANCEL = "workflow_execution.cancel"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -424,6 +431,25 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     AuditEventType.IMPORT_APPLY.value: _spec(
         AuditEventType.IMPORT_APPLY, AuditTargetType.IMPORT, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.WORKFLOW_CREATE.value: _spec(
+        AuditEventType.WORKFLOW_CREATE, AuditTargetType.WORKFLOW, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.WORKFLOW_UPDATE.value: _spec(
+        AuditEventType.WORKFLOW_UPDATE, AuditTargetType.WORKFLOW, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.WORKFLOW_DELETE.value: _spec(
+        AuditEventType.WORKFLOW_DELETE, AuditTargetType.WORKFLOW, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.WORKFLOW_EXECUTION_START.value: _spec(
+        AuditEventType.WORKFLOW_EXECUTION_START,
+        AuditTargetType.WORKFLOW_EXECUTION,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.WORKFLOW_EXECUTION_CANCEL.value: _spec(
+        AuditEventType.WORKFLOW_EXECUTION_CANCEL,
+        AuditTargetType.WORKFLOW_EXECUTION,
+        RecordingMode.BEST_EFFORT,
     ),
 }
 

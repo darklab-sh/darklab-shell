@@ -444,6 +444,8 @@ _FORGIVING_INT_KEYS = {
     "ai_max_queue_depth",
     "ai_rate_limit_per_session_hour",
     "ai_rate_limit_global_per_minute",
+    "workflow_active_execution_limit",
+    "workflow_execution_max_runtime_seconds",
 }
 _FORGIVING_INT_DEFAULTS: dict[str, tuple[int, int]] = {
     "database_pool_min": (1, 0),
@@ -459,6 +461,8 @@ _FORGIVING_INT_DEFAULTS: dict[str, tuple[int, int]] = {
     "ai_max_queue_depth": (20, 0),
     "ai_rate_limit_per_session_hour": (5, 1),
     "ai_rate_limit_global_per_minute": (2, 1),
+    "workflow_active_execution_limit": (3, 1),
+    "workflow_execution_max_runtime_seconds": (14400, 1),
 }
 _FORGIVING_MB_KEYS = {"output_preview_max_mb", "full_output_max_mb"}
 _NORMALIZED_LIST_KEYS = {
@@ -944,6 +948,8 @@ def load_config(conf_dir=None):
         "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
         "raw_packet_scanning_enabled": False,
+        "workflow_active_execution_limit": 3,
+        "workflow_execution_max_runtime_seconds": 14400,
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,

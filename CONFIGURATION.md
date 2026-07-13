@@ -349,6 +349,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
+| `workflow_active_execution_limit` | `3` | Maximum active workflow executions for one personal session or team owner |
+| `workflow_execution_max_runtime_seconds` | `14400` | Maximum total lifetime of one workflow execution. The engine checks this before launching or advancing each step |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
 | `run_broker_require_redis` | `true` | Requires Redis for brokered live reattachment. Keep enabled for Docker/production deployments; set to `false` only for single-worker local development where in-memory replay limitations are acceptable. Multi-worker startup still requires Redis for shared active-run state |
@@ -1378,7 +1380,7 @@ Relative paths are resolved from `app/conf`. The app reloads the catalog when th
 - Add FAQ entries in `app/conf/faq.local.yaml`.
 - Add welcome samples in `app/conf/welcome.local.yaml`.
 - Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
-- Add deployment-specific workflows in `app/conf/workflows.local.yaml` or through the in-app workflow editor.
+- Add deployment-specific legacy or v2 workflows in `app/conf/workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
 - Add deployment-specific evidence package presets in `app/conf/package_presets.local.yaml` and point `package_presets_file` at that file.
 - Add deployment-specific report templates in `app/conf/report_templates.local.yaml` and point `report_templates_file` at that file.
 
@@ -1406,5 +1408,6 @@ Relative paths are resolved from `app/conf`. The app reloads the catalog when th
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

@@ -14,6 +14,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
   - [AI Assists: Private Provider, Worker, and Validation Boundary](#ai-assists-private-provider-worker-and-validation-boundary)
+  - [Durable Workflows: Server-Owned Steps and Bounded Captures](#durable-workflows-server-owned-steps-and-bounded-captures)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
@@ -129,6 +130,22 @@ The private-base-URL guard is intentionally conservative. The default use case i
 Suggestion validation sits outside the model. The model may propose only JSON, but the app still checks the command root, command policy, trusted target presence, known open ports for port-scoped suggestions, redaction sentinels, and a small denylist of known hallucinated flags. Accepted suggestions can be copied, and optional Run buttons still submit through the normal composer path so command policy gets the final say. Rejected suggestions are stored and displayed as blocked drafts because they are useful debugging evidence without becoming executable UI.
 
 AI payloads are stored separately from transcripts, findings, Atlas source text, search text, and comparisons. This keeps assistant text additive and auditable while preserving the original command output as the source of truth.
+
+### Durable Workflows: Server-Owned Steps and Bounded Captures
+
+**V2 workflow progress belongs to the server, while each command remains a normal run.**
+
+The original workflow runner queued rendered commands in one browser tab and advanced when that tab's status changed. That works for simple guided lists, but it can't reliably preserve branches, captures, cancellation, or progress after a reload. V2 definitions therefore compile into an immutable database snapshot with one state row per stable step id. The server claims and launches one step at a time through the existing run broker, then advances only after normal run finalization has saved the completed run.
+
+This design deliberately reuses the command lifecycle instead of introducing a second executor. Every rendered step crosses the same command policy, secret, workspace, team-scope, runtime-readiness, output, finding, artifact, and project-link boundaries as a command typed at the prompt. The execution ledger adds orchestration context and a unique run-to-step link; it doesn't replace run history.
+
+Template substitution is authoritative on the server and quotes each value as one shell scalar before policy validation. Captures observe normalized output with a small fixed selector set: eligible lines, structured entities, and JSON Pointer scalar values. Arbitrary expressions and regular expressions aren't accepted because they would add a second untrusted evaluation language and make runtime limits harder to guarantee. Captured values stay local to the execution and are omitted from workflow lifecycle logs.
+
+Durability also needs a bounded recovery rule. Web startup reconciles active execution rows after stale run metadata is cleaned up: it reclaims a step that never reached run binding, advances a linked run that was saved before the workflow hook completed, leaves a still-live broker run alone, and fails a vanished run instead of guessing. The same execution path rechecks the current team, initiating member permission, and initiating session token before every launch. Per-owner concurrency and wall-clock limits keep playbooks from becoming a second way around normal run controls.
+
+Interactive PTY commands remain outside this model. Their completion depends on durable terminal-screen capture and input/replay state, not just a normal command exit and normalized line stream. The workflow launcher therefore detects registry-declared PTY trigger flags and fails that step before broker dispatch instead of silently running it through the wrong transport.
+
+Execution events are derived from the durable execution and step rows rather than copied into another event table. Stable logical ordering gives clients a replay cursor for start, step, capture-name, and terminal changes while keeping commands and values out of the feed. The same privacy boundary applies to workflow audit rows, lifecycle logs, and metric labels: they carry bounded ids, counts, status, timing, exit, transition, and failure-class fields only.
 
 ---
 
@@ -609,5 +626,6 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

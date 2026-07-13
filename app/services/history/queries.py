@@ -39,6 +39,7 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
+from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
 from services.history.insights import history_insights as history_insights
 from services.history import mutations as _history_mutations
 
@@ -575,6 +576,7 @@ def list_history_items(
         scheduled_by_run = schedule_refs_by_run(conn, run_ids)
         labels_by_run = entity_labels_by_entity_ids(conn, "run", run_ids)
         notes_by_run = entity_notes_by_entity_ids(conn, "run", run_ids)
+        workflow_provenance = workflow_provenance_by_run(conn, run_ids)
         labels_by_snapshot = entity_labels_by_entity_ids(conn, "snapshot", snapshot_ids)
         notes_by_snapshot = entity_notes_by_entity_ids(conn, "snapshot", snapshot_ids)
         for item in paged_runs:
@@ -593,6 +595,7 @@ def list_history_items(
                 "atlas_finding_count": 0,
             }))
             _apply_schedule_ref(item, scheduled_by_run.get(str(item["id"])))
+            apply_workflow_provenance(item, workflow_provenance.get(str(item["id"])))
         for item in paged_snapshots:
             item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
             item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
@@ -865,7 +868,11 @@ def history_run_row(run_id: str):
             "WHERE runs.id = ?",
             (run_id,),
         ).fetchone()
-    return dict(row) if row else None
+        run = dict(row) if row else None
+        if run:
+            provenance = workflow_provenance_by_run(conn, [run_id], include_steps=True).get(run_id)
+            apply_workflow_provenance(run, provenance)
+    return run
 
 
 def history_run_private_metadata(run_id: str, session_id: str, run_team_id: str, *, include_private_metadata: bool):

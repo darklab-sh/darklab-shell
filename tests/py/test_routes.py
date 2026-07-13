@@ -3771,6 +3771,15 @@ class TestTeamRoutes:
             assert admin_update.status_code == 200
             assert admin_update.get_json()["workflow"]["title"] == "Updated team DNS"
             assert admin_delete.status_code == 200
+            workflow_audit = _audit_event_rows(target_id=workflow["id"])
+            assert [row["event_type"] for row in workflow_audit] == [
+                "workflow.create",
+                "workflow.update",
+                "workflow.delete",
+            ]
+            assert {row["target_type"] for row in workflow_audit} == {"workflow"}
+            assert {row["details"]["source"] for row in workflow_audit} == {"team"}
+            assert "example.com" not in json.dumps(workflow_audit)
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()

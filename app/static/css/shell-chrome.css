@@ -374,6 +374,11 @@
   .rail-section-workflows .rail-item .drill-chev {
     flex: 0 0 auto;
   }
+  .rail-section-workflows .rail-workflows-browse-all {
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--green);
+    font-weight: 700;
+  }
   .rail-section-empty {
     padding: 5px 18px;
     font-size: 12px;

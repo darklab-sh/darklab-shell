@@ -6111,6 +6111,8 @@ class TestPostgresMigrations:
         "starred_commands",
         "session_variables",
         "user_workflows",
+        "workflow_execution_steps",
+        "workflow_executions",
         "recent_values",
         "secrets",
         "notification_channels",
@@ -6145,23 +6147,28 @@ class TestPostgresMigrations:
     @staticmethod
     def _postgres_table_columns(statements, table_name):
         create_re = re.compile(rf"CREATE TABLE IF NOT EXISTS {re.escape(table_name)}\s*\(", re.I)
+        alter_re = re.compile(
+            rf"ALTER TABLE {re.escape(table_name)} ADD COLUMN(?: IF NOT EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)",
+            re.I,
+        )
+        columns = set()
         for statement in statements:
-            if not create_re.search(statement):
-                continue
-            body = statement[statement.find("(") + 1:statement.rfind(")")]
-            columns = set()
-            for raw_line in body.splitlines():
-                line = raw_line.strip().rstrip(",")
-                if not line:
-                    continue
-                keyword = line.split()[0].upper()
-                if keyword.startswith("'"):
-                    continue
-                if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
-                    continue
-                columns.add(line.split()[0].strip('"'))
-            return columns
-        return set()
+            if create_re.search(statement):
+                body = statement[statement.find("(") + 1:statement.rfind(")")]
+                for raw_line in body.splitlines():
+                    line = raw_line.strip().rstrip(",")
+                    if not line:
+                        continue
+                    keyword = line.split()[0].upper()
+                    if keyword.startswith("'"):
+                        continue
+                    if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
+                        continue
+                    columns.add(line.split()[0].strip('"'))
+            alter_match = alter_re.search(statement)
+            if alter_match:
+                columns.add(alter_match.group(1))
+        return columns
 
     @staticmethod
     def _postgres_shared_index_names(statements):
@@ -6232,6 +6239,7 @@ class TestPostgresMigrations:
             "0040",
             "0041",
             "0042",
+            "0043",
         ]
         for table_name in (
             "runs",
@@ -6572,7 +6580,7 @@ class TestPostgresMigrations:
         from core.database_backend import DatabaseBackend
         from core.migrations import MIGRATIONS
         from core.migrations.baseline import postgres_baseline_statements
-        from core.schema_manifest import SHARED_APP_TABLES, postgres_migration_schema_inventory
+        from core.schema_manifest import UNIFIED_BASELINE_APP_TABLES, postgres_migration_schema_inventory
 
         # Everything before the 0039 squash boundary is the authoritative pre-squash head.
         legacy_statements = [
@@ -6589,7 +6597,7 @@ class TestPostgresMigrations:
 
         column_diffs: list[str] = []
         constraint_diffs: list[str] = []
-        for table_name in sorted(SHARED_APP_TABLES):
+        for table_name in sorted(UNIFIED_BASELINE_APP_TABLES):
             legacy_table = legacy.tables.get(table_name)
             generated_table = generated.tables.get(table_name)
             assert legacy_table is not None, f"legacy v0001-v0038 head is missing shared table {table_name}"
@@ -6608,7 +6616,7 @@ class TestPostgresMigrations:
                     f"generated={sorted(generated_table.constraints)}"
                 )
 
-        shared = set(SHARED_APP_TABLES)
+        shared = set(UNIFIED_BASELINE_APP_TABLES)
         legacy_indexes = {name for name, index in legacy.indexes.items() if index.table_name in shared}
         generated_indexes = {name for name, index in generated.indexes.items() if index.table_name in shared}
 
@@ -7019,7 +7027,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0043",
+            "0044",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7071,7 +7079,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0042"
+        assert rows[-1]["version"] == "0043"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7460,13 +7468,14 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042"]
+        assert applied == ["0039", "0040", "0041", "0042", "0043"]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
         assert "0041" in conn.applied_versions
         assert "0042" in conn.applied_versions
-        assert conn.commit_count == 4
+        assert "0043" in conn.applied_versions
+        assert conn.commit_count == 5
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -15379,7 +15388,7 @@ class TestEntrypointWorkspaceRepair:
             assert state["metrics_module_loaded"] is False
 
         assert payload["factory_distinct"] is True
-        assert payload["factory_blueprint_count"] == 14
+        assert payload["factory_blueprint_count"] == 15
         assert payload["factory_override_false"] is False
         assert payload["factory_override_true"] is True
         assert payload["factory_testing_override"] is True
@@ -15512,6 +15521,8 @@ class TestEntrypointWorkspaceRepair:
         assert "FLASK_APP=wsgi.py" in server_helper
         assert "wsgi:application" in server_helper
         assert "app:app" not in server_helper
+        assert "from core.database import db_init; db_init()" in server_helper
+        assert '"$PYTHON_BIN" -c "import app"' not in server_helper
 
 
 class TestAIRuntimeWiring:
@@ -22993,6 +23004,80 @@ class TestWorkflowInputLoading:
                 ],
             }
         ]
+
+    def test_load_workflows_rejects_an_invalid_v2_entry_as_one_playbook(self):
+        payload = textwrap.dedent(
+            """
+            - version: 2
+              id: broken_playbook
+              title: "Broken playbook"
+              inputs:
+                - id: host
+                  type: host
+                  required: true
+              steps:
+                - id: probe
+                  cmd: "ping {{host}}"
+                  next:
+                    success: missing_step
+                    failure: stop
+                - id: fallback
+                  cmd: "host {{host}}"
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(payload)
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result == []
+        warning.assert_called_once()
+        assert warning.call_args.args[0] == "WORKFLOW_DEFINITION_REJECTED"
+        assert warning.call_args.kwargs["extra"]["entry_index"] == 0
+
+        unsupported = textwrap.dedent(
+            """
+            - version: 3
+              id: future_playbook
+              title: Future playbook
+              steps:
+                - id: skipped
+                  cmd: "echo should-not-run"
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(unsupported, encoding="utf-8")
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result == []
+        warning.assert_called_once()
+        assert warning.call_args.kwargs["extra"] == {
+            "source": "config",
+            "entry_index": 0,
+            "reason": "unsupported workflow version",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text("- version: [2\n", encoding="utf-8")
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result == []
+        warning.assert_called_once()
+        assert warning.call_args.kwargs["extra"]["reason"] == "invalid_yaml"
 
     def test_load_all_workflows_filters_workspace_required_workflows(self):
         disabled = load_all_workflows({"workspace_enabled": False})

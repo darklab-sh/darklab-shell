@@ -978,6 +978,7 @@ function loadRunnerFns({
     interruptPromptLine,
     hasPendingTerminalConfirm,
     cancelPendingTerminalConfirm,
+    _setPendingTerminalConfirm,
     runCommand,
     attachActiveRunFromMonitor,
     killActiveRunFromMonitor,
@@ -4156,7 +4157,12 @@ describe('session-token set pending prompt', () => {
     const setComposerPromptMode = vi.fn()
     const updateSessionId = vi.fn()
     const reloadSessionHistory = vi.fn(() => Promise.resolve())
-    const { submitCommand, storage } = loadRunnerFns({
+    const {
+      _setPendingTerminalConfirm,
+      cancelPendingTerminalConfirm,
+      submitCommand,
+      storage,
+    } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       appendLine,
       addToHistory,
@@ -4268,6 +4274,24 @@ describe('session-token set pending prompt', () => {
     expect(addToHistory).toHaveBeenCalledTimes(1)
     expect(setComposerPromptMode).toHaveBeenCalledTimes(1)
     expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+
+    cancelPendingTerminalConfirm('tab-1')
+    appendLine.mockClear()
+    const secretAnswer = vi.fn()
+    _setPendingTerminalConfirm({
+      kind: 'secret',
+      tabId: 'tab-1',
+      onAnswer: secretAnswer,
+    })
+    await submitCommand('workflow-secret-value')
+
+    expect(setComposerPromptMode).toHaveBeenCalledWith('secret')
+    expect(secretAnswer).toHaveBeenCalledWith('workflow-secret-value')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      'workflow-secret-value',
+      'prompt-echo',
+      'tab-1',
+    )
   })
 
   it('treats Ctrl+C as cancel and aborts the session-token set flow', async () => {

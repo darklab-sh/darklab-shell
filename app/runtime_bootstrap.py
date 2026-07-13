@@ -197,6 +197,20 @@ def cleanup_active_run_metadata_on_startup() -> None:
         )
 
 
+def recover_workflow_executions_on_startup() -> None:
+    from services.workflows.executions import recover_workflow_executions  # noqa: PLC0415
+
+    try:
+        recover_workflow_executions()
+    except Exception:
+        log.error("WORKFLOW_RECOVERY_ERROR", exc_info=True, extra={
+            "execution_id": "",
+            "stage": "recovery_batch",
+            "pid": os.getpid(),
+            "recovery_owner": True,
+        })
+
+
 def _bootstrap_step_flags(
     *,
     init_metrics: bool,
@@ -257,6 +271,7 @@ def bootstrap_runtime(
         ("process", init_process, lambda: init_process_runtime(active_cfg)),
         ("database", init_db, init_database),
         ("active_run_cleanup", cleanup_active_runs, cleanup_active_run_metadata_on_startup),
+        ("workflow_recovery", cleanup_active_runs, recover_workflow_executions_on_startup),
     )
     for step, enabled, func in steps:
         if not enabled:

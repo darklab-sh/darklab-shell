@@ -638,19 +638,21 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; user-created workflows appear above the built-in catalog under **My workflows**.
-- Clicking a step pre-fills the prompt with its `cmd`; each step can also be run directly, and `Run all` queues the rendered steps sequentially in the active tab.
-- The **New** workflow editor saves personal workflows by default, or shared team workflows when a team scope is active, with a title, description, ordered command steps, optional notes, and `{{variables}}` inferred from the commands.
-- The terminal-native `workflow` command supports `workflow list`, `workflow show <name>`, and `workflow run <name> [--variable value ...]`; missing required variables are prompted transcript-style before the run is queued.
+- **Browse all workflows** in the desktop rail, `Alt+G`, and the mobile ☰ menu open the same Workflows workspace. The **Workflows** tab has search, source filters, grouped personal/team/built-in definitions, and one selected detail. Clicking a workflow in the desktop rail opens that workspace with the definition selected instead of hiding the rest of the catalog.
+- Clicking a step pre-fills the prompt with its `cmd`, and each step can also be run directly. `Run all` keeps legacy workflows in the active tab and starts a durable server execution for explicit v2 playbooks.
+- The **Executions** tab shows recent durable playbooks in the active personal or team scope, including their current step, elapsed time, branch outcome, capture names, and linked runs. Active runs can be attached to a terminal tab, completed runs open in Run Details, and cancellation asks for confirmation before stopping the current step.
+- Active playbooks continue when the Workflows panel closes. Reopening the panel, reloading the app, or switching scope restores the matching execution state; the desktop modal and mobile sheet use the same controls.
+- The **New Workflow** editor saves personal workflows by default, or shared team workflows when a team scope is active. Saved workflows can be edited or deleted from their detail view; deleting one keeps the workspace open, selects the next definition, and removes the deleted item from the desktop rail immediately. The Parameters section supports text, target, domain, host, URL, port, port-set, Files-path, and wordlist values with labels, defaults, placeholders, help, and required state. Steps have stable IDs plus **After success** and **After failure** routes. Each step can capture a first line, matching line, structured entity, or JSON Pointer value for later steps; command previews label those future values as available during the playbook. Invalid parameters, steps, transitions, and captures are called out beside the matching field.
+- The terminal-native `workflow` command supports `list`, `show`, and `run`; missing required variables are prompted transcript-style. Sensitive values use masked fields and non-echoing prompts, and must be omitted from inline flags so they don't appear in the command transcript. Starting an execution still stores all supplied values, including sensitive inputs, in the owner-scoped execution record and database backups, so credentials that shouldn't become workflow history belong in app-managed Secrets. A terminal-started playbook returns its durable execution id and points to `workflow status` instead of leaving an initial-step snapshot that can go stale. Playbooks started with **Run all** keep progress in the Workflows panel without adding partial status to the active terminal. `workflow runs`, `workflow status <execution-id>`, and `workflow cancel <execution-id>` expose durable v2 execution state.
 - Each step can show a short `note` explaining what the command checks.
 - Personal workflows are stored with the active session and migrate with session tokens. Shared team workflows stay in that team scope; owners and admins can create, edit, and delete them, while other team members can use them when running commands.
 - Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, fast port/service triage, and Files-backed chained recon such as subdomain HTTP triage and crawl-and-scan.
-- Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
+- Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart. Invalid v2 entries, unsupported explicit versions, and malformed YAML are rejected instead of exposing a partial playbook.
 - Workflows that depend on Files can declare `feature_required: workspace`; those entries are hidden when `workspace_enabled` is off.
 
-**Limits:** step commands still run through the command policy — a workflow step is only usable if its `cmd` is permitted by `commands.yaml`.
+**Limits:** every step still runs through the normal command policy and runtime readiness checks. The server allows three active executions per personal or team owner by default and stops an execution after four hours. Team state, the initiator's membership and run permission, and the initiating session token are checked again before each step. Workflow, step, parameter, and capture ids start with a lowercase letter and then use lowercase letters, numbers, and underscores. Saved personal/team definitions allow up to 24 parameters and 40 steps; titles are capped at 120 characters, descriptions and step notes at 1,000, commands at 1,200, and supplied values at 4,096. Captures are limited to eight small scalar values per step and use bounded line, entity, or JSON Pointer selectors rather than arbitrary expressions.
 
-**Configuration:** `conf/workflows.yaml` — operator-defined workflow entries use the same normalized shape as saved user workflows. User-created workflows store that shape in the session database, scoped to the active personal or team workspace, while `conf/workflows.yaml` keeps deployment-wide entries in YAML.
+**Configuration:** `conf/workflows.yaml` accepts legacy linear entries and explicit `version: 2` playbooks. User-created workflows store the same shape in the active personal or team scope. `workflow_active_execution_limit` and `workflow_execution_max_runtime_seconds` control the server-side execution bounds. See [Workflow Playbooks](docs/workflows.md) for the complete YAML, parameter, transition, capture, terminal, and recovery reference.
 
 ```yaml
 - title: "My Custom Check"
@@ -672,15 +674,15 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `title` — required; workflow heading.
 - `description` — optional; shown below the title.
 - `inputs` — optional list of template variables that can be referenced as `{{id}}` inside step commands and notes.
-- `id` — required per input; lowercase letters, numbers, and underscores.
-- `type` — optional per input; accepted values are `text`, `domain`, `host`, `url`, `port`, and `path`.
+- `id` — required per input; starts with a lowercase letter and then uses lowercase letters, numbers, and underscores.
+- `type` — optional per input; accepted values are `text`, `target`, `domain`, `host`, `url`, `port`, `port_set`, `workspace_path`, and `wordlist` (`path` remains a legacy alias).
 - `required`, `placeholder`, `default`, and `help` — optional per input; used by the Workflows panel, `workflow run` prompting, and runtime autocomplete.
 - `steps` — required list; each step needs at least a `cmd`.
 - `cmd` — required; loaded into the prompt when the step is clicked and rendered with workflow inputs when variables are present.
 - `note` — optional; helper text shown alongside the command.
 - `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
 
-**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/user_workflows.py` (session workflow storage), `app/static/js/features/workflows/workflows.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
+**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/` (compiler, captures, execution state, and saved workflows), `app/static/js/features/workflows/` (workflow panel, catalog, parameters, execution view, editor, and CLI), `app/blueprints/workflows.py` (durable execution routes), and `docs/workflows.md` (operator guide).
 
 ---
 
@@ -1430,11 +1432,11 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ## Session Tokens
 
-**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, and saved user options follow an operator across browsers and workstations without introducing a login layer.
+**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, completed personal workflow executions, active-project context, and saved user options follow an operator across browsers and workstations without introducing a login layer.
 
 **Behavior:**
 
-- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, team memberships, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, completed personal workflow executions, active-project context, team memberships, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
 - Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
@@ -1445,11 +1447,11 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 **Terminal commands:**
 
 - `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
-- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, user workflows, project workspace records, recent targets, active-project context, and workspace files when the current session has portable data. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, user workflows, completed personal workflow executions, project workspace records, recent targets, active-project context, and workspace files when the current session has portable data. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
 - `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history or workspace files; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
 - `session-token copy` — copies the active token to the clipboard without printing the raw token in the terminal.
 - `session-token clear` — opens a terminal-owned yes/no confirmation, removes `session_token` from `localStorage` only after explicit confirmation, and reverts to the anonymous UUID session. `Ctrl+C` cancels the clear flow. Server-side session data remains and can be reclaimed with `session-token set`.
-- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent targets, active-project context, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, user workflows, completed personal workflow executions, project workspace records, recent targets, active-project context, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
 - `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
 - `session-token revoke <token>` — opens a transcript-owned yes/no confirmation, warns that the token's history and workspace files will not be recoverable from the app after revocation, then permanently deletes the given token via `POST /session/token/revoke` only after an explicit `yes`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, saved preferences, and workspace files for the revoked token are not deleted but become unreachable.
 
@@ -1463,11 +1465,11 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 | **Rotate** | Token active | Generates a new token, migrates session data, copies the new token |
 | **Clear** | Token active | Opens a destructive confirm, optionally copies the token, then reverts to the anonymous session |
 
-If a session has run history, workspace files, project workspace records, user workflows, or recent targets, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
+If a session has run history, workspace files, project workspace records, user workflows, completed personal workflow executions, or recent targets, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
 
-**Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
+**Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data. Migration and rotation return `409 active_workflow_execution` while the current identity has an active workflow execution; wait for it to finish or cancel it before retrying. Completed personal execution history moves to the destination token, while team-owned history stays with the team.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent targets, active-project context, saved user options, and app-managed workspace files when Files are enabled.
+**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, completed personal workflow executions, project workspace records, recent targets, active-project context, saved user options, and app-managed workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/core/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 
@@ -1624,7 +1626,7 @@ curl http://localhost:8888/diag?format=json
 
 ### Prometheus metrics
 
-`/metrics` is meant for Prometheus, Grafana, and similar monitoring stacks. It exposes `darklab_` metrics for HTTP volume and latency, active and completed runs, PTY activity, rate-limit pressure, broker mode and subscribers, database and Redis health, selected database hot-path latency, Postgres pool health, AI queue health, AI Redis coordination key pressure, workspace usage, Atlas/finding counts, intel provider results and cache size, evidence package builds, snapshots, client errors, and unhandled server exceptions. Labels are bounded to safe values such as command roots, provider IDs, endpoint names, status classes, and coarse outcomes.
+`/metrics` is meant for Prometheus, Grafana, and similar monitoring stacks. It exposes `darklab_` metrics for HTTP volume and latency, active and completed runs, PTY activity, durable workflow execution and step outcomes/durations, workflow capture failures, cancellations and recovery, rate-limit pressure, broker mode and subscribers, database and Redis health, selected database hot-path latency, Postgres pool health, AI queue health, AI Redis coordination key pressure, workspace usage, Atlas/finding counts, intel provider results and cache size, evidence package builds, snapshots, client errors, and unhandled server exceptions. Labels are bounded to safe values such as command roots, provider IDs, endpoint names, status classes, and coarse outcomes. Workflow metric labels don't include workflow names, input or capture values, targets, paths, or output text.
 
 ```bash
 curl http://localhost:8888/metrics
@@ -1662,5 +1664,6 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

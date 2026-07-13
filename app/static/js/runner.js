@@ -2392,7 +2392,8 @@ async function _seedLocalStorageStarsToServer() {
 function _setPendingTerminalConfirm(config) {
   _pendingTerminalConfirm = config || null;
   if (typeof setComposerPromptMode === 'function') {
-    setComposerPromptMode(_pendingTerminalConfirm ? 'confirm' : null);
+    const mode = _pendingTerminalConfirm?.kind === 'secret' ? 'secret' : 'confirm';
+    setComposerPromptMode(_pendingTerminalConfirm ? mode : null);
   }
 }
 
@@ -2423,7 +2424,7 @@ function cancelPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
     : (typeof pending.onNo === 'function' ? pending.onNo : null);
-  if (pending.kind === 'text') {
+  if (pending.kind === 'text' || pending.kind === 'secret') {
     Promise.resolve(typeof cancelHandler === 'function' ? cancelHandler() : undefined).catch((err) => {
       appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
       setStatus('fail');
@@ -3605,8 +3606,8 @@ function submitCommand(rawCmd) {
   if (_pendingTerminalConfirm) {
     const pending = _pendingTerminalConfirm;
     const promptTabId = pending.tabId || _runnerActiveTabId();
-    appendCommandEcho(cmd, promptTabId);
-    if (pending.kind === 'text') {
+    if (pending.kind !== 'secret') appendCommandEcho(cmd, promptTabId);
+    if (pending.kind === 'text' || pending.kind === 'secret') {
       _setPendingTerminalConfirm(null);
       Promise.resolve(typeof pending.onAnswer === 'function' ? pending.onAnswer(cmd) : undefined).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);

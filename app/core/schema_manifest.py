@@ -13,9 +13,7 @@ from core.database_backend import (
     sqlite_schema_objects,
     sqlite_table_names,
 )
-
-
-SHARED_APP_TABLES: tuple[str, ...] = (
+UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
     "ai_run_assists",
     "ai_suggestion_validations",
     "atlas_entity_import_links",
@@ -63,6 +61,7 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     "watchers",
 )
 
+SHARED_APP_TABLES: tuple[str, ...] = (*UNIFIED_BASELINE_APP_TABLES, "workflow_execution_steps", "workflow_executions")
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",
     "runs_fts_config",

@@ -742,6 +742,20 @@ let importedProjectWorkspaceShell;
     if (railWorkflowsCount) railWorkflowsCount.textContent = String(allWorkflows.length);
     if (!railWorkflowsBody) return;
     railWorkflowsBody.replaceChildren();
+    const browseRow = document.createElement('button');
+    browseRow.type = 'button';
+    browseRow.className = 'rail-item rail-workflows-browse-all';
+    browseRow.title = 'Browse all workflows';
+    const browseGlyph = document.createElement('span');
+    browseGlyph.className = 'drill-chev';
+    browseGlyph.setAttribute('aria-hidden', 'true');
+    browseGlyph.textContent = '›';
+    const browseText = document.createElement('span');
+    browseText.className = 'rail-item-text';
+    browseText.textContent = 'Browse all workflows';
+    browseRow.append(browseGlyph, browseText);
+    browseRow.addEventListener('click', () => openWorkflowWorkspace());
+    railWorkflowsBody.appendChild(browseRow);
     if (!allWorkflows.length) {
       const empty = document.createElement('div');
       empty.className = 'rail-section-empty';
@@ -764,21 +778,19 @@ let importedProjectWorkspaceShell;
       text.textContent = label;
       row.appendChild(glyph);
       row.appendChild(text);
-      row.addEventListener('click', () => openScopedWorkflow(idx));
+      row.addEventListener('click', () => openWorkflowWorkspace(wf.id));
       railWorkflowsBody.appendChild(row);
     });
   }
 
-  async function openScopedWorkflow(idx) {
-    const item = allWorkflows[idx];
-    if (!item) return;
+  async function openWorkflowWorkspace(selectedWorkflowId = '') {
     const loadWorkflowsFn = _shellFn('loadWorkflows');
     if (loadWorkflowsFn) {
       try { await loadWorkflowsFn(); } catch (_) { /* non-critical */ }
     }
     const openWorkflowsFn = _shellFn('openWorkflows', importedOpenWorkflows);
     if (openWorkflowsFn) {
-      openWorkflowsFn({ items: [item], emitCatalogEvent: false });
+      openWorkflowsFn({ selectedWorkflowId, view: 'workflows' });
     } else {
       _shellFn('showWorkflowsOverlay', importedShowWorkflowsOverlay)?.();
     }

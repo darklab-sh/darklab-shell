@@ -84,10 +84,10 @@
     {
       "name": "__workflowCatalogItems",
       "purpose": "lazy_placeholder",
-      "owner": "features/workflows/workflows.js",
+      "owner": "features/workflows/workflow_catalog.js",
       "sources": [
         "/static/js/core/lazy_assets.js",
-        "/static/js/features/workflows/workflows.js"
+        "/static/js/features/workflows/workflow_catalog.js"
       ],
       "reason": "The lazy asset loader keeps the workflow catalog cache available before the Workflows module downloads; the module hydrates from the same cache when it loads.",
       "removal_target": "Replace with an explicit Workflows bridge/cache module if the lazy loader no longer needs a pre-module cache."

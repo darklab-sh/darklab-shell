@@ -28,6 +28,7 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
+from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
 
 log = logging.getLogger("shell")
 
@@ -355,12 +356,14 @@ def history_rows(
         metadata = run_metadata_counts_by_run(conn, run_ids)
         atlas = run_atlas_counts_by_run(conn, session_id, run_ids, team_id=team_id)
         scheduled = schedule_refs_by_run(conn, run_ids)
+        workflow_provenance = workflow_provenance_by_run(conn, run_ids)
     for run in runs:
         run_id = str(run["id"])
         run["artifact_count"] = len(artifacts.get(run_id, []))
         run.update(metadata.get(run_id, {}))
         run.update(atlas.get(run_id, {}))
         apply_schedule_ref(run, scheduled.get(run_id))
+        apply_workflow_provenance(run, workflow_provenance.get(run_id))
     log.debug("API_HISTORY_DATA_ACCESS", extra={
         "session": get_log_session_id(session_id),
         "team_scope": bool(team_id),
@@ -393,6 +396,8 @@ def load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any
         run.update(run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
         run.update(run_atlas_counts_by_run(conn, session_id, [run_id], team_id=team_id).get(run_id, {}))
         apply_schedule_ref(run, schedule_refs_by_run(conn, [run_id]).get(run_id))
+        provenance = workflow_provenance_by_run(conn, [run_id], include_steps=True).get(run_id)
+        apply_workflow_provenance(run, provenance)
     return run
 
 

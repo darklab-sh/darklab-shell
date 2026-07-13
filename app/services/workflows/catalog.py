@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
+import logging
 import yaml
 
 
-WORKFLOW_INPUT_TYPES = {"domain", "host", "url", "port", "path"}
+WORKFLOW_INPUT_TYPES = {
+    "text", "target", "domain", "host", "url", "port", "port_set",
+    "path", "workspace_path", "wordlist",
+}
 WORKFLOW_INPUT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 WORKFLOW_TOKEN_RE = re.compile(r"{{\s*([a-z][a-z0-9_]*)\s*}}")
+WORKFLOW_CAPTURE_SOURCES = {
+    "first_nonempty_line", "first_line_containing", "entity", "json_pointer",
+}
+WORKFLOW_TERMINAL_DESTINATIONS = {"complete", "stop"}
+log = logging.getLogger("shell")
 
 
 def _local_overlay_path(path: str) -> str:
@@ -21,9 +31,22 @@ def _load_yaml_list(path: str) -> list:
     try:
         with open(path) as f:
             loaded = yaml.safe_load(f) or []
-    except (FileNotFoundError, yaml.YAMLError):
+    except FileNotFoundError:
         return []
-    return loaded if isinstance(loaded, list) else []
+    except yaml.YAMLError as exc:
+        log.warning("WORKFLOW_DEFINITION_REJECTED", extra={
+            "source": "config",
+            "reason": "invalid_yaml",
+            "error_type": type(exc).__name__,
+        })
+        return []
+    if not isinstance(loaded, list):
+        log.warning("WORKFLOW_DEFINITION_REJECTED", extra={
+            "source": "config",
+            "reason": "root_not_list",
+        })
+        return []
+    return loaded
 
 
 def _load_yaml_list_with_local(path: str) -> list:
@@ -41,6 +64,14 @@ def render_workflow_text(value: str, inputs: dict[str, str]) -> str:
     return WORKFLOW_TOKEN_RE.sub(lambda match: inputs.get(match.group(1), ""), value or "")
 
 
+def render_workflow_command(value: str, variables: dict[str, str]) -> str:
+    """Render workflow variables as single shell-safe scalar arguments."""
+    return WORKFLOW_TOKEN_RE.sub(
+        lambda match: shlex.quote(str(variables.get(match.group(1), ""))),
+        value or "",
+    )
+
+
 def normalize_workflow_inputs(raw_inputs):
     if not isinstance(raw_inputs, list):
         return []
@@ -50,7 +81,7 @@ def normalize_workflow_inputs(raw_inputs):
         if not isinstance(item, dict):
             continue
         input_id = str(item.get("id") or "").strip().lower()
-        input_type = str(item.get("type") or "").strip().lower()
+        input_type = str(item.get("type") or "text").strip().lower()
         if (
             not input_id
             or input_id in seen_ids
@@ -71,6 +102,8 @@ def normalize_workflow_inputs(raw_inputs):
             "default": default,
             "help": help_text,
         }
+        if bool(item.get("sensitive", False)):
+            normalized["sensitive"] = True
         result.append(normalized)
         seen_ids.add(input_id)
     return result
@@ -86,18 +119,80 @@ def normalize_workflow_entry(entry):
         return None
     inputs = normalize_workflow_inputs(entry.get("inputs") or [])
     declared_ids = {item["id"] for item in inputs}
+    version = 2 if str(entry.get("version") or "").strip() == "2" else 1
     clean_steps = []
-    for step in steps:
+    capture_names = set()
+    for index, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
         cmd = str(step.get("cmd") or "").strip()
         note = str(step.get("note") or "").strip()
         if not cmd:
             continue
+        captures = []
+        pending_capture_names = set()
+        for raw_capture in step.get("captures") or []:
+            if not isinstance(raw_capture, dict):
+                continue
+            name = str(raw_capture.get("name") or "").strip().lower()
+            source = str(raw_capture.get("source") or "").strip().lower()
+            if (
+                not WORKFLOW_INPUT_ID_RE.fullmatch(name)
+                or name in declared_ids
+                or name in capture_names
+                or name in pending_capture_names
+                or source not in WORKFLOW_CAPTURE_SOURCES
+            ):
+                continue
+            capture = {
+                "name": name,
+                "source": source,
+                "required": bool(raw_capture.get("required", False)),
+            }
+            for field in ("contains", "entity_type", "pointer"):
+                field_value = str(raw_capture.get(field) or "").strip()
+                if field_value:
+                    capture[field] = field_value
+            captures.append(capture)
+            pending_capture_names.add(name)
         tokens = workflow_tokens(cmd) | workflow_tokens(note)
-        if tokens and not tokens.issubset(declared_ids):
+        all_v2_captures = {
+            str(capture.get("name") or "").strip().lower()
+            for candidate in steps
+            if isinstance(candidate, dict)
+            for capture in candidate.get("captures") or []
+            if isinstance(capture, dict)
+        } if version == 2 else set()
+        if tokens and not tokens.issubset(declared_ids | capture_names | all_v2_captures):
             continue
-        clean_steps.append({"cmd": cmd, "note": note})
+        clean_step: dict[str, object] = {
+            "cmd": cmd,
+            "note": note,
+        }
+        if version == 2:
+            clean_step["id"] = str(step.get("id") or f"step_{index + 1}").strip().lower()
+        if version == 2 and captures:
+            clean_step["captures"] = captures
+            capture_names.update(pending_capture_names)
+        raw_next = step.get("next")
+        if version == 2 and isinstance(raw_next, dict):
+            next_value: dict[str, object] = {}
+            for outcome in ("success", "failure"):
+                destination = str(raw_next.get(outcome) or "").strip().lower()
+                if destination:
+                    next_value[outcome] = destination
+            raw_codes = raw_next.get("codes")
+            if isinstance(raw_codes, dict):
+                codes = {
+                    str(code).strip(): str(destination).strip().lower()
+                    for code, destination in raw_codes.items()
+                    if str(code).strip() and str(destination).strip()
+                }
+                if codes:
+                    next_value["codes"] = codes
+            if next_value:
+                clean_step["next"] = next_value
+        clean_steps.append(clean_step)
     if not clean_steps:
         return None
     normalized = {
@@ -106,6 +201,11 @@ def normalize_workflow_entry(entry):
         "inputs": inputs,
         "steps": clean_steps,
     }
+    if version == 2:
+        normalized["version"] = 2
+    workflow_id = str(entry.get("id") or "").strip().lower()
+    if workflow_id:
+        normalized["id"] = workflow_id
     feature_required = entry.get("feature_required") or entry.get("requires_feature") or entry.get("feature")
     if feature_required:
         if isinstance(feature_required, (list, tuple, set)):
@@ -123,8 +223,23 @@ def load_workflows(path: str) -> list[dict[str, object]]:
     if not data:
         return []
     result = []
-    for entry in data:
-        normalized = normalize_workflow_entry(entry)
+    for index, entry in enumerate(data):
+        normalized = None
+        if isinstance(entry, dict) and "version" in entry:
+            try:
+                from services.workflows.compiler import compile_workflow_definition  # noqa: PLC0415
+
+                if str(entry.get("version") or "").strip() != "2":
+                    raise ValueError("unsupported workflow version")
+                normalized = compile_workflow_definition(entry, require_workflow_id=True)
+            except ValueError as exc:
+                log.warning("WORKFLOW_DEFINITION_REJECTED", extra={
+                    "source": "config",
+                    "entry_index": index,
+                    "reason": str(exc)[:200],
+                })
+        else:
+            normalized = normalize_workflow_entry(entry)
         if normalized:
             result.append(normalized)
     return result

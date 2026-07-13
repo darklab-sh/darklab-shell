@@ -3,9 +3,7 @@ SQLite persistence — connection helper, schema initialisation, and retention p
 Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
-Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
-starred_commands, session_variables, user_workflows, recent_values, scheduled runs,
-Atlas entity tables, and project workspace relationship tables.
+Tables include runs, snapshots, tokens, workflows, automation, Atlas, and Projects.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -498,6 +496,7 @@ def delete_run_artifacts(conn, run_ids):
         log.error("WATCHER_BASELINE_DELETE_HOOK_ERROR", exc_info=True)
 
     placeholders = ",".join("?" for _ in ids)
+    conn.execute(f"UPDATE workflow_execution_steps SET run_id = '' WHERE run_id IN ({placeholders})", ids)  # nosec
     rows = conn.execute(
         f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,

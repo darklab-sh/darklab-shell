@@ -6,25 +6,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: F401
 from services.teams.scope import OwnerContext, owner_context_for_scope
-
-
-class RunPreparationError(Exception):
-    def __init__(self, message: str, *, status_code: int = 403):
-        super().__init__(message)
-        self.status_code = status_code
-
-
-class RunSpawnError(Exception):
-    pass
-
-
-class RunStartRejected(Exception):
-    def __init__(self, code: str, message: str, *, status_code: int = 400):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -75,6 +58,7 @@ def start_brokered_run(
     workspace_cwd: str = "",
     link_project_id: str = "",
     thread_name_prefix: str = "run-broker",
+    run_created_hook: Callable[[str, object | None], None] | None = None,
 ) -> BrokeredRunStartResult:
     owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
     if handlers.resolves_exact_special_builtin_command(original_command):
@@ -98,6 +82,7 @@ def start_brokered_run(
             events,
             exit_code,
             **synthetic_kwargs,
+            **({"run_created_hook": run_created_hook} if run_created_hook else {}),
         )
         return BrokeredRunStartResult(
             run_id=run_id,
@@ -132,6 +117,7 @@ def start_brokered_run(
             ),
             exit_code,
             **synthetic_kwargs,
+            **({"run_created_hook": run_created_hook} if run_created_hook else {}),
         )
         return BrokeredRunStartResult(
             run_id=run_id,
@@ -175,6 +161,7 @@ def start_brokered_run(
             [{"type": "output", "text": handlers.runtime_missing_command_message(prepared_real.missing_runtime)}],
             127,
             **synthetic_kwargs,
+            **({"run_created_hook": run_created_hook} if run_created_hook else {}),
         )
         return BrokeredRunStartResult(
             run_id=run_id,
@@ -198,6 +185,7 @@ def start_brokered_run(
         prepared_real,
         **start_kwargs,
     )
+    attach_started_run(started, run_created_hook)
     handlers.publish_run_event(
         started.run_id,
         "started",

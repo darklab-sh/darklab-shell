@@ -12,7 +12,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
-  - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
   - [Run comparison enhancements](#run-comparison-enhancements)
   - [Bulk history export and share](#bulk-history-export-and-share)
@@ -77,13 +76,6 @@ No research items are currently tracked.
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
-
-### Workflows v2 — playbooks with parameters
-- Evolve workflows from saved command lists into reusable runbooks.
-- Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.
-- Add conditional next-step behavior based on exit code.
-- Let each step capture selected output into named variables that later steps can consume.
-- Build on the existing session-variable and workflow foundations so operators can turn repeat scans into parameterized profiles without rewriting commands by hand.
 
 ### Run replay / scrubbable event stream
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.

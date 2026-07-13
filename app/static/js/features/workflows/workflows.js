@@ -14,6 +14,7 @@ import {
   _persistClientSideRun as importedPersistClientSideRun,
   _recordSuccessfulLocalCommand as importedRecordSuccessfulLocalCommand,
   _setPendingTerminalConfirm as importedSetPendingTerminalConfirm,
+  attachActiveRunFromMonitor as importedAttachActiveRunFromMonitor,
   appendCommandEcho as importedAppendCommandEcho,
   setStatus as importedSetStatus,
   submitComposerCommand as importedSubmitComposerCommand,
@@ -36,9 +37,33 @@ import {
 } from '../autocomplete/runtime_context.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
 import {
+  openHistoryRunDetails as importedOpenHistoryRunDetails,
+} from '../history/history_run_modal_state_bridge.js';
+import {
   apiFetch as importedRuntimeApiFetch,
   hasRuntimeHandler as importedHasRuntimeHandler,
 } from '../../runtime_bridge.js';
+import {
+  cancelWorkflowExecution as importedCancelWorkflowExecution,
+  createWorkflowExecution as importedCreateWorkflowExecution,
+  createWorkflowExecutionController as importedCreateWorkflowExecutionController,
+  getWorkflowExecution as importedGetWorkflowExecution,
+  listWorkflowExecutions as importedListWorkflowExecutions,
+  workflowExecutionIsActive,
+} from './workflow_executions.js';
+import {
+  createWorkflowCatalogStore,
+  workflowCliName,
+} from './workflow_catalog.js';
+import { createWorkflowEditorController } from './workflow_editor.js';
+import {
+  appendWorkflowInputSourcePicker,
+  buildRenderedWorkflow,
+  getWorkflowInputValues,
+  loadWorkflowInputValues,
+  persistWorkflowInputValues,
+  sanitizeWorkflowInputValue,
+} from './workflow_parameters.js';
 import { setWorkflowHandlers as importedSetWorkflowHandlers } from './workflows_bridge.js';
 
 const WORKFLOWS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
@@ -97,6 +122,22 @@ function _workflowApiFetch(...args) {
   return fetcher(...args);
 }
 
+const workflowExecutionController = typeof importedCreateWorkflowExecutionController === 'function'
+  ? importedCreateWorkflowExecutionController({
+    apiFetch: _workflowApiFetch,
+    attachActiveRun: importedAttachActiveRunFromMonitor,
+    bindPressable: _workflowBindPressable,
+    closeOverlays: _workflowCloseMajorOverlays,
+    openRunDetails: importedOpenHistoryRunDetails,
+    showConfirm: importedShowConfirm,
+    showToast: importedShowToast,
+  })
+  : null;
+
+function refreshWorkflowExecutions(options = {}) {
+  return workflowExecutionController?.refresh(options) || Promise.resolve([]);
+}
+
 function _workflowRuntimeHint(value, description = '', insertValue = null) {
   const hint = (typeof importedRuntimeHint === 'function' && importedRuntimeHint)
     || _workflowGlobalFunction('_runtimeHint');
@@ -116,168 +157,100 @@ function _workflowRuntimeContextSpec(spec = {}) {
   return contextSpec ? contextSpec(spec) : spec;
 }
 
-const WORKFLOW_TOKEN_RE = /{{\s*([a-z][a-z0-9_]*)\s*}}/g;
-const WORKFLOW_INPUT_STATE_KEY = 'workflow_input_state_v1';
 const _workflowRunQueueByTab = new Map();
-let workflowCatalogItems = (
-  typeof globalThis !== 'undefined' && Array.isArray(globalThis.__workflowCatalogItems)
-) ? globalThis.__workflowCatalogItems.slice() : [];
-let workflowCatalogLoadPromise = null;
-let _workflowEditorWorkflow = null;
+const workflowCatalogStore = createWorkflowCatalogStore({
+  apiFetch: _workflowApiFetch,
+  onItems: renderWorkflowItems,
+});
 
-function getWorkflowStorageKey(workflow) {
-  const id = String(workflow?.id || '').trim();
-  if (id) return id;
-  const title = String(workflow?.title || '').trim();
-  const description = String(workflow?.description || '').trim();
-  return `${title}::${description}`;
-}
-
-function workflowSlug(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'workflow';
-}
-
-function workflowLookupKeys(workflow) {
-  const keys = [];
-  const id = String(workflow?.id || '').trim();
-  const title = String(workflow?.title || '').trim();
-  [id, title, workflowSlug(title)].forEach((key) => {
-    const value = String(key || '').trim().toLowerCase();
-    if (value && !keys.includes(value)) keys.push(value);
-  });
-  return keys;
-}
-
-function workflowCliName(workflow) {
-  const id = String(workflow?.id || '').trim();
-  return workflowSlug(workflow?.title || id || 'workflow');
-}
-
-function readWorkflowInputState() {
-  if (typeof localStorage === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(WORKFLOW_INPUT_STATE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_err) {
-    return {};
-  }
-}
-
-function writeWorkflowInputState(nextState) {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(WORKFLOW_INPUT_STATE_KEY, JSON.stringify(nextState || {}));
-  } catch (_err) {
-    // Non-critical persistence failure; the workflow form still works in-memory.
-  }
-}
-
-function loadWorkflowInputValues(workflow) {
-  const base = getWorkflowInputValues(workflow);
-  const state = readWorkflowInputState();
-  const saved = state[getWorkflowStorageKey(workflow)];
-  if (!saved || typeof saved !== 'object') return base;
-  const next = { ...base };
-  Object.entries(saved).forEach(([key, value]) => {
-    const input = (workflow?.inputs || []).find((item) => item.id === key);
-    if (!input) return;
-    next[key] = sanitizeWorkflowInputValue(input, value);
-  });
-  return next;
-}
-
-function persistWorkflowInputValues(workflow, values) {
-  const state = readWorkflowInputState();
-  const nextState = { ...state };
-  nextState[getWorkflowStorageKey(workflow)] = { ...(values || {}) };
-  writeWorkflowInputState(nextState);
-}
-
-function sanitizeWorkflowInputValue(input, value) {
-  const raw = String(value == null ? '' : value).trim();
-  if (!input || !raw) return raw;
-  if (input.type === 'port') return raw.replace(/[^\d]/g, '');
-  return raw;
-}
-
-function getWorkflowInputValues(workflow) {
-  const values = {};
-  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
-  inputs.forEach((input) => {
-    values[input.id] = sanitizeWorkflowInputValue(input, input.default || '');
-  });
-  return values;
-}
-
-function renderWorkflowCommandTemplate(template, values) {
-  return String(template || '').replace(WORKFLOW_TOKEN_RE, (_match, token) => values[token] || '');
-}
-
-function workflowInputsReady(workflow, values) {
-  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
-  return inputs.every((input) => !input.required || String(values[input.id] || '').trim().length > 0);
-}
-
-function buildRenderedWorkflow(workflow, values) {
-  const renderedValues = { ...(values || {}) };
-  const ready = workflowInputsReady(workflow, renderedValues);
-  const steps = Array.isArray(workflow?.steps) ? workflow.steps : [];
-  return {
-    ready,
-    steps: steps.map((step) => ({
-      ...step,
-      renderedCmd: renderWorkflowCommandTemplate(step.cmd || '', renderedValues).trim(),
-    })),
-  };
-}
-
-function workflowInputTypeFromName(name) {
-  const value = String(name || '').toLowerCase();
-  if (value.includes('url')) return 'url';
-  if (value.includes('port')) return 'port';
-  if (value.includes('path') || value.includes('file') || value.includes('wordlist')) return 'path';
-  if (value.includes('domain')) return 'domain';
-  return 'host';
-}
-
-function workflowInputLabel(inputId) {
-  return String(inputId || '')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, char => char.toUpperCase());
-}
-
-function collectWorkflowTokensFromSteps(steps) {
-  const seen = [];
-  (Array.isArray(steps) ? steps : []).forEach((step) => {
-    [step?.cmd, step?.note].forEach((value) => {
-      const text = String(value || '');
-      let match = WORKFLOW_TOKEN_RE.exec(text);
-      while (match) {
-        const token = String(match[1] || '').trim();
-        if (token && !seen.includes(token)) seen.push(token);
-        match = WORKFLOW_TOKEN_RE.exec(text);
+function applyWorkflowStepPreviews(card, workflow, values) {
+  const rendered = buildRenderedWorkflow(workflow, values);
+  const stepsEl = card.querySelector('.workflow-steps');
+  if (!stepsEl) return rendered;
+  stepsEl.querySelectorAll('.workflow-step').forEach((stepEl, index) => {
+    const chip = stepEl.querySelector('.workflow-step-cmd');
+    const runBtn = stepEl.querySelector('.workflow-step-run');
+    const state = stepEl.querySelector('.workflow-step-preview-state');
+    const renderedStep = rendered.steps[index];
+    const renderedCmd = renderedStep?.renderedCmd || '';
+    const displayCmd = renderedStep?.displayCmd || renderedCmd;
+    const waitsForCapture = !!renderedStep?.pendingCaptureNames?.length;
+    const usesSensitiveInput = !!renderedStep?.sensitiveInputNames?.length;
+    const runnable = rendered.ready && !!renderedCmd && !waitsForCapture && !usesSensitiveInput;
+    if (chip) {
+      chip.textContent = rendered.ready ? (displayCmd || renderedStep?.cmd || '') : (renderedStep?.cmd || '');
+      if (runnable) {
+        chip.title = 'Click to load into prompt';
+        chip.dataset.faqCommand = renderedCmd;
+        chip.classList.remove('is-disabled');
+      } else {
+        chip.title = waitsForCapture
+          ? 'Capture values are filled during the playbook'
+          : (usesSensitiveInput
+            ? 'Sensitive values run only with Run all'
+            : 'Fill required workflow inputs to load this step');
+        delete chip.dataset.faqCommand;
+        chip.classList.add('is-disabled');
       }
-      WORKFLOW_TOKEN_RE.lastIndex = 0;
-    });
+    }
+    if (runBtn) {
+      runBtn.dataset.workflowStepCmd = runnable ? renderedCmd : '';
+      runBtn.disabled = !runnable;
+      runBtn.setAttribute('aria-disabled', runBtn.disabled ? 'true' : 'false');
+      runBtn.title = waitsForCapture
+        ? 'This step runs after its capture values are available'
+        : (usesSensitiveInput
+          ? 'Sensitive values run only with Run all'
+          : (runBtn.disabled ? 'Fill required workflow inputs to run this step' : 'Run this step'));
+      runBtn.setAttribute('aria-label', runnable ? `Run: ${displayCmd}` : 'Run this step');
+    }
+    if (state) {
+      state.textContent = waitsForCapture
+        ? `During playbook: ${renderedStep.pendingCaptureNames.map(name => `{{${name}}}`).join(', ')}`
+        : 'Inputs known';
+      state.classList.toggle('is-capture-pending', waitsForCapture);
+    }
   });
-  return seen;
+  return rendered;
 }
 
-function inferWorkflowInputsFromSteps(steps) {
-  return collectWorkflowTokensFromSteps(steps).map((id) => ({
-    id,
-    label: workflowInputLabel(id),
-    type: workflowInputTypeFromName(id),
-    required: true,
-    placeholder: id,
-    default: '',
-    help: '',
-  }));
+async function startServerWorkflowExecution(
+  workflow,
+  values,
+  tabId = _workflowActiveTabId(),
+  { announceInTerminal = false } = {},
+) {
+  if (typeof importedCreateWorkflowExecution !== 'function') {
+    throw new Error('Workflow execution is unavailable');
+  }
+  const payload = await importedCreateWorkflowExecution(
+    _workflowApiFetch,
+    workflow,
+    values,
+    tabId,
+  );
+  const execution = payload.execution || {};
+  if (announceInTerminal) {
+    const executionId = String(execution.id || '').trim();
+    const inputCount = Object.keys(values || {}).length;
+    const inputSummary = inputCount
+      ? ` with ${inputCount} input${inputCount === 1 ? '' : 's'}`
+      : '';
+    const executionSummary = executionId ? `execution ${executionId} started` : 'execution started';
+    const statusHint = executionId ? ` Check progress with workflow status ${executionId}.` : '';
+    _workflowAppendLine(
+      `[workflow] ${workflow.title}: ${executionSummary}${inputSummary}.${statusHint}`,
+      'notice',
+      tabId,
+    );
+  }
+  if (typeof importedShowToast === 'function') importedShowToast('Workflow started');
+  const workflowsOverlay = document.getElementById('workflows-overlay');
+  if (!announceInTerminal && workflowsOverlay?.classList.contains('open')) {
+    setWorkflowWorkspaceView('executions', { refreshExecutions: false });
+  }
+  refreshWorkflowExecutions().catch(() => {});
+  return payload;
 }
 
 function runWorkflowCommands(commands) {
@@ -372,6 +345,19 @@ if (typeof workflowOnUiEvent === 'function') {
     }
     _scheduleNextWorkflowQueueStep(tabId);
   });
+  workflowOnUiEvent('app:workflows-opened', () => {
+    syncWorkflowWorkspaceFromOverlay();
+  });
+  workflowOnUiEvent('app:workflows-closed', () => {
+    workflowExecutionController?.onPanelClose();
+  });
+  workflowOnUiEvent('app:scope-changed', () => {
+    selectedWorkflowId = '';
+    workflowCatalogQuery = '';
+    workflowCatalogSource = 'all';
+    mobileWorkflowDetailOpen = false;
+    workflowExecutionController?.onScopeChanged().catch(() => {});
+  });
 }
 
 function renderWorkflowInputCard(card, workflow) {
@@ -415,8 +401,8 @@ function renderWorkflowInputCard(card, workflow) {
     field.appendChild(label);
 
     const control = document.createElement('input');
-    control.className = 'options-token-input workflow-input-control';
-    control.type = input.type === 'port' ? 'text' : 'text';
+    control.className = 'form-control workflow-input-control';
+    control.type = input.sensitive ? 'password' : 'text';
     control.autocomplete = 'off';
     control.autocapitalize = 'none';
     control.autocorrect = 'off';
@@ -439,52 +425,46 @@ function renderWorkflowInputCard(card, workflow) {
     }
 
     grid.appendChild(field);
+    appendWorkflowInputSourcePicker(field, input, control);
   });
 
   panel.appendChild(hint);
 
   const applyRenderedState = () => {
-    const rendered = buildRenderedWorkflow(workflow, values);
-    const stepsEl = card.querySelector('.workflow-steps');
-    if (!stepsEl) return;
-    stepsEl.querySelectorAll('.workflow-step').forEach((stepEl, idx) => {
-      const chip = stepEl.querySelector('.workflow-step-cmd');
-      const runBtn = stepEl.querySelector('.workflow-step-run');
-      const renderedStep = rendered.steps[idx];
-      const renderedCmd = renderedStep?.renderedCmd || '';
-      if (chip) {
-        chip.textContent = rendered.ready ? (renderedCmd || renderedStep?.cmd || '') : (renderedStep?.cmd || '');
-        if (rendered.ready && renderedCmd) {
-          chip.title = 'Click to load into prompt';
-          chip.dataset.faqCommand = renderedCmd;
-          chip.classList.remove('is-disabled');
-        } else {
-          chip.title = 'Fill required workflow inputs to load this step';
-          delete chip.dataset.faqCommand;
-          chip.classList.add('is-disabled');
-        }
-      }
-      if (runBtn) {
-        runBtn.dataset.workflowStepCmd = rendered.ready ? renderedCmd : '';
-        runBtn.disabled = !(rendered.ready && renderedCmd);
-        runBtn.setAttribute('aria-disabled', runBtn.disabled ? 'true' : 'false');
-        runBtn.title = runBtn.disabled ? 'Fill required workflow inputs to run this step' : 'Run this step';
-        runBtn.setAttribute('aria-label', rendered.ready && renderedCmd ? `Run: ${renderedCmd}` : 'Run this step');
-      }
-    });
+    const rendered = applyWorkflowStepPreviews(card, workflow, values);
     runAllBtn.disabled = !(rendered.ready && rendered.steps.some((step) => step.renderedCmd));
     runAllBtn.setAttribute('aria-disabled', runAllBtn.disabled ? 'true' : 'false');
+    const hasSensitiveValues = rendered.steps.some((step) => step.sensitiveInputNames?.length);
     hint.textContent = rendered.ready
-      ? 'Rendered commands are live. Click a chip to load it, use ▶ to run one step, or Run all to execute the full workflow here in sequence.'
+      ? (hasSensitiveValues
+        ? 'Sensitive values stay masked and run only with Run all.'
+        : 'Rendered commands are live. Click a chip to load it, use ▶ to run one step, or Run all to execute the full workflow here in sequence.')
       : 'Fill the required fields to render runnable commands.';
     _workflowWireFaqCommandChips(card);
     wireWorkflowStepRunButtons(card);
   };
 
   _workflowBindPressable(runAllBtn, {
-    onActivate: () => {
+    onActivate: async () => {
       const rendered = buildRenderedWorkflow(workflow, values);
       if (!rendered.ready) return;
+      if (
+        Number(workflow.version || 1) === 2
+        || inputs.some(input => input?.sensitive)
+      ) {
+        runAllBtn.disabled = true;
+        try {
+          persistWorkflowInputValues(workflow, values);
+          await startServerWorkflowExecution(workflow, values);
+        } catch (err) {
+          if (typeof importedShowToast === 'function') {
+            importedShowToast(err.message || 'Failed to start workflow', 'error');
+          }
+        } finally {
+          applyRenderedState();
+        }
+        return;
+      }
       runWorkflowCommands(rendered.steps.map((step) => step.renderedCmd));
     },
   });
@@ -505,197 +485,26 @@ function renderWorkflowInputCard(card, workflow) {
   return panel;
 }
 
-function workflowEditorRefs() {
-  return {
-    overlay: document.getElementById('workflow-editor-overlay'),
-    form: document.getElementById('workflow-editor-form'),
-    title: document.getElementById('workflow-editor-title'),
-    titleInput: document.getElementById('workflow-editor-title-input'),
-    descriptionInput: document.getElementById('workflow-editor-description-input'),
-    steps: document.getElementById('workflow-editor-steps'),
-    msg: document.getElementById('workflow-editor-msg'),
-    saveBtn: document.getElementById('workflow-editor-save-btn'),
-  };
-}
-
-function setWorkflowEditorMessage(message = '', isError = false) {
-  const { msg } = workflowEditorRefs();
-  if (!msg) return;
-  msg.textContent = message;
-  msg.classList.toggle('is-error', !!isError);
-}
-
-function createWorkflowEditorStep(step = {}, index = 0) {
-  const row = document.createElement('div');
-  row.className = 'workflow-editor-step';
-  row.dataset.workflowEditorStep = '1';
-
-  const header = document.createElement('div');
-  header.className = 'workflow-editor-step-header';
-  const title = document.createElement('span');
-  title.className = 'workflow-editor-step-title';
-  title.textContent = `Step ${index + 1}`;
-  header.appendChild(title);
-  const removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'btn btn-ghost btn-icon-only btn-compact workflow-editor-remove-step';
-  removeBtn.textContent = '×';
-  removeBtn.title = 'Remove step';
-  removeBtn.setAttribute('aria-label', 'Remove workflow step');
-  header.appendChild(removeBtn);
-  row.appendChild(header);
-
-  const cmdLabel = document.createElement('label');
-  cmdLabel.className = 'workflow-editor-field';
-  const cmdText = document.createElement('span');
-  cmdText.className = 'workflow-input-label';
-  cmdText.textContent = 'Command';
-  const cmdInput = document.createElement('input');
-  cmdInput.className = 'options-token-input workflow-editor-step-command';
-  cmdInput.type = 'text';
-  cmdInput.autocomplete = 'off';
-  cmdInput.autocapitalize = 'none';
-  cmdInput.autocorrect = 'off';
-  cmdInput.spellcheck = false;
-  cmdInput.inputMode = 'text';
-  cmdInput.value = step.cmd || '';
-  cmdInput.placeholder = 'nmap -F {{host}}';
-  cmdLabel.append(cmdText, cmdInput);
-  row.appendChild(cmdLabel);
-
-  const noteLabel = document.createElement('label');
-  noteLabel.className = 'workflow-editor-field';
-  const noteText = document.createElement('span');
-  noteText.className = 'workflow-input-label';
-  noteText.textContent = 'Note';
-  const noteInput = document.createElement('input');
-  noteInput.className = 'options-token-input workflow-editor-step-note';
-  noteInput.type = 'text';
-  noteInput.autocomplete = 'off';
-  noteInput.autocapitalize = 'none';
-  noteInput.autocorrect = 'off';
-  noteInput.spellcheck = false;
-  noteInput.inputMode = 'text';
-  noteInput.value = step.note || '';
-  noteInput.placeholder = 'Optional context for this step';
-  noteLabel.append(noteText, noteInput);
-  row.appendChild(noteLabel);
-
-  removeBtn.addEventListener('click', () => {
-    row.remove();
-    refreshWorkflowEditorStepNumbers();
-  });
-  return row;
-}
-
-function refreshWorkflowEditorStepNumbers() {
-  const { steps } = workflowEditorRefs();
-  if (!steps) return;
-  const rows = [...steps.querySelectorAll('[data-workflow-editor-step]')];
-  rows.forEach((row, index) => {
-    const title = row.querySelector('.workflow-editor-step-title');
-    if (title) title.textContent = `Step ${index + 1}`;
-    const removeBtn = row.querySelector('.workflow-editor-remove-step');
-    if (removeBtn) removeBtn.disabled = rows.length <= 1;
-  });
-}
-
-function addWorkflowEditorStep(step = {}) {
-  const { steps } = workflowEditorRefs();
-  if (!steps) return;
-  const row = createWorkflowEditorStep(step, steps.querySelectorAll('[data-workflow-editor-step]').length);
-  steps.appendChild(row);
-  refreshWorkflowEditorStepNumbers();
-}
-
-function workflowPayloadFromEditor() {
-  const { titleInput, descriptionInput, steps } = workflowEditorRefs();
-  const rawSteps = [...(steps?.querySelectorAll('[data-workflow-editor-step]') || [])].map(row => ({
-    cmd: String(row.querySelector('.workflow-editor-step-command')?.value || '').trim(),
-    note: String(row.querySelector('.workflow-editor-step-note')?.value || '').trim(),
-  })).filter(step => step.cmd);
-  return {
-    title: String(titleInput?.value || '').trim(),
-    description: String(descriptionInput?.value || '').trim(),
-    inputs: inferWorkflowInputsFromSteps(rawSteps),
-    steps: rawSteps,
-  };
-}
+const workflowEditorController = createWorkflowEditorController({
+  apiFetch: _workflowApiFetch,
+  onSaved: (workflow) => {
+    const savedWorkflowId = String(workflow?.id || '');
+    if (!savedWorkflowId) return;
+    selectedWorkflowId = savedWorkflowId;
+    mobileWorkflowDetailOpen = isMobileWorkflowSheetMode();
+    const overlay = document.getElementById('workflows-overlay');
+    if (overlay) overlay.dataset.workflowId = savedWorkflowId;
+  },
+  reloadCatalog: reloadWorkflowCatalog,
+  showToast: importedShowToast,
+});
 
 function openWorkflowEditor(workflow = null) {
-  const refs = workflowEditorRefs();
-  if (!refs.overlay || !refs.form || !refs.steps) return;
-  _workflowEditorWorkflow = workflow && workflow.source === 'user' ? workflow : null;
-  refs.title.textContent = _workflowEditorWorkflow ? 'EDIT WORKFLOW' : 'NEW WORKFLOW';
-  refs.saveBtn.textContent = _workflowEditorWorkflow ? 'Save changes' : 'Save workflow';
-  refs.titleInput.value = _workflowEditorWorkflow?.title || '';
-  refs.descriptionInput.value = _workflowEditorWorkflow?.description || '';
-  refs.steps.innerHTML = '';
-  const sourceSteps = Array.isArray(_workflowEditorWorkflow?.steps) && _workflowEditorWorkflow.steps.length
-    ? _workflowEditorWorkflow.steps
-    : [{ cmd: '', note: '' }];
-  sourceSteps.forEach(step => addWorkflowEditorStep(step));
-  setWorkflowEditorMessage('');
-  refs.overlay.classList.remove('u-hidden');
-  refs.overlay.classList.add('open');
-  refs.overlay.setAttribute('aria-hidden', 'false');
-  setTimeout(() => {
-    const active = document.activeElement;
-    const activeIsEditable = active instanceof HTMLInputElement
-      || active instanceof HTMLTextAreaElement
-      || active instanceof HTMLSelectElement
-      || active?.isContentEditable;
-    if (activeIsEditable && refs.overlay.contains(active)) return;
-    refs.titleInput?.focus();
-  }, 0);
+  workflowEditorController.open(workflow);
 }
 
 function closeWorkflowEditor() {
-  const { overlay, form } = workflowEditorRefs();
-  if (!overlay) return;
-  overlay.classList.remove('open');
-  overlay.classList.add('u-hidden');
-  overlay.setAttribute('aria-hidden', 'true');
-  if (form) form.reset();
-  _workflowEditorWorkflow = null;
-}
-
-async function saveWorkflowEditor() {
-  const refs = workflowEditorRefs();
-  if (!refs.saveBtn) return;
-  const payload = workflowPayloadFromEditor();
-  if (!payload.title) {
-    setWorkflowEditorMessage('Workflow name is required.', true);
-    return;
-  }
-  if (!payload.steps.length) {
-    setWorkflowEditorMessage('Add at least one command step.', true);
-    return;
-  }
-  refs.saveBtn.disabled = true;
-  setWorkflowEditorMessage('Saving workflow...');
-  try {
-    const editing = _workflowEditorWorkflow && _workflowEditorWorkflow.id;
-    const url = editing
-      ? `/session/workflows/${encodeURIComponent(_workflowEditorWorkflow.id)}`
-      : '/session/workflows';
-    const resp = await _workflowApiFetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    closeWorkflowEditor();
-    await reloadWorkflowCatalog();
-    const showToast = (typeof importedShowToast === 'function' && importedShowToast)
-      || _workflowGlobalFunction('showToast');
-    if (showToast) showToast(editing ? 'Workflow updated' : 'Workflow saved');
-  } catch (err) {
-    setWorkflowEditorMessage(err.message || 'Failed to save workflow.', true);
-  } finally {
-    refs.saveBtn.disabled = false;
-  }
+  workflowEditorController.close();
 }
 
 async function deleteUserWorkflow(workflow) {
@@ -721,6 +530,17 @@ async function deleteUserWorkflow(workflow) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.error || `HTTP ${resp.status}`);
     }
+    const currentItems = workflowCatalogStore.getItems();
+    const deletedIndex = currentItems.findIndex(item => item.id === workflow.id);
+    const nextItems = currentItems.filter(item => item.id !== workflow.id);
+    const nextWorkflow = nextItems[Math.min(Math.max(deletedIndex, 0), nextItems.length - 1)] || null;
+    selectedWorkflowId = String(nextWorkflow?.id || '');
+    mobileWorkflowDetailOpen = !!nextWorkflow;
+    const overlay = document.getElementById('workflows-overlay');
+    if (overlay) {
+      if (selectedWorkflowId) overlay.dataset.workflowId = selectedWorkflowId;
+      else delete overlay.dataset.workflowId;
+    }
     await reloadWorkflowCatalog();
     const showToast = (typeof importedShowToast === 'function' && importedShowToast)
       || _workflowGlobalFunction('showToast');
@@ -738,197 +558,399 @@ function isMobileWorkflowSheetMode() {
   return !!(useMobile && useMobile());
 }
 
-function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
-  const list = Array.isArray(items) ? items : [];
-  const workflowsOverlay = document.getElementById('workflows-overlay');
-  if (
-    workflowsOverlay?.dataset?.workflowScoped === '1'
-    && workflowsOverlay.classList.contains('open')
-    && list.length > 1
-  ) {
-    return;
-  }
-  workflowCatalogItems = list.slice();
-  if (typeof globalThis !== 'undefined') globalThis.__workflowCatalogItems = list.slice();
-  const body = document.querySelector('.workflows-body');
-  if (!body) return;
-  body.innerHTML = '';
-  const collapseCards = isMobileWorkflowSheetMode();
-  let lastSection = null;
-  list.forEach((item, idx) => {
-    const section = item.source === 'user' ? 'My workflows' : 'Built-ins';
-    if (section !== lastSection) {
-      const label = document.createElement('div');
-      label.className = 'workflow-section-label';
-      label.textContent = section;
-      body.appendChild(label);
-      lastSection = section;
-    }
-    const card = document.createElement('div');
-    card.className = 'workflow-card workflow-card-accordion';
-    if (item.id) card.dataset.workflowId = String(item.id);
-    if (item.source === 'user') card.classList.add('is-user-workflow');
-    if (collapseCards) card.classList.add('is-collapsed');
-
-    const cardBodyId = `workflow-card-body-${idx}`;
-
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className = 'workflow-card-toggle';
-    toggleBtn.setAttribute('aria-expanded', collapseCards ? 'false' : 'true');
-    toggleBtn.setAttribute('aria-controls', cardBodyId);
-
-    const heading = document.createElement('span');
-    heading.className = 'workflow-card-heading';
-    const titleEl = document.createElement('span');
-    titleEl.className = 'workflow-title';
-    titleEl.textContent = item.title || '';
-    heading.appendChild(titleEl);
-    if (item.source === 'user') {
-      const badge = document.createElement('span');
-      badge.className = 'workflow-source-badge';
-      badge.textContent = 'user';
-      heading.appendChild(badge);
-    }
-    toggleBtn.appendChild(heading);
-
-    const toggleIcon = document.createElement('span');
-    toggleIcon.className = 'workflow-card-toggle-icon';
-    toggleIcon.setAttribute('aria-hidden', 'true');
-    toggleIcon.textContent = '⌄';
-    toggleBtn.appendChild(toggleIcon);
-    toggleBtn.addEventListener('click', () => {
-      const nextExpanded = card.classList.toggle('is-collapsed') === false;
-      toggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
-    });
-    card.appendChild(toggleBtn);
-
-    const cardBody = document.createElement('div');
-    cardBody.className = 'workflow-card-body';
-    cardBody.id = cardBodyId;
-
-    if (item.source === 'user') {
-      const actions = document.createElement('div');
-      actions.className = 'workflow-card-actions';
-      const editBtn = document.createElement('button');
-      editBtn.type = 'button';
-      editBtn.className = 'btn btn-secondary btn-compact workflow-edit-btn';
-      editBtn.textContent = 'Edit';
-      editBtn.addEventListener('click', () => openWorkflowEditor(item));
-      actions.appendChild(editBtn);
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn btn-ghost btn-compact workflow-delete-btn';
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.addEventListener('click', () => deleteUserWorkflow(item));
-      actions.appendChild(deleteBtn);
-      cardBody.appendChild(actions);
-    }
-
-    if (item.description) {
-      const desc = document.createElement('div');
-      desc.className = 'workflow-desc';
-      desc.textContent = item.description;
-      cardBody.appendChild(desc);
-    }
-
-    const inputPanel = renderWorkflowInputCard(card, item);
-    if (inputPanel) cardBody.appendChild(inputPanel);
-
-    const steps = item.steps || [];
-    if (steps.length) {
-      const stepsEl = document.createElement('ol');
-      stepsEl.className = 'workflow-steps';
-      steps.forEach(step => {
-        const li = document.createElement('li');
-        li.className = 'workflow-step';
-
-        const main = document.createElement('div');
-        main.className = 'workflow-step-main';
-
-        const chip = document.createElement('span');
-        chip.className = 'allowed-chip faq-chip workflow-step-cmd chip chip-action';
-        chip.textContent = step.cmd || '';
-        if (inputPanel) {
-          chip.title = 'Fill required workflow inputs to load this step';
-          chip.classList.add('is-disabled');
-        } else {
-          chip.title = 'Click to load into prompt';
-          chip.dataset.faqCommand = step.cmd || '';
-        }
-        main.appendChild(chip);
-
-        const runBtn = document.createElement('button');
-        runBtn.type = 'button';
-        runBtn.className = 'btn btn-ghost btn-compact btn-icon-only workflow-step-run';
-        runBtn.textContent = '▶';
-        if (inputPanel) {
-          runBtn.title = 'Fill required workflow inputs to run this step';
-          runBtn.setAttribute('aria-label', 'Run this step');
-          runBtn.dataset.workflowStepCmd = '';
-          runBtn.disabled = true;
-          runBtn.setAttribute('aria-disabled', 'true');
-        } else {
-          runBtn.title = 'Run this step';
-          runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
-          runBtn.dataset.workflowStepCmd = step.cmd || '';
-        }
-        main.appendChild(runBtn);
-
-        li.appendChild(main);
-
-        if (step.note) {
-          const note = document.createElement('span');
-          note.className = 'workflow-step-note';
-          note.textContent = step.note;
-          li.appendChild(note);
-        }
-
-        stepsEl.appendChild(li);
-      });
-      cardBody.appendChild(stepsEl);
-    }
-
-    card.appendChild(cardBody);
-
-    if (inputPanel && typeof inputPanel._workflowApplyRenderedState === 'function') {
-      inputPanel._workflowApplyRenderedState();
-    }
-
-    body.appendChild(card);
-  });
-
-  _workflowWireFaqCommandChips(body);
-  wireWorkflowStepRunButtons(body);
-
+function emitWorkflowCatalogRendered(items, enabled = true) {
   const emitUiEvent = (typeof importedEmitUiEvent === 'function' && importedEmitUiEvent)
     || _workflowGlobalFunction('emitUiEvent');
-  if (emitCatalogEvent && emitUiEvent) {
+  if (enabled && emitUiEvent) {
     emitUiEvent('app:workflows-rendered', {
-      items: list.slice(),
+      items: items.slice(),
     });
   }
+}
+
+let selectedWorkflowId = '';
+let workflowCatalogQuery = '';
+let workflowCatalogSource = 'all';
+let mobileWorkflowDetailOpen = false;
+
+function workflowSourceLabel(workflow) {
+  if (workflow?.source !== 'user') return 'built-in';
+  return workflow.team_id ? 'team' : 'saved';
+}
+
+function workflowCatalogGroup(workflow) {
+  if (workflow?.source !== 'user') return 'Built-ins';
+  return workflow.team_id ? 'Team workflows' : 'My workflows';
+}
+
+function ensureWorkflowWorkspace() {
+  const body = document.querySelector('.workflows-body');
+  if (!body) return null;
+  let workflowsPanel = body.querySelector('[data-workflows-panel="workflows"]');
+  if (!workflowsPanel) {
+    workflowsPanel = document.createElement('section');
+    workflowsPanel.className = 'workflows-view-panel';
+    workflowsPanel.dataset.workflowsPanel = 'workflows';
+    body.appendChild(workflowsPanel);
+  }
+  let executionsPanel = body.querySelector('[data-workflows-panel="executions"]');
+  if (!executionsPanel) {
+    executionsPanel = document.createElement('section');
+    executionsPanel.className = 'workflows-view-panel workflows-executions-panel nice-scroll';
+    executionsPanel.dataset.workflowsPanel = 'executions';
+    executionsPanel.hidden = true;
+    body.appendChild(executionsPanel);
+  }
+  return { body, workflowsPanel, executionsPanel };
+}
+
+function setWorkflowWorkspaceView(view, { refreshExecutions = true } = {}) {
+  const workspace = ensureWorkflowWorkspace();
+  if (!workspace) return;
+  const activeView = view === 'executions' ? 'executions' : 'workflows';
+  const overlay = document.getElementById('workflows-overlay');
+  if (overlay) overlay.dataset.workflowView = activeView;
+  document.querySelectorAll('[data-workflows-view]').forEach((tab) => {
+    const active = tab.dataset.workflowsView === activeView;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    tab.tabIndex = active ? 0 : -1;
+  });
+  workspace.workflowsPanel.hidden = activeView !== 'workflows';
+  workspace.executionsPanel.hidden = activeView !== 'executions';
+  if (activeView === 'executions') {
+    if (refreshExecutions) workflowExecutionController?.onPanelOpen().catch(() => {});
+    else workflowExecutionController?.render();
+  } else {
+    workflowExecutionController?.onPanelClose();
+  }
+}
+
+function wireWorkflowWorkspaceTabs() {
+  document.querySelectorAll('[data-workflows-view]').forEach((tab) => {
+    if (tab.dataset.workflowTabWired === '1') return;
+    tab.dataset.workflowTabWired = '1';
+    _workflowBindPressable(tab, {
+      onActivate: () => setWorkflowWorkspaceView(tab.dataset.workflowsView),
+      refocusComposer: false,
+    });
+    tab.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const tabs = Array.from(document.querySelectorAll('[data-workflows-view]'));
+      const currentIndex = Math.max(0, tabs.indexOf(tab));
+      const nextIndex = event.key === 'Home'
+        ? 0
+        : (event.key === 'End'
+          ? tabs.length - 1
+          : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length);
+      const nextTab = tabs[nextIndex];
+      setWorkflowWorkspaceView(nextTab?.dataset.workflowsView);
+      nextTab?.focus();
+    });
+  });
+}
+
+function syncWorkflowWorkspaceFromOverlay() {
+  const overlay = document.getElementById('workflows-overlay');
+  const selectionRequested = overlay?.dataset.workflowSelectionRequested === '1';
+  const requestedWorkflowId = String(
+    overlay?.dataset.workflowRequestedId || overlay?.dataset.workflowId || '',
+  ).trim();
+  if (selectionRequested && requestedWorkflowId) {
+    selectedWorkflowId = requestedWorkflowId;
+    workflowCatalogQuery = '';
+    workflowCatalogSource = 'all';
+  }
+  if (overlay) {
+    delete overlay.dataset.workflowRequestedId;
+    overlay.dataset.workflowSelectionRequested = '0';
+  }
+  mobileWorkflowDetailOpen = isMobileWorkflowSheetMode() && selectionRequested && !!requestedWorkflowId;
+  renderWorkflowItems(workflowCatalogStore.getItems(), { emitCatalogEvent: false });
+  wireWorkflowWorkspaceTabs();
+  setWorkflowWorkspaceView(overlay?.dataset.workflowView || 'workflows');
+}
+
+function renderWorkflowDetail(workflow, container) {
+  container.replaceChildren();
+  if (!workflow) {
+    const empty = document.createElement('div');
+    empty.className = 'workflow-detail-empty';
+    empty.textContent = 'Choose a workflow to see its inputs and steps.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const card = document.createElement('article');
+  card.className = 'workflow-card workflow-detail';
+  card.dataset.workflowId = String(workflow.id || '');
+  if (workflow.source === 'user') card.classList.add('is-user-workflow');
+
+  const mobileBack = document.createElement('button');
+  mobileBack.type = 'button';
+  mobileBack.className = 'btn btn-ghost btn-compact workflow-detail-back';
+  mobileBack.textContent = '‹ Workflows';
+  mobileBack.addEventListener('click', () => {
+    mobileWorkflowDetailOpen = false;
+    renderWorkflowItems(workflowCatalogStore.getItems(), { emitCatalogEvent: false });
+  });
+  card.appendChild(mobileBack);
+
+  const header = document.createElement('div');
+  header.className = 'workflow-detail-header';
+  const heading = document.createElement('div');
+  heading.className = 'workflow-card-heading';
+  const titleEl = document.createElement('h2');
+  titleEl.className = 'workflow-title';
+  titleEl.textContent = workflow.title || '';
+  heading.appendChild(titleEl);
+  const badge = document.createElement('span');
+  badge.className = 'workflow-source-badge';
+  badge.textContent = workflowSourceLabel(workflow);
+  heading.appendChild(badge);
+  header.appendChild(heading);
+
+  if (workflow.source === 'user') {
+    const actions = document.createElement('div');
+    actions.className = 'workflow-card-actions';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn btn-secondary btn-compact workflow-edit-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => openWorkflowEditor(workflow));
+    actions.appendChild(editBtn);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn btn-ghost btn-compact workflow-delete-btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => deleteUserWorkflow(workflow));
+    actions.appendChild(deleteBtn);
+    header.appendChild(actions);
+  }
+  card.appendChild(header);
+
+  const cardBody = document.createElement('div');
+  cardBody.className = 'workflow-card-body';
+  if (workflow.description) {
+    const desc = document.createElement('div');
+    desc.className = 'workflow-desc';
+    desc.textContent = workflow.description;
+    cardBody.appendChild(desc);
+  }
+
+  if (Number(workflow.version || 1) === 2 && !(workflow.inputs || []).length) {
+    const runActions = document.createElement('div');
+    runActions.className = 'workflow-input-actions';
+    const runPlaybookBtn = document.createElement('button');
+    runPlaybookBtn.type = 'button';
+    runPlaybookBtn.className = 'btn btn-secondary btn-compact workflow-run-all';
+    runPlaybookBtn.textContent = 'Run all';
+    runPlaybookBtn.title = 'Start this workflow execution';
+    _workflowBindPressable(runPlaybookBtn, {
+      onActivate: async () => {
+        runPlaybookBtn.disabled = true;
+        try {
+          await startServerWorkflowExecution(workflow, {});
+        } catch (err) {
+          if (typeof importedShowToast === 'function') {
+            importedShowToast(err.message || 'Failed to start workflow', 'error');
+          }
+        } finally {
+          runPlaybookBtn.disabled = false;
+        }
+      },
+    });
+    runActions.appendChild(runPlaybookBtn);
+    cardBody.appendChild(runActions);
+  }
+
+  const inputPanel = renderWorkflowInputCard(card, workflow);
+  if (inputPanel) cardBody.appendChild(inputPanel);
+  const steps = workflow.steps || [];
+  if (steps.length) {
+    const stepsEl = document.createElement('ol');
+    stepsEl.className = 'workflow-steps';
+    steps.forEach((step) => {
+      const li = document.createElement('li');
+      li.className = 'workflow-step';
+      const main = document.createElement('div');
+      main.className = 'workflow-step-main';
+      const chip = document.createElement('span');
+      chip.className = 'allowed-chip faq-chip workflow-step-cmd chip chip-action';
+      chip.textContent = step.cmd || '';
+      if (inputPanel) {
+        chip.title = 'Fill required workflow inputs to load this step';
+        chip.classList.add('is-disabled');
+      } else {
+        chip.title = 'Click to load into prompt';
+        chip.dataset.faqCommand = step.cmd || '';
+      }
+      main.appendChild(chip);
+      const runBtn = document.createElement('button');
+      runBtn.type = 'button';
+      runBtn.className = 'btn btn-ghost btn-compact btn-icon-only workflow-step-run';
+      runBtn.textContent = '▶';
+      runBtn.title = inputPanel ? 'Fill required workflow inputs to run this step' : 'Run this step';
+      runBtn.setAttribute('aria-label', inputPanel ? 'Run this step' : `Run: ${step.cmd || ''}`);
+      runBtn.dataset.workflowStepCmd = inputPanel ? '' : (step.cmd || '');
+      runBtn.disabled = !!inputPanel;
+      runBtn.setAttribute('aria-disabled', runBtn.disabled ? 'true' : 'false');
+      main.appendChild(runBtn);
+      if (Number(workflow.version || 1) === 2) {
+        const previewState = document.createElement('span');
+        previewState.className = 'workflow-step-preview-state';
+        main.appendChild(previewState);
+      }
+      li.appendChild(main);
+      if (step.note) {
+        const note = document.createElement('span');
+        note.className = 'workflow-step-note';
+        note.textContent = step.note;
+        li.appendChild(note);
+      }
+      stepsEl.appendChild(li);
+    });
+    cardBody.appendChild(stepsEl);
+  }
+  card.appendChild(cardBody);
+  container.appendChild(card);
+
+  if (inputPanel && typeof inputPanel._workflowApplyRenderedState === 'function') {
+    inputPanel._workflowApplyRenderedState();
+  } else if (Number(workflow.version || 1) === 2) {
+    applyWorkflowStepPreviews(card, workflow, {});
+  }
+  _workflowWireFaqCommandChips(card);
+  wireWorkflowStepRunButtons(card);
+}
+
+function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  workflowCatalogStore.setItems(list);
+  const workspace = ensureWorkflowWorkspace();
+  if (!workspace) return;
+  const panel = workspace.workflowsPanel;
+  panel.replaceChildren();
+  const shell = document.createElement('div');
+  shell.className = `workflow-workspace${mobileWorkflowDetailOpen ? ' is-detail-open' : ''}`;
+  const catalogPane = document.createElement('aside');
+  catalogPane.className = 'workflow-catalog-pane';
+  catalogPane.setAttribute('aria-label', 'Workflow catalog');
+  const toolbar = document.createElement('div');
+  toolbar.className = 'workflow-catalog-toolbar';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'form-control workflow-catalog-search';
+  search.placeholder = 'Search workflows';
+  search.setAttribute('aria-label', 'Search workflows');
+  search.value = workflowCatalogQuery;
+  search.addEventListener('input', () => {
+    workflowCatalogQuery = search.value;
+    renderWorkflowItems(workflowCatalogStore.getItems(), { emitCatalogEvent: false });
+    document.querySelector('.workflow-catalog-search')?.focus({ preventScroll: true });
+  });
+  const source = document.createElement('select');
+  source.className = 'form-select workflow-catalog-source';
+  source.setAttribute('aria-label', 'Filter workflows by source');
+  [['all', 'All sources'], ['saved', 'Saved'], ['built-in', 'Built-ins']].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    source.appendChild(option);
+  });
+  source.value = workflowCatalogSource;
+  source.addEventListener('change', () => {
+    workflowCatalogSource = source.value;
+    renderWorkflowItems(workflowCatalogStore.getItems(), { emitCatalogEvent: false });
+  });
+  toolbar.append(search, source);
+  catalogPane.appendChild(toolbar);
+
+  const normalizedQuery = workflowCatalogQuery.trim().toLowerCase();
+  const filtered = list.filter((workflow) => {
+    const sourceMatches = workflowCatalogSource === 'all'
+      || (workflowCatalogSource === 'saved' && workflow.source === 'user')
+      || (workflowCatalogSource === 'built-in' && workflow.source !== 'user');
+    const text = `${workflow.title || ''} ${workflow.description || ''}`.toLowerCase();
+    return sourceMatches && (!normalizedQuery || text.includes(normalizedQuery));
+  });
+  if (!filtered.some(workflow => String(workflow.id || '') === selectedWorkflowId)) {
+    selectedWorkflowId = String(filtered[0]?.id || '');
+  }
+  const selectedWorkflow = filtered.find(workflow => String(workflow.id || '') === selectedWorkflowId) || null;
+  const overlay = document.getElementById('workflows-overlay');
+  if (overlay) {
+    if (selectedWorkflowId) overlay.dataset.workflowId = selectedWorkflowId;
+    else delete overlay.dataset.workflowId;
+  }
+
+  const catalogList = document.createElement('div');
+  catalogList.className = 'workflow-catalog-list nice-scroll';
+  if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'workflow-catalog-empty';
+    empty.textContent = list.length ? 'No workflows match these filters.' : 'No workflows are available.';
+    catalogList.appendChild(empty);
+  } else {
+    let lastGroup = '';
+    filtered.forEach((workflow) => {
+      const group = workflowCatalogGroup(workflow);
+      if (group !== lastGroup) {
+        const label = document.createElement('div');
+        label.className = 'workflow-section-label';
+        label.textContent = group;
+        catalogList.appendChild(label);
+        lastGroup = group;
+      }
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'btn btn-ghost panel-row panel-row-clickable workflow-catalog-item';
+      row.dataset.workflowId = String(workflow.id || '');
+      const selected = String(workflow.id || '') === selectedWorkflowId;
+      row.classList.toggle('is-selected', selected);
+      if (selected) row.setAttribute('aria-current', 'true');
+      const rowMain = document.createElement('span');
+      rowMain.className = 'workflow-catalog-item-main';
+      const rowTitle = document.createElement('span');
+      rowTitle.className = 'workflow-catalog-item-title';
+      rowTitle.textContent = workflow.title || '';
+      const rowDescription = document.createElement('span');
+      rowDescription.className = 'workflow-catalog-item-description';
+      rowDescription.textContent = workflow.description || 'No description';
+      rowMain.append(rowTitle, rowDescription);
+      const rowSource = document.createElement('span');
+      rowSource.className = 'workflow-source-badge';
+      rowSource.textContent = workflowSourceLabel(workflow);
+      row.append(rowMain, rowSource);
+      row.addEventListener('click', () => {
+        selectedWorkflowId = String(workflow.id || '');
+        mobileWorkflowDetailOpen = isMobileWorkflowSheetMode();
+        if (overlay) overlay.dataset.workflowId = selectedWorkflowId;
+        renderWorkflowItems(workflowCatalogStore.getItems(), { emitCatalogEvent: false });
+      });
+      catalogList.appendChild(row);
+    });
+  }
+  catalogPane.appendChild(catalogList);
+  const detailPane = document.createElement('section');
+  detailPane.className = 'workflow-detail-pane nice-scroll';
+  detailPane.setAttribute('aria-label', 'Selected workflow');
+  shell.append(catalogPane, detailPane);
+  panel.appendChild(shell);
+  renderWorkflowDetail(selectedWorkflow, detailPane);
+  wireWorkflowWorkspaceTabs();
+  setWorkflowWorkspaceView(overlay?.dataset.workflowView || 'workflows', { refreshExecutions: false });
+
+  emitWorkflowCatalogRendered(list, emitCatalogEvent);
 }
 
 async function reloadWorkflowCatalog() {
-  const request = (async () => {
-    const resp = await _workflowApiFetch('/workflows');
-    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    renderWorkflowItems(data.items || []);
-    return data.items || [];
-  })();
-  workflowCatalogLoadPromise = request;
-  try {
-    return await request;
-  } finally {
-    if (workflowCatalogLoadPromise === request) workflowCatalogLoadPromise = null;
-  }
+  return workflowCatalogStore.reload();
 }
 
 function ensureWorkflowCatalogLoaded() {
-  if (workflowCatalogItems.length) return Promise.resolve(workflowCatalogItems);
-  return workflowCatalogLoadPromise || reloadWorkflowCatalog();
+  return workflowCatalogStore.ensureLoaded();
 }
 
 function activateWorkflowStepRun(cmd) {
@@ -1003,35 +1025,18 @@ function _workflowCliFinish(cmd, lines, status = 'ok', tabId = _workflowActiveTa
 }
 
 function _workflowFind(selector) {
-  const query = String(selector || '').trim().toLowerCase();
-  if (!query) return { workflow: null, error: 'workflow name is required' };
-  const items = workflowCatalogItems || [];
-  const exactMatches = items.filter(item => workflowLookupKeys(item).some(key => key === query));
-  if (exactMatches.length === 1) return { workflow: exactMatches[0], error: '' };
-  if (exactMatches.length > 1) {
-    return {
-      workflow: null,
-      error: `ambiguous workflow '${selector}': ${exactMatches.slice(0, 5).map(workflowCliName).join(', ')}`,
-    };
-  }
-  const matches = items.filter(item => workflowLookupKeys(item).some(key => key.includes(query)));
-  if (matches.length === 1) return { workflow: matches[0], error: '' };
-  if (matches.length > 1) {
-    return {
-      workflow: null,
-      error: `ambiguous workflow '${selector}': ${matches.slice(0, 5).map(workflowCliName).join(', ')}`,
-    };
-  }
-  return { workflow: null, error: `workflow not found: ${selector}` };
+  return workflowCatalogStore.find(selector);
 }
 
 function _workflowCliUsageLines() {
   return [
-    'Usage: workflow [list | show <name> | run <name> [--input value ...]]',
+    'Usage: workflow [list | show <name> | run <name> [--input value ...] | runs | status <execution-id> | cancel <execution-id>]',
     'Examples:',
     '  workflow list',
     '  workflow show dns-troubleshooting',
     '  workflow run dns-troubleshooting --domain darklab.sh',
+    '  workflow runs',
+    '  workflow status wfx_...',
   ];
 }
 
@@ -1063,6 +1068,31 @@ function _workflowParseRunArgs(args) {
   return { selector: selectors.join(' '), values, errors };
 }
 
+function _workflowRedactedRunCommand(parts, sensitiveNames) {
+  const redacted = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const token = String(parts[index] || '');
+    if (!token.startsWith('--')) {
+      redacted.push(token);
+      continue;
+    }
+    const eq = token.indexOf('=');
+    const rawName = eq >= 0 ? token.slice(2, eq) : token.slice(2);
+    const name = rawName.replace(/-/g, '_').toLowerCase();
+    if (!sensitiveNames.has(name)) {
+      redacted.push(token);
+      continue;
+    }
+    if (eq >= 0) {
+      redacted.push(`--${rawName}=[redacted]`);
+    } else {
+      redacted.push(token, '[redacted]');
+      index += 1;
+    }
+  }
+  return redacted.join(' ');
+}
+
 function _workflowResolvedValues(workflow, provided = {}) {
   const values = getWorkflowInputValues(workflow);
   Object.entries(provided || {}).forEach(([key, value]) => {
@@ -1091,6 +1121,13 @@ function _workflowRunResolved(workflow, values, tabId) {
     return;
   }
   persistWorkflowInputValues(workflow, values);
+  if (Number(workflow.version || 1) === 2) {
+    startServerWorkflowExecution(workflow, values, tabId, { announceInTerminal: true }).catch((err) => {
+      _workflowCliAppend(`[workflow] ${err.message || 'Failed to start workflow'}`, 'exit-fail', tabId);
+      _workflowCliSetStatus('fail');
+    });
+    return;
+  }
   _workflowCliAppend(`[workflow] ${workflow.title}: ${commands.length} step(s) queued.`, 'notice', tabId);
   runWorkflowCommands(commands);
 }
@@ -1114,7 +1151,7 @@ function _workflowPromptForInputs(workflow, values, missing, tabId) {
       return;
     }
     setPendingTerminalConfirm({
-      kind: 'text',
+      kind: input.sensitive ? 'secret' : 'text',
       tabId,
       onAnswer: async (answer) => {
         const value = sanitizeWorkflowInputValue(input, answer);
@@ -1143,10 +1180,15 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
   };
   const appendCommandEcho = (typeof importedAppendCommandEcho === 'function' && importedAppendCommandEcho)
     || _workflowGlobalFunction('appendCommandEcho');
-  if (appendCommandEcho) appendCommandEcho(cmd, tabId);
-  if (!workflowCatalogItems.length) {
+  let echoed = false;
+  const echoCommand = (command) => {
+    if (!echoed && appendCommandEcho) appendCommandEcho(command, tabId);
+    echoed = true;
+  };
+  if (!workflowCatalogStore.getItems().length) {
     try { await reloadWorkflowCatalog(); }
     catch (err) {
+      echoCommand(cmd);
       append(`[workflow] failed to load workflows: ${err.message || 'network error'}`, 'exit-fail');
       _workflowCliFinish(cmd, lines, 'fail', tabId);
       return true;
@@ -1154,6 +1196,7 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
   }
   const parts = _workflowCommandTokens(cmd);
   const sub = String(parts[1] || 'list').toLowerCase();
+  if (sub !== 'run') echoCommand(cmd);
   if (sub === 'help' || sub === '--help' || sub === '-h') {
     _workflowCliUsageLines().forEach(line => append(line, ''));
     _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
@@ -1161,7 +1204,7 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
   }
   if (sub === 'list' || parts.length === 1) {
     append('Workflows:', 'builtin-section');
-    workflowCatalogItems.forEach((workflow) => {
+    workflowCatalogStore.getItems().forEach((workflow) => {
       const kind = workflow.source === 'user' ? 'user' : 'built-in';
       const idHint = workflow.source === 'user' && workflow.id ? `, id: ${workflow.id}` : '';
       append(`  ${workflowCliName(workflow)}  ${workflow.title} (${workflow.steps?.length || 0} steps, ${kind}${idHint})`, 'builtin-help-row');
@@ -1187,16 +1230,98 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
     _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
     return true;
   }
-  if (sub === 'run') {
-    const parsed = _workflowParseRunArgs(parts.slice(2));
-    if (parsed.errors.length) {
-      parsed.errors.forEach(error => append(`[workflow] ${error}`, 'exit-fail'));
+  if (sub === 'runs') {
+    try {
+      const executions = await importedListWorkflowExecutions(_workflowApiFetch, 20);
+      append('Recent workflow executions:', 'builtin-section');
+      if (!executions.length) append('  No workflow executions yet.', 'builtin-note');
+      executions.forEach((execution) => {
+        const step = execution.current_step_id ? `, step ${execution.current_step_id}` : '';
+        append(`  ${execution.id}  ${execution.title} (${execution.status}${step})`, 'builtin-help-row');
+      });
+      _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    } catch (err) {
+      append(`[workflow] ${err.message || 'Failed to load workflow executions'}`, 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+    }
+    return true;
+  }
+  if (sub === 'status') {
+    const executionId = String(parts[2] || '').trim();
+    if (!executionId) {
+      append('[workflow] execution id is required', 'exit-fail');
       _workflowCliFinish(cmd, lines, 'fail', tabId);
       return true;
     }
+    try {
+      const payload = await importedGetWorkflowExecution(_workflowApiFetch, executionId);
+      const execution = payload.execution || {};
+      append(`${execution.title || 'Workflow'} (${execution.id})`, 'builtin-section');
+      append(`  Status: ${execution.status || 'unknown'}`, 'builtin-kv');
+      (execution.steps || []).forEach((step) => {
+        const run = step.run_id ? `, run ${step.run_id}` : '';
+        const transition = step.selected_transition
+          ? `, next ${step.selected_transition} (${step.transition_reason || 'selected'})`
+          : '';
+        const captures = Array.isArray(step.capture_names) && step.capture_names.length
+          ? `, captures ${step.capture_names.join(', ')}`
+          : '';
+        append(`  ${step.step_id}: ${step.status}${run}${transition}${captures}`, 'builtin-help-row');
+      });
+      _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    } catch (err) {
+      append(`[workflow] ${err.message || 'Failed to load workflow execution'}`, 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+    }
+    return true;
+  }
+  if (sub === 'cancel') {
+    const executionId = String(parts[2] || '').trim();
+    if (!executionId) {
+      append('[workflow] execution id is required', 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      return true;
+    }
+    try {
+      await importedCancelWorkflowExecution(_workflowApiFetch, executionId);
+      append(`[workflow] ${executionId} canceled.`, 'notice');
+      refreshWorkflowExecutions().catch(() => {});
+      _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    } catch (err) {
+      append(`[workflow] ${err.message || 'Failed to cancel workflow execution'}`, 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+    }
+    return true;
+  }
+  if (sub === 'run') {
+    const parsed = _workflowParseRunArgs(parts.slice(2));
     const { workflow, error } = _workflowFind(parsed.selector);
     if (!workflow) {
-      append(`[workflow] ${error}`, 'exit-fail');
+      echoCommand(cmd);
+      if (parsed.errors.length) {
+        parsed.errors.forEach(parseError => append(`[workflow] ${parseError}`, 'exit-fail'));
+      } else {
+        append(`[workflow] ${error}`, 'exit-fail');
+      }
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      return true;
+    }
+    const sensitiveNames = new Set(
+      (workflow.inputs || []).filter(input => input.sensitive).map(input => input.id),
+    );
+    const inlineSensitiveNames = Object.keys(parsed.values).filter(name => sensitiveNames.has(name));
+    const safeCommand = inlineSensitiveNames.length
+      ? _workflowRedactedRunCommand(parts, sensitiveNames)
+      : cmd;
+    echoCommand(safeCommand);
+    if (inlineSensitiveNames.length) {
+      const flags = inlineSensitiveNames.map(name => `--${name.replace(/_/g, '-')}`).join(', ');
+      append(`[workflow] Sensitive parameters can't be supplied inline (${flags}). Omit them to enter the values securely.`, 'exit-fail');
+      _workflowCliFinish(safeCommand, lines, 'fail', tabId);
+      return true;
+    }
+    if (parsed.errors.length) {
+      parsed.errors.forEach(parseError => append(`[workflow] ${parseError}`, 'exit-fail'));
       _workflowCliFinish(cmd, lines, 'fail', tabId);
       return true;
     }
@@ -1225,23 +1350,47 @@ function _workflowInputHint(input) {
     `<${input.id}>`,
     input.label || input.id,
   );
-  if (input.type === 'domain') item.value_type = 'domain';
+  const inputType = String(input.type || 'text').trim().toLowerCase();
+  if (inputType !== 'text') {
+    item.value_type = inputType === 'path' ? 'workspace_path' : inputType;
+  }
   return item;
 }
 
 function _runtimeWorkflowContext() {
-  const workflows = Array.isArray(workflowCatalogItems) ? workflowCatalogItems : [];
+  const workflows = workflowCatalogStore.getItems();
   const workflowHints = workflows.map(_workflowRuntimeHintFor);
+  const recentExecutions = workflowExecutionController?.getExecutions() || [];
+  const executionHints = recentExecutions.map(execution => _workflowRuntimeHint(
+    String(execution?.id || ''),
+    `${execution?.title || 'Workflow'} (${execution?.status || 'unknown'})`,
+  ));
+  const activeExecutionHints = recentExecutions
+    .filter(workflowExecutionIsActive)
+    .map(execution => _workflowRuntimeHint(
+      String(execution?.id || ''),
+      `${execution?.title || 'Workflow'} (${execution?.status || 'unknown'})`,
+    ));
   const flags = [];
   const expectsValue = [];
   const argHints = {
     list: [],
     show: workflowHints,
     run: workflowHints,
+    runs: [],
+    status: executionHints.length
+      ? executionHints
+      : [_workflowRuntimePlaceholderHint('<execution-id>', 'Workflow execution id')],
+    cancel: activeExecutionHints.length
+      ? activeExecutionHints
+      : [_workflowRuntimePlaceholderHint('<execution-id>', 'Workflow execution id')],
     __positional__: [
       _workflowRuntimeHint('list', 'List workflows'),
       _workflowRuntimeHint('show', 'Show workflow steps', 'show '),
       _workflowRuntimeHint('run', 'Run a workflow', 'run '),
+      _workflowRuntimeHint('runs', 'List recent workflow executions'),
+      _workflowRuntimeHint('status', 'Show workflow execution status', 'status '),
+      _workflowRuntimeHint('cancel', 'Cancel a workflow execution', 'cancel '),
     ],
   };
   const sequenceArgHints = {};
@@ -1264,34 +1413,18 @@ function _runtimeWorkflowContext() {
   return _workflowRuntimeContextSpec({ flags, expectsValue, argHints, sequenceArgHints });
 }
 
-document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(btn => {
-  if (btn.dataset.workflowEditorOpenBound === '1') return;
-  btn.dataset.workflowEditorOpenBound = '1';
-  btn.addEventListener('click', () => openWorkflowEditor());
-});
-document.getElementById('workflow-editor-add-step')?.addEventListener('click', () => addWorkflowEditorStep());
-document.getElementById('workflow-editor-form')?.addEventListener('submit', (event) => {
-  event.preventDefault();
-  saveWorkflowEditor();
-});
-document.querySelectorAll('.workflow-editor-close').forEach(btn => {
-  btn.addEventListener('click', () => closeWorkflowEditor());
-});
-document.getElementById('workflow-editor-overlay')?.addEventListener('click', (event) => {
-  if (event.target === event.currentTarget) closeWorkflowEditor();
-});
-
 if (typeof window !== 'undefined') {
-  if (workflowCatalogItems.length) renderWorkflowItems(workflowCatalogItems, { emitCatalogEvent: false });
+  const initialWorkflowItems = workflowCatalogStore.getItems();
+  if (initialWorkflowItems.length) renderWorkflowItems(initialWorkflowItems, { emitCatalogEvent: false });
   if (typeof importedSetWorkflowHandlers === 'function') {
     importedSetWorkflowHandlers({
-    renderWorkflowItems,
-    reloadWorkflowCatalog,
-    ensureWorkflowCatalogLoaded,
-    handleWorkflowTerminalCommand,
-    _runtimeWorkflowContext,
-    openWorkflowEditor,
-    closeWorkflowEditor,
+      renderWorkflowItems,
+      reloadWorkflowCatalog,
+      ensureWorkflowCatalogLoaded,
+      handleWorkflowTerminalCommand,
+      _runtimeWorkflowContext,
+      openWorkflowEditor,
+      closeWorkflowEditor,
     });
   }
 }

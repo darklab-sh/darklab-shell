@@ -100,13 +100,13 @@ async function waitForStatusMonitorTelemetry(page) {
   await expect(page.locator('.status-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/)
 }
 
-async function openScopedWorkflow(page) {
+async function openWorkflowWorkspace(page) {
   await waitForWorkflowsReady(page)
   const workflowsClosed = await page.locator('#rail-section-workflows').evaluate((node) =>
     node.classList.contains('closed'),
   )
   if (workflowsClosed) await page.locator('#rail-workflows-header').click()
-  await page.locator('#rail-workflows-list .rail-item').first().click()
+  await page.locator('#rail-workflows-list .rail-workflows-browse-all').click()
   await expect(page.locator('#workflows-modal')).toBeVisible()
 }
 
@@ -393,7 +393,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await openScopedWorkflow(page)
+      await openWorkflowWorkspace(page)
     },
   },
   {

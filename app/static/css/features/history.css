@@ -629,6 +629,24 @@ body #history-panel { background: var(--theme-chrome-bg); }
   width: fit-content;
 }
 
+.history-run-workflow-summary {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.history-run-workflow-label {
+  line-height: 1.3;
+}
+
+.history-run-workflow-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .history-run-section {
   display: flex;
   flex: 0 0 auto;

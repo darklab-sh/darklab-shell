@@ -29,7 +29,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError
 
 import pytest
@@ -883,6 +883,29 @@ def _json_request(
         return exc.code, json.loads(body) if body else {}
 
 
+def _wait_for_workflow_execution(
+    base_url: str,
+    session_id: str,
+    execution_id: str,
+    *,
+    timeout: int = 30,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    last_payload: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        status, payload = _json_request(
+            f"{base_url}/workflow-executions/{execution_id}",
+            session_id=session_id,
+        )
+        assert status == 200, f"workflow status failed with HTTP {status}: {payload}"
+        last_payload = payload
+        execution = payload.get("execution")
+        if isinstance(execution, dict) and execution.get("status") in {"completed", "failed", "canceled"}:
+            return execution
+        time.sleep(0.1)
+    raise AssertionError(f"workflow execution did not finish within {timeout}s: {last_payload}")
+
+
 def _workspace_payload_or_skip(base_url: str, session_id: str) -> dict[str, object]:
     status, payload = _json_request(
         f"{base_url}/workspace/files",
@@ -1490,6 +1513,79 @@ def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_
 
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
+
+
+def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_test):
+    session_id = _new_smoke_session_id()
+    definition = {
+        "version": 2,
+        "id": "container_capture",
+        "title": "Container capture",
+        "inputs": [{
+            "id": "service",
+            "label": "Service",
+            "type": "host",
+            "required": True,
+        }],
+        "steps": [
+            {
+                "id": "read_status",
+                "cmd": "curl -sS -I http://{{service}}:8888/",
+                "captures": [{
+                    "name": "status_line",
+                    "source": "first_nonempty_line",
+                    "required": True,
+                }],
+                "next": {"success": "send_status", "failure": "stop"},
+            },
+            {
+                "id": "send_status",
+                "cmd": "curl -sS -I -A {{status_line}} http://{{service}}:8888/",
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
+    }
+    created_status, created_payload = _json_request(
+        f"{container_smoke_test}/session/workflows",
+        session_id=session_id,
+        method="POST",
+        payload=definition,
+    )
+    assert created_status == 201, created_payload
+    workflow = cast(dict[str, Any], created_payload["workflow"])
+    started_status, started_payload = _json_request(
+        f"{container_smoke_test}/workflow-executions",
+        session_id=session_id,
+        method="POST",
+        payload={"workflow_id": workflow["id"], "inputs": {"service": "allowed-target"}},
+    )
+    assert started_status == 202, started_payload
+    started_execution = cast(dict[str, Any], started_payload["execution"])
+    execution_id = str(started_execution["id"])
+    execution = cast(
+        dict[str, Any],
+        _wait_for_workflow_execution(container_smoke_test, session_id, execution_id),
+    )
+
+    assert execution["status"] == "completed", execution
+    variables = cast(dict[str, Any], execution["variables"])
+    assert str(variables["status_line"]).startswith("HTTP/")
+    steps = cast(list[dict[str, Any]], execution["steps"])
+    assert [step["status"] for step in steps] == ["succeeded", "succeeded"]
+    assert steps[0]["capture_names"] == ["status_line"]
+    run_ids = [str(step["run_id"]) for step in steps]
+    assert all(run_ids)
+    for step_id, run_id in zip(("read_status", "send_status"), run_ids, strict=True):
+        history_status, history = _json_request(
+            f"{container_smoke_test}/history/{run_id}?json=1",
+            session_id=session_id,
+        )
+        assert history_status == 200, history
+        assert history["workflow_execution_id"] == execution_id
+        assert history["workflow_step_id"] == step_id
+        workflow_execution = cast(dict[str, Any], history["workflow_execution"])
+        execution_steps = cast(list[dict[str, Any]], workflow_execution["steps"])
+        assert [item["run_id"] for item in execution_steps] == run_ids
 
 
 def test_container_smoke_test_raw_syn_scan_reaches_remote_app_port(container_smoke_test):

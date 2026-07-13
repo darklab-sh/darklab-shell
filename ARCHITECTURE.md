@@ -448,7 +448,7 @@ Client-visible error codes include `session_required`, `file_required`,
 | `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server. |
 | `GET` | `/session/recent-values` | Returns recent target values for the active personal/team scope and metadata-gated autocomplete suggestions. |
 | `POST` | `/session/recent-values` | Saves normalized recent values for the active personal/team scope and prunes each value kind to the autocomplete cap. |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, project workspace records, recent values, and non-conflicting workspace paths between session IDs. |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, completed personal workflow executions, project workspace records, recent values, and non-conflicting workspace paths between session IDs. Returns `409 active_workflow_execution` while the source identity has active workflow work. |
 | `GET` | `/session/secrets` | Lists encrypted secret names, consumer env bindings, and update timestamps for the active personal/team scope without returning values. |
 | `POST` | `/session/secrets` | Creates or replaces one encrypted personal/team secret value for the active scope. |
 | `POST` | `/session/secrets/rotate` | Re-wraps the active personal/team scope's encrypted secret rows under the active master key. |
@@ -486,6 +486,18 @@ Client-visible error codes include `session_required`, `file_required`,
 | `GET` | `/session/starred` | Returns the current session's starred command list. |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list. |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session. |
+
+### Workflow Execution Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `POST` | `/workflow-executions` | Compiles a scoped workflow, validates typed inputs, snapshots the active workspace/project context, and starts the first durable v2 step. |
+| `GET` | `/workflow-executions` | Lists recent executions with ordered step summaries in the active personal/team scope, with an optional `workflow_id` filter for scoped workflow views. |
+| `GET` | `/workflow-executions/<execution_id>` | Returns one immutable definition snapshot plus ordered step, transition, capture-name, and linked-run state. |
+| `GET` | `/workflow-executions/<execution_id>/events` | Replays bounded lifecycle events after an integer cursor without returning commands or input/capture values. |
+| `POST` | `/workflow-executions/<execution_id>/cancel` | Cancels pending workflow work and signals every linked run made active by the canceled transition. |
+
+Workflow execution is bounded by `workflow_active_execution_limit` per personal/team owner and `workflow_execution_max_runtime_seconds` per execution. Postgres takes an owner-scoped transaction advisory lock around the active-count claim and insert. Before each step, the engine rechecks durable personal tokens plus the current team, initiating token, membership, and run capability. Web startup follows an immutable `(created, id)` cursor through bounded pages of active execution rows after stale run metadata cleanup: unbound launch claims return to pending, completed linked runs advance from saved normalized output, live broker runs remain attached, and missing runs fail with bounded recovery metadata. A workflow-hook exception marks only the execution failed; the completed run remains saved.
 
 ### Project Routes
 
@@ -671,7 +683,7 @@ The frontend enters through ES module entry points and app-owned modules talk th
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, project run/entity capture toggles, run-notification state, HUD clock timezone mode), session-token shortcuts, encrypted secret management, team membership management, and outbound notification channels for the active session. The modal is split into a **Preferences** tab for display, identity, run, and compare controls, a **Secrets** tab for Provider Status, add/refresh actions, and the dynamic secret list, a **Teams** tab for create/join/member/invite/recovery flows plus personal/team scope switching, and a **Notifications** tab for session-owned delivery destinations; the selected tab is saved with the session preference snapshot. The modal feeds preference changes back into the browser runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, `secret set`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `secret set NAME` opens the same replace-only Options value prompt and never accepts the value on the command line. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/runs` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, project run/entity capture toggles, run-notification state, HUD clock timezone mode), session-token shortcuts, encrypted secret management, team membership management, and outbound notification channels for the active session. The modal is split into a **Preferences** tab for display, identity, run, and compare controls, a **Secrets** tab for Provider Status, add/refresh actions, and the dynamic secret list, a **Teams** tab for create/join/member/invite/recovery flows plus personal/team scope switching, and a **Notifications** tab for session-owned delivery destinations; the selected tab is saved with the session preference snapshot. The modal feeds preference changes back into the browser runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, `secret set`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `secret set NAME` opens the same replace-only Options value prompt and never accepts the value on the command line. `workflow run` uses that local command path for catalog lookup and input prompting. Legacy workflows continue queuing their rendered commands through the browser. Explicit v2 playbooks instead submit `POST /workflow-executions`, then the server owns step launch and advancement and returns a durable id plus a `workflow status` hint without claiming that the initial step remains current. Panel-started v2 playbooks keep their progress in the Workflows surface and do not add partial state to the active terminal. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -811,7 +823,7 @@ All pressable primitives route through `bindPressable` in `app/static/js/ui/ui_p
 
 Modal and panel tabs use the shared `.tab-strip` / `.tab-strip-item` primitive pair. The primitive owns the horizontal overflow behavior, hidden scrollbar, top-border active tab treatment, non-active hover color, pressed-state cleanup, and focus styling. Surface classes such as `.atlas-tab`, `.history-run-tab`, `.project-explorer-tab`, and `.project-mobile-tab` remain as JS hooks or for small local count-chip/layout tweaks, but they don't redefine the tab chrome.
 
-Current consumers are Run Details, Atlas, Project desktop tabs, Project mobile tabs, Project entity-type tabs, and the Options modal tabs. Terminal document tabs keep their separate `.tab` contract because they are draggable workspace tabs rather than simple modal tabs.
+Current consumers are Run Details, Atlas, Project desktop tabs, Project mobile tabs, Project entity-type tabs, the Workflows workspace, and the Options modal tabs. Terminal document tabs keep their separate `.tab` contract because they are draggable workspace tabs rather than simple modal tabs.
 
 #### Dropdown/Menu Primitive Family
 
@@ -1001,6 +1013,16 @@ This boundary view answers a different question than the dependency graph above:
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
+
+### Workflow Execution Runtime
+
+Legacy workflows remain browser-owned linear queues. Explicit v2 workflows are server-owned durable executions. `services.workflows.compiler` validates the complete graph, rejects capture use unless every incoming path has produced the value, and validates typed values. Runtime rendering fails closed if a saved snapshot still lacks a referenced variable. `services.workflows.storage` saves an immutable definition snapshot and one pending row per stable step id.
+
+`services.workflows.executions` claims one pending step with a compare-and-set update, renders substitutions as shell-safe scalar arguments, and launches the command through `services.runs.start.start_brokered_run()`. The generated run id is bound to the step before output begins. A bounded `WorkflowCaptureAccumulator` observes normalized `LineEvent` objects without changing transcript persistence. After normal run finalization has saved the run and structured metadata, the workflow hook claims that step exactly once, stores capture names and execution-local values, records the selected transition, and either launches the next step or marks the remaining branch rows skipped.
+
+The execution snapshot preserves the initiating personal/team scope, workspace folder, active project, actor role, browser ownership hints, and source workflow identity. The bounded events route derives replayable state from those durable rows, so a browser can resume from a cursor without another event store. History and project run payloads include a value-free workflow ancestry summary and sibling step links only after normal run authorization. Workflow lifecycle logs contain ids, counts, statuses, exit outcomes, and transition reasons; they don't include rendered commands, parameter values, captured values, targets, paths, or output text.
+
+The Workflows surface keeps catalog identity/loading in `features/workflows/workflow_catalog.js`, typed values, source pickers, remembered state, and previews in `features/workflows/workflow_parameters.js`, definition authoring in `features/workflows/workflow_editor.js`, and durable requests plus Executions-tab rendering in `features/workflows/workflow_executions.js`. The remaining controller coordinates those modules with the terminal and modal bridges. Every browser entry point opens one workspace: the **Workflows** tab uses a searchable, source-filtered catalog with `panel-row` navigation and an unframed selected detail, while the **Executions** tab owns active-scope execution history and polling. Desktop keeps the catalog and detail side by side; mobile drills from the same catalog into the same detail and back without a separate workflow implementation. Selecting a rail workflow changes workspace selection only, so execution history never inherits stale definition filters. Deleting a definition refreshes the shared catalog/rail while leaving the workspace and historical executions available. The editor owns typed parameter rows, stable step IDs, success/failure destinations, bounded capture selectors, and field-level server errors while preserving exact-code settings it doesn't edit yet. Sensitive fields use masked controls; terminal answers use the shared secret composer mode without transcript echo, and inline sensitive flags are rejected after redaction. Browser command previews render known inputs only; references to earlier captures remain visible and non-runnable until the server-owned playbook produces them. The shared desktop modal and mobile sheet read the same active-scope execution list, poll only while the Executions tab is visible, refresh on reopen and scope changes, and stop polling when that view closes without canceling server-owned work. Active linked runs attach through the runner's Status Monitor path; finished linked runs open through the shared Run Details boundary.
 
 ### AI Assist Runtime
 
@@ -1695,7 +1717,9 @@ erDiagram
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
-- `user_workflows` — one row per saved workflow `(id, session_id, team_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, session-token migration, and shared team workflows.
+- `user_workflows` — one row per saved workflow `(id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, session-token migration, and shared team workflows.
+- `workflow_executions` — one immutable compiled workflow snapshot per durable run, including owner scope, source workflow, resolved inputs, execution-local variables, current state, workspace/project context, initiating actor, browser ownership hints, and bounded failure metadata.
+- `workflow_execution_steps` — one ordered row per execution step with stable step id, unique linked run id, status, exit code, capture-name summary, selected transition/reason, and bounded error metadata.
 - `recent_values` — one row per recently used autocomplete value per personal/team scope `(session_id, team_id, kind, value, last_used, use_count)`. `kind` is one of `domain`, `ip`, `url`, or `port_set`; each kind is capped independently at 10 entries. URL recents keep the scheme, host, and path but drop query strings and fragments before storage.
 - `secrets` — one row per encrypted secret name per vault scope `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Personal scopes use the user's session token as the stored `session_token`; team scopes use the team id as the stored vault-scope id. Storage also rejects attempts to bind the same consumer env name to two different secrets in one scope, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session attribution, optional `team_id` ownership for shared team projects, display metadata, status, timestamps, and session/team-scoped slugs. Project notes are stored through `entity_notes` with `entity_type='project'`.
@@ -1873,6 +1897,12 @@ The current event inventory is:
 | INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
 | INFO | `RUN_OUTPUT_ARTIFACT_FINALIZED` | full-output artifact capture | run_id, rel_path, artifact_bytes, lines, truncated, available |
+| INFO | `WORKFLOW_EXECUTION_STARTED` | durable workflow route | execution_id, workflow_id, workflow_source, step_count, team_id, session, ip |
+| INFO | `WORKFLOW_STEP_STARTED` | workflow execution engine | execution_id, step_id, run_id, cmd_type |
+| INFO | `WORKFLOW_STEP_COMPLETED` | workflow execution engine | execution_id, step_id, step_status, exit_code, duration_ms, transition, transition_reason |
+| INFO | `WORKFLOW_EXECUTION_COMPLETED` | workflow execution engine | execution_id, status, duration_ms |
+| INFO | `WORKFLOW_EXECUTION_CANCELED` | durable workflow route | execution_id, run_id, step_count, duration_ms, team_id, session, ip |
+| INFO | `WORKFLOW_RECOVERY_COMPLETED` | workflow startup recovery | examined, recovered, left_running, failed, ignored, errors, pid, recovery_owner |
 | INFO | `PTY_SESSION_STARTED` | interactive PTY service | ip, run_id, session, pid, cmd, rows, cols, allow_input |
 | INFO | `PTY_SESSION_ENDED` | interactive PTY service | ip, run_id, session, exit_code, elapsed, cmd |
 | INFO | `PTY_OWNERSHIP_DISPLACED` | interactive PTY ownership claim | run_id, session, owner_client_id, owner_tab_id, displaced_client_id, displaced_tab_id |
@@ -2110,6 +2140,21 @@ The current event inventory is:
 | WARN | `SHARE_REDACTION_RULE_INVALID` | share/export redaction config | label, pattern_hash, error |
 | WARN | `SHARE_REDACTION_RULE_FAILED` | share/export redaction application | label, pattern_hash, error |
 | WARN | `KILL_FAILED` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role, pid, pgid, error |
+| WARN | `WORKFLOW_DEFINITION_REJECTED` | operator workflow catalog | source, entry_index and error_type (when known), reason |
+| WARN | `WORKFLOW_DEFINITION_VALIDATION_FAILED` | saved workflow create/update route | action, error_count, team_id, session |
+| WARN | `WORKFLOW_EXECUTION_VALIDATION_FAILED` | durable workflow start route | reason, workflow_id and error_type (when known), session |
+| WARN | `WORKFLOW_CAPTURE_FAILED` | workflow execution engine | execution_id, step_id, reason |
+| WARN | `WORKFLOW_STEP_FAILED` | workflow execution engine | execution_id, step_id, exit_code, transition_reason |
+| WARN | `WORKFLOW_STEP_DEFINITION_MISSING` | workflow execution engine | execution_id, step_id |
+| WARN | `WORKFLOW_STEP_RENDER_FAILED` | workflow execution engine | execution_id, step_id, error_type |
+| WARN | `WORKFLOW_INTERACTIVE_STEP_REJECTED` | workflow execution engine | execution_id, step_id |
+| WARN | `WORKFLOW_STEP_LAUNCH_FAILED` | workflow execution engine | execution_id, step_id, error_type, stage |
+| WARN | `WORKFLOW_CANCEL_SIGNAL_FAILED` | durable workflow cancel route | execution_id, run_id, error_type |
+| WARN | `WORKFLOW_EXECUTION_LIMIT_REACHED` | durable workflow start route | limit, team_id, session, ip |
+| WARN | `WORKFLOW_EXECUTION_TIMEOUT` | workflow execution engine | execution_id, step_id, max_runtime_seconds |
+| WARN | `WORKFLOW_EXECUTION_PERMISSION_REVOKED` | workflow execution engine | execution_id, step_id, team_id, actor_member_id, reason |
+| WARN | `WORKFLOW_RECOVERY_OUTPUT_LOAD_FAILED` | workflow startup recovery | execution_id, step_id, run_id, stage, reason |
+| WARN | `WORKFLOW_RECOVERY_FAILED` | workflow startup recovery | execution_id, step_id, run_id (when known), reason |
 | WARN | `HEALTH_DEGRADED` | `health()` | db, redis |
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
@@ -2122,6 +2167,9 @@ The current event inventory is:
 | ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |
 | ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |
 | ERROR | `WATCHER_FINALIZE_ERROR` | run finalization watcher hook | run_id, session (+ traceback) |
+| ERROR | `WORKFLOW_STEP_LAUNCH_ERROR` | workflow execution engine | execution_id, step_id, error_type, stage (+ traceback) |
+| ERROR | `WORKFLOW_FINALIZE_ERROR` | run finalization workflow hook | execution_id, step_id, run_id, stage, session (+ traceback) |
+| ERROR | `WORKFLOW_RECOVERY_ERROR` | workflow startup recovery | execution_id, stage, pid, recovery_owner (+ traceback) |
 | ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
@@ -2161,7 +2209,7 @@ The current event inventory is:
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
 - `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session.
-- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, Postgres pool health, AI provider duration/outcome/cache/suggestion metrics, durable AI queue-health gauges, AI Redis coordination key pressure, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
+- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, durable workflow execution and step outcomes/durations, workflow capture failures/cancellations/recovery, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, Postgres pool health, AI provider duration/outcome/cache/suggestion metrics, durable AI queue-health gauges, AI Redis coordination key pressure, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
 
@@ -2178,7 +2226,7 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 - the AI panel reads the same AI config used by route and worker code, probes `/v1/models` through the provider client, and can send a tiny JSON-only test prompt without attaching run output
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
-- Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Postgres pool state, Redis, AI Redis coordination key pressure, broker mode, workspace, intel cache size, Atlas, findings, snapshots, AI queue health, and provider-secret health live in `app/services/metrics/collectors.py`
+- Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; workflow outcome, duration, capture-failure, cancellation, and recovery metrics live in `app/services/metrics/workflows.py`; scrape-time collectors for database, Postgres pool state, Redis, AI Redis coordination key pressure, broker mode, workspace, intel cache size, Atlas, findings, snapshots, AI queue health, and provider-secret health live in `app/services/metrics/collectors.py`
 - the container entrypoint prepares `PROMETHEUS_MULTIPROC_DIR` under `/tmp/darklab_shell-prom`, clears stale worker shards on startup, keeps the directory ephemeral with the existing tmpfs runtime, and starts Gunicorn with `app/gunicorn_conf.py` so dead worker metric shards are removed when workers exit
 
 ---
@@ -2255,12 +2303,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,050
+- behavior tests: 4,093
 - docs/inventory meta-tests: 63
-- `pytest`: 2356 (2306 behavior + 50 meta)
-- `vitest`: 1485 (1472 behavior + 13 meta)
-- `playwright`: 272 behavior
-- total: 4,113
+- `pytest`: 2385 (2335 behavior + 50 meta)
+- `vitest`: 1496 (1483 behavior + 13 meta)
+- `playwright`: 275 behavior
+- total: 4,156
 
 ### Testing Architecture
 
@@ -2308,5 +2356,6 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

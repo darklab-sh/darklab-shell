@@ -216,8 +216,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2356 pytest + 1485 Vitest + 272 Playwright = 4,113 tests**.
-That total includes 4,050 behavior tests plus 63 docs/inventory meta-tests.
+Current totals: **2385 pytest + 1496 Vitest + 275 Playwright = 4,156 tests**.
+That total includes 4,093 behavior tests plus 63 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -444,5 +444,6 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

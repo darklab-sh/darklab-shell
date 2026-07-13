@@ -449,21 +449,23 @@ lnBtn.addEventListener('click', () => {
 function openWorkflows(options = {}) {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-  const scopedItems = Array.isArray(options.items) ? options.items : null;
+  const selectedWorkflowId = String(options.selectedWorkflowId || '').trim();
+  const focusExecutionId = String(options.executionId || '').trim();
+  const requestedView = focusExecutionId || options.view === 'executions' ? 'executions' : 'workflows';
   if (workflowsOverlay) {
-    if (scopedItems) workflowsOverlay.dataset.workflowScoped = '1';
-    else delete workflowsOverlay.dataset.workflowScoped;
+    workflowsOverlay.dataset.workflowView = requestedView;
+    if (selectedWorkflowId) {
+      workflowsOverlay.dataset.workflowId = selectedWorkflowId;
+      workflowsOverlay.dataset.workflowRequestedId = selectedWorkflowId;
+    } else {
+      delete workflowsOverlay.dataset.workflowId;
+      delete workflowsOverlay.dataset.workflowRequestedId;
+    }
+    workflowsOverlay.dataset.workflowSelectionRequested = selectedWorkflowId ? '1' : '0';
+    if (focusExecutionId) workflowsOverlay.dataset.workflowExecutionFocus = focusExecutionId;
+    else delete workflowsOverlay.dataset.workflowExecutionFocus;
   }
   showWorkflowsOverlay();
-  if (scopedItems) {
-    if (typeof renderWorkflowItems === 'function') {
-      renderWorkflowItems(scopedItems, { emitCatalogEvent: options.emitCatalogEvent !== false });
-    }
-    if (typeof markInteractionSurfaceReady === 'function') {
-      markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
-    }
-    return Promise.resolve(scopedItems);
-  }
   const workflowsReady = typeof loadWorkflows === 'function'
     ? loadWorkflows()
     : Promise.resolve();
@@ -473,6 +475,12 @@ function openWorkflows(options = {}) {
       logClientError('failed to load /workflows while opening modal', err);
       return null;
     });
+  }).then((items) => {
+    if (Array.isArray(items) && typeof renderWorkflowItems === 'function') {
+      renderWorkflowItems(items, { emitCatalogEvent: false });
+    }
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:workflows-opened', {});
+    return items;
   }).catch(err => {
     logClientError('failed to load workflows controller', err);
   }).finally(() => {
@@ -483,7 +491,12 @@ function openWorkflows(options = {}) {
 }
 
 function closeWorkflows() {
-  if (workflowsOverlay) delete workflowsOverlay.dataset.workflowScoped;
+  if (workflowsOverlay) {
+    delete workflowsOverlay.dataset.workflowId;
+    delete workflowsOverlay.dataset.workflowRequestedId;
+    delete workflowsOverlay.dataset.workflowSelectionRequested;
+    delete workflowsOverlay.dataset.workflowExecutionFocus;
+  }
   hideWorkflowsOverlay();
   if (typeof emitUiEvent === 'function') emitUiEvent('app:workflows-closed', {});
   refocusComposerAfterAction({ defer: true });

@@ -52,7 +52,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
   - The Activity tab shows safe project audit rows with filters, paging, collapsed details, and mobile rows, so project users can review what changed without opening operator diagnostics. Metadata edit sheets also show a small Recent activity panel for the item you're editing, with a jump into the filtered Activity tab.
   - The Report tab turns selected project material into a narrative engagement report with explicit draft saves, section ordering, paged included-evidence controls for large projects, HTML preview, markdown/HTML archive export, safe audit correlation for job-backed exports, and browser Print/PDF.
 - **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, team-scope sharing for live PTY sessions, and completed transcripts saved back into normal history
-- **Session tokens and teams** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, saved options, and team memberships across browsers and devices.
+- **Session tokens and teams** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows and completed personal workflow executions, recent target autocomplete, saved options, and team memberships across browsers and devices. Migration or rotation waits until workflow executions started by the current identity are no longer active.
   - A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor.
   - The Options **Teams** tab and `/api/v1/teams` cover team creation, invites, member edits, recovery codes, archive/reactivate, shared scope management, a Recent activity preview for owners/admins, and an owner/admin Activity subtab for safe team-governance audit rows. `darklab team ...` covers script-friendly team creation, invites, joins, member edits, recovery codes, and saved CLI scope; the terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation.
   - Team scopes share team-owned runs while they're still running, plus History, Run Details, Files, Projects, project targets, finding review, labels, notes, cached Atlas intel, linked-run artifacts, evidence packages, shared workflows, schedules, watchers, notification delivery history, completed-run AI assists, and explicit team secrets while keeping personal work separate.
@@ -67,7 +67,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior, command outcome summaries, and default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` (with `--json` for a machine-readable entry), `commands search <term>`, and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, subcommands, and per-tool knowledge guidance (notes, gotchas, safe defaults, and artifact behavior) from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, manage team scope, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
-- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. Users can save personal or team-scoped workflows with `{{variables}}`, edit/delete them above the built-ins, and run them from the terminal with `workflow list/show/run`
+- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. The Workflows workspace is available from **Browse all workflows** in the desktop rail, the mobile menu, or `Alt+G`; its searchable catalog keeps definitions and their inputs together, while a separate Executions tab shows progress and linked runs. Users can save personal or team-scoped v2 playbooks with named typed parameters, masked sensitive fields, stable steps, success/failure routes, and bounded output captures for later steps. Playbooks keep running after the workspace closes
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting for commands, APIs, and dynamic app routes, shared PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, an IP-gated `/diag/audit` viewer for filtered audit rows and capped CSV/JSON downloads, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
@@ -443,6 +443,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [docs/schedules.md](docs/schedules.md) - Scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](docs/watchers.md) - Change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](docs/workflows.md) - Workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
 
@@ -534,6 +535,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
 │   │   ├── teams.py            # /session/teams* browser team, invite, member, and recovery routes
 │   │   ├── watchers.py         # /watchers* browser watcher CRUD, fire audit, run-now, and baseline routes
+│   │   ├── workflows.py        # /workflow-executions* durable workflow start, status, and cancel routes
 │   │   └── workspace.py        # /workspace/files* app-managed personal/team file routes
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
@@ -607,7 +609,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
 │   │   │   ├── v0040_personal_scope_team_id_normalization.py # Personal-scope team-id normalization for partial indexes
 │   │   │   ├── v0041_project_atlas_sort_indexes.py # Project and Atlas sort-order indexes
-│   │   │   └── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
+│   │   │   ├── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
+│   │   │   └── v0043_workflow_executions.py # Durable workflow definition version and execution tables
 │   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
 │   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
 │   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
@@ -779,7 +782,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── zoomeye.py      # ZoomEye search provider normalization
 │   │   ├── metrics/
 │   │   │   ├── __init__.py     # Prometheus metric definitions, label normalizers, and render helpers
-│   │   │   └── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
+│   │   │   ├── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
+│   │   │   └── workflows.py    # Value-free durable workflow outcome, duration, capture, cancel, and recovery metrics
 │   │   ├── metrics_environment.py # Prometheus multiprocess environment setup helper
 │   │   ├── metrics_lazy.py     # Lazy Prometheus metrics proxy for import-pure modules
 │   │   ├── notifications/
@@ -870,6 +874,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
 │   │   │   ├── broker_worker.py # Brokered synthetic and subprocess worker output publishing
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
+│   │   │   ├── contracts.py    # Shared run-start exception contracts
 │   │   │   ├── finalization.py # Completed-run capture, Atlas/finding/project hooks, and PTY persistence
 │   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
 │   │   │   ├── lifecycle.py    # Command preparation and process spawn helpers
@@ -937,7 +942,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── service.py      # Watcher CRUD, state changes, option validation, quota, and fire-audit helpers
 │   │   ├── workflows/
 │   │   │   ├── __init__.py     # Workflow service package marker
+│   │   │   ├── captures.py     # Bounded normalized-output capture selectors
 │   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers
+│   │   │   ├── compiler.py     # V2 definition graph, typed input, and shell-safe rendering validation
+│   │   │   ├── contracts.py    # Workflow execution service errors
+│   │   │   ├── events.py       # Bounded value-free execution event replay payloads
+│   │   │   ├── executions.py   # Server-owned launch, finalization, permission, and recovery orchestration
+│   │   │   ├── hooks.py        # Failure-isolated shared run-finalization hook
+│   │   │   ├── storage.py      # Durable execution and step state transitions
 │   │   │   └── user_workflows.py # Personal/team workflow storage, validation, and serialization helpers
 │   │   └── workspace/
 │   │       ├── __init__.py     # Workspace service package marker
@@ -966,7 +978,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── schedules.css # Schedules modal, recurring-run editor, and schedule-fire audit rows
 │   │   │   │   ├── status-monitor.css # Status Monitor modal, visual cards, active-run rows, and mobile sheet layout
 │   │   │   │   ├── watchers.css # Watchers modal, diff summary, cadence editor, and fire-audit rows
-│   │   │   │   ├── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
+│   │   │   │   ├── workflows.css # Workflows workspace, catalog/detail layout, editor, and execution views
 │   │   │   │   └── workspace.css # Files modal, file viewer/editor, workspace rows, and workspace metadata chips
 │   │   │   ├── mobile-chrome.css # Mobile sheet handles, drag affordances, and pull-to-refresh suppression hooks
 │   │   │   ├── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
@@ -1132,7 +1144,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── watchers/
 │   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
-│   │       │   │   ├── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
+│   │       │   │   ├── workflow_catalog.js # Searchable source-grouped workflow catalog and selection UI
+│   │       │   │   ├── workflow_editor.js # Typed parameter, stable step, transition, and validation editor
+│   │       │   │   ├── workflow_executions.js # Durable workflow requests and Executions-tab UI
+│   │       │   │   ├── workflow_parameters.js # Parameter value controls, remembered form state, and command previews
+│   │       │   │   ├── workflows.js # Workflows workspace, terminal command, and runtime autocomplete support
 │   │       │   │   └── workflows_bridge.js # Workflows ESM bridge for lazy workflow panels
 │   │       │   └── workspace/
 │   │       │       ├── workspace_autocomplete_cache.js # Files autocomplete cache refresh and path hint helpers
@@ -1205,7 +1221,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-│   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
+│   ├── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
+│   └── workflows.md           # Workflow playbook parameters, transitions, captures, execution state, and operator YAML
 ├── entrypoint.sh               # Container startup script — fixes writable dirs, starts optional workers, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
@@ -1373,7 +1390,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
 │   │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
 │   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
-│   │   └── test_watchers_classifiers.py # Watcher findings, ports, hosts, TLS, textual fallback, and classifier registry coverage
+│   │   ├── test_watchers_classifiers.py # Watcher findings, ports, hosts, TLS, textual fallback, and classifier registry coverage
+│   │   └── test_workflows_v2.py # Workflow v2 compilation, execution, recovery, and API coverage
 │   └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
 └── tools/
     └── darklab_cli/

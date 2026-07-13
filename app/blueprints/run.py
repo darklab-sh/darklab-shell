@@ -673,7 +673,7 @@ def _brokered_synthetic_run(
     *,
     cmd_type="builtin",
     owner_tab_id="",
-    team_id="",
+    team_id="", **kwargs,
 ):
     return run_lifecycle.brokered_synthetic_run(
         original_command,
@@ -690,7 +690,7 @@ def _brokered_synthetic_run(
         publish_run_event_fn=publish_run_event,
         publish_broker_captured_line_fn=_publish_broker_captured_line,
         save_completed_run_fn=_save_completed_run,
-        app_metrics_obj=app_metrics,
+        app_metrics_obj=app_metrics, **kwargs,
     )
 
 

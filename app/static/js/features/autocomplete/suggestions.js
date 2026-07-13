@@ -1637,6 +1637,7 @@ if (typeof window !== 'undefined') {
 
 export {
   _readRecentValues,
+  _readProjectTargets,
   _readAutocompleteProjects,
   _readAutocompleteSchedules,
   _readAutocompleteWatchers,

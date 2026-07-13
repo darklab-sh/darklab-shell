@@ -342,27 +342,34 @@ function _mobileComposerPlaceholder() {
 
 function _applyComposerPromptMode() {
   const isConfirm = _composerPromptMode === 'confirm';
+  const isSecret = _composerPromptMode === 'secret';
+  const isPrompt = isConfirm || isSecret;
   const defaultPromptLabel = typeof _appBuildPromptLabelAdapter === 'function'
     ? _appBuildPromptLabelAdapter()
     : (_defaultDesktopPromptLabel || 'anon@darklab.sh:~ $');
-  const desktopLabel = isConfirm ? '[yes/no]:' : defaultPromptLabel;
-  const mobileLabel = isConfirm ? '[yes/no]:' : '';
+  const desktopLabel = isConfirm ? '[yes/no]:' : (isSecret ? '[hidden]:' : defaultPromptLabel);
+  const mobileLabel = isConfirm ? '[yes/no]:' : (isSecret ? '[hidden]:' : '');
   const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
     ? shellPromptWrap.querySelector('.prompt-prefix')
     : null;
   if (promptPrefix) promptPrefix.textContent = desktopLabel;
   if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
-    shellPromptWrap.classList.toggle('shell-prompt-confirm', isConfirm);
+    shellPromptWrap.classList.toggle('shell-prompt-confirm', isPrompt);
   }
   const mobilePromptLabel = typeof mobileComposerRow !== 'undefined' && mobileComposerRow
     ? mobileComposerRow.querySelector('.mobile-prompt-label')
     : null;
   if (mobilePromptLabel) {
     mobilePromptLabel.textContent = mobileLabel;
-    mobilePromptLabel.hidden = !isConfirm;
+    mobilePromptLabel.hidden = !isPrompt;
   }
   if (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) {
-    mobileCmdInput.placeholder = isConfirm ? '' : _mobileComposerPlaceholder();
+    mobileCmdInput.placeholder = isPrompt ? '' : _mobileComposerPlaceholder();
+  }
+  if (typeof _appGetComposerInputsAdapter === 'function') {
+    const { desktop, mobile } = _appGetComposerInputsAdapter();
+    if (desktop) desktop.type = isSecret ? 'password' : 'text';
+    if (mobile) mobile.type = isSecret ? 'password' : 'text';
   }
 }
 
@@ -374,9 +381,11 @@ function _syncDesktopPromptPrefix() {
   const defaultPromptLabel = typeof _appBuildPromptLabelAdapter === 'function'
     ? _appBuildPromptLabelAdapter()
     : (_defaultDesktopPromptLabel || 'anon@darklab.sh:~ $');
-  promptPrefix.textContent = _composerPromptMode === 'confirm' ? '[yes/no]:' : defaultPromptLabel;
+  promptPrefix.textContent = _composerPromptMode === 'confirm'
+    ? '[yes/no]:'
+    : (_composerPromptMode === 'secret' ? '[hidden]:' : defaultPromptLabel);
   if (
-    _composerPromptMode !== 'confirm'
+    _composerPromptMode === null
     && _appConfig().workspace_enabled === true
     && typeof mobileCmdInput !== 'undefined'
     && mobileCmdInput
@@ -386,7 +395,7 @@ function _syncDesktopPromptPrefix() {
 }
 
 function setComposerPromptMode(mode = null) {
-  _composerPromptMode = mode === 'confirm' ? 'confirm' : null;
+  _composerPromptMode = ['confirm', 'secret'].includes(mode) ? mode : null;
   if (typeof window !== 'undefined')  _applyComposerPromptMode();
 }
 
@@ -407,9 +416,10 @@ function syncShellPrompt() {
   }
   const composer = typeof _appGetComposerStateAdapter === 'function' ? _appGetComposerStateAdapter() : null;
   const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
-  const value = composer && typeof composer.value === 'string'
+  const rawValue = composer && typeof composer.value === 'string'
     ? composer.value
     : (fallbackInput ? fallbackInput.value || '' : '');
+  const value = _composerPromptMode === 'secret' ? '*'.repeat(rawValue.length) : rawValue;
   const len = value.length;
   let start = composer && typeof composer.selectionStart === 'number'
     ? composer.selectionStart

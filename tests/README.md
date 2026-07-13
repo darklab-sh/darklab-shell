@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,050
+- behavior tests: 4,093
 - docs/inventory meta-tests: 63
-- `pytest`: 2356 (2306 behavior + 50 meta)
-- `vitest`: 1485 (1472 behavior + 13 meta)
-- `playwright`: 272 behavior
-- total: 4,113
+- `pytest`: 2385 (2335 behavior + 50 meta)
+- `vitest`: 1496 (1483 behavior + 13 meta)
+- `playwright`: 275 behavior
+- total: 4,156
 
 This document is organized in two parts:
 
@@ -260,7 +260,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists and still matches the Docker runtime inputs, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild; otherwise the cache refreshes itself when `Dockerfile`, `app/requirements.txt`, or `entrypoint.sh` changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. Required-secret tools can still contribute registry-declared help examples when those examples are marked with `smoke.profile: unauthenticated`, which catches broken CLI imports without needing provider keys. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. Raw-packet readiness is enabled inside the isolated smoke project, where Nmap, Naabu, and Masscan scan test-owned services. The HTTP targets deliberately listen on `8888`, proving the scanner can reach that port on remote containers while both connect and raw-IP attempts against the local app stay blocked. A second app service applies a restricted CIDR to a hostname-resolved target, confirms Nmap's raw traffic is rejected while an adjacent target remains reachable, keeps Naabu in connect mode, and denies Masscan's packet-socket path. The fixture removes stale `darklab_shell-test-*` Compose containers, networks, and volumes before startup and after teardown so interrupted local runs don't leave test resources behind. It catches drift between surfaced commands and actual tool behavior, including renamed flags, changed output, missing tools, broken workspace path rewriting, or lost Linux scanner capabilities. It's not part of the default fast loop; run it after Dockerfile, packaged-tool, base-image, command-registry example, workspace file-flag, interactive PTY example, or workflow command changes.
+`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists and still matches the Docker runtime inputs, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild; otherwise the cache refreshes itself when `Dockerfile`, `app/requirements.txt`, or `entrypoint.sh` changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. Required-secret tools can still contribute registry-declared help examples when those examples are marked with `smoke.profile: unauthenticated`, which catches broken CLI imports without needing provider keys. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. Raw-packet readiness is enabled inside the isolated smoke project, where Nmap, Naabu, and Masscan scan test-owned services. The HTTP targets deliberately listen on `8888`, proving the scanner can reach that port on remote containers while both connect and raw-IP attempts against the local app stay blocked. A second app service applies a restricted CIDR to a hostname-resolved target, confirms Nmap's raw traffic is rejected while an adjacent target remains reachable, keeps Naabu in connect mode, and denies Masscan's packet-socket path. The live stack also saves a v2 playbook, captures a response from a test-owned service, feeds it into a second command, and verifies both linked runs keep their execution ancestry. The fixture removes stale `darklab_shell-test-*` Compose containers, networks, and volumes before startup and after teardown so interrupted local runs don't leave test resources behind. It catches drift between surfaced commands and actual tool behavior, including renamed flags, changed output, missing tools, broken workspace path rewriting, or lost Linux scanner capabilities. It's not part of the default fast loop; run it after Dockerfile, packaged-tool, base-image, command-registry example, workspace file-flag, interactive PTY example, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -1084,6 +1084,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWordlistCatalog.test_wordlist_catalog_missing_root_returns_empty_items` | Verifies that a missing SecLists root returns an empty catalog without losing configured category metadata. |
 | `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
+| `TestWorkflowInputLoading.test_load_workflows_rejects_an_invalid_v2_entry_as_one_playbook` | Verifies invalid v2 entries, unsupported explicit versions, and malformed workflow YAML are rejected with bounded warnings instead of loading valid-looking fragments. |
 | `TestWorkflowInputLoading.test_load_all_workflows_filters_workspace_required_workflows` | Verifies that Files-backed workflow chains are hidden when workspaces are disabled and retain their workspace feature gate when enabled. |
 | `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
 | `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry built-in commands such as `bogus-command`. |
@@ -1264,6 +1265,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_smoke_image_cache_status_requires_matching_label` | Verifies that the smoke fixture reuses only cache images with the expected build-input label. |
 | `test_smoke_image_cache_status_rebuilds_when_image_is_missing` | Verifies that a missing stable smoke cache image triggers a rebuild. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
+| `test_container_smoke_test_workflow_capture_feeds_linked_run` | Verifies a live v2 playbook captures output from a test-owned service, feeds it into a later command, and preserves execution and step provenance on both runs. |
 | `test_container_smoke_test_raw_syn_scan_reaches_remote_app_port` | Verifies capability-backed Nmap reaches test-owned services while connect and raw-IP attempts against the local app stay blocked and link-layer bypass requests are denied. |
 | `test_container_smoke_test_raw_naabu_and_masscan_find_test_owned_port` | Verifies capability-backed Naabu SYN and Masscan runs find a test-owned open port without permission errors. |
 | `test_container_smoke_test_restricted_hostname_raw_traffic_is_blocked` | Verifies restricted hostname traffic is blocked through Nmap's raw-IP path, an adjacent target stays reachable, Naabu uses connect mode, and Masscan stays denied. |
@@ -1622,8 +1624,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_completed_external_run_persistence_writes_full_postgres_graph` | Verifies completed external runs persist run rows, full-output artifacts, workspace artifacts, active project links, Atlas entities, findings, and History readback through Postgres. |
 | `test_completed_run_finalize_rolls_back_optional_postgres_failure` | Verifies optional Postgres run-finalization failures roll back their partial writes without losing the completed run row. |
 | `test_share_routes_roundtrip_snapshot_on_postgres` | Verifies snapshot share create/read/delete routes round-trip through Postgres. |
-| `test_session_metadata_routes_write_to_postgres` | Verifies session preferences, recent values, starred commands, and user workflows write through Postgres using JSONB-safe parameters and native conflict handling. |
-| `test_session_token_lifecycle_and_migration_routes_use_postgres` | Verifies session token generation, lookup, verification, revocation, guarded session migration, and migrated session data through Postgres. |
+| `test_session_metadata_routes_write_to_postgres` | Verifies Postgres workflow JSONB/index contracts, capture-fed transitions, compare-and-set finalization, team ownership, linked-run cleanup, workflow-filtered reads, cancellation, and concurrent per-owner limits alongside session metadata. |
+| `test_session_token_lifecycle_and_migration_routes_use_postgres` | Verifies session token generation, lookup, verification, revocation, guarded migration, and completed workflow execution/step ownership moving through Postgres. |
 | `test_secret_session_migration_uses_postgres_conflict_handling` | Verifies encrypted secret session migration keeps an existing destination secret when Postgres conflict handling skips a duplicate source secret. |
 | `test_project_routes_use_postgres_query_path` | Verifies project create/list/active, target linking, run linking, metadata ordering, and JSON source details through the Postgres query path. |
 | `test_workspace_files_route_uses_postgres_metadata_query_path` | Verifies the Files list route can attach workspace artifact, project, label, and note metadata through the Postgres query path. |
@@ -2429,6 +2431,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSessionMigrate.test_migrate_workspace_file_metadata_only_for_moved_files` | Verifies that workspace-file labels and notes migrate only when the source file actually moved to the destination session. |
 | `TestSessionWorkflows.test_create_lists_and_returns_normalized_workflow` | Checks that creating a session workflow stores normalized workflow data and returns it through the list endpoint. |
 | `TestSessionWorkflows.test_rejects_undeclared_workflow_variables` | Checks that workflow steps cannot reference undeclared template variables. |
+| `TestSessionWorkflows.test_create_and_update_return_field_level_definition_errors` | Verifies workflow create and update errors identify the invalid parameter or step field. |
 | `TestSessionWorkflows.test_update_and_delete_are_session_scoped` | Checks that workflow update and delete operations are scoped to the owning session. |
 | `TestSessionRecentValues.test_get_returns_empty_list_for_new_session` | Checks that a new session starts with empty recent autocomplete values. |
 | `TestSessionRecentValues.test_post_normalizes_filters_and_caps_values_per_kind` | Checks that recent-value persistence normalizes domains, IPs, URLs, and port sets while capping each kind at 10 values. |
@@ -2593,6 +2596,37 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_tls_classifier_reports_certificate_field_changes` | Verifies openssl s_client output reports changed certificate fields. |
 | `test_classifier_registry_keeps_structured_classifiers_before_textual_fallback` | Verifies structured watcher classifiers run before the textual fallback. |
 
+#### `test_workflows_v2.py`
+
+| Test | Description |
+| --- | --- |
+| `test_legacy_definition_gets_snapshot_local_step_ids` | Verifies legacy workflows compile into durable snapshots with generated ordered step ids. |
+| `test_v2_compiler_rejects_forward_capture_references_and_cycles` | Verifies v2 definitions reject capture use when any incoming branch can skip its producer, plus cyclic transition graphs. |
+| `test_v2_compiler_rejects_duplicate_variables_invalid_transitions_and_unreachable_steps` | Verifies v2 definitions reject duplicate parameters, unknown transition targets, and steps that no branch can reach. |
+| `test_typed_inputs_are_canonicalized_and_rendered_as_shell_scalars` | Verifies typed target and port-set inputs are normalized and substituted as one shell-safe argument, while missing runtime variables fail closed. |
+| `test_typed_input_boundaries_reject_unsafe_paths_controls_and_sizes` | Verifies target, Files, and wordlist values are normalized while invalid ports, path escapes, controls, and oversized input are rejected. |
+| `test_capture_accumulator_ignores_noise_and_supports_entities_and_json_pointer` | Verifies bounded captures ignore progress noise and extract eligible lines, structured entities, and JSON Pointer scalars. |
+| `test_capture_accumulator_reports_required_misses_without_using_notices` | Verifies notices don't satisfy line captures and required misses return a bounded error. |
+| `test_capture_accumulator_enforces_value_total_and_control_character_limits` | Verifies captured values stay within per-value and execution byte limits and reject control characters. |
+| `test_execution_state_machine_advances_once_and_keeps_snapshot` | Verifies exact-code routing, capture-fed variables, immutable snapshots, and duplicate-finalization protection. |
+| `test_execution_state_machine_routes_failures_and_skips_unvisited_branches` | Verifies nonzero steps follow explicit fallback branches, unvisited branches are skipped, and unhandled failures stop. |
+| `test_execution_cancel_marks_active_and_pending_steps_terminal` | Verifies cancellation marks active and pending workflow steps terminal, returns the linked run it changed, and wins a late-finalization race. |
+| `test_cancel_route_contains_missing_and_failed_process_signals` | Verifies cancellation remains terminal when the linked process is missing or can't be validated or signaled, records bounded diagnostics, and prevents late finalization from advancing the playbook. |
+| `test_team_execution_routes_enforce_roles_scope_and_team_process_control` | Verifies team owners and operators can start and cancel shared executions, viewers remain read-only, archived or removed membership is rejected, owner scopes stay isolated, and team cancellation signals the bound process group. |
+| `test_execution_routes_are_scoped_and_launch_server_execution` | Verifies durable routes enforce owner and workflow filters, active limits, event replay, transition-safe run signaling, and immutable snapshots after the source is edited or deleted. |
+| `test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_projects` | Verifies History and Projects expose linked-run ancestry without leaking input, variable, snapshot, or command values. |
+| `test_server_orchestrator_launches_capture_fed_steps_through_normal_run_service` | Verifies server orchestration uses the normal run service, feeds a captured value into the next rendered step, and preserves the execution's owner, workspace, Project, client, and tab context on every launch. |
+| `test_required_capture_failure_uses_failure_branch_without_leaking_values` | Verifies a successful command with a missing required capture keeps exit code zero, marks the step failed, follows the failure branch, records the capture-failure metric, and keeps private inputs out of logs, events, audit rows, and notifications. |
+| `test_server_orchestrator_rejects_interactive_pty_steps` | Verifies a registry-declared interactive trigger fails before a workflow step reaches the run broker. |
+| `test_server_orchestrator_records_broker_or_policy_launch_failures` | Verifies broker and launch-time policy errors leave the execution and active step in a durable failed state, including a policy change between steps without binding a second run. |
+| `test_active_execution_limit_is_enforced_per_owner` | Verifies one personal or team owner can't exceed the configured active workflow execution cap. |
+| `test_step_launch_fails_execution_after_wall_clock_limit` | Verifies an overdue execution fails before another step can launch. |
+| `test_step_launch_rechecks_team_and_initiator_state` | Verifies each step stops for revoked personal/team tokens, archived or missing teams, removed members, and downgraded roles. |
+| `test_recovery_replays_completed_runs_and_fails_vanished_runs` | Verifies recovery advances completed runs, fails vanished runs, and examines every bounded page even when earlier rows stay active. |
+| `test_recovery_reclaims_stale_states_and_advances_completed_step_once` | Verifies restart recovery reclaims pending and stale-launching steps, leaves live runs alone, fails malformed durable state, restores captures, and advances a completed step exactly once under concurrent recovery. |
+| `test_completed_personal_execution_moves_with_session_migration` | Verifies session migration moves completed personal executions and their linked steps to the destination while preserving run ancestry and hiding them from the source. |
+| `test_finalization_hook_failure_marks_workflow_failed_without_raising` | Verifies workflow-hook errors are contained and leave the execution failed without escaping into normal run finalization. |
+
 ### Vitest
 
 #### `app.test.js`
@@ -2649,9 +2683,20 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `omits the interactive tools chapter from the terminal tour on mobile` | Verifies that the terminal tour hides the Interactive Tools chapter on mobile layouts even when Interactive PTY is enabled. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves workflow names and variable flags in runtime autocomplete context` | Verifies that saved workflow names and workflow input flags are exposed through runtime autocomplete. |
+| `offers project, recent, Files, and packaged wordlist values for workflow parameters` | Verifies parameter controls reuse active-project, recent-target, Files, and packaged-wordlist sources for the matching types. |
+| `scopes remembered workflow values and never stores sensitive parameters` | Verifies remembered form values stay within their owner and workflow scope while sensitive values use masked controls and are never persisted in browser storage. |
 | `deduplicates workflow subcommands that share runtime insert text` | Verifies that runtime workflow subcommands replace placeholder-decorated static hints when both insert the same command text. |
-| `renders user workflows above built-ins with edit actions` | Verifies that session-owned workflows render before built-ins and expose edit controls. |
-| `runs a workflow from the terminal command with flag-provided inputs` | Verifies that `workflow run` resolves a workflow, applies flag values, and queues its rendered commands. |
+| `renders saved workflows above built-ins and keeps the workspace open after deletion` | Verifies that saved workflows render before built-ins, expose edit controls, and refresh the shared catalog while selecting the next definition after deletion. |
+| `authors explicit typed parameters and stable step transitions in the workflow editor` | Verifies the editor serializes typed parameters, stable step IDs, and default success/failure destinations into a v2 definition. |
+| `marks workflow capture-fed command previews as available only during the playbook` | Verifies later-step capture references stay visible and non-runnable until the server-owned playbook produces them. |
+| `places structured workflow save errors beside the matching editor field` | Verifies structured server errors mark and explain the matching workflow editor control. |
+| `renders recent workflow execution progress, branches, captures, and linked runs` | Verifies that Recent Executions shows durable status, elapsed time, selected branches, capture names, and linked run ids. |
+| `shows playbook ancestry on history rows and links sibling step runs` | Verifies History rows display workflow and step ancestry and let operators open sibling runs through the shared Run Details path. |
+| `wires workflow execution attach, open, cancel, and refresh actions` | Verifies that active and finished execution rows expose the correct shared panel actions. |
+| `coordinates active workflow attachment and confirmed server cancellation` | Verifies that the execution controller resolves active run metadata, attaches through the shared runner, confirms cancellation, calls the server, and refreshes the list. |
+| `keeps recent execution history global when workflow selection changes` | Verifies that workflow selection doesn't filter the scope-wide execution timeline and that its ids continue feeding runtime autocomplete. |
+| `keeps panel launches out of the terminal and handles workflow run inputs` | Verifies that **Run all** switches the workspace to execution status without leaving partial state in the terminal, while `workflow run` returns a durable id and status hint, applies ordinary flags, and rejects inline sensitive values with a redacted command echo. |
+| `handles workflow runs, status, and cancel terminal commands without exposing inputs` | Verifies terminal execution listing, detail, and cancellation commands handle missing and cross-scope ids, call the expected APIs, and never print stored input or variable values. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
 | `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file download`, `file rm`, and `cat`. |
 | `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
@@ -3689,7 +3734,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
 | `filters client-side session-token output through the built-in pipe helpers` | Verifies that terminal-native `session-token` output supports built-in pipe helpers before rendering. |
 | `prints success only after a skipped migration answer and does not store yes/no in command history` | Verifies that explicitly skipping migration still applies the token, delays the success copy until that answer, and keeps the yes/no response out of command history. |
-| `keeps the pending prompt open on invalid answers` | Verifies that invalid terminal-confirm answers re-prompt on a new line instead of silently defaulting to yes or no. |
+| `keeps the pending prompt open on invalid answers` | Verifies invalid yes/no answers re-prompt and secret text prompts pass their answer without echoing it into the transcript. |
 | `treats Ctrl+C as cancel and aborts the session-token set flow` | Verifies that `Ctrl+C` during the `session-token set` migration prompt cancels the whole flow instead of applying the token with migration skipped. |
 | `uses the uncapped session run-count endpoint for migration prompts` | Verifies that session-token migration prompts use the uncapped `/session/run-count` value instead of the paginated `/history` slice. |
 | `prompts for migration when the current session only has workspace files` | Verifies that workspace files alone are enough to trigger the session-token migration prompt. |
@@ -4488,10 +4533,11 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
 | `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the backdrop — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
+| `workflows sheet exposes the shared recent execution controls` | Verifies that the mobile Workflows sheet opens its Executions tab, shows durable status and captures, attaches the linked active run to the terminal, reopens, and confirms cancellation. |
 | `mobile Projects creates, links, drills by count chip, and opens row actions` | Verifies the real mobile Projects browser flow for creating a project, linking the last run, using a count chip to drill into Runs, and opening row actions in a mobile action sheet. |
 | `mobile Projects can launch run comparison from the runs tab` | Verifies that the mobile Projects compare stepper hands off to the shared run comparison overlay, closes the Projects sheet, and avoids the generic compare failure toast. |
 | `mobile Projects shows retryable project summary errors` | Verifies that mobile Projects renders a retryable inline error when a project summary fetch fails and recovers after tapping Retry. |
-| `workflows sheet starts collapsed and wraps commands inside cards` | Verifies that mobile workflow cards start collapsed, expand on tap, and keep wrapped command chips inside the sheet width. |
+| `workflows sheet browses the catalog and drills into wrapped command details` | Verifies that mobile opens on the workflow catalog, drills into one shared detail view, keeps command chips inside the sheet width, and returns to the catalog. |
 | `mobile recent peek summarizes recent runs and opens the full history panel on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile History panel with tools collapsed. |
 | `mobile full history opens run details from row tap` | Verifies that tapping a row in the mobile History panel opens Run Details and leaves the mobile composer untouched. |
 | `mobile full history restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile History panel loads the corresponding run into the active tab. |
@@ -4730,10 +4776,12 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `editing workflow inputs rerenders steps and step run submits the rendered command` | Verifies that editing workflow inputs rerenders the displayed commands and that the per-step run button submits the interpolated command. |
 | `rendered workflow chips load interpolated commands into the prompt` | Verifies that workflow chips load the rendered command text, not the raw template, into the active prompt. |
 | `workflow inputs persist when the workflow modal is reopened` | Verifies that workflow form values persist across closing and reopening the workflows modal. |
-| `creates and edits a user workflow from the workflows modal` | Verifies that the workflows modal can create and edit a current-session user workflow through the browser UI. |
+| `recent execution status can be canceled and restored after reopening` | Verifies that the desktop Workflows panel shows branch, capture, linked-run, and current-step state, confirms server cancellation, and refreshes the canceled execution after reopening. |
+| `runs a real capture-fed playbook and reopens its linked run` | Verifies a saved v2 playbook starts through the real server, captures normalized output into its next command, completes its branch, survives panel close/reopen, and opens a linked run in Run Details. |
+| `creates, edits, and deletes a user workflow from the workflows modal` | Verifies that the workflows modal can create, run, edit, and delete a typed v2 workflow, switches a panel-owned run to the Executions tab without writing progress into the terminal, keeps the workspace open after deletion, and removes the deleted workflow from the desktop rail without a page refresh. |
 | `rail workflow plus opens the new workflow editor without toggling the section` | Verifies that the desktop rail workflow `+` button opens the new workflow editor without collapsing the Workflows rail section. |
 | `run all executes rendered workflow steps sequentially in the same tab` | Verifies that `Run all` executes the rendered workflow commands sequentially in the active tab instead of opening separate tabs. |
-| `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
+| `rail browse and workflow entries open one workspace with global executions` | Verifies that the rail exposes a full-catalog entry, a specific workflow row wins over both first-open and prior selection state, and the Executions tab remains scope-wide. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
 | `persists the selected Options tab and keeps secrets out of preferences` | Verifies that the Options modal remembers the selected Secrets tab and keeps stored secret rows out of the Preferences tab. |
 
@@ -4790,4 +4838,5 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [docs/schedules.md](../docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](../docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [docs/watchers.md](../docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
+- [docs/workflows.md](../docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
 - [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory
