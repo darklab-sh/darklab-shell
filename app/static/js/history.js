@@ -381,6 +381,7 @@ let _historyCompareState = {
   candidates: [],
   manualCandidates: [],
   manualLoaded: false,
+  launcherRequestId: 0,
   manualRequestId: 0,
   manualPage: 1,
   manualHasNext: false,
@@ -388,6 +389,7 @@ let _historyCompareState = {
   manualCollapsedGroups: new Set(),
   selected: null,
   manualQuery: '',
+  initialViewMode: '',
 };
 let _historyCompareRowPairSequence = 0;
 let _historyCompareUnitSequence = 0;

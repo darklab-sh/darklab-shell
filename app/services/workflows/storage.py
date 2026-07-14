@@ -388,8 +388,11 @@ def workflow_provenance_by_run(
     run_ids: list[str],
     *,
     include_steps: bool = False,
+    owner_scope: Any | None = None,
+    session_id: str = "",
+    team_id: str = "",
 ) -> dict[str, dict[str, Any]]:
-    """Return bounded workflow ancestry for already-authorized run ids."""
+    """Return bounded workflow ancestry for authorized run ids and owners."""
     normalized_ids = [str(run_id) for run_id in run_ids if run_id]
     if not normalized_ids:
         return {}
@@ -399,14 +402,23 @@ def workflow_provenance_by_run(
     ):
         return {}
     placeholders = ", ".join("?" for _run_id in normalized_ids)
+    owner_sql = ""
+    owner_params: tuple[Any, ...] = ()
+    if owner_scope is not None:
+        owner_clause, raw_owner_params = owner_scope.predicate(table_alias="e")
+        owner_sql = " AND " + owner_clause
+        owner_params = tuple(raw_owner_params)
+    elif session_id or team_id:
+        owner_clause, owner_params = _owner_where(session_id, team_id=team_id, table_alias="e")
+        owner_sql = " AND " + owner_clause
     rows = conn.execute(
         "SELECT s.run_id, s.execution_id, s.step_id, s.step_index, s.status AS step_status, "  # nosec B608
         "s.exit_code, s.selected_transition, s.transition_reason, "
         "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
         "FROM workflow_execution_steps s "
         "JOIN workflow_executions e ON e.id = s.execution_id "
-        f"WHERE s.run_id IN ({placeholders})",
-        tuple(normalized_ids),
+        f"WHERE s.run_id IN ({placeholders})" + owner_sql,
+        (*normalized_ids, *owner_params),
     ).fetchall()
     result: dict[str, dict[str, Any]] = {}
     execution_ids: set[str] = set()

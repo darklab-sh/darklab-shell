@@ -356,7 +356,12 @@ def history_rows(
         metadata = run_metadata_counts_by_run(conn, run_ids)
         atlas = run_atlas_counts_by_run(conn, session_id, run_ids, team_id=team_id)
         scheduled = schedule_refs_by_run(conn, run_ids)
-        workflow_provenance = workflow_provenance_by_run(conn, run_ids)
+        workflow_provenance = workflow_provenance_by_run(
+            conn,
+            run_ids,
+            session_id=session_id,
+            team_id=team_id,
+        )
     for run in runs:
         run_id = str(run["id"])
         run["artifact_count"] = len(artifacts.get(run_id, []))
@@ -396,7 +401,13 @@ def load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any
         run.update(run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
         run.update(run_atlas_counts_by_run(conn, session_id, [run_id], team_id=team_id).get(run_id, {}))
         apply_schedule_ref(run, schedule_refs_by_run(conn, [run_id]).get(run_id))
-        provenance = workflow_provenance_by_run(conn, [run_id], include_steps=True).get(run_id)
+        provenance = workflow_provenance_by_run(
+            conn,
+            [run_id],
+            include_steps=True,
+            session_id=session_id,
+            team_id=team_id,
+        ).get(run_id)
         apply_workflow_provenance(run, provenance)
     return run
 

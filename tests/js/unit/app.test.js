@@ -3943,6 +3943,7 @@ describe('app helpers', () => {
         st: 'idle',
         exitCode: null,
         historyRunId: '',
+        historyRunKind: '',
         previewTruncated: false,
         fullOutputAvailable: false,
         fullOutputLoaded: false,
@@ -3958,6 +3959,7 @@ describe('app helpers', () => {
         st: 'running',
         exitCode: null,
         historyRunId: 'run-1',
+        historyRunKind: 'external',
         previewTruncated: false,
         fullOutputAvailable: false,
         fullOutputLoaded: false,
@@ -3982,6 +3984,7 @@ describe('app helpers', () => {
       st: 'running',
       runId: '',
       historyRunId: 'run-1',
+      historyRunKind: 'external',
     })
   })
 
@@ -4128,6 +4131,7 @@ describe('app helpers', () => {
             st: 'idle',
             exitCode: null,
             historyRunId: '',
+            historyRunKind: '',
             previewTruncated: false,
             fullOutputAvailable: false,
             fullOutputLoaded: false,
@@ -4141,6 +4145,7 @@ describe('app helpers', () => {
             st: 'fail',
             exitCode: 1,
             historyRunId: 'run-2',
+            historyRunKind: 'external',
             previewTruncated: false,
             fullOutputAvailable: true,
             fullOutputLoaded: true,
@@ -4156,6 +4161,8 @@ describe('app helpers', () => {
     expect(createTab).toHaveBeenCalledTimes(2)
     expect(getTab('tab-2')?.draftInput).toBe('ffuf -u https://target/FUZZ')
     expect(getTab('tab-2')?.renamed).toBe(true)
+    expect(getTab('tab-2')?.historyRunId).toBe('run-2')
+    expect(getTab('tab-2')?.historyRunKind).toBe('external')
     expect(activateTab).toHaveBeenCalledWith('tab-2', { focusComposer: false })
   })
 

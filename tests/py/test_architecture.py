@@ -179,6 +179,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker.py", 716, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/comparison.py", 1263, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/runs/comparison_derived.py", 204, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/comparison_findings.py", 238, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/contracts.py", 41, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/kinds.py", 53, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/output_model.py", 534, "split-package-ratchet"),

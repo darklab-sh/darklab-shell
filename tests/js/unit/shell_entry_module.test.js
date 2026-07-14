@@ -292,6 +292,7 @@ function scaffoldShellDom() {
   document.getElementById('mobile-menu-sheet').innerHTML = `
     <button data-menu-action="ts-toggle"></button>
     <button data-menu-action="ts-set" data-ts-mode="off"></button>
+    <button class="u-hidden" data-menu-action="compare-active"></button>
     <button data-menu-action="diag"></button>
   `
   document.getElementById('mobile-kb-helper').innerHTML = '<button data-kb-action="left"></button>'
@@ -369,6 +370,7 @@ describe('shell module entry', () => {
       themeModule,
       preferencesModule,
       stateModule,
+      compareBridgeModule,
     ] = await Promise.all([
       import(moduleUrl('app/static/js/tabs.js')),
       import(moduleUrl('app/static/js/output.js')),
@@ -376,6 +378,7 @@ describe('shell module entry', () => {
       import(moduleUrl('app/static/js/features/theme/theme.js')),
       import(moduleUrl('app/static/js/features/preferences/preferences.js')),
       import(moduleUrl('app/static/js/core/state.js')),
+      import(moduleUrl('app/static/js/features/run-comparison/history_compare_bridge.js')),
     ])
 
     expect(typeof tabsModule.createTab).toBe('function')
@@ -384,6 +387,7 @@ describe('shell module entry', () => {
     expect(typeof themeModule.applyThemeSelection).toBe('function')
 
     const tabId = tabsModule.createTab('module smoke')
+    tabsModule.activateTab(tabId)
     const tab = stateModule.getTab(tabId)
     const out = tabsModule.getOutput(tabId)
     let scrollTop = 0
@@ -415,6 +419,30 @@ describe('shell module entry', () => {
     }
     expect(faqHelpersModule.openAutocompleteForVisibleComposer()).toBe(true)
     expect(document.querySelectorAll('#ac-dropdown .ac-item')).toHaveLength(1)
+
+    const openComparison = vi.fn()
+    compareBridgeModule.setHistoryCompareHandlers({ openHistoryCompareLauncher: openComparison })
+    tab.st = 'ok'
+    tab.historyRunId = 'run-module-smoke'
+    tab.historyRunKind = 'external'
+    stateModule.emitUiEvent('app:mobile-menu-show')
+    const compareActive = document.querySelector('[data-menu-action="compare-active"]')
+    expect(compareActive.classList.contains('u-hidden')).toBe(false)
+    compareActive.click()
+    expect(openComparison).toHaveBeenCalledWith(
+      { id: 'run-module-smoke' },
+      { returnFocus: document.getElementById('hamburger-btn') },
+    )
+    for (const state of [
+      { st: 'running', historyRunId: 'run-module-smoke', historyRunKind: 'external' },
+      { st: 'ok', historyRunId: 'run-module-smoke', historyRunKind: 'builtin' },
+      { st: 'ok', historyRunId: '', historyRunKind: 'external' },
+      { st: 'idle', historyRunId: null, historyRunKind: '' },
+    ]) {
+      Object.assign(tab, state)
+      stateModule.emitUiEvent('app:mobile-menu-show')
+      expect(compareActive.classList.contains('u-hidden')).toBe(true)
+    }
   })
 
   it('keeps bundle-mode lazy entries on shared chunks without eager shell owner setup', () => {

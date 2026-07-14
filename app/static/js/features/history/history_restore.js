@@ -285,6 +285,7 @@ function restoreHistoryRunIntoTab(run, {
         t.command = fullRun.command;
         t.runId = null;
         t.historyRunId = fullRun.id || run.id;
+        t.historyRunKind = String(fullRun.run_kind || run.run_kind || '');
         t.exitCode = fullRun.exit_code;
         t.previewTruncated = !!previewNotice;
         t.fullOutputAvailable = !!fullRun.full_output_available;

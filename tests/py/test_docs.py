@@ -364,6 +364,21 @@ def _extract_combined_total(text: str) -> int | None:
     return None
 
 
+def _extract_behavior_meta_totals(text: str) -> tuple[int, int] | None:
+    patterns = (
+        r"behavior tests:\s*([\d,]+).*?docs/inventory meta-tests:\s*([\d,]+)",
+        r"includes\s+([\d,]+)\s+behavior tests plus\s+([\d,]+)\s+docs/inventory meta-tests",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            return (
+                int(match.group(1).replace(",", "")),
+                int(match.group(2).replace(",", "")),
+            )
+    return None
+
+
 def _config_default_keys() -> list[str]:
     """Return app/config.py load_config() default keys in source order."""
     tree = ast.parse(_CONFIG_PY.read_text())
@@ -786,6 +801,16 @@ class TestDocumentedPlaywrightTotals:
 
 class TestDocumentedCombinedTotals:
 
+    @staticmethod
+    def _assert_breakdown(label: str, text: str, expected: int) -> None:
+        breakdown = _extract_behavior_meta_totals(text)
+        assert breakdown is not None, f"Could not parse behavior/meta test totals from {label}"
+        behavior_total, meta_total = breakdown
+        assert behavior_total + meta_total == expected, (
+            f"{label} records {behavior_total} behavior tests plus {meta_total} meta-tests; "
+            f"the documented runner totals sum to {expected}"
+        )
+
     def _expected(self, pytest_collected, vitest_collected, playwright_parallel_collected):
         py_total, _ = pytest_collected
         vi_total, _ = vitest_collected
@@ -804,6 +829,7 @@ class TestDocumentedCombinedTotals:
             f"tests/README.md records {documented} combined tests; "
             f"pytest+vitest+playwright sum to {expected}"
         )
+        self._assert_breakdown("tests/README.md", _TESTS_README.read_text(), expected)
 
     def test_contributing(
         self, pytest_collected, vitest_collected, playwright_parallel_collected
@@ -817,6 +843,7 @@ class TestDocumentedCombinedTotals:
             f"CONTRIBUTING.md records {documented} combined tests; "
             f"pytest+vitest+playwright sum to {expected}"
         )
+        self._assert_breakdown("CONTRIBUTING.md", _CONTRIBUTING.read_text(), expected)
 
     def test_architecture(
         self, pytest_collected, vitest_collected, playwright_parallel_collected
@@ -830,6 +857,7 @@ class TestDocumentedCombinedTotals:
             f"ARCHITECTURE.md records {documented} combined tests; "
             f"pytest+vitest+playwright sum to {expected}"
         )
+        self._assert_breakdown("ARCHITECTURE.md", _ARCHITECTURE.read_text(), expected)
 
 
 # ── Part 3: README.md project structure tree coverage ────────────────────────

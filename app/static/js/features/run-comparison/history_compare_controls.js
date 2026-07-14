@@ -217,6 +217,10 @@ function _renderHistoryCompareContextControls(data, viewMode) {
 
 function _historyCompareSummaryText(data, deltas = {}) {
   const totalsForCopy = data.totals || {};
+  const findingObjects = data.objects?.findings || {};
+  const changedFindings = Array.isArray(findingObjects.changed) ? findingObjects.changed.length : 0;
+  const addedFindings = Array.isArray(findingObjects.added) ? findingObjects.added.length : 0;
+  const removedFindings = Array.isArray(findingObjects.removed) ? findingObjects.removed.length : 0;
   return [
     `Compare: ${data.left.command} -> ${data.right.command}`,
     `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
@@ -226,6 +230,7 @@ function _historyCompareSummaryText(data, deltas = {}) {
     `Added: ${Number(totalsForCopy.added_line_count || 0)}`,
     `Removed: ${Number(totalsForCopy.removed_line_count || 0)}`,
     `Unchanged: ${Number(totalsForCopy.equal_line_count || 0)}`,
+    `Stored findings: ${changedFindings} changed · ${addedFindings} added · ${removedFindings} removed`,
   ].join('\n');
 }
 

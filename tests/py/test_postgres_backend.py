@@ -272,9 +272,94 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
 
     conn = postgres_schema.conn
-    applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    pre_comparison_migrations = tuple(
+        migration for migration in MIGRATIONS if migration.version < "0044"
+    )
+    comparison_migrations = tuple(
+        migration for migration in MIGRATIONS if migration.version == "0044"
+    )
+    applied = run_migrations_with_advisory_lock(conn, pre_comparison_migrations)
+    conn.execute(
+        "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
+        ("run-before-0044", "migration-session", "scanner darklab.sh", "2026-07-13T09:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, line_number, severity, tool_root, kind, subject_key, "
+        "raw_line, created) VALUES (%s, %s, '', 2, 'high', 'scanner', 'finding', %s, %s, %s)",
+        (
+            "finding-before-0044",
+            "migration-session",
+            "domain:darklab.sh",
+            "[high] exposed service",
+            "2026-07-13T09:00:00Z",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO findings_occurrences "
+        "(finding_id, run_id, line_number, snippet, seen_at) VALUES (%s, %s, 2, %s, %s)",
+        (
+            "finding-before-0044",
+            "run-before-0044",
+            "[high] exposed service",
+            "2026-07-13T09:00:00Z",
+        ),
+    )
+    applied.extend(run_migrations_with_advisory_lock(conn, comparison_migrations))
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
+
+    backfilled_occurrence = conn.execute(
+        "SELECT observed_severity, comparison_key FROM findings_occurrences "
+        "WHERE finding_id = %s",
+        ("finding-before-0044",),
+    ).fetchone()
+    assert backfilled_occurrence["observed_severity"] == "high"
+    assert backfilled_occurrence["comparison_key"] == (
+        "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[high] exposed service"
+    )
+    conn.execute(
+        "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
+        ("run-after-0044", "migration-session", "scanner darklab.sh", "2026-07-13T10:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, line_number, scope, review_state, severity, tool_root, kind, "
+        "subject_key, fingerprint, raw_line, created) "
+        "VALUES (%s, %s, %s, 4, 'finding', 'important', 'critical', 'scanner', 'finding', "
+        "%s, %s, %s, %s)",
+        (
+            "finding-after-0044",
+            "migration-session",
+            "run-after-0044",
+            "domain:darklab.sh",
+            "fingerprint-after-0044",
+            "[critical] exposed service",
+            "2026-07-13T10:00:00Z",
+        ),
+    )
+    triggered_occurrence = conn.execute(
+        "SELECT observed_severity, comparison_key FROM findings_occurrences "
+        "WHERE finding_id = %s",
+        ("finding-after-0044",),
+    ).fetchone()
+    triggered_finding = conn.execute(
+        "SELECT first_run_id, last_run_id, occurrence_count, status, kind, signature_hash "
+        "FROM findings WHERE id = %s",
+        ("finding-after-0044",),
+    ).fetchone()
+    assert triggered_occurrence["observed_severity"] == "critical"
+    assert triggered_occurrence["comparison_key"] == (
+        "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[critical] exposed service"
+    )
+    assert triggered_finding == {
+        "first_run_id": "run-after-0044",
+        "last_run_id": "run-after-0044",
+        "occurrence_count": 1,
+        "status": "important",
+        "kind": "finding",
+        "signature_hash": "fingerprint-after-0044",
+    }
 
     assert applied == [
         "0001",
@@ -320,6 +405,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0041",
         "0042",
         "0043",
+        "0044",
     ]
     assert applied_again == []
     table_rows = conn.execute(

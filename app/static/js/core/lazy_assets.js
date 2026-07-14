@@ -1620,11 +1620,11 @@ let exportedLoadWatchersModal = null;
     return handle(cmd, tabId);
   }
 
-  async function lazyOpenHistoryCompareLauncher(run) {
+  async function lazyOpenHistoryCompareLauncher(run, options = {}) {
     const compare = await loadHistoryCompare();
     const open = compare?.openHistoryCompareLauncher;
     if (typeof open !== 'function' || open === lazyOpenHistoryCompareLauncher) return false;
-    return open(run);
+    return open(run, options);
   }
 
   async function lazyFetchAndRenderHistoryComparison(leftId, rightId, options = {}) {

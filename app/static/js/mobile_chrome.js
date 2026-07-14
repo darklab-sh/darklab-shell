@@ -117,7 +117,7 @@ import {
     if (typeof importedLogClientError === 'function') importedLogClientError(context, err);
   }
 
-  function _recentsOpenHistoryCompare(run) {
+  function _recentsOpenHistoryCompare(run, options = {}) {
     const hasImportedHandler = typeof openHistoryCompareLauncher?.hasHandler === 'function'
       && openHistoryCompareLauncher.hasHandler();
     const openCompare = hasImportedHandler || typeof openHistoryCompareLauncher?.hasHandler !== 'function'
@@ -125,7 +125,7 @@ import {
       : null;
     if (typeof openCompare !== 'function') return false;
     try {
-      const result = openCompare(run);
+      const result = openCompare(run, options);
       return result !== false;
     } catch (err) {
       logMobileChromeError('mobile recents compare unavailable', err);
@@ -455,12 +455,25 @@ import {
   // openMenuSheet() to reset the sub-menu to collapsed each time the sheet
   // opens (so the user never returns to a previously-expanded surface).
   const tsToggleBtn = menuSheet?.querySelector('[data-menu-action="ts-toggle"]');
+  const compareActiveBtn = menuSheet?.querySelector('[data-menu-action="compare-active"]');
   const tsSubmenuEl = document.getElementById('mobile-menu-ts-submenu');
   const tsDisclosure = tsToggleBtn ? bindDisclosure(tsToggleBtn, {
     panel: tsSubmenuEl,
     openClass: null,
     hiddenClass: 'u-hidden',
   }) : null;
+
+  function activeComparisonRun() {
+    const tab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    const runId = String(tab?.historyRunId || '').trim();
+    const runKind = String(tab?.historyRunKind || '').trim();
+    if (!runId || tab?.st === 'running' || runKind !== 'external') return null;
+    return { id: runId };
+  }
+
+  function refreshCompareActiveAction() {
+    compareActiveBtn?.classList.toggle('u-hidden', !activeComparisonRun());
+  }
 
   function openMenuSheet() {
     refreshMenuStateHints();
@@ -471,6 +484,7 @@ import {
     refreshSchedulesCount();
     refreshWatchersCount();
     refreshProjectHintFromServer();
+    refreshCompareActiveAction();
     tsDisclosure?.close();
     show(menuSheetScrim);
     show(menuSheet);
@@ -512,6 +526,16 @@ import {
         e.stopImmediatePropagation();
         closeMenuSheet();
         openMobileHistorySurface();
+      } else if (action === 'compare-active') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const run = activeComparisonRun();
+        closeMenuSheet();
+        if (run) {
+          _recentsOpenHistoryCompare(run, {
+            returnFocus: document.getElementById('hamburger-btn'),
+          });
+        }
       }
     }, true);
   });
@@ -858,7 +882,7 @@ import {
       }
     });
     addItem('compare', () => {
-      if (_recentsOpenHistoryCompare(run)) {
+      if (_recentsOpenHistoryCompare(run, { returnFocus: recentPeek })) {
         closeRecentsSheet();
       } else if (showToast) {
         showToast('Run comparison is not available.', 'error');
@@ -1521,11 +1545,15 @@ import {
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
       if (isMenuSheetOpen()) {
         try { refreshHistoryCount(); } catch (_) { /* non-critical */ }
+        try { refreshCompareActiveAction(); } catch (_) { /* non-critical */ }
       }
     });
     onUiEvent('app:tab-activated', () => {
       _statusMonitorPeekHoldUntil = 0;
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+      if (isMenuSheetOpen()) {
+        try { refreshCompareActiveAction(); } catch (_) { /* non-critical */ }
+      }
     });
   }
   renderRecentPeek();

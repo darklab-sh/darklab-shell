@@ -96,6 +96,8 @@ function loadShellChrome({
   openStatusMonitor = vi.fn(() => Promise.resolve(true)),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
   openHistoryRunDetails = vi.fn(),
+  openHistoryCompareLauncher = vi.fn(),
+  activeTab = null,
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   showToast = vi.fn(),
@@ -339,6 +341,7 @@ function loadShellChrome({
     anchor.remove()
   })
   global.APP_CONFIG = appConfig
+  global.openHistoryCompareLauncher = openHistoryCompareLauncher
 
   new Function(
     'global',
@@ -560,7 +563,7 @@ function loadShellChrome({
     bindOutsideClickClose,
     () => {},
     () => 'tab-1',
-    () => null,
+    () => activeTab,
     token => token,
     () => {},
     () => {},
@@ -596,6 +599,7 @@ function loadShellChrome({
     preferences,
     openStatusMonitor,
     openHistoryRunDetails,
+    openHistoryCompareLauncher,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
@@ -729,6 +733,39 @@ describe('shell chrome rail sections', () => {
     expect(statusCell.dataset.statusMonitorTrigger).toBe('1')
     expect(statusCell.classList.contains('hud-action-cell')).toBe(true)
     expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'status' })
+  })
+
+  it('shows Compare in the HUD only for an eligible completed external run', () => {
+    const openHistoryCompareLauncher = vi.fn()
+    const shell = loadShellChrome({
+      activeTab: {
+        id: 'tab-1',
+        st: 'ok',
+        historyRunId: 'run-completed',
+        historyRunKind: 'external',
+      },
+      openHistoryCompareLauncher,
+    })
+    const compare = document.querySelector('#hud-actions [data-action="compare"]')
+
+    expect(compare.classList.contains('u-hidden')).toBe(false)
+    compare.click()
+    expect(shell.openHistoryCompareLauncher).toHaveBeenCalledWith(
+      { id: 'run-completed' },
+      { returnFocus: compare },
+    )
+
+    const ineligibleTabs = [
+      { st: 'running', historyRunId: 'run-active', historyRunKind: 'external' },
+      { st: 'ok', historyRunId: 'run-builtin', historyRunKind: 'builtin' },
+      { st: 'ok', historyRunId: '', historyRunKind: 'external' },
+      { st: 'idle', historyRunId: null, historyRunKind: '' },
+    ]
+    ineligibleTabs.forEach((tab) => {
+      loadShellChrome({ activeTab: { id: 'tab-1', ...tab } })
+      expect(document.querySelector('#hud-actions [data-action="compare"]')
+        .classList.contains('u-hidden')).toBe(true)
+    })
   })
 
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {

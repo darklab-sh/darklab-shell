@@ -1162,6 +1162,7 @@ describe('runner helpers', () => {
     await flushPromises()
 
     expect(tabs[0].historyRunId).toBe('run-1')
+    expect(tabs[0].historyRunKind).toBe('external')
     expect(tabs[0].lastEventId).toBe('')
     expect(tabs[0].reconnectedRun).toBe(false)
     expect(tabs[0].st).toBe('ok')
@@ -2329,21 +2330,31 @@ describe('runner helpers', () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
     const welcomeOwnsTab = vi.fn(() => true)
-    const { runCommand, cancelWelcome, clearTab } = loadRunnerFns({
+    const loaded = loadRunnerFns({
       cmdValue: 'echo hello',
-      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      tabs: [{
+        id: 'tab-1',
+        st: 'idle',
+        runId: null,
+        historyRunId: 'run-before-command',
+        historyRunKind: 'external',
+        killed: false,
+        pendingKill: false,
+      }],
       apiFetch,
       appendLine,
       welcomeOwnsTab,
     })
 
-    runCommand()
+    loaded.runCommand()
     await Promise.resolve()
     await Promise.resolve()
 
     expect(welcomeOwnsTab).toHaveBeenCalledWith('tab-1')
-    expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
-    expect(clearTab).toHaveBeenCalledWith('tab-1')
+    expect(loaded.cancelWelcome).toHaveBeenCalledWith('tab-1')
+    expect(loaded.clearTab).toHaveBeenCalledWith('tab-1')
+    expect(loaded.tabs[0].historyRunId).toBeNull()
+    expect(loaded.tabs[0].historyRunKind).toBe('')
     expect(apiFetch).toHaveBeenCalledWith(
       '/runs',
       expect.objectContaining({

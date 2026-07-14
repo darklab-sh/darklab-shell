@@ -13,7 +13,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Research](#research)
 - [Ideas](#ideas)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
-  - [Run comparison enhancements](#run-comparison-enhancements)
+  - [Run comparison enhancements — deferred pieces](#run-comparison-enhancements--deferred-pieces)
   - [Bulk history export and share](#bulk-history-export-and-share)
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
@@ -82,29 +82,14 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
 - Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
 
-### Run comparison enhancements
-- Future-state enhancements after the shared split-pane comparison flow has real use.
-  - Finding-level diffs using persisted signal/finding metadata:
-    - New findings.
-    - Disappeared findings.
-    - Unchanged findings.
-    - Changed severity or changed metadata.
-  - Tool-aware diffs for common scanner outputs:
-    - `nmap`: ports, protocols, services, versions, and state changes.
-    - URL/status/title lists: new URLs, disappeared URLs, status changes, title changes.
-    - Subdomain lists: new and disappeared names.
-    - TLS/certificate output: issuer, subject, SAN, validity, and fingerprint changes.
-  - Keep tool-aware parsers additive; raw changed/added/removed output should remain the fallback.
-- Future entry points and packaging:
-  - Active tab `Compare` action for restored/completed runs.
-  - Findings strip action such as `Compare findings with previous run`.
-  - Workflow provenance in comparison summaries once workflow-linked runs exist.
-  - Snapshot/permalink compare if the run-vs-run model continues to work well.
-  - `Export comparison` once share/export packages have a stable artifact model.
-- Future UX/testing:
-  - Consider date-range filters in the manual compare picker if day grouping plus `Load More` is not enough for deep history.
-  - Broaden Playwright coverage for edge/mobile layout paths after the UI settles.
-  - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
+### Run comparison enhancements — deferred pieces
+- Run comparison now covers finding severity changes, discovered hosts, TLS fields, workflow context, and completed-tab launch points. The remaining ideas are:
+  - Snapshot/permalink compare, once the compare route can resolve snapshot/permalink ids instead of only live `runs` rows.
+  - `Export comparison`, once share/export packages have one unified, stable artifact schema version rather than several independent `schema_version` fields.
+  - Unifying the comparison-local URL/status/title parsing (`httpx`/`ffuf`/`gobuster`/`katana`) with the shared tool-aware classifier registry that ports/hosts/tls already use.
+  - Date-range filters in the manual compare picker, if day grouping plus `Load More` is not enough for deep history.
+  - Broader Playwright coverage for additional edge and mobile layout paths.
+  - Focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
 ### Bulk history export and share
 - The history drawer can delete all, delete non-favorites, export selected history as text/JSONL, and use visible-page multi-select for bulk project add/remove plus selected-item delete. Bulk share/permalink bundles would close the remaining gap when packaging selected history items after an engagement.

@@ -311,8 +311,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/stats` | Returns compact current-session counters for the Status Monitor dashboard. |
 | `GET` | `/history/insights` | Returns compact visual history data for Status Monitor constellation, heatmap, ticker, and command mix widgets. |
 | `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Status Monitor. |
-| `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
-| `GET` | `/history/compare` | Compares two current-session runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded output hunks, totals, limits, finding/entity/artifact object diffs, and derived tool-aware changes such as nmap port/service and web URL/status deltas. |
+| `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous completed external runs from the active personal/team owner scope for the shared compare launcher. |
+| `GET` | `/history/compare` | Compares two active-scope runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded output hunks, totals, limits, finding/entity/artifact object diffs, workflow ancestry when present, and derived tool-aware changes such as nmap port/service, web URL/status, discovered-host, and TLS deltas. Explicit `left`/`right` ids remain positional. |
 | `GET` | `/history/compare/lines` | Returns bounded filtered-output slices for lazy expansion of folded comparison hunks, using `left`/`right` run ids, `side`, `start`/`end`, and optional `project_id` scoping. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set, and includes same-session Atlas counts for source runs. |
 | `GET` | `/history/<run_id>/atlas-cleanup-preview` | Previews disposable, kept-by-default, and not-eligible Atlas rows before a run delete. |
@@ -333,14 +333,37 @@ Replace-line pairing is bounded by `COMPARE_REPLACE_PAIR_CANDIDATES` (32 nearest
 and accepts pairs at `COMPARE_REPLACE_PAIR_MIN_RATIO` (0.5), with a matching
 `COMPARE_REPLACE_PAIR_QUICK_RATIO` prefilter to avoid expensive full similarity checks when the
 cheap upper bound is already below the threshold. Transcript hunks preserve source output order.
-Finding and artifact object diffs are intentionally order-insensitive: finding keys normalize
-stored `raw_line` / `title` text with fingerprint fallback, while artifact keys prefer
+Finding and artifact object diffs are intentionally order-insensitive. Finding occurrences keep
+the severity and severity-neutral comparison identity observed by each run; exact severity matches
+pair first, then remaining rows with the same comparison identity become deterministic `changed`
+records with complete `before` / `after` objects and `changed_fields`. Rows without a usable
+comparison identity retain the generic added/removed fallback. Occurrence writers store the bounded
+raw identity components, so occurrences recorded after schema migration `0044` retain exact
+run-observed severity. Migration `0044` reconstructs older rows from retained canonical finding and
+snippet data; it cannot recover severity that was overwritten earlier, and best-effort rows fall
+back to added/removed findings when a dependable identity is unavailable. Comparison reads apply
+the current normalization rules consistently to all rows. Artifact keys prefer
 `content_sha256`, then workspace path, then artifact id.
 The compare payload also includes a bounded `derived_changes` block for tool-aware summaries.
 Its nmap port/service group reuses the shared diff classifier, while the web URL/status group
 uses line-attached URL entities plus confident `httpx`, `ffuf`, `gobuster`, and `katana` output
-parsers to report added, removed, and changed records. Derived records carry output-line pointers
-mapped through the same compare-line indexes used by finding jump actions.
+parsers to report added, removed, and changed records. Same-root host adapters cover discovery
+output without duplicating a confident `httpx` URL group, and the TLS adapter normalizes subject,
+issuer, alternative names, validity dates, SHA-256 fingerprint, and verification changes. Derived
+records carry output-line pointers when the parser can identify a reliable source line and preserve
+partial/truncated notes without suppressing the raw transcript diff.
+
+App-generated previous-run comparisons normalize `started` timestamps so the older baseline is
+left and the current run is right. This includes automatic/manual History launches and Project
+defaults; direct API callers that supply both ids keep their requested order. Every comparison read
+uses one resolved owner scope for runs, project links, findings, artifacts, workflow provenance, and
+lazy line slices. Comparison run cards add value-free workflow execution/step ancestry only when a
+run has it, and the browser hands **View playbook** back to the existing Workflows execution view.
+The dynamically mounted comparison dialog binds the shared focus trap when it is created and keeps
+an explicit launch control for focus restoration; mobile menu launches use the hamburger because
+the menu row is hidden before the dialog opens. Findings-only mode renders persisted
+changed/added/removed totals and finding rows without transcript navigation or line-anchor controls,
+because that view does not mount transcript panes.
 
 ### Atlas Routes
 
@@ -969,7 +992,8 @@ flowchart TB
 - The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` is the app assembly module and the local development entrypoint; `app_factory.py` stays piece-agnostic and builds a Flask app from explicitly supplied registrations.
 - AI assist service code keeps provider HTTP handling in `services.ai.client`, context assembly and redaction in `services.ai.context`, Redis-backed rate/concurrency coordination in `services.ai.coordination`, queue/cache persistence in `services.ai.storage`, route orchestration in `services.ai.assists`, suggestion validation in `services.ai.suggestions`, and the provider-call loop in `services.ai.worker`.
 - Shared diff service code keeps tool-aware classifier registration and parser helpers in `services.diff.classifiers` plus shared result constants in `services.diff.models`, so Watchers and run comparison can reuse the same per-tool diff logic instead of maintaining separate parser families.
-- History service code keeps run deletion and export mutations in `services.history.mutations`, snapshot persistence in `services.history.snapshots`, and cleanup INFO/audit field shaping in `services.history.cleanup_logging`; `services.history.mutations` re-exports the snapshot helpers for existing callers.
+- History service code keeps run deletion and export mutations in `services.history.mutations`, snapshot persistence in `services.history.snapshots`, owner-scoped comparison candidates and object loading in `services.history.comparison_queries`, and cleanup INFO/audit field shaping in `services.history.cleanup_logging`; `services.history.mutations` re-exports the snapshot helpers for existing callers. The History blueprint delegates comparison pair/project resolution to `blueprints.history_compare_requests` so route wiring and read authorization stay separate.
+- Run comparison keeps transcript diff assembly and shared caps in `services.runs.comparison`, severity-neutral finding identity and changed-finding pairing in `services.runs.comparison_findings`, and host/TLS adapters in `services.runs.comparison_derived` so the central comparison module remains within its size ratchet.
 - Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, cleanup INFO/audit field shaping in `services.projects.cleanup_logging`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package preset catalog loading and validation helpers in `services.projects.package_presets`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, safe project-link provenance shaping helpers in `services.projects.provenance`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, personal/team project owner predicates in `services.projects.scope`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles. Engagement report draft, template, composition, rendering, redaction, storage, and async archive export helpers live in `services.reports`.
 
 ### Flask Construction And Startup Contract
@@ -1349,7 +1373,7 @@ Atlas is the entity-first triage surface that turns saved external-run output in
 
 **Intel snapshots.** Per-entity cached intel data lives in `entity_intel_snapshots`, keyed `(entity_id, provider)` so refresh, expiry, and per-provider quota stories stay tractable. The refresh route writes through the same provider orchestration used by the terminal `intel` command — see **Intel and Provider Integrations**. Ports are intentionally excluded from provider refresh because they represent app-captured scan evidence.
 
-**Findings model.** `findings` is a single entity-owned table deduped across personal runs by session and across team runs by team using a stable signature; `findings_occurrences` records per-run sightings. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through linked source runs or linked Atlas entities, not separate finding membership rows. Remediation, verification steps, verification status, and verification notes live in `finding_triage_details`, scoped by the same personal/team owner model as labels and notes. List responses carry compact triage previews and flags, while the internal `/findings/<finding_id>/triage` route returns and saves the full text. Evidence package finding JSON and Markdown include remediation and verification steps/status for selected findings; verification notes are included only when private notes are enabled, and redacted packages scrub those fields before rendering.
+**Findings model.** `findings` is a single entity-owned table deduped across personal runs by session and across team runs by team using a stable signature; `findings_occurrences` records per-run sightings plus the severity and comparison identity observed at that time. Exact run-observed severity starts with schema migration `0044`; older rows carry a best-effort backfill from retained canonical finding and occurrence-snippet data, which cannot reconstruct severity overwritten before migration. Run comparison uses dependable occurrence snapshots for historical severity changes and otherwise keeps the finding pair as added/removed, while review state remains mutable canonical triage and is not presented as a run-observed change. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through linked source runs or linked Atlas entities, not separate finding membership rows. Remediation, verification steps, verification status, and verification notes live in `finding_triage_details`, scoped by the same personal/team owner model as labels and notes. List responses carry compact triage previews and flags, while the internal `/findings/<finding_id>/triage` route returns and saves the full text. Evidence package finding JSON and Markdown include remediation and verification steps/status for selected findings; verification notes are included only when private notes are enabled, and redacted packages scrub those fields before rendering.
 
 **Suppression model.** Atlas entities and findings both carry a reversible `suppressed` flag plus an optional reason and timestamp. Atlas and Projects hide suppressed rows by default, while Atlas can switch to **Show all** or **Only suppressed** for review and restoration. Suppression never deletes source runs, occurrences, labels, notes, project links, or cached intel.
 
@@ -1729,7 +1753,7 @@ erDiagram
 - `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. When `intel_payload_inline_max_bytes` is set, oversized provider JSON moves to `data_dir/body-store` and detail reads resolve the pointer before rendering. Atlas derives compact `intel_summary` highlights from these rows at read time instead of storing duplicate summary columns. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `findings` — entity-owned finding rows deduped across runs by a stable signature within the active personal or team owner scope. Findings keep a primary Atlas entity when one is available, an unscoped subject key when one is not, first/last run IDs, first/last seen timestamps, occurrence count, severity, status, and lightweight title/raw-line context. The Projects modal, Run Details, and Atlas read the same table, so finding review state does not drift between surfaces.
-- `findings_occurrences` — per-run sightings for findings, keyed by finding, run, and line number. Run pruning removes these occurrence rows while leaving the parent finding row in place so labels, notes, and triage state can survive after the original transcript ages out.
+- `findings_occurrences` — per-run sightings for findings, keyed by finding, run, and line number, with an observed severity and severity-neutral comparison key for historical run comparison. Rows recorded before schema migration `0044` contain a best-effort backfill from retained finding and snippet data rather than guaranteed original severity. Run pruning removes these occurrence rows while leaving the parent finding row in place so labels, notes, and triage state can survive after the original transcript ages out.
 - `finding_triage_details` — one owner-scoped remediation and verification row per finding. Stores remediation text, verification steps, verification status, and optional verification notes separately from the deduped finding row so aggregate recalculation and re-observation can update finding counts without overwriting operator handoff text. The same table backs Atlas, Projects, evidence packages, and compact AI context.
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including Atlas entities, projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including Atlas entities and project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
@@ -1802,7 +1826,7 @@ The application uses a dedicated `shell` logger configured by `logging_setup.py`
 
 Structured events use the `session` field for request correlation. Anonymous session IDs are logged as-is, while `tok_` session-token values are masked before logging because they are bearer credentials.
 
-Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
+Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
 
 ### Output Formats
 
@@ -1927,6 +1951,7 @@ The current event inventory is:
 | INFO | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
 | INFO | `SHARE_DELETED` | `delete_share` | ip, session, share_id, deleted |
 | INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
+| INFO | `RUN_COMPARISON_VIEWED` | `compare_history_runs` | owner_scope, project_scoped, left_run_id, right_run_id, duration_ms, left/right output sources, finding-change counts, derived_group_ids, output/changed-lines/findings/artifacts/derived truncation flags, comparison_partial |
 | INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, output_search, command_root, exit_code_filter, date_range |
 | INFO | `ATLAS_RUN_CLEANED` | Atlas cleanup route | ip, session, run_id, include_curated, detached_entities, detached_findings, deleted_entities, deleted_findings |
 | INFO | `ATLAS_ENTITY_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, entity_id/count, suppressed, reason, bulk |
@@ -2089,6 +2114,8 @@ The current event inventory is:
 | WARN | `INTEL_PROVIDER_LOOKUP_SKIPPED` | Atlas intel refresh | session, entity_id, provider, status, provider_message |
 | WARN | `VAULT_DECRYPT_FAILED` | secrets vault | source |
 | WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
+| WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, error_name, stage, status, run_id, route |
+| WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, error_name, status, left_run_id, right_run_id, route, compare_request_error |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN | `SESSION_TOKEN_REVOKE_DENIED` | `session_token_revoke` | ip, session, reason |
 | WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
@@ -2303,12 +2330,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,093
+- behavior tests: 4,110
 - docs/inventory meta-tests: 63
-- `pytest`: 2385 (2335 behavior + 50 meta)
-- `vitest`: 1496 (1483 behavior + 13 meta)
-- `playwright`: 275 behavior
-- total: 4,156
+- `pytest`: 2399 (2349 behavior + 50 meta)
+- `vitest`: 1498 (1485 behavior + 13 meta)
+- `playwright`: 276 behavior
+- total: 4,173
 
 ### Testing Architecture
 

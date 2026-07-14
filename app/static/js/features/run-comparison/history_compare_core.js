@@ -24,6 +24,17 @@ var DarklabHistoryCompareCore = (function (global) {
     return historyCore().compareDateGroupLabel(value);
   }
 
+  function orderedRunIds(current, candidate) {
+    const currentId = String(current?.id || current?.value || '');
+    const candidateId = String(candidate?.id || candidate?.value || '');
+    const currentStarted = Date.parse(String(current?.started || current?.created || ''));
+    const candidateStarted = Date.parse(String(candidate?.started || candidate?.created || ''));
+    if (Number.isFinite(currentStarted) && Number.isFinite(candidateStarted) && currentStarted <= candidateStarted) {
+      return [currentId, candidateId];
+    }
+    return [candidateId, currentId];
+  }
+
   function compareFormatDuration(seconds) {
     return historyCore().compareFormatDuration(seconds);
   }
@@ -178,6 +189,10 @@ var DarklabHistoryCompareCore = (function (global) {
     };
     (Array.isArray(findingObjects.added) ? findingObjects.added : []).forEach(item => addAnchor('b', item));
     (Array.isArray(findingObjects.removed) ? findingObjects.removed : []).forEach(item => addAnchor('a', item));
+    (Array.isArray(findingObjects.changed) ? findingObjects.changed : []).forEach(item => {
+      addAnchor('a', item?.before);
+      addAnchor('b', item?.after);
+    });
     return map;
   }
 
@@ -203,6 +218,7 @@ var DarklabHistoryCompareCore = (function (global) {
     lineLimit,
     number,
     omittedTotal,
+    orderedRunIds,
     resolveViewMode,
     storedContext,
     storedViewMode,
@@ -229,6 +245,7 @@ const {
   lineLimit,
   number,
   omittedTotal,
+  orderedRunIds,
   resolveViewMode,
   storedContext,
   storedViewMode,
@@ -254,6 +271,7 @@ export {
   lineLimit,
   number,
   omittedTotal,
+  orderedRunIds,
   resolveViewMode,
   storedContext,
   storedViewMode,

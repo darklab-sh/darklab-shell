@@ -866,6 +866,7 @@ function _reattachActiveRunToTab(
   const runId = String(run.run_id || '');
   t.runId = runId;
   t.historyRunId = runId;
+  t.historyRunKind = 'external';
   t.scheduledRun = !!run.scheduled;
   t.scheduleId = String(run.schedule_id || '');
   t.reconnectedRun = true;
@@ -980,6 +981,7 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   }
   t.runId = run.run_id;
   t.historyRunId = run.run_id;
+  t.historyRunKind = 'external';
   t.scheduledRun = !!run.scheduled;
   t.scheduleId = String(run.schedule_id || '');
   t.lastEventId = '';
@@ -1628,6 +1630,7 @@ function _markTabRunStarted(tabId, runId) {
   const sameRun = t.runId === runId || t.historyRunId === runId;
   t.runId = runId;
   t.historyRunId = runId;
+  t.historyRunKind = 'external';
   if (!sameRun) {
     t.lastEventId = '';
     t.streamRecoveryAttempts = 0;
@@ -3815,6 +3818,7 @@ function submitCommand(rawCmd) {
     _runTab.fullOutputAvailable = false;
     _runTab.fullOutputLoaded = false;
     _runTab.historyRunId = null;
+    _runTab.historyRunKind = '';
     _runTab.reconnectedRun = false;
     _runTab.commandOutcomeSummary = null;
     _runTab.lastEventId = '';

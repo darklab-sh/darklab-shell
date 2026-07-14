@@ -6240,6 +6240,7 @@ class TestPostgresMigrations:
             "0041",
             "0042",
             "0043",
+            "0044",
         ]
         for table_name in (
             "runs",
@@ -7079,7 +7080,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0043"
+        assert rows[-1]["version"] == "0044"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7468,14 +7469,15 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042", "0043"]
+        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044"]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
         assert "0041" in conn.applied_versions
         assert "0042" in conn.applied_versions
         assert "0043" in conn.applied_versions
-        assert conn.commit_count == 5
+        assert "0044" in conn.applied_versions
+        assert conn.commit_count == 6
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -7628,7 +7630,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0043",
+            "0045",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -7652,9 +7654,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0043"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0045"]
         assert table_exists is not None
-        assert "0043" in versions
+        assert "0045" in versions
 
     def test_migration_failure_logs_statement_context(self):
         from core.migrations.runner import Migration, apply_migration
@@ -26749,6 +26751,12 @@ SQL syntax error near q</response>
             rows = conn.execute(
                 "SELECT entity_id, subject_key, raw_line, severity FROM findings ORDER BY line_number"
             ).fetchall()
+            occurrence_keys = [
+                row["comparison_key"]
+                for row in conn.execute(
+                    "SELECT comparison_key FROM findings_occurrences ORDER BY line_number"
+                ).fetchall()
+            ]
             entity_rows = conn.execute("SELECT id, type, canonical_value FROM entities ORDER BY canonical_value").fetchall()
             conn.close()
 
@@ -26770,6 +26778,7 @@ SQL syntax error near q</response>
         assert {(row["type"], row["canonical_value"]) for row in entity_rows} == {("ip", "192.168.1.5")}
         assert {row["entity_id"] for row in rows} == {entity_rows[0]["id"]}
         assert {row["subject_key"] for row in rows} == {"nmap-service:192.168.1.5:139 samba"}
+        assert occurrence_keys and all(key.startswith("raw:") for key in occurrence_keys)
 
     def test_record_run_findings_redacts_trufflehog_secret_values(self):
         from blueprints.run import _TruffleHogOutputFilter

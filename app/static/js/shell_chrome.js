@@ -26,6 +26,7 @@ import { openCommandRegistry as importedOpenCommandRegistry } from './features/c
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from './features/history/history_run_modal_state_bridge.js';
 import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from './features/history/history_restore_bridge.js';
+import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from './features/run-comparison/history_compare_bridge.js';
 import { setProjectContextHandlers as importedSetProjectContextHandlers } from './features/projects/project_context_bridge.js';
 import { setProjectHudHandlers as importedSetProjectHudHandlers } from './features/projects/project_hud_bridge.js';
 import { DarklabProjectActiveContext as importedProjectActiveContext } from './features/projects/project_active_context.js';
@@ -1377,6 +1378,7 @@ let importedProjectWorkspaceShell;
   const hudActions = document.getElementById('hud-actions');
   let hudKillBtn = null;
   let hudShareSnapshotBtn = null;
+  let hudCompareBtn = null;
 
   function _currentTabId() {
     return _shellGetActiveTabId();
@@ -1431,6 +1433,13 @@ let importedProjectWorkspaceShell;
       : _hudShareSnapshotDeniedTitle();
   }
 
+  function _comparisonRunForTab(tab) {
+    const runId = String(tab?.historyRunId || '').trim();
+    const runKind = String(tab?.historyRunKind || '').trim();
+    if (!runId || tab?.st === 'running' || runKind !== 'external') return null;
+    return { id: runId };
+  }
+
   function buildHudActions() {
     if (!hudActions) return;
     hudActions.replaceChildren();
@@ -1457,6 +1466,12 @@ let importedProjectWorkspaceShell;
       if (id) confirmKill?.(id);
     }, 'btn btn-destructive btn-compact u-hidden', 'Kill current run');
     hudActions.appendChild(hudKillBtn);
+
+    hudCompareBtn = _makeHudBtn('compare', 'compare', () => {
+      const run = _comparisonRunForTab(_shellGetTab(_currentTabId()));
+      if (run) importedOpenHistoryCompareLauncher?.(run, { returnFocus: hudCompareBtn });
+    }, 'btn btn-secondary btn-compact u-hidden', 'Compare active run with a previous run');
+    hudActions.appendChild(hudCompareBtn);
 
     hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
@@ -1523,10 +1538,16 @@ let importedProjectWorkspaceShell;
     hudKillBtn.classList.toggle('u-hidden', !show);
   }
 
+  function _setHudCompareVisible(show) {
+    if (!hudCompareBtn) return;
+    hudCompareBtn.classList.toggle('u-hidden', !show);
+  }
+
   function refreshHudActions(tabId) {
     const id = tabId || _currentTabId();
     const tab = _shellGetTab(id);
     _setHudKillVisible(!!(tab && tab.st === 'running'));
+    _setHudCompareVisible(!!_comparisonRunForTab(tab));
     _refreshHudShareSnapshotState();
   }
 

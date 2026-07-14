@@ -24,7 +24,14 @@ def command_root(command_text: str) -> str:
 
 
 def normalized_line_records(run: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    entries, output_info = run_comparison.compare_entries_for_diff(run)
+    preloaded_entries = run.get("_comparison_entries")
+    if isinstance(preloaded_entries, list):
+        entries = preloaded_entries
+        output_info = run.get("_comparison_output_info")
+        if not isinstance(output_info, dict):
+            output_info = {"partial": False}
+    else:
+        entries, output_info = run_comparison.compare_entries_for_diff(run)
     records = []
     for entry in entries:
         line = strip_ansi_codes(str(entry.get("text") or "")).strip()

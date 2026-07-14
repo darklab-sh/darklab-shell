@@ -232,6 +232,7 @@ function _resetPreservedSingleTabState(tab) {
   tab.command = '';
   tab.runId = null;
   tab.historyRunId = null;
+  tab.historyRunKind = '';
   tab.lastEventId = '';
   tab.attachMode = '';
   tab.reconnectedRun = false;

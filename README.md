@@ -36,7 +36,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, a desktop-aligned mobile menu with compact context hints, and a mobile History panel with collapsible search, filter, and bulk-action tools
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, deterministic outcome summaries for supported noisy tools, quieter handling for known progress/status chatter, jump-to-live / jump-to-bottom controls, and exports/permalinks that include the same visible summaries while keeping raw transcripts unchanged
 - **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, cleaner saved search text that skips known scanner noise without deleting raw output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, selected-history exports as text or JSONL, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
-- **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context, folded scanner chatter, detected-change summaries for supported scan output, lazy expansion for unchanged lines, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
+- **Run comparison** — compare completed runs from History, Run Details, Projects, the active-tab HUD, the mobile menu, or a tab's Findings signal. App-launched comparisons keep the older baseline on the left and current run on the right, then combine responsive transcript diffs with changed finding severities, order-insensitive finding/artifact changes, detected nmap/web/host/TLS changes, workflow step context, folded scanner chatter, lazy unchanged-line expansion, change navigation, copyable summaries, and restore actions
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Shodan InternetDB, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, RouteViews, FOFA, and ZoomEye, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
@@ -512,6 +512,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── atlas_read.py      # Atlas run, entity, finding, detail, and export read routes
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
+│   │   ├── history_compare_requests.py # Owner-scoped History and Project comparison request resolution
 │   │   ├── notifications.py    # /session/notification-channels* browser notification-channel CRUD and test-send routes
 │   │   ├── projects.py         # Shared project blueprint, helpers, and route registration
 │   │   ├── projects_artifacts.py # Project artifact list, preview, download, and download-ticket routes
@@ -610,7 +611,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0040_personal_scope_team_id_normalization.py # Personal-scope team-id normalization for partial indexes
 │   │   │   ├── v0041_project_atlas_sort_indexes.py # Project and Atlas sort-order indexes
 │   │   │   ├── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
-│   │   │   └── v0043_workflow_executions.py # Durable workflow definition version and execution tables
+│   │   │   ├── v0043_workflow_executions.py # Durable workflow definition version and execution tables
+│   │   │   └── v0044_finding_occurrence_comparison.py # Per-run finding severity and comparison identity snapshots
 │   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
 │   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
 │   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
@@ -741,6 +743,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
 │   │   │   ├── cleanup_logging.py # Structured cleanup fields for History INFO and audit events
+│   │   │   ├── comparison_logging.py # Bounded lifecycle logging for completed and partial run comparisons
+│   │   │   ├── comparison_queries.py # Owner-scoped comparison candidates, run rows, and object loading
 │   │   │   ├── insights.py     # History activity, command-mix, and run-constellation insight helpers
 │   │   │   ├── mutations.py    # History run delete and bulk-export mutation helpers
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
@@ -874,6 +878,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
 │   │   │   ├── broker_worker.py # Brokered synthetic and subprocess worker output publishing
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
+│   │   │   ├── comparison_derived.py # Discovered-host and TLS comparison adapters
+│   │   │   ├── comparison_findings.py # Finding comparison identity, loading, and changed-severity pairing
 │   │   │   ├── contracts.py    # Shared run-start exception contracts
 │   │   │   ├── finalization.py # Completed-run capture, Atlas/finding/project hooks, and PTY persistence
 │   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
@@ -1268,6 +1274,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── autocomplete.spec.js # autocomplete dropdown coverage — context-aware suggestions, pipe-stage hints, accept paths
 │   │   │   ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
 │   │   │   ├── commands.spec.js # command execution, denial, and status rendering
+│   │   │   ├── compare.spec.js # History, Project, active-tab, mobile, and findings-only comparison flows
 │   │   │   ├── demo.mobile.spec.js # Mobile demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
 │   │   │   ├── demo.spec.js    # Desktop demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
 │   │   │   ├── failure-paths.spec.js  # /runs denial/rate limit, share/history failure toasts
@@ -1384,6 +1391,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
 │   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
 │   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
+│   │   ├── test_run_comparison_enhancements.py # Run comparison severity, adapters, scope, route, and migration coverage
 │   │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
 │   │   ├── test_run_output_model.py # Typed run-output line-event schema, legacy compatibility, and entity normalization coverage
 │   │   ├── test_run_output_model_parity.py # Python/browser enum parity coverage for the run-output line-event schema

@@ -8008,6 +8008,10 @@ class TestProjectRoutes:
         right_run_id = self._seed_run(session_id, "httpx darklab.sh")
         unlinked_run_id = self._seed_run(session_id, "nuclei darklab.sh")
         other_run_id = self._seed_run(other_session, "nmap other.example")
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("UPDATE runs SET started = '2026-07-13T10:00:00Z' WHERE id = ?", (left_run_id,))
+            conn.execute("UPDATE runs SET started = '2026-07-13T11:00:00Z' WHERE id = ?", (right_run_id,))
+            conn.commit()
         self._link_run(client, session_id, project["id"], left_run_id)
 
         one_linked = client.get(
@@ -8022,6 +8026,20 @@ class TestProjectRoutes:
         assert removed_project_route.status_code == 404
 
         self._link_run(client, session_id, project["id"], right_run_id)
+        default_pair = client.get(
+            self._project_compare_url(project["id"]),
+            headers={"X-Session-ID": session_id},
+        )
+        assert default_pair.status_code == 200
+        assert default_pair.get_json()["left_run_id"] == left_run_id
+        assert default_pair.get_json()["right_run_id"] == right_run_id
+        explicit_reversed = client.get(
+            self._project_compare_url(project["id"], left=right_run_id, right=left_run_id),
+            headers={"X-Session-ID": session_id},
+        )
+        assert explicit_reversed.status_code == 200
+        assert explicit_reversed.get_json()["left_run_id"] == right_run_id
+        assert explicit_reversed.get_json()["right_run_id"] == left_run_id
         same_run = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=left_run_id),
             headers={"X-Session-ID": session_id},
@@ -8065,7 +8083,12 @@ class TestProjectRoutes:
         payload = json.loads(resp.data)
         assert "findings" not in payload
         assert "artifacts" not in payload
-        assert payload["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert payload["objects"]["findings"] == {
+            "added": [],
+            "removed": [],
+            "changed": [],
+            "unchanged_count": 0,
+        }
         assert payload["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert len(payload["density_buckets"]) == 256
         assert payload["density_buckets"][0] == {
@@ -8159,7 +8182,12 @@ class TestProjectRoutes:
         assert capped["right"]["artifact_count"] == 1
         assert "findings" not in capped
         assert "artifacts" not in capped
-        assert capped["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert capped["objects"]["findings"] == {
+            "added": [],
+            "removed": [],
+            "changed": [],
+            "unchanged_count": 0,
+        }
         assert capped["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert capped["truncated"] == {
             "left": True,
@@ -8663,7 +8691,8 @@ class TestProjectRoutes:
             self._project_compare_url(project["id"], left=run_id, baseline_label="baseline"),
             headers={"X-Session-ID": session_id},
         ).data)
-        assert baseline_comparison["right_run_id"] == baseline_run_id
+        assert baseline_comparison["left_run_id"] == baseline_run_id
+        assert baseline_comparison["right_run_id"] == run_id
         assert baseline_comparison["baseline_label"] == "baseline"
         invalid_project_findings = client.get(
             f"/projects/{project['id']}/findings?review_state=maybe",
@@ -12290,8 +12319,12 @@ class TestClientLogRoute:
                     "module_keys": ["DarklabProjectWorkspaceShell", "helper"],
                     "operation": "loadProjectWorkspace",
                     "route": "/projects",
+                    "left_run_id": "run-left-123",
+                    "right_run_id": "run-right-456",
                     "status": 404,
+                    "compare_request_error": True,
                     "expected_global": True,
+                    "url_path": "/history/compare?q=sensitive-search",
                     "raw_artifact_path": "/private/workspace/secret.txt",
                 },
             })
@@ -12315,8 +12348,11 @@ class TestClientLogRoute:
             "page": "index",
             "phase": "load",
             "route": "/projects",
+            "left_run_id": "run-left-123",
+            "right_run_id": "run-right-456",
             "src": "/static/build/shell-bootstrap.123456789abc.js?v=abc123",
             "status": 404,
+            "compare_request_error": True,
             "expected_global": True,
         }
         assert "secret" not in json.dumps(extra)
@@ -20690,10 +20726,11 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get(
-                f"/history/compare?left={left_id}&right={right_id}",
-                headers={"X-Session-ID": session},
-            )
+            with mock.patch.object(history_routes.log, "info") as compare_log:
+                resp = client.get(
+                    f"/history/compare?left={left_id}&right={right_id}",
+                    headers={"X-Session-ID": session},
+                )
             data = json.loads(resp.data)
 
             assert resp.status_code == 200
@@ -20708,6 +20745,14 @@ class TestHistoryRoute:
             ]
             assert "left preview" in hunk_texts
             assert "right preview" in hunk_texts
+            viewed_event = next(
+                call for call in compare_log.call_args_list
+                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+            ).kwargs["extra"]
+            assert viewed_event["left_output_source"] == "preview"
+            assert viewed_event["right_output_source"] == "preview"
+            assert viewed_event["output_truncated"] is True
+            assert viewed_event["comparison_partial"] is True
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (left_id,))
@@ -21221,10 +21266,11 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get(
-                "/history/compare?left=cmp-left&right=cmp-right",
-                headers={"X-Session-ID": session},
-            )
+            with mock.patch.object(history_routes.log, "info") as compare_log:
+                resp = client.get(
+                    "/history/compare?left=cmp-left&right=cmp-right",
+                    headers={"X-Session-ID": session},
+                )
             data = json.loads(resp.data)
 
             assert resp.status_code == 200
@@ -21303,6 +21349,31 @@ class TestHistoryRoute:
             assert port_group["removed"][0]["key"] == "8080/tcp"
             assert port_group["removed"][0]["compare_line_index"] == 2
             assert port_group["removed"][0]["compare_side"] == "left"
+            viewed_call = next(
+                call for call in compare_log.call_args_list
+                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+            )
+            viewed_extra = viewed_call.kwargs["extra"]
+            assert viewed_extra == {
+                "owner_scope": "personal",
+                "project_scoped": False,
+                "left_run_id": "cmp-left",
+                "right_run_id": "cmp-right",
+                "duration_ms": viewed_extra["duration_ms"],
+                "left_output_source": "preview",
+                "right_output_source": "preview",
+                "findings_added": 1,
+                "findings_removed": 1,
+                "findings_changed": 0,
+                "derived_group_ids": "nmap_ports",
+                "output_truncated": False,
+                "changed_lines_truncated": False,
+                "findings_truncated": False,
+                "artifacts_truncated": False,
+                "derived_truncated": False,
+                "comparison_partial": False,
+            }
+            assert viewed_extra["duration_ms"] >= 0
 
             web_resp = client.get(
                 "/history/compare?left=cmp-web-left&right=cmp-web-right",
@@ -21330,7 +21401,10 @@ class TestHistoryRoute:
             assert web_data["objects"]["entities"]["added"][0]["canonical_value"] == "https://darklab.sh/admin"
             assert web_data["objects"]["entities"]["removed"][0]["canonical_value"] == "https://darklab.sh/login"
 
-            with mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+            with (
+                mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0),
+                mock.patch.object(history_routes.log, "info") as capped_log,
+            ):
                 capped_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
                     headers={"X-Session-ID": session},
@@ -21341,11 +21415,23 @@ class TestHistoryRoute:
             assert capped["right"]["persisted_finding_count"] == 1
             assert capped["left"]["artifact_count"] == 1
             assert capped["right"]["artifact_count"] == 1
-            assert capped["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+            assert capped["objects"]["findings"] == {
+                "added": [],
+                "removed": [],
+                "changed": [],
+                "unchanged_count": 0,
+            }
             assert capped["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
             assert capped["truncated"]["findings"] == {"left": True, "right": True}
             assert capped["truncated"]["artifacts"] == {"left": True, "right": True}
             assert capped["truncated"]["item_limit"] == 0
+            capped_event = next(
+                call for call in capped_log.call_args_list
+                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+            ).kwargs["extra"]
+            assert capped_event["findings_truncated"] is True
+            assert capped_event["artifacts_truncated"] is True
+            assert capped_event["comparison_partial"] is True
 
             with mock.patch("services.runs.comparison.COMPARE_MAX_CHANGED_LINES", 2):
                 line_limited_resp = client.get(
@@ -21425,6 +21511,7 @@ class TestHistoryRoute:
             assert identical_payload["objects"]["findings"] == {
                 "added": [],
                 "removed": [],
+                "changed": [],
                 "unchanged_count": 0,
             }
             assert identical_payload["objects"]["artifacts"] == {

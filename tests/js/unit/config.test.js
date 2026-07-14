@@ -806,7 +806,7 @@ describe('frontend config bootstrap', () => {
     const openPromise = window.openHistoryCompareLauncher({ id: 'run-1' })
 
     await expect(openPromise).resolves.toEqual({ runId: 'run-1' })
-    expect(window.openHistoryCompareLauncher).toHaveBeenCalledWith({ id: 'run-1' })
+    expect(window.openHistoryCompareLauncher).toHaveBeenCalledWith({ id: 'run-1' }, {})
     expect(imported).toEqual(historyCompareScripts.map(([, url]) => url))
     expect(appended).toEqual([])
     expect(window.logClientError).not.toHaveBeenCalled()

@@ -246,7 +246,12 @@ def _project_run_rows_to_items(conn, session_id, rows, *, team_id="", include_pr
     finding_counts, artifact_counts = _project_run_count_maps(conn, session_id, run_ids, team_id=team_id)
     run_labels = _entity_labels_by_id(conn, session_id, "run", run_ids, team_id=team_id)
     run_notes = _entity_notes_by_id(conn, session_id, "run", run_ids, team_id=team_id)
-    workflow_provenance = workflow_provenance_by_run(conn, [str(run_id) for run_id in run_ids])
+    workflow_provenance = workflow_provenance_by_run(
+        conn,
+        [str(run_id) for run_id in run_ids],
+        session_id=session_id,
+        team_id=team_id,
+    )
     runs = []
     for row in rows:
         item = _row_to_project_run(row, include_provenance=include_provenance)

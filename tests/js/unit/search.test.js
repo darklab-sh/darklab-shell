@@ -677,6 +677,49 @@ describe('search helpers', () => {
     expect(document.getElementById('searchInput').disabled).toBe(false)
   })
 
+  it('offers a findings-only comparison for an eligible saved run', () => {
+    const openHistoryCompareLauncher = vi.fn()
+    const { refreshSearchDiscoverabilityUi } = loadSearchFns({
+      tab: {
+        id: 'tab-1',
+        command: 'nmap -sV darklab.sh',
+        st: 'ok',
+        historyRunId: 'run-findings',
+        historyRunKind: 'external',
+      },
+      overrides: { openHistoryCompareLauncher },
+    })
+    document.getElementById('out').innerHTML = (
+      '<span class="line" data-signals="findings">443/tcp open https</span>'
+    )
+
+    refreshSearchDiscoverabilityUi()
+    const compare = document.querySelector('[data-search-compare-findings="1"]')
+
+    expect(compare?.getAttribute('aria-label')).toBe('Compare findings with previous run')
+    compare.click()
+    expect(openHistoryCompareLauncher).toHaveBeenCalledWith(
+      { id: 'run-findings' },
+      { initialViewMode: 'findings_only', returnFocus: compare },
+    )
+
+    for (const tab of [
+      { st: 'running', historyRunId: 'run-findings', historyRunKind: 'external' },
+      { st: 'ok', historyRunId: 'run-findings', historyRunKind: 'builtin' },
+      { st: 'ok', historyRunId: '', historyRunKind: 'external' },
+      { st: 'idle', historyRunId: null, historyRunKind: '' },
+    ]) {
+      const invalid = loadSearchFns({
+        tab: { id: 'tab-invalid', command: 'nmap darklab.sh', ...tab },
+      })
+      document.getElementById('out').innerHTML = (
+        '<span class="line" data-signals="findings">443/tcp open https</span>'
+      )
+      invalid.refreshSearchDiscoverabilityUi()
+      expect(document.querySelector('[data-search-compare-findings="1"]')).toBeNull()
+    }
+  })
+
   it('scopes to summary lines and ignores detail rows', () => {
     const { setSearchScope } = loadSearchFns()
     document.getElementById('out').innerHTML = [

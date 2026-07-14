@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,093
+- behavior tests: 4,110
 - docs/inventory meta-tests: 63
-- `pytest`: 2385 (2335 behavior + 50 meta)
-- `vitest`: 1496 (1483 behavior + 13 meta)
-- `playwright`: 275 behavior
-- total: 4,156
+- `pytest`: 2399 (2349 behavior + 50 meta)
+- `vitest`: 1498 (1485 behavior + 13 meta)
+- `playwright`: 276 behavior
+- total: 4,173
 
 This document is organized in two parts:
 
@@ -1609,7 +1609,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
-| `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema, verifies key table and column types, and exercises the finding-occurrence comparison backfill and replacement trigger. |
 | `test_personal_scope_predicates_use_postgres_partial_indexes` | Verifies representative personal Atlas and Project predicates, sort paths, and artifact lookups use Postgres indexes. |
 | `test_postgres_legacy_0038_ledger_refuses_unified_marker_when_head_drifted` | Verifies an isolated Postgres schema with only legacy `0001`-`0038` ledger rows but missing head tables refuses the `0039` marker and leaves the ledger unchanged. |
 | `test_postgres_watcher_monitoring_migration_backfills_legacy_rows` | Verifies the Postgres watcher-monitoring migration backfills legacy watcher Project ids and watcher-fire state/kind rows. |
@@ -2199,6 +2199,20 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestGetClientIp.test_non_ip_xff_falls_back_to_remote_addr` | Checks that non IP X-Forwarded-For falls back to remote addr. |
 | `TestGetClientIp.test_empty_xff_falls_back_to_remote_addr` | Checks that empty X-Forwarded-For falls back to remote addr. |
 
+#### `test_run_comparison_enhancements.py`
+
+| Test | Description |
+| --- | --- |
+| `test_finding_comparison_key_ignores_supported_severity_tokens` | Verifies that supported severity formats don't change a finding's comparison identity. |
+| `test_changed_findings_pair_exact_severities_before_remaining_duplicates` | Verifies that duplicate findings pair exact severities before reporting a deterministic severity change. |
+| `test_findings_without_comparison_keys_keep_generic_add_remove_behavior` | Verifies that findings without a comparison identity stay as separate additions and removals. |
+| `test_occurrence_migration_backfills_and_trigger_snapshots_comparison_metadata` | Verifies that the occurrence migration backfills comparison metadata and new trigger writes retain it. |
+| `test_finding_compare_loader_applies_owner_scope_to_run_and_finding` | Verifies that finding comparison loading applies the active owner scope to both runs and findings. |
+| `test_host_and_tls_adapters_use_same_root_and_loaded_entries` | Verifies host and TLS field parsing, target ambiguity, partial and capped results, HTTP route output, compatible command roots, and bounded loaded output reuse. |
+| `test_compare_route_reports_severity_change_anchors_and_conditional_workflow_provenance` | Verifies direct-writer occurrence snapshots, changed-finding anchors, two-sided historical workflow context, and positional explicit-pair behavior. |
+| `test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows` | Verifies real member-scoped candidates, direct and project comparisons, lazy lines, subordinate object isolation, and revoked-member denial. |
+| `test_compare_candidates_only_include_older_completed_external_runs` | Verifies that automatic candidates include only older completed external runs. |
+
 #### `test_run_history_share.py`
 
 | Test | Description |
@@ -2719,10 +2733,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `lets blank Enter append a prompt after the welcome intro is done` | Verifies that blank Enter uses the normal prompt-newline path once the welcome intro has finished, even while welcome hint rotation is still active. |
 | `does not let welcome playback steal Space from schedules form fields` | Verifies that the global welcome keyboard handler leaves Schedules modal form input alone while the modal is open. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
-| `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
+| `persists only non-running tabs for session restore` | Verifies that the browser session snapshot preserves saved-run kind metadata while retaining active-run restore state. |
 | `uses one accessor-backed tab restore flag for window and module guards` | Verifies that the session-restore guard is a single accessor-backed value shared by module code and `window`. |
 | `persists output signal metadata for session restore` | Verifies that findings, warning, error, and summary metadata survives browser refresh state snapshots. |
-| `restores saved non-running tabs and active draft state from session storage` | Verifies that saved tab labels, drafts, and transcript previews rebuild from browser session storage after reload. |
+| `restores saved non-running tabs and active draft state from session storage` | Verifies that saved tab labels, drafts, transcript previews, and external-run comparison eligibility rebuild from browser session storage after reload. |
 | `preserves a non-active tab draft even when createTab activation would overwrite it during restore` | Verifies that the restore flow reapplies saved drafts after tab creation so a non-active tab draft survives restore-time activation churn. |
 | `preserves the last created non-active tab draft when the final restored active tab is different` | Verifies that the final active-tab selection in session restore does not wipe the last created non-active tab's saved draft. |
 | `manually inserts printable desktop keydown input once` | Verifies that manually inserts printable desktop keydown input once. |
@@ -3230,9 +3244,9 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `shows run cleanup reason notes without destructive options when only not eligible items exist` | Verifies that run delete confirmations still explain not-eligible Atlas cleanup candidates without showing disposable or kept-by-default deletion checkboxes. |
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
-| `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
+| `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens with a suggested previous run, falls back to manual selection without one, ignores stale responses, and returns focus on close. |
 | `keeps the history drawer open when compare launcher is unavailable` | Verifies the History drawer stays open and in context when compare launch cannot start. |
-| `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces the manual candidate list instead of merging stale suggested runs into the search results. |
+| `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces stale suggestions, paginates choices, and keeps chronological baseline/current order when the manual candidate is newer. |
 | `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
 | `preflights Restore Both tab capacity before creating either tab` | Verifies that Restore Both checks available tab capacity before creating comparison restore tabs. |
 | `includes the history type filter in the request URL when snapshots are selected` | Verifies that switching the desktop history surface to snapshots adds the `type=snapshots` filter to the `/history` request. |
@@ -3302,7 +3316,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `renders a fetched comparison in mobile mode with the real select enhancer` | Verifies that the fetched compare renderer can open the mobile unified view with the app-native select enhancer without falling into the generic failure toast. |
 | `surfaces backend compare errors instead of only the generic failure toast` | Verifies that failed compare responses include the backend validation message in the toast instead of collapsing every failure into the same generic copy. |
 | `hides equal-line context controls and rows in changes-only and findings-only modes` | Verifies that changes-only and findings-only comparison modes hide context controls and suppress transcript equal rows or the transcript pane. |
-| `renders added and removed entity-set diffs from comparison objects` | Verifies that run comparison renders added and removed entity diffs from the structured comparison object payload. |
+| `renders added and removed entity-set diffs from comparison objects` | Verifies entity diffs plus anchored host and unanchored TLS summaries, preserved counts, ambiguous targets, and truncation notes. |
 | `rerenders full equal hunks when context dropdown changes without refetching or saving defaults` | Verifies that the compare context dropdown reshapes already-loaded equal hunks without re-running the compare request or changing the saved default. |
 | `renders replace blocks while preserving each side output order` | Verifies that replace hunks keep each pane's original transcript order while aligning changed pairs. |
 | `keeps right-only replace lines before later paired right lines` | Verifies that a right-side inserted service line renders before a later paired summary line when that was the original B-side order. |
@@ -3661,7 +3675,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `runCommand shows the missing-secret setup hint from the server` | Verifies that missing required secret denials render the server-provided setup hint in the terminal. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
 | `runCommand dismisses the mobile keyboard after a successful submit` | Verifies that runCommand dismisses the mobile keyboard after a successful submit. |
-| `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
+| `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels welcome output and clears stale saved-run comparison state before the new command starts. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
 | `runCommand uses live config for preview truncation notices after config reloads` | Verifies runCommand reads current config when building preview truncation notices after a reload. |
@@ -3780,6 +3794,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `does not classify plain text without server-provided signal metadata` | Verifies that untagged transcript text is treated as signal-unavailable instead of being reclassified by browser heuristics. |
 | `does not infer command roots for lines without signal metadata` | Verifies that untagged transcript rows do not walk backward through prior output while computing signal scopes. |
 | `opens normal search in text mode even when findings are available` | Verifies that the standard search button path preserves keyboard-first text search while still showing signal availability. |
+| `offers a findings-only comparison for an eligible saved run` | Verifies that only a saved completed external run exposes the compact Findings comparison action, excluding active, built-in, unsaved, and cleared tabs. |
 | `scopes to summary lines and ignores detail rows` | Verifies that summaries mode targets roll-up lines without re-matching the detailed output underneath them. |
 | `does not count user-killed runs as errors` | Verifies that `[killed by user ...]` lines stay out of the error count and error scope. |
 | `appends a synthetic signal summary without inflating scoped counts` | Verifies that the generated command-findings block does not feed back into the signal counters or scoped search matches. |
@@ -3830,6 +3845,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `keeps rail modal launchers wired to ESM imports instead of dead placeholders` | Verifies shell rail modal launchers call imported ESM openers instead of stale placeholder globals. |
 | `opens Status Monitor and Findings Board from the desktop rail nav item` | Verifies that the desktop rail exposes Status Monitor and the Findings Board as first-class navigation items. |
 | `opens Status Monitor from the HUD before the monitor module binds its own triggers` | Verifies that the desktop HUD STATUS pill opens the lazy Status Monitor on the first click before the monitor module installs its own HUD handlers. |
+| `shows Compare in the HUD only for an eligible completed external run` | Verifies that the active-tab HUD exposes Compare only for saved completed external runs, excluding active, built-in, unsaved, and cleared tabs. |
 | `keeps the default split when workflows is closed and reopened before resizing` | Verifies that the desktop rail preserves the default Recents/Workflows split when Workflows is collapsed before the user drags the splitter. |
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
@@ -3958,7 +3974,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `activateTab clears acFiltered so stale suggestions from a previous tab do not persist` | Verifies that activateTab clears acFiltered so stale suggestions from a previous tab do not persist. |
 | `closeTab resets the last remaining tab instead of removing it` | Verifies that closeTab resets the last remaining tab instead of removing it. |
 | `closeTab resets the preserved last tab line counter before the next command output` | Verifies that closing the only tab clears preserved tab state so the next command starts line numbering from the fresh prompt. |
-| `clearTab preserves a running tab state when asked to keep the run active` | Verifies that clearTab preserves a running tab state when asked to keep the run active. |
+| `clearTab preserves a running tab state when asked to keep the run active` | Verifies that clearTab preserves a running tab's saved-run id and kind when asked to keep the run active. |
 | `clearTab clears the active un-ran composer input along with the tab output` | Verifies that clearTab clears the active un-ran composer input along with the tab output. |
 | `closing a running tab prompts before killing it and activates a neighboring tab` | Verifies that closing a running tab asks before sending a kill request and activates a neighboring tab when kill is chosen. |
 | `closing an attached running tab can detach it without killing the run` | Verifies that closing an attached active-run tab can remove the local view without sending a kill request. |
@@ -4412,6 +4428,13 @@ The interactive PTY browser checks in this spec mock the PTY HTTP and SSE layer 
 | `starts, streams, resizes, and kills an interactive PTY command` | Verifies that the browser PTY path can start an interactive command, render streamed output in xterm, post resize events, and kill the run through the confirmation flow. |
 | `reattaches an active interactive PTY after reload` | Verifies that reload recovery can rebuild an active PTY modal from the snapshot endpoint and resume the live stream. |
 
+#### `compare.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `opens chronological comparison from History, Project, HUD, and Findings` | Verifies ordering, saved changed/added/removed findings, both transcript anchors, exact workflow execution handoff, split navigation, lazy expansion, and Findings only mode across desktop entry points. |
+| `opens comparison for the restored active run from the hamburger menu` | Verifies that mobile can compare the saved run restored into the active tab from the existing menu. |
+
 #### `demo.mobile.spec.js`
 
 Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's mobile keyboard overlay, which would otherwise paint above the app and shrink the visual viewport. The normal wrapper records the headed browser through OBS; the spec still has a screenshot-frame fallback for local experiments.
@@ -4459,7 +4482,6 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 | `history drawer can filter to snapshots and shows snapshot actions` | Verifies that the history drawer can switch to snapshot-only mode, render the `SNAPSHOT` row treatment, and expose the snapshot action set. |
 | `history bulk select can export add remove and delete visible runs` | Verifies that desktop History select mode can export selected runs without closing the drawer, then add them to the active project, remove them from a project, and bulk-delete them. |
-| `run comparison split view works from history and project entry points` | Verifies that seeded same-command runs render the split comparison from both the History drawer and Projects modal, including synced scrolling, lazy equal-line expansion, long-line expansion, counts, and project-scoped lazy fetches. |
 
 #### `interaction-contract.spec.js`
 

@@ -15,6 +15,7 @@ function loadCompareHelpers({
   const clipboard = clipboardImpl || { writeText: vi.fn(() => Promise.resolve()) }
   const applyCompareViewModePreference = vi.fn((mode) => { compareViewMode = mode })
   const applyCompareContextPreference = vi.fn((mode) => { compareContext = mode })
+  const bindFocusTrap = vi.fn()
   const fns = fromDomScripts(
     [
       'app/static/js/core/utils.js',
@@ -42,6 +43,7 @@ function loadCompareHelpers({
       navigator: { clipboard },
       showToast,
       bindDismissible: vi.fn(),
+      bindFocusTrap,
       refocusComposerAfterAction: vi.fn(),
       restoreHistoryRunIntoTab: vi.fn(() => Promise.resolve()),
       createTab: vi.fn(),
@@ -69,7 +71,15 @@ function loadCompareHelpers({
        return '';
      };`,
   )
-  return { ...fns, apiFetch, showToast, clipboard, applyCompareViewModePreference, applyCompareContextPreference }
+  return {
+    ...fns,
+    apiFetch,
+    showToast,
+    clipboard,
+    applyCompareViewModePreference,
+    applyCompareContextPreference,
+    bindFocusTrap,
+  }
 }
 
 function flushPromises() {
@@ -80,8 +90,8 @@ function compareData(overrides = {}) {
   return {
     left_run_id: 'run-a',
     right_run_id: 'run-b',
-    left: { id: 'run-a', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 5 },
-    right: { id: 'run-b', command: 'nmap darklab.sh', exit_code: 1, output_line_count: 6 },
+    left: { id: 'run-a', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 5, artifact_count: 1 },
+    right: { id: 'run-b', command: 'nmap darklab.sh', exit_code: 1, output_line_count: 6, artifact_count: 2 },
     deltas: {
       exit_code_changed: true,
       exit_code: { left: 0, right: 1 },
@@ -272,12 +282,16 @@ describe('history compare split renderer', () => {
       ok: true,
       json: () => Promise.resolve(compareData()),
     }))
-    const { fetchAndRenderHistoryComparison, showToast } = loadCompareHelpers({
+    const { fetchAndRenderHistoryComparison, showToast, bindFocusTrap } = loadCompareHelpers({
       apiFetchImpl: apiFetch,
       mobileMode: true,
       compareViewMode: 'auto',
       useRealSelectEnhancer: true,
     })
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Compare'
+    document.body.appendChild(trigger)
+    trigger.focus()
 
     fetchAndRenderHistoryComparison('run-a', 'run-b')
     await flushPromises()
@@ -293,6 +307,10 @@ describe('history compare split renderer', () => {
     expect(document.querySelector('.history-compare-controls .app-select-menu')?.classList.contains('dropdown-up')).toBe(false)
     expect(document.querySelector('.history-compare-actions-menu-wrap')?.classList.contains('save-menu-down')).toBe(true)
     expect(document.querySelector('.history-compare-actions-menu')?.classList.contains('dropdown-up')).toBe(false)
+    const modal = document.getElementById('history-compare-modal')
+    expect(bindFocusTrap).toHaveBeenCalledWith(modal)
+    document.querySelector('.history-compare-close').click()
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('surfaces backend compare errors instead of only the generic failure toast', async () => {
@@ -329,13 +347,41 @@ describe('history compare split renderer', () => {
     const { _renderHistoryComparison: renderFindingsOnly } = loadCompareHelpers({ compareViewMode: 'findings_only' })
     renderFindingsOnly(compareData({
       objects: {
-        findings: { added: [{ id: 'f1', title: 'new finding' }], removed: [] },
-        artifacts: { added: [], removed: [] },
+        findings: {
+          added: [{ id: 'f1', title: 'new finding' }],
+          removed: [],
+          changed: [{
+            key: 'severity-change',
+            before: { id: 'f2', title: 'changed finding', severity: 'low', compare_line_index: 1 },
+            after: { id: 'f3', title: 'changed finding', severity: 'high', compare_line_index: 2 },
+            changed_fields: ['severity'],
+          }],
+        },
+        artifacts: { added: [{ id: 'a1', workspace_path: 'hidden.txt' }], removed: [] },
+        entities: { added: [{ id: 'e1', canonical_value: 'hidden.darklab.sh' }], removed: [] },
+      },
+      derived_changes: {
+        groups: [{
+          id: 'hidden-derived',
+          title: 'Hidden derived group',
+          added: [{ key: 'hidden' }],
+          added_count: 1,
+        }],
       },
     }))
     expect(document.querySelector('.history-compare-context-select')).toBeNull()
     expect(document.querySelector('.history-compare-split')).toBeNull()
     expect(document.querySelector('.history-compare-object-section')).not.toBeNull()
+    expect(document.querySelector('.history-compare-changed-findings')?.textContent)
+      .toContain('Baseline: low')
+    expect(document.querySelector('.history-compare-changed-findings')?.textContent)
+      .toContain('Current: high')
+    expect(document.querySelector('.history-compare-derived-section')).toBeNull()
+    expect(document.querySelector('[data-object-kind="artifact"]')).toBeNull()
+    expect(document.querySelector('[data-object-kind="entity"]')).toBeNull()
+    const metricsText = document.querySelector('.history-compare-metrics')?.textContent || ''
+    expect(metricsText).not.toContain('Findings')
+    expect(metricsText).not.toContain('Artifacts')
   })
 
   it('renders added and removed entity-set diffs from comparison objects', () => {
@@ -369,13 +415,64 @@ describe('history compare split renderer', () => {
         },
         artifacts: { added: [], removed: [] },
       },
+      derived_changes: {
+        truncated: true,
+        groups: [
+          {
+            id: 'discovered_hosts',
+            kind: 'hosts',
+            title: 'Discovered hosts',
+            display_target: 'multiple targets',
+            target_ambiguous: true,
+            added: [{
+              key: 'new.darklab.sh',
+              host: 'new.darklab.sh',
+              line: 'new.darklab.sh',
+              compare_side: 'right',
+              compare_line_index: 2,
+            }],
+            removed: [{ key: 'old.darklab.sh', host: 'old.darklab.sh' }],
+            added_count: 4,
+            removed_count: 1,
+            changed_count: 0,
+            note: 'Host results may be incomplete.',
+          },
+          {
+            id: 'tls_certificate',
+            kind: 'tls',
+            title: 'TLS certificate',
+            display_target: 'darklab.sh:443',
+            added: [],
+            removed: [],
+            changed: [{
+              key: 'issuer',
+              before: { field: 'issuer', value: 'Old CA' },
+              after: { field: 'issuer', value: 'New CA' },
+            }],
+            added_count: 0,
+            removed_count: 0,
+            changed_count: 1,
+          },
+        ],
+      },
     }))
 
     const sections = Array.from(document.querySelectorAll('.history-compare-object-section'));
     expect(sections.map(section => section.querySelector('summary')?.textContent)).toEqual([
+      'Detected changes (6)',
       'Added entities (1)',
       'Removed entities (1)',
     ])
+    const derivedText = document.querySelector('.history-compare-derived-section')?.textContent || ''
+    expect(derivedText).toContain('Discovered hosts · multiple targets · 4 added · 1 removed')
+    expect(derivedText).toContain('TLS certificate · darklab.sh:443 · 1 changed')
+    expect(derivedText).toContain('issuer')
+    expect(derivedText).toContain('Old CA -> New CA')
+    expect(derivedText).toContain('Host results may be incomplete.')
+    expect(derivedText).toContain('Some detected changes were omitted by compare limits.')
+    expect(document.querySelector('button[data-derived-kind="hosts"][data-compare-line-index="2"]'))
+      .not.toBeNull()
+    expect(document.querySelector('[data-derived-kind="tls"]')).not.toBeInstanceOf(HTMLButtonElement)
     expect(document.querySelector('[data-object-kind="entity"][data-compare-side="b"]')?.textContent)
       .toContain('www.darklab.sh')
     expect(document.querySelector('[data-object-kind="entity"][data-compare-side="a"]')?.textContent)

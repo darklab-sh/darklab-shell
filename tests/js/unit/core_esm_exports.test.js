@@ -538,6 +538,17 @@ describe('core ESM exports', () => {
         url: '/history/compare?left=run-1&project_id=project-1&right=run-2',
       })
 
+      fallbackCompare.mockClear()
+      const controls = document.createElement('div')
+      controls.dataset.projectCompareRunOptions = JSON.stringify([
+        { value: 'run-current', started: '2026-07-13T12:00:00Z' },
+        { value: 'run-baseline', started: '2026-07-12T12:00:00Z' },
+      ])
+      controller.compareRuns('project-1', 'run-current', 'run', 'run-baseline', controls)
+      expect(fallbackCompare).toHaveBeenCalledWith('run-baseline', 'run-current', {
+        url: '/history/compare?left=run-baseline&project_id=project-1&right=run-current',
+      })
+
       delete bridgeGlobal.fetchAndRenderHistoryComparison
       expect(() => controller.compareRuns('project-1', 'run-1', 'run', 'run-2'))
         .toThrow('Run comparison is not available.')
