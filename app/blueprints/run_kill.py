@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Run kill route for the run blueprint."""
 
 from __future__ import annotations

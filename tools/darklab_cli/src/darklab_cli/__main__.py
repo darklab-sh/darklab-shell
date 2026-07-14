@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Command line entry point for the darklab_shell API client."""
 
 from __future__ import annotations

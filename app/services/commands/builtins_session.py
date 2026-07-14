@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Session identity and variable built-in command handlers."""
 
 from __future__ import annotations

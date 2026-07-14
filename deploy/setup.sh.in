@@ -1,0 +1,256 @@
+#!/usr/bin/env sh
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+set -eu
+
+RELEASE_VERSION="@RELEASE_VERSION@"
+PAYLOAD_BASE_URL="${DARKLAB_SETUP_BASE_URL:-@PAYLOAD_BASE_URL@}"
+ALLOW_TEST_URLS="${DARKLAB_SETUP_ALLOW_TEST_URLS:-0}"
+COMPOSE_SHA256="@COMPOSE_SHA256@"
+ENV_SHA256="@ENV_SHA256@"
+CONFIG_SHA256="@CONFIG_SHA256@"
+VERIFY_IMAGE_SHA256="@VERIFY_IMAGE_SHA256@"
+NOTICES_SHA256="@NOTICES_SHA256@"
+LICENSES_SHA256="@LICENSES_SHA256@"
+PROJECT_LICENSE_SHA256="@PROJECT_LICENSE_SHA256@"
+GITLAB_IMAGE="@GITLAB_IMAGE@"
+GITLAB_DIGEST="@GITLAB_DIGEST@"
+DOCKERHUB_IMAGE="@DOCKERHUB_IMAGE@"
+DOCKERHUB_DIGEST="@DOCKERHUB_DIGEST@"
+COMPRESSED_BYTES="@COMPRESSED_BYTES@"
+UNPACKED_BYTES="@UNPACKED_BYTES@"
+TARGET_DIR="."
+
+usage() {
+    cat <<EOF
+Usage: setup.sh [--dir PATH] [--help] [--version]
+
+Prepare a darklab_shell ${RELEASE_VERSION} deployment directory.
+The script verifies and installs release files but does not pull or start containers.
+EOF
+}
+
+fail() {
+    printf 'setup: %s\n' "$*" >&2
+    exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dir)
+            [ "$#" -ge 2 ] || fail "--dir requires a path"
+            TARGET_DIR=$2
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --version)
+            printf '%s\n' "$RELEASE_VERSION"
+            exit 0
+            ;;
+        *)
+            fail "unknown option: $1"
+            ;;
+    esac
+done
+
+missing=""
+for command_name in basename cat chmod cp curl docker find grep mkdir mktemp mv od rm sed tr; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        missing="${missing} ${command_name}"
+    fi
+done
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    missing="${missing} sha256sum-or-shasum"
+fi
+[ -z "$missing" ] || fail "missing required commands:${missing}"
+
+compose_version=$(docker compose version --short 2>/dev/null) \
+    || fail "Docker Compose 2.20.0 or newer is required"
+compose_version=${compose_version#v}
+compose_version=${compose_version%%-*}
+compose_version=${compose_version%%+*}
+compose_major=${compose_version%%.*}
+compose_remainder=${compose_version#*.}
+[ "$compose_remainder" != "$compose_version" ] \
+    || fail "could not parse Docker Compose version: $compose_version"
+compose_minor=${compose_remainder%%.*}
+compose_patch=${compose_remainder#*.}
+[ "$compose_patch" != "$compose_remainder" ] || compose_patch=0
+compose_patch=${compose_patch%%.*}
+for compose_part in "$compose_major" "$compose_minor" "$compose_patch"; do
+    case "$compose_part" in
+        ''|*[!0-9]*) fail "could not parse Docker Compose version: $compose_version" ;;
+    esac
+done
+if [ "$compose_major" -lt 2 ] \
+    || { [ "$compose_major" -eq 2 ] && [ "$compose_minor" -lt 20 ]; }; then
+    fail "Docker Compose 2.20.0 or newer is required (found $compose_version)"
+fi
+docker info >/dev/null 2>&1 || fail "the Docker daemon is not reachable"
+
+[ -n "$TARGET_DIR" ] || fail "target directory must not be empty"
+[ "$TARGET_DIR" != "/" ] || fail "refusing to install into /"
+[ ! -L "$TARGET_DIR" ] || fail "target directory must not be a symlink: $TARGET_DIR"
+if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
+    fail "target exists and is not a directory: $TARGET_DIR"
+fi
+if [ -d "$TARGET_DIR" ]; then
+    unexpected_entry=$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 \
+        ! -name setup.sh ! -name setup.sh.sha256 ! -name SHA256SUMS \
+        -print -quit)
+    [ -z "$unexpected_entry" ] || fail "target directory must be empty: $TARGET_DIR"
+fi
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | sed 's/[[:space:]].*$//'
+    else
+        shasum -a 256 "$1" | sed 's/[[:space:]].*$//'
+    fi
+}
+
+download() {
+    source_url=$1
+    destination=$2
+    payload_name=$(basename "$destination")
+    case "$source_url" in
+        https://*)
+            curl -fsSL --proto '=https' --tlsv1.2 "$source_url" -o "$destination" 2>/dev/null \
+                || fail "download failed for ${payload_name} (release ${RELEASE_VERSION})"
+            ;;
+        file://*)
+            [ "$ALLOW_TEST_URLS" = "1" ] || fail "non-HTTPS payload URL is not allowed"
+            curl -fsSL "$source_url" -o "$destination" 2>/dev/null \
+                || fail "download failed for ${payload_name} (release ${RELEASE_VERSION})"
+            ;;
+        *) fail "payload URL must use HTTPS" ;;
+    esac
+}
+
+verify_file() {
+    path=$1
+    expected=$2
+    actual=$(sha256_file "$path")
+    [ "$actual" = "$expected" ] || fail "checksum mismatch for $(basename "$path")"
+}
+
+umask 077
+staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/darklab-setup.XXXXXX")
+trap 'rm -rf "$staging_dir"' EXIT HUP INT TERM
+
+download "$PAYLOAD_BASE_URL/compose.yaml" "$staging_dir/compose.yaml"
+download "$PAYLOAD_BASE_URL/.env.example" "$staging_dir/.env.example"
+download "$PAYLOAD_BASE_URL/config.local.yaml" "$staging_dir/config.local.yaml"
+download "$PAYLOAD_BASE_URL/verify-release-image.sh" "$staging_dir/verify-release-image.sh"
+download "$PAYLOAD_BASE_URL/THIRD_PARTY_NOTICES.txt" "$staging_dir/THIRD_PARTY_NOTICES.txt"
+download "$PAYLOAD_BASE_URL/container-licenses.json" "$staging_dir/container-licenses.json"
+download "$PAYLOAD_BASE_URL/LICENSE" "$staging_dir/LICENSE"
+verify_file "$staging_dir/compose.yaml" "$COMPOSE_SHA256"
+verify_file "$staging_dir/.env.example" "$ENV_SHA256"
+verify_file "$staging_dir/config.local.yaml" "$CONFIG_SHA256"
+verify_file "$staging_dir/verify-release-image.sh" "$VERIFY_IMAGE_SHA256"
+verify_file "$staging_dir/THIRD_PARTY_NOTICES.txt" "$NOTICES_SHA256"
+verify_file "$staging_dir/container-licenses.json" "$LICENSES_SHA256"
+verify_file "$staging_dir/LICENSE" "$PROJECT_LICENSE_SHA256"
+
+install_dir="$staging_dir/install"
+mkdir "$install_dir"
+chmod 700 "$install_dir"
+for directory in data conf workspaces backups; do
+    mkdir "$install_dir/$directory"
+    chmod 700 "$install_dir/$directory"
+done
+
+cp "$staging_dir/compose.yaml" "$install_dir/compose.yaml"
+cp "$staging_dir/.env.example" "$install_dir/.env.example"
+cp "$staging_dir/.env.example" "$install_dir/.env"
+cp "$staging_dir/config.local.yaml" "$install_dir/conf/config.local.yaml"
+cp "$staging_dir/verify-release-image.sh" "$install_dir/verify-release-image.sh"
+cp "$staging_dir/THIRD_PARTY_NOTICES.txt" "$install_dir/THIRD_PARTY_NOTICES.txt"
+cp "$staging_dir/container-licenses.json" "$install_dir/container-licenses.json"
+cp "$staging_dir/LICENSE" "$install_dir/LICENSE"
+chmod 600 "$install_dir/.env" "$install_dir/conf/config.local.yaml"
+chmod 755 "$install_dir/verify-release-image.sh"
+chmod 644 "$install_dir/compose.yaml" "$install_dir/.env.example" \
+    "$install_dir/LICENSE" "$install_dir/THIRD_PARTY_NOTICES.txt" \
+    "$install_dir/container-licenses.json"
+
+postgres_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+[ "${#postgres_password}" -eq 48 ] || fail "could not generate the Postgres password"
+sed \
+    -e "s|^POSTGRES_PASSWORD=.*$|POSTGRES_PASSWORD=${postgres_password}|" \
+    -e "s|^DATABASE_URL=.*$|DATABASE_URL=postgresql://darklab:${postgres_password}@postgres:5432/darklab_shell|" \
+    "$install_dir/.env" > "$staging_dir/.env"
+cp "$staging_dir/.env" "$install_dir/.env"
+chmod 600 "$install_dir/.env"
+
+cat > "$install_dir/release-manifest.json" <<EOF
+{
+  "version": "${RELEASE_VERSION}",
+  "gitlab_image": "${GITLAB_IMAGE}",
+  "gitlab_digest": "${GITLAB_DIGEST}",
+  "dockerhub_image": "${DOCKERHUB_IMAGE}",
+  "dockerhub_digest": "${DOCKERHUB_DIGEST}",
+  "image_metrics": {
+    "compressed_bytes": ${COMPRESSED_BYTES},
+    "unpacked_bytes": ${UNPACKED_BYTES}
+  },
+  "managed_files": {
+    "compose.yaml": "${COMPOSE_SHA256}",
+    ".env.example": "${ENV_SHA256}",
+    "conf/config.local.yaml": "${CONFIG_SHA256}",
+    "verify-release-image.sh": "${VERIFY_IMAGE_SHA256}",
+    "THIRD_PARTY_NOTICES.txt": "${NOTICES_SHA256}",
+    "container-licenses.json": "${LICENSES_SHA256}",
+    "LICENSE": "${PROJECT_LICENSE_SHA256}"
+  }
+}
+EOF
+chmod 644 "$install_dir/release-manifest.json"
+
+if grep -E '@[A-Z0-9_]+@' \
+    "$install_dir/compose.yaml" \
+    "$install_dir/.env.example" \
+    "$install_dir/.env" \
+    "$install_dir/conf/config.local.yaml" \
+    "$install_dir/verify-release-image.sh" \
+    "$install_dir/release-manifest.json" >/dev/null 2>&1; then
+    fail "release payload contains an unresolved template value"
+fi
+docker compose \
+    --env-file "$install_dir/.env" \
+    -f "$install_dir/compose.yaml" \
+    config --quiet || fail "release Compose configuration is invalid"
+
+mkdir -p "$TARGET_DIR"
+chmod 700 "$TARGET_DIR"
+for directory in data conf workspaces backups; do
+    mv "$install_dir/$directory" "$TARGET_DIR/$directory"
+done
+for managed_file in compose.yaml .env.example .env release-manifest.json verify-release-image.sh \
+    LICENSE THIRD_PARTY_NOTICES.txt container-licenses.json; do
+    mv "$install_dir/$managed_file" "$TARGET_DIR/$managed_file"
+done
+
+cat <<EOF
+darklab_shell ${RELEASE_VERSION} is ready in ${TARGET_DIR}.
+
+Review these files before starting:
+  ${TARGET_DIR}/.env
+  ${TARGET_DIR}/conf/config.local.yaml
+  ${TARGET_DIR}/compose.yaml
+
+Then run:
+  cd ${TARGET_DIR}
+  docker compose pull
+  ./verify-release-image.sh
+  docker compose up -d
+  docker compose ps
+  docker compose logs -f shell
+
+The app listens on http://127.0.0.1:8888 by default.
+EOF

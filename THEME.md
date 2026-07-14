@@ -196,6 +196,7 @@ There is no filename-based or palette-based group inference — `group` must be 
 ## Practical Notes
 
 - Theme YAML files are explicit and self-contained so operators can tune the shell without touching code.
+- The repository-free production `/config` mount resolves only `config.local.yaml`. Custom theme files and `themes/<name>.local.yaml` overlays still use the source-mounted `app/conf/themes/` layout.
 - Most values are safe to tweak live as long as they remain valid CSS values.
 - The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.

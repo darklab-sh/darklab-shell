@@ -1,0 +1,61 @@
+darklab_shell container third-party notices
+===========================================
+
+The released container includes operating-system packages, scanner tools,
+runtime libraries, browser libraries, fonts, and wordlists maintained by
+third parties. Their licenses remain separate from darklab_shell's license.
+darklab_shell itself is licensed under GNU AGPLv3; the complete project
+license is installed beside this file as LICENSE.
+
+The reviewed component inventory is installed beside this file as
+container-licenses.json. It records each upstream source, license, and the
+location of the corresponding notice or license text in the image.
+
+The paths below are inside the released image. From an installed deployment
+directory after `docker compose pull`, read one without starting the app with:
+
+    image=$(sed -n 's/^DARKLAB_IMAGE=//p' .env)
+    docker run --rm --entrypoint cat "$image" \
+        /usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt
+
+Replace the final path with another path named below when reviewing its terms.
+
+Important usage terms
+---------------------
+
+WPScan uses the WPScan Public Source License rather than a standard
+open-source license. Some commercial uses require a separate license from
+the WPScan Team. Read
+/usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt in the image before
+using WPScan in a commercial product or service. The image's
+wpscan-ruby-gems.json records the name, version, declared license, homepage,
+and default-gem status of every RubyGem installed with the WPScan runtime.
+
+The Debian Nmap package uses Nmap's GPLv2-based terms with additional
+clarifications and exceptions, including conditions for products designed to
+execute and parse Nmap. Read /usr/share/doc/nmap/copyright in the image before
+redistributing Nmap with another product or appliance. Alternative commercial
+licensing may be available from the Nmap Project.
+
+Browser runtime libraries
+-------------------------
+
+The browser bundles include xterm.js, @xterm/addon-fit, ansi_up, and jsPDF.
+Their complete MIT notices are in
+/usr/share/doc/darklab-shell/licenses/frontend-runtime.txt in the image.
+
+Fonts
+-----
+
+JetBrains Mono and Syne are distributed under the SIL Open Font License 1.1.
+The license text is in
+/usr/share/doc/darklab-shell/licenses/OFL-1.1.txt in the image.
+
+Other notice locations
+----------------------
+
+Debian package notices are under /usr/share/doc/*/copyright. Python package
+notices are under their installed *-info metadata directories. Go source and
+license files are retained in /root/go/pkg/mod. Source trees retained for
+SecLists, testssl.sh, and Nikto include their upstream license files. Standard
+GNU license texts are under /usr/share/common-licenses.

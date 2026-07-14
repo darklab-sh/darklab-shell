@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison pure helpers ──────────────────────────────────────────
 // Loaded before history.js. DOM rendering and route calls stay in history.js;
 // comparison formatting, preferences, and deterministic summary helpers live here.

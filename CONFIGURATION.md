@@ -14,7 +14,7 @@ Resolution order for the main app config is:
 
 1. Built-in defaults from `app/config.py`
 2. `app/conf/config.yaml`
-3. Optional untracked `app/conf/config.local.yaml`
+3. Optional local `config.local.yaml`, either beside the shipped file or under `APP_LOCAL_CONF_DIR`
 4. Environment variables for the settings that support them
 
 The loader validates the final config at startup. Malformed YAML, a non-mapping file root, or a structurally invalid value stops startup with a specific key/source message. Unknown keys are ignored and logged as `CONFIG_UNKNOWN_KEY_IGNORED` so typos do not quietly become live settings. Error messages redact secret-looking values, including `ai_api_key`, AI secret names, SMTP password secret ids, credential-bearing DSNs such as `database_url`, and webhook-style fields. Non-secret invalid values are shown in a shortened form so ordinary typos are easier to fix.
@@ -51,6 +51,8 @@ No image rebuild is needed for normal config changes.
 ## Local Override Files
 
 Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibling `*.local.*` overlays. These local files are intentionally useful for private deployment changes that should not be committed.
+
+The repository-free production stack is deliberately narrower: it mounts host `./conf` at `/config` and sets `APP_LOCAL_CONF_DIR=/config`, which moves only the main `config.local.yaml` lookup. The installer keeps that host directory at `0700` and the file at `0600`; container startup stages the file into a private `appuser`-owned runtime directory before dropping privileges. Shipped defaults and catalogs remain under `/app/conf`. Files such as `/config/commands.local.yaml`, `/config/workflows.local.yaml`, and `/config/themes/*.local.yaml` are not loaded; use the source-mounted layout when those content overlays are required. Startup INFO logs list only config files that contributed recognized settings. Missing and comment-only optional overlays are normal DEBUG-level checks, not applied overlays or warnings. An unknown-only file also stays out of the applied list, while its existing unknown-key warning still points out the setting that was ignored.
 
 | Base file | Local overlay | Behavior |
 |-----------|---------------|----------|
@@ -759,6 +761,8 @@ cp .env.example .env
 
 ```env
 # APP_PORT=8888
+# HOST_BIND_ADDRESS=127.0.0.1
+# DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
@@ -796,15 +800,14 @@ cp .env.example .env
 # these when you want Compose to start Postgres and the app to use it. Add
 # postgres to COMPOSE_PROFILES above when enabling the bundled Postgres service.
 # DATABASE_BACKEND=postgres
-# DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+# DATABASE_URL=
 # DATABASE_POOL_MIN=1
 # DATABASE_POOL_MAX=5
 # DATABASE_POSTGRES_JIT=false
 # POSTGRES_DB=darklab_shell
 # POSTGRES_USER=darklab
-# POSTGRES_PASSWORD=darklab_dev_password
+# POSTGRES_PASSWORD=
 # SECRETS_MASTER_KEY=
-# DOCKER_GELF_ADDRESS=udp://loghost.darklab.sh:12201/
 ```
 
 For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
@@ -812,6 +815,9 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
+| `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `127.0.0.1`; widening it exposes the app beyond the local host |
+| `DARKLAB_IMAGE` | Repository-free production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
+| `APP_LOCAL_CONF_DIR` | Flask app | Optional directory for the main `config.local.yaml` overlay. Production sets `/config`; when unset, the loader keeps using the sibling file beside `config.yaml` |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
@@ -958,6 +964,26 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 ## Docker Compose Files
 
+The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls the Linux AMD64 image `docker.io/darklabsh/darklab-shell:2.6.0` and doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on `127.0.0.1` by default, and omits fixed container names so separate Compose project directories don't collide.
+
+Only `conf/config.local.yaml` is active under the production `/config` mount. The entrypoint copies it into a private runtime path on each container start, so restart after changing it:
+
+```bash
+docker compose restart shell
+```
+
+SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama` profile is independent and can be combined as `COMPOSE_PROFILES=postgres,llama`.
+
+`/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files workspaces stay under tmpfs unless `.env` sets `WORKSPACE_ROOT=/workspaces` and `conf/config.local.yaml` enables the `volume` workspace backend. The production Compose file already maps `./workspaces` to that path.
+
+For SELinux-enforcing hosts, add a local Compose override with private relabeling such as `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z`. Rootless Docker and Podman can reject scanner capabilities even when the YAML is otherwise compatible; Docker Compose 2.20.0 or newer on Linux is the supported runtime.
+
+After `docker compose pull`, run `./verify-release-image.sh` before starting the stack. It requires the GitLab and Docker Hub digests in `release-manifest.json` to agree, confirms `.env` still selects that reviewed release image, and checks the pulled image's repository digest. A mismatch stops with a named error instead of starting an unverified image.
+
+Before an upgrade, stop writes and verify a backup of the selected database, `.env`, `conf/`, host `data/`, persistent workspaces, and `release-manifest.json`. The production stack mounts that deployment-directory `./data` path at `/data` inside the container. Run the new installer in a separate empty directory, compare its managed files, preserve operator-owned state, then update `DARKLAB_IMAGE` to the exact new tag and recreate the shell. Startup may apply a forward-only schema migration, and changing the tag back doesn't reverse it.
+
+The repository-backed [docker-compose.yml](docker-compose.yml) remains the local development and custom-deployment stack. It builds the same Dockerfile, then mounts `./app:/app:ro` over the bundled application:
+
 The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
 
 ```bash
@@ -1018,7 +1044,7 @@ For release builds, pass the same metadata values you want Docker inventory to s
 
 ```bash
 docker compose build \
-  --build-arg APP_VERSION=2.5.0 \
+  --build-arg APP_VERSION=2.6.0 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```

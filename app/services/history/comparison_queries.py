@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Owner-scoped database queries for run comparisons."""
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ def compare_run_rows(owner_scope, left_id: str, right_id: str):
         rows = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE " + scope_sql + " AND runs.id IN (?, ?)",  # nosec B608
+            "WHERE " + scope_sql + " AND runs.id IN (?, ?)",  # nosec
             (*scope_params, left_id, right_id),
         ).fetchall()
         provenance_by_run = workflow_provenance_by_run(
@@ -40,7 +43,7 @@ def compare_candidate_rows(owner_scope, run_id: str):
         source_row = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE runs.id = ? AND " + scope_sql + " "  # nosec B608
+            "WHERE runs.id = ? AND " + scope_sql + " "  # nosec
             "AND runs.run_kind = 'external' AND runs.finished IS NOT NULL",
             (run_id, *scope_params),
         ).fetchone()
@@ -51,7 +54,7 @@ def compare_candidate_rows(owner_scope, run_id: str):
         rows = conn.execute(
             "SELECT runs.*, art.rel_path "
             "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE " + scope_sql + " AND runs.id != ? AND runs.started < ? "  # nosec B608
+            "WHERE " + scope_sql + " AND runs.id != ? AND runs.started < ? "  # nosec
             "AND runs.run_kind = 'external' AND runs.finished IS NOT NULL "
             "ORDER BY runs.started DESC "
             "LIMIT 200",

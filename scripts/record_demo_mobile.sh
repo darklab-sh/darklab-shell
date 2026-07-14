@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 #
 # Record the mobile demo with OBS while Playwright drives a real headed
 # Chromium window. OBS is the standard demo recording path because it captures

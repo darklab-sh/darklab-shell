@@ -38,3 +38,6 @@ pyrightconfig.json
 # Compose and environment files
 docker-compose*.yml
 .env*
+
+# Operator-owned configuration must never be baked into a local image build.
+*.local.*

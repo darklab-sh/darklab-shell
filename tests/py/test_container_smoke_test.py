@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Opt-in regression for the built Docker image.
 
@@ -173,13 +176,15 @@ def _hash_smoke_build_input(hasher: Any, path: Path) -> None:
 
 def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
     hasher = hashlib.sha256()
-    hasher.update(b"container-smoke-cache-v1\0")
+    hasher.update(b"container-smoke-cache-v2\0")
     for path in (
         dockerfile_path,
-        build_context / "app" / "requirements.txt",
         build_context / "entrypoint.sh",
     ):
         _hash_smoke_build_input(hasher, path)
+    for path in sorted((build_context / "app").rglob("*")):
+        if path.is_file() and ".local." not in path.name:
+            _hash_smoke_build_input(hasher, path)
     return hasher.hexdigest()
 
 
@@ -560,10 +565,12 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     app_dir.mkdir()
     dockerfile = tmp_path / "Dockerfile"
     requirements = app_dir / "requirements.txt"
+    app_source = app_dir / "app.py"
     entrypoint = tmp_path / "entrypoint.sh"
 
     dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
     requirements.write_text("flask==3.1.2\n", encoding="utf-8")
+    app_source.write_text("APP_VERSION = '1.0.0'\n", encoding="utf-8")
     entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
 
     original_key = _smoke_image_cache_key(tmp_path, dockerfile)
@@ -576,8 +583,12 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     dockerfile_key = _smoke_image_cache_key(tmp_path, dockerfile)
     assert dockerfile_key != requirements_key
 
+    app_source.write_text("APP_VERSION = '1.0.1'\n", encoding="utf-8")
+    app_source_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert app_source_key != dockerfile_key
+
     entrypoint.write_text("#!/usr/bin/env sh\nexec \"$@\"\n", encoding="utf-8")
-    assert _smoke_image_cache_key(tmp_path, dockerfile) != dockerfile_key
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != app_source_key
 
 
 def test_smoke_image_cache_status_requires_matching_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1235,7 +1246,9 @@ def container_smoke_test():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
 
-        config_local = tmp_path / "config.local.yaml"
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_local = config_dir / "config.local.yaml"
         config_local.write_text(
             "rate_limit_enabled: false\n"
             "rate_limit_per_minute: 10000\n"
@@ -1291,6 +1304,7 @@ def container_smoke_test():
             else item
             for item in shell.get("environment", [])
         ]
+        shell["environment"].append("APP_LOCAL_CONF_DIR=/config")
         compose_cfg["services"]["raw-target"] = {
             "image": runtime_image_tag,
             "entrypoint": ["python", "-m", "http.server", "8888", "--bind", "0.0.0.0"],
@@ -1352,11 +1366,7 @@ def container_smoke_test():
                 print(f"[container-smoke-test] building runtime image: {runtime_image_tag}", flush=True)
                 _run(["docker", "create", "--name", runtime_container_name, image_tag], timeout=30)
                 _run(
-                    ["docker", "cp", f"{ROOT / 'app'}/.", f"{runtime_container_name}:/app"],
-                    timeout=120,
-                )
-                _run(
-                    ["docker", "cp", str(config_local), f"{runtime_container_name}:/app/conf/config.local.yaml"],
+                    ["docker", "cp", str(config_dir), f"{runtime_container_name}:/config"],
                     timeout=30,
                 )
                 _run(

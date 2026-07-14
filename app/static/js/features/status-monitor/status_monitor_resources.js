@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 function createStatusMonitorResources({ core, svgEl, pathFromPoints }) {
   const resourceStateByRunId = new Map();
   const resourceTrendByRunId = new Map();

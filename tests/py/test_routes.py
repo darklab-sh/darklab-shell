@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Integration tests for Flask routes using the test client.
 These tests exercise HTTP-level behaviour without starting a real server.

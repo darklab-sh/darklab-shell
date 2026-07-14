@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 """

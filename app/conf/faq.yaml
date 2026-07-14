@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Custom FAQ entries for this instance.
 # Each entry requires a 'question' and an 'answer' field.
 # Optional: add category: "Core features" to place the item under a FAQ

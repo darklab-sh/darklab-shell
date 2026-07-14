@@ -17,6 +17,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
 - [Dependency Version Tracking](#dependency-version-tracking)
+- [Contribution License](#contribution-license)
 - [Submitting a Merge Request](#submitting-a-merge-request)
 - [Related Docs](#related-docs)
 
@@ -139,6 +140,7 @@ Before merging a version branch back to `main`:
 
 - Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
 - Ensure the new version is updated in [app/config.py](app/config.py) and [package.json](package.json).
+- Run `python scripts/check_versions.sh --release-version <version>` and fix every reported app, npm, Docker, Compose, installer, and OpenAPI mismatch before creating the tag.
 - After changing the app version, regenerate the checked-in API contract with `python scripts/generate_api_openapi.py` so [docs/api-v1-openapi.json](docs/api-v1-openapi.json) matches `/api/v1/openapi.json`.
 - Ensure the PROJECT_README variable in [app/config.py](app/config.py) is accurate and not branch-specific.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
@@ -148,6 +150,7 @@ Before merging a version branch back to `main`:
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
 - Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
 - Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
+- Confirm the protected `vMAJOR.MINOR.PATCH` tag pipeline pushed the canonical GitLab image, passed repository-free smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, and published the checksummed installer payload.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
 
 ---
@@ -163,6 +166,8 @@ Before merging a version branch back to `main`:
 **JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`, including minified ESM output, linked source maps, and precompressed `.br` and `.gz` siblings for text assets; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports intentional browser globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks an intentional browser-boundary publish path. Match the existing style of the file you are editing. ESLint checks app source, tests, tooling, and scripts, enforces syntax/global safety for browser code, and keeps the 2-space indentation, single quote, and no-semicolon rules scoped to config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
+
+**Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root, while `APP_LOCAL_CONF_DIR` selects only the directory for the main `config.local.yaml`. Other loaders still use their sibling `*.local.*` files. When adding or changing an overlay-capable surface, keep its merge/reload/cache behavior explicit and document whether the repository-free `/config` mount supports it; don't make a filename look active when the runtime doesn't resolve it.
 
 **Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
 
@@ -216,8 +221,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2399 pytest + 1498 Vitest + 276 Playwright = 4,173 tests**.
-That total includes 4,110 behavior tests plus 63 docs/inventory meta-tests.
+Current totals: **2420 pytest + 1498 Vitest + 276 Playwright = 4,194 tests**.
+That total includes 4,131 behavior tests plus 63 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -255,7 +260,7 @@ The checks and their scope:
 
 | Check | Tool | Scope | Run manually |
 |---|---|---|---|
-| Python style | `ruff check` | `app/`, `tests/py/` | `python -m ruff check --config .tooling/ruff.toml app/ tests/py/` |
+| Python style | `ruff check` | `app/`, `tests/py/`, source-license checker | `npm run lint:py` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
 | Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
@@ -266,11 +271,12 @@ The checks and their scope:
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
 | YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
+| Source license notices | project checker | project-owned source, excluding generated and third-party paths | `npm run lint:licenses` |
 | Markdown | `markdownlint-cli2` | all tracked `.md` files | `npm run lint:md` |
 | Vendor JS | `build_vendor.mjs` + `git diff` | `app/static/js/vendor/` | `npm run vendor:check` |
 | Frontend bundles | `build_assets.mjs` + committed build output | `assets.config.json`, `app/static/build/`, bundled CSS | `npm run assets:check` |
 
-Run all linters at once (Python + JS/CSS/shell/Docker/YAML/Markdown + vendor/assets): `npm run lint`
+Run all linters at once (Python + JS/CSS/shell/Docker/YAML/license/Markdown + vendor/assets): `npm run lint`
 
 Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
@@ -325,6 +331,39 @@ The `volumes` entry must be inside `[runners.docker]` — a top-level `volumes` 
 
 **Config file location:** the systemd service reads `/etc/gitlab-runner/config.toml`. Registering with `gitlab-runner register` as a non-root user writes to `~/.gitlab-runner/config.toml` instead — copy it to `/etc/` if running under systemd.
 
+### Release Images And Installer Payloads
+
+Ordinary branches and merge requests build verification-only images. A protected tag matching `vMAJOR.MINOR.PATCH` starts the public release path:
+
+1. validate the reviewed container-license inventory, then build the self-contained image once with a registry-backed BuildKit cache and push the exact tag to the GitLab Container Registry
+2. start that image without an `/app` mount and verify its version, architecture, bundled static assets, read-only runtime, private host-config staging, health endpoint, every declared notice path, and the complete installed RubyGem manifest
+3. copy the canonical manifest directly between registries with Buildx imagetools, publish it at `docker.io/darklabsh/darklab-shell`, and require the Docker Hub digest to match
+4. record compressed/unpacked image sizes and pull timing as CI metadata, then generate the byte-stable exact-version `setup.sh`, checksums, production Compose file, `.env.example`, config placeholder, project license, and third-party notices
+5. publish those files to the GitLab Generic Package Registry, create stable release links, then anonymously pull and verify the public artifacts
+
+Exact semantic-version tags are immutable. The promotion job fails when Docker Hub already holds different content at that tag, and it never rebuilds for the mirror. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are protected, masked-and-hidden GitLab variables; GitLab's built-in job-scoped registry credentials handle the canonical push.
+
+Release verification failures name the stage, invariant, expected value, and a bounded actual value without printing registry credentials or token-bearing URLs. The canonical build and Docker Hub promotion retain only their allowlisted manifests, measurements, copy output, and bounded status summaries when a later check fails; Docker client configuration and credentials are never release artifacts.
+
+The protected jobs call `scripts/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
+
+Any Dockerfile tool-version or top-level apt, pip, or Git install change must update `deploy/container-licenses.json`. Run `python scripts/check_container_licenses.py` before publishing; it verifies that every install maps to a reviewed component with a source, license, and notice location and that the bundled WPScan terms still match upstream exactly. The image smoke job performs the second half of the gate against the built filesystem, including notice-path resolution and the generated RubyGem dependency manifest. Ordinary push and merge-request pipelines also run the offline release-version consistency check; the protected tag job repeats it against the tag itself.
+
+Before testing a release payload locally, check the version boundary and build into an empty output directory:
+
+```bash
+python scripts/check_versions.sh --release-version 2.6.0
+python scripts/build_release_payload.py \
+  --version 2.6.0 \
+  --output-dir /tmp/darklab-shell-release
+```
+
+The normal development command stays source-mounted:
+
+```bash
+docker compose up --build
+```
+
 ---
 
 ## Dependency Version Tracking
@@ -336,6 +375,23 @@ The `volumes` entry must be inside `[runners.docker]` — a top-level `volumes` 
 ```
 
 The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
+
+---
+
+## Contribution License
+
+darklab_shell is licensed under `AGPL-3.0-only`. By submitting a contribution, you agree that it can be distributed under the project's [GNU AGPLv3 license](LICENSE). You keep the copyright in your work.
+
+Only submit code, assets, or documentation that you have the right to contribute under those terms. Identify copied or adapted third-party material and preserve its notices instead of treating it as project-owned code. If users interact with a modified version remotely over a network, Section 13 requires that version to prominently offer every remote user its complete Corresponding Source at no charge through a standard or customary copying method. The built-in FAQ is the default source link for official releases; modifiers are responsible for ensuring their complete offer reaches all remote users. The full [license text](LICENSE) controls.
+
+New project-owned source files need a near-top SPDX notice using the file's comment syntax. Put your own name and the current year in `SPDX-FileCopyrightText`; keep existing copyright lines when editing a file:
+
+```text
+SPDX-FileCopyrightText: 2026 Your Name
+SPDX-License-Identifier: AGPL-3.0-only
+```
+
+Keep a script's shebang first and an HTML document's doctype first. Don't add the project notice to generated bundles, vendored libraries, fonts, or copied third-party material. `npm run lint:licenses` checks the project-owned boundary in `scripts/check_source_licenses.py`; review ownership before using its `--add-missing` maintenance option.
 
 ---
 

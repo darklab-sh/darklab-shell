@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Manual benchmark for backend output-signal classification.
 
 This intentionally stays out of normal CI. It gives release work a stable way

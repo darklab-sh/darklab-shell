@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Flask extension singletons initialized without an app so blueprints can import
 them before the Flask app object is created.

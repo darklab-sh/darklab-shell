@@ -1,6 +1,0 @@
-/*
- * Compatibility entrypoint.
- *
- * App templates include the component stylesheets directly so browsers can
- * discover them in parallel instead of walking a CSS @import waterfall.
- */

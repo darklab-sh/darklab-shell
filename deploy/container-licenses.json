@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "reviewed_for_release": "2.6.0",
+  "reviewed_on": "2026-07-14",
+  "dockerfile_install_coverage": {
+    "apt:bsdextrautils": "Python container base and Debian packages",
+    "apt:build-essential": "Python container base and Debian packages",
+    "apt:ca-certificates": "Python container base and Debian packages",
+    "apt:curl": "Python container base and Debian packages",
+    "apt:dnsenum": "Python container base and Debian packages",
+    "apt:dnsrecon": "Python container base and Debian packages",
+    "apt:dnsutils": "Python container base and Debian packages",
+    "apt:fierce": "Python container base and Debian packages",
+    "apt:fping": "Python container base and Debian packages",
+    "apt:git": "Python container base and Debian packages",
+    "apt:gosu": "Python container base and Debian packages",
+    "apt:groff-base": "Python container base and Debian packages",
+    "apt:httping": "Python container base and Debian packages",
+    "apt:inetutils-telnet": "Python container base and Debian packages",
+    "apt:iptables": "Python container base and Debian packages",
+    "apt:iputils-ping": "Python container base and Debian packages",
+    "apt:libcap2-bin": "Python container base and Debian packages",
+    "apt:libjson-perl": "Python container base and Debian packages",
+    "apt:libnet-ssleay-perl": "Python container base and Debian packages",
+    "apt:libpcap-dev": "Python container base and Debian packages",
+    "apt:libxml-writer-perl": "Python container base and Debian packages",
+    "apt:man-db": "Python container base and Debian packages",
+    "apt:masscan": "Debian Masscan package",
+    "apt:mtr": "Python container base and Debian packages",
+    "apt:net-tools": "Python container base and Debian packages",
+    "apt:netcat-traditional": "Python container base and Debian packages",
+    "apt:nmap": "Debian Nmap package",
+    "apt:perl": "Python container base and Debian packages",
+    "apt:procps": "Python container base and Debian packages",
+    "apt:python3-requests": "Python container base and Debian packages",
+    "apt:ruby-dev": "Python container base and Debian packages",
+    "apt:rubygems": "Python container base and Debian packages",
+    "apt:sudo": "Python container base and Debian packages",
+    "apt:tcptraceroute": "Python container base and Debian packages",
+    "apt:traceroute": "Python container base and Debian packages",
+    "apt:unzip": "Python container base and Debian packages",
+    "apt:wget": "Python container base and Debian packages",
+    "apt:whois": "Python container base and Debian packages",
+    "apt:zlib1g-dev": "Python container base and Debian packages",
+    "git:https://github.com/blechschmidt/massdns.git": "massdns",
+    "git:https://github.com/danielmiessler/SecLists.git": "SecLists",
+    "git:https://github.com/rbsec/sslscan.git": "sslscan",
+    "git:https://github.com/sullo/Nikto.git": "Nikto",
+    "git:https://github.com/testssl/testssl.sh.git": "testssl.sh",
+    "git:https://github.com/trufflesecurity/trufflehog.git": "TruffleHog",
+    "pip:greynoise": "Python application and intelligence dependencies",
+    "pip:pip": "Python application and intelligence dependencies",
+    "pip:setuptools": "Python application and intelligence dependencies",
+    "pip:shodan": "Python application and intelligence dependencies",
+    "pip:sslyze": "SSLyze",
+    "pip:wafw00f": "WAFW00F",
+    "pip:wheel": "Python application and intelligence dependencies"
+  },
+  "components": [
+    {
+      "name": "Python container base and Debian packages",
+      "version_arg": "PYTHON_VERSION",
+      "source": "https://github.com/docker-library/python/tree/3.14/slim-trixie",
+      "license": "mixed-open-source",
+      "notice_location": "/usr/share/doc/*/copyright and /usr/local/lib/python3.14/site-packages/*-info/licenses"
+    },
+    {
+      "name": "Debian Nmap package",
+      "source": "https://tracker.debian.org/pkg/nmap",
+      "license": "LicenseRef-Nmap-GPL-2-with-clarifications-and-exceptions",
+      "notice_location": "/usr/share/doc/nmap/copyright",
+      "usage_note": "The Debian DFSG package carries Nmap's GPLv2-based terms with additional clarifications and exceptions. Review the installed notice before redistributing Nmap with another product."
+    },
+    {
+      "name": "Debian Masscan package",
+      "source": "https://tracker.debian.org/pkg/masscan",
+      "license": "AGPL-3.0-only AND MIT AND (BSD-3-Clause OR BSD-2-Clause)",
+      "notice_location": "/usr/share/doc/masscan/copyright"
+    },
+    {
+      "name": "Go toolchain",
+      "version_arg": "GO_VERSION",
+      "source": "https://go.dev/LICENSE",
+      "license": "BSD-3-Clause",
+      "notice_location": "/usr/local/go/LICENSE"
+    },
+    {
+      "name": "OpenSSL",
+      "version_arg": "OPENSSL_VERSION",
+      "source": "https://github.com/openssl/openssl",
+      "license": "Apache-2.0",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/OpenSSL.txt"
+    },
+    {
+      "name": "sslscan",
+      "version_arg": "SSLSCAN_VERSION",
+      "source": "https://github.com/rbsec/sslscan",
+      "license": "GPL-3.0",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/sslscan.txt"
+    },
+    {
+      "name": "ProjectDiscovery scanner suite",
+      "version_args": [
+        "NUCLEI_VERSION",
+        "SUBFINDER_VERSION",
+        "HTTPX_VERSION",
+        "DNSX_VERSION",
+        "NAABU_VERSION",
+        "KATANA_VERSION",
+        "TLSX_VERSION",
+        "CDNCHECK_VERSION",
+        "CHAOS_CLIENT_VERSION"
+      ],
+      "source": "https://github.com/projectdiscovery",
+      "license": "MIT",
+      "notice_location": "/root/go/pkg/mod/github.com/projectdiscovery"
+    },
+    {
+      "name": "OWASP Amass",
+      "version_arg": "AMASS_VERSION",
+      "source": "https://github.com/owasp-amass/amass",
+      "license": "Apache-2.0",
+      "notice_location": "/root/go/pkg/mod/github.com/owasp-amass"
+    },
+    {
+      "name": "assetfinder",
+      "version_arg": "ASSETFINDER_VERSION",
+      "source": "https://github.com/tomnomnom/assetfinder",
+      "license": "MIT",
+      "notice_location": "/root/go/pkg/mod/github.com/tomnomnom"
+    },
+    {
+      "name": "gobuster",
+      "version_arg": "GOBUSTER_VERSION",
+      "source": "https://github.com/OJ/gobuster",
+      "license": "Apache-2.0",
+      "notice_location": "/root/go/pkg/mod/github.com/!o!j"
+    },
+    {
+      "name": "ffuf",
+      "version_arg": "FFUF_VERSION",
+      "source": "https://github.com/ffuf/ffuf",
+      "license": "MIT",
+      "notice_location": "/root/go/pkg/mod/github.com/ffuf"
+    },
+    {
+      "name": "tcping",
+      "version_arg": "TCPING_VERSION",
+      "source": "https://github.com/pouriyajamshidi/tcping",
+      "license": "MIT",
+      "notice_location": "/root/go/pkg/mod/github.com/pouriyajamshidi"
+    },
+    {
+      "name": "TruffleHog",
+      "version_arg": "TRUFFLEHOG_VERSION",
+      "source": "https://github.com/trufflesecurity/trufflehog",
+      "license": "AGPL-3.0",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/TruffleHog.txt"
+    },
+    {
+      "name": "massdns",
+      "version_arg": "MASSDNS_VERSION",
+      "source": "https://github.com/blechschmidt/massdns",
+      "license": "GPL-3.0",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/massdns.txt"
+    },
+    {
+      "name": "puredns",
+      "version_arg": "PUREDNS_VERSION",
+      "source": "https://github.com/d3mondev/puredns",
+      "license": "GPL-3.0",
+      "notice_location": "/root/go/pkg/mod/github.com/d3mondev"
+    },
+    {
+      "name": "SecLists",
+      "source": "https://github.com/danielmiessler/SecLists",
+      "license": "MIT",
+      "notice_location": "/usr/share/wordlists/seclists/LICENSE"
+    },
+    {
+      "name": "testssl.sh",
+      "version_arg": "TESTSSL_VERSION",
+      "source": "https://github.com/testssl/testssl.sh",
+      "license": "GPL-2.0",
+      "notice_location": "/opt/testssl.sh/LICENSE"
+    },
+    {
+      "name": "Nikto",
+      "source": "https://github.com/sullo/Nikto",
+      "license": "GPL-2.0",
+      "notice_location": "/opt/Nikto/COPYING and /opt/Nikto/COPYING.LibWhisker"
+    },
+    {
+      "name": "SSLyze",
+      "version_arg": "SSLYZE_VERSION",
+      "source": "https://github.com/nabla-c0d3/sslyze",
+      "license": "AGPL-3.0",
+      "notice_location": "/usr/local/lib/python3.14/site-packages/sslyze-*.dist-info/licenses"
+    },
+    {
+      "name": "WAFW00F",
+      "version_arg": "WAFW00F_VERSION",
+      "source": "https://github.com/EnableSecurity/wafw00f",
+      "license": "BSD-3-Clause",
+      "notice_location": "/usr/local/lib/python3.14/site-packages/wafw00f-*.dist-info/licenses"
+    },
+    {
+      "name": "RustScan",
+      "version_arg": "RUSTSCAN_VERSION",
+      "source": "https://github.com/bee-san/RustScan",
+      "license": "GPL-3.0",
+      "notice_location": "/usr/share/common-licenses/GPL-3"
+    },
+    {
+      "name": "WPScan",
+      "version_arg": "WPSCAN_VERSION",
+      "source": "https://github.com/wpscanteam/wpscan",
+      "license": "LicenseRef-WPScan-Public-Source",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt",
+      "usage_note": "Commercialization can require a separate WPScan license; the bundled terms control."
+    },
+    {
+      "name": "Ruby runtime and WPScan RubyGem dependencies",
+      "source": "RubyGems specifications installed in the release image",
+      "license": "mixed-open-source",
+      "notice_location": "/usr/share/doc/darklab-shell/wpscan-ruby-gems.json"
+    },
+    {
+      "name": "VirusTotal CLI",
+      "version_arg": "VT_CLI_VERSION",
+      "source": "https://github.com/VirusTotal/vt-cli",
+      "license": "Apache-2.0",
+      "notice_location": "/root/go/pkg/mod/github.com/!virus!total"
+    },
+    {
+      "name": "IPinfo CLI",
+      "version_arg": "IPINFO_CLI_VERSION",
+      "source": "https://github.com/ipinfo/cli",
+      "license": "Apache-2.0",
+      "notice_location": "/root/go/pkg/mod/github.com/ipinfo"
+    },
+    {
+      "name": "urlscan CLI",
+      "version_arg": "URLSCAN_CLI_VERSION",
+      "source": "https://github.com/urlscan/urlscan-cli",
+      "license": "Apache-2.0",
+      "notice_location": "/root/go/pkg/mod/github.com/urlscan"
+    },
+    {
+      "name": "Python application and intelligence dependencies",
+      "version_arg": "SETUPTOOLS_VERSION",
+      "source": "app/requirements.txt and Dockerfile pip install declarations",
+      "license": "mixed-open-source",
+      "notice_location": "/usr/local/lib/python3.14/site-packages/*-info/licenses"
+    },
+    {
+      "name": "Browser runtime libraries",
+      "source": "package.json runtime dependencies",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/frontend-runtime.txt"
+    },
+    {
+      "name": "JetBrains Mono and Syne fonts",
+      "source": "app/static/fonts",
+      "license": "OFL-1.1",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/OFL-1.1.txt"
+    }
+  ]
+}

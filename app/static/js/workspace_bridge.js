@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral workspace boundary for shell modules that need Files actions without
 // importing the full Files panel into the initial shell graph.
 import { logClientError as importedLogClientError } from './runtime_bridge.js';

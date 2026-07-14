@@ -136,6 +136,22 @@ This is the transport and boundary view. It focuses on stable communication path
 - outbound notification delivery runs in its own supervised process and claims queued delivery rows from the database, so Flask workers do not send external notifications inline
 - the scheduler runs in its own supervised process, uses an exclusive deployment-wide lock, and owns time-based schedule ticks outside the Flask worker lifecycle
 
+### Container And Release Boundary
+
+One Dockerfile owns both runtime modes. The image contains the complete `/app` tree after the expensive scanner-tool layers, so an exact release image can start without a repository checkout. The source-mounted development stack builds that same image and overlays `./app:/app:ro`; the production stack pulls `docker.io/darklabsh/darklab-shell:<version>` and never mounts `/app`.
+
+Release images are built once for `linux/amd64` from protected semantic-version tags, with unchanged toolchain layers reused through a registry-backed BuildKit cache. Before the build, CI requires every versioned Dockerfile component and every top-level apt, pip, and Git install to map to the release-specific license inventory and required notices. Image smoke validation then resolves every declared notice path and compares the complete installed RubyGem set with the generated WPScan dependency manifest. CI pushes the canonical image to the GitLab Container Registry, verifies repository-free startup and architecture, then copies that manifest byte-for-byte to Docker Hub without routing it through a daemon image store. The public-image check installs the generated deployment payload, pulls through its Compose file, requires both the HTTP and Compose health checks to pass, restarts the app, and confirms `/data` survives. The Docker Hub digest must match the GitLab digest before the installer payload and release links are published. Exact version tags are immutable; the production Compose file uses a readable exact tag rather than `latest`.
+
+The protected release jobs call `scripts/publish_release_artifacts.sh` for GitLab image publication, Docker Hub promotion, and installer-payload upload. The same entry points run under regression tests with local registry doubles, which keeps first publication, identical retries, conflicting immutable content, missing digests, and failed uploads aligned with the CI behavior.
+
+The small deployment payload contains `compose.yaml`, `.env.example`, a comment-only `config.local.yaml`, the project's GNU AGPLv3 license, third-party notices, checksums, a pulled-image verifier, and a release-specific POSIX installer. The installer requires Docker Compose 2.20.0 or newer, verifies every downloaded file, validates the resolved Compose model, generates only the Postgres password, and records both registry references, digests, and measured image sizes. After an operator pulls the image, the installed verifier requires the registry digests to agree, matches `.env` to the reviewed image reference, and checks the local image's repository digest before startup. Volatile pull timing stays in a separate CI artifact so retries produce identical release payload bytes. The installer doesn't pull or start containers.
+
+darklab_shell's original source and documentation use `AGPL-3.0-only`. Project-owned source carries a near-top `SPDX-FileCopyrightText` notice and that exact `SPDX-License-Identifier`; `scripts/check_source_licenses.py` defines the ownership boundary and runs through local lint, pre-commit, and CI. Hashed bundles, generated theme examples, fonts, vendored browser libraries, and third-party license texts are excluded so they keep their generated or upstream identity. The module-size ratchet ignores the standard three notice-only lines. The root `LICENSE` remains the single complete project license rather than duplicating it under `LICENSES/`.
+
+The image records the same SPDX expression in its OCI metadata and carries the full license under `/usr/share/doc/darklab-shell/LICENSE`. The built-in FAQ provides the default source link for official releases. A modified network deployment is responsible for prominently offering every remote user its complete corresponding source at no charge through a standard or customary copying method; replacing the official FAQ URL is necessary when it remains visible, but one placement isn't treated as universally sufficient. The complete `LICENSE` text controls. Third-party tools and assets remain outside the project license and retain the terms recorded in `THIRD_PARTY_NOTICES.txt` and `container-licenses.json`.
+
+Shipped configuration stays inside the image at `/app/conf`. Production mounts operator state at `/config`, but `APP_LOCAL_CONF_DIR` currently moves only the main `config.local.yaml` lookup. The root entrypoint stages an existing host overlay into a private `appuser`-owned path before resolving configuration and dropping privileges, which preserves the host's `0700/0600` permissions. Source deployments with no separate local directory retain the sibling overlay behavior. This separation lets image upgrades refresh commands, themes, workflows, and other shipped catalogs without an old host directory hiding them.
+
 ---
 
 ## Request Flow Walkthroughs
@@ -1894,13 +1910,14 @@ The current event inventory is:
 | DEBUG | `NOTIFICATION_SMTP_SEND_ATTEMPT` | notification email channel | host, port, tls_mode, timeout, channel_id |
 | DEBUG | `SCHEDULE_FIRE_CLAIMED` | scheduler dispatch | schedule_id, owner_kind, session, claimed, fired_at, command_root |
 | DEBUG | `BODY_STORE_DELETE_MISS` | large body storage | rel_path, kind |
-| DEBUG | `CONFIG_SOURCE_SELECTED` | config loading | conf_dir, local_overlay |
+| DEBUG | `CONFIG_SOURCE_SELECTED` | config loading | conf_dir, local_conf_dir, local_overlay |
+| DEBUG | `CONFIG_OVERLAY_CHECKED` | config loading | source, present, known_keys, unknown_keys |
 | DEBUG | `CONFIG_OVERLAY_APPLIED` | config loading | source, known_keys, unknown_keys |
 | DEBUG | `CONFIG_ENV_OVERRIDES_APPLIED` | config loading | env_keys |
 | DEBUG | `CONFIG_LEGACY_KEY_MIGRATED` | config loading | legacy_key, target_key, source |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
+| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, overlays, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
 | INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
 | INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
 | INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
@@ -2308,7 +2325,7 @@ The Flask index route embeds the same normalized browser config payload that `/c
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence and storage controls such as `persist_full_run_output`, `full_output_max_mb`, and the `workspace_*` settings stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB values are converted to bytes internally before artifact or workspace quota logic runs.
 
-Backend config is loaded into one validated, pydantic-backed `AppConfig` object at startup. `config.yaml`, `config.local.yaml`, and supported environment variables feed that object in precedence order; known nested sections merge by field; unknown keys are warned and ignored; malformed YAML or invalid structural types stop startup before Flask or worker loops proceed. The public object remains mapping-compatible for older callers, attribute access exposes typed nested sections for new code, and `model_json_schema()` exposes the schema for tooling and tests.
+Backend config is loaded into one validated, pydantic-backed `AppConfig` object at startup. `config.yaml`, the resolved `config.local.yaml`, and supported environment variables feed that object in precedence order; known nested sections merge by field; unknown keys are warned and ignored; malformed YAML or invalid structural types stop startup before Flask or worker loops proceed. `APP_CONF_DIR` can replace the shipped base root for tests or nonstandard source deployments, while `APP_LOCAL_CONF_DIR` independently selects the directory that contains the main local overlay. When the local setting is absent, the overlay remains beside the base file. The public object remains mapping-compatible for older callers, attribute access exposes typed nested sections for new code, and `model_json_schema()` exposes the schema for tooling and tests.
 
 This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob. The full theme contract lives in its own top-level section below.
 
@@ -2330,12 +2347,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,110
+- behavior tests: 4,131
 - docs/inventory meta-tests: 63
-- `pytest`: 2399 (2349 behavior + 50 meta)
+- `pytest`: 2420 (2370 behavior + 50 meta)
 - `vitest`: 1498 (1485 behavior + 13 meta)
 - `playwright`: 276 behavior
-- total: 4,173
+- total: 4,194
 
 ### Testing Architecture
 

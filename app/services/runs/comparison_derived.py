@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Adapters from shared diff classifiers to run-comparison derived groups."""
 
 from __future__ import annotations

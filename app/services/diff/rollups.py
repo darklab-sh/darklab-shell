@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Dashboard and digest rollups for persisted diff summaries."""
 
 from __future__ import annotations

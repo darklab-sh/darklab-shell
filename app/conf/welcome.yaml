@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Welcome message shown on page load.
 # Each block is a command example with a short description that appears as a
 # muted shell comment after the command finishes typing.

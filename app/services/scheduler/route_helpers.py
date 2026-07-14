@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Shared schedule and watcher route normalization helpers."""
 
 from __future__ import annotations
@@ -88,7 +91,7 @@ def baseline_run_for_owner(run_id: str, session_id: str, *, team_id: str = "", c
         owner_sql = "(team_id IS NULL OR team_id = '') AND session_id = ?"
         owner_params = (session_id,)
     row = conn.execute(
-        f"SELECT id, session_id, team_id, command, finished FROM runs WHERE id = ? AND {owner_sql}",  # nosec B608
+        f"SELECT id, session_id, team_id, command, finished FROM runs WHERE id = ? AND {owner_sql}",  # nosec
         (baseline_id, *owner_params),
     ).fetchone()
     if row is None:

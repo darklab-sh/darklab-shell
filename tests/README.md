@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,110
+- behavior tests: 4,131
 - docs/inventory meta-tests: 63
-- `pytest`: 2399 (2349 behavior + 50 meta)
+- `pytest`: 2420 (2370 behavior + 50 meta)
 - `vitest`: 1498 (1485 behavior + 13 meta)
 - `playwright`: 276 behavior
-- total: 4,173
+- total: 4,194
 
 This document is organized in two parts:
 
@@ -356,6 +356,7 @@ Practical note:
 - For tests that explicitly exercise per-IP rate-limit behavior, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`.
 - For browser tests that need a long-running command, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
+- `npm run lint:licenses` checks SPDX notices on project-owned source used by every test layer while leaving generated fixtures and third-party files under their existing terms.
 - Keep this appendix, README project tree, and configuration reference in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and `CONFIGURATION.md`.
 
 ---
@@ -516,6 +517,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values` | Verifies that `RESTRICTED_COMMAND_INPUT_CIDRS` overrides YAML policy, preserves valid CIDRs, and warns on malformed values. |
 | `TestLoadConfig.test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values` | Verifies generic-output extra domain suffix config normalizes case, dots, IDNs, and duplicate values while warning on invalid suffixes. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
+| `TestLoadConfig.test_separate_local_config_directory_overrides_shipped_config` | Verifies a separately mounted local config directory overrides shipped settings without reading the sibling overlay. |
+| `TestLoadConfig.test_app_local_conf_dir_selects_external_main_overlay` | Verifies `APP_LOCAL_CONF_DIR` selects the external main config overlay when no explicit local path is passed. |
+| `TestLoadConfig.test_missing_or_comment_only_external_local_config_is_harmless` | Verifies missing, comment-only, and unknown-only external overlays leave shipped settings unchanged and stay out of the applied-overlay summary; normal empty checks remain warning-free, while DEBUG and validation-warning paths stay bounded and single-line. |
+| `TestLoadConfig.test_external_local_config_failure_reports_mounted_source` | Verifies invalid external config reports the mounted source path without hiding the failing file. |
 | `TestLoadConfig.test_unknown_yaml_keys_warn_and_are_ignored` | Verifies unknown top-level and nested config keys warn with source context and stay out of the effective config. |
 | `TestLoadConfig.test_forgiving_config_fields_coerce_human_values` | Verifies forgiving config fields still coerce human-edited boolean, integer, capped integer, and megabyte values before schema validation. |
 | `TestLoadConfig.test_config_yaml_non_mapping_root_fails_fast` | Verifies that a non-mapping `config.yaml` root fails during config load. |
@@ -1261,7 +1266,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_post_run_reads_batched_output_for_stop_text` | Verifies the smoke stream parser treats output batches as visible command output when checking stop text. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
 | `test_force_smoke_image_build_reads_wrapper_env` | Verifies that the smoke fixture only forces a cache-image rebuild when the wrapper sets `RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD=1`. |
-| `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, Python requirements, and entrypoint changes refresh the stable smoke cache image. |
+| `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, bundled app, requirements, and entrypoint changes refresh the stable smoke cache image. |
 | `test_smoke_image_cache_status_requires_matching_label` | Verifies that the smoke fixture reuses only cache images with the expected build-input label. |
 | `test_smoke_image_cache_status_rebuilds_when_image_is_missing` | Verifies that a missing stable smoke cache image triggers a rebuild. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
@@ -1635,6 +1640,27 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_metrics_route_scrapes_postgres_runtime_gauges` | Verifies `/metrics` scrapes Postgres runtime gauges, backend markers, table rows, allocated bytes, and a harmless zero FTS-orphan value through the app query path. |
 | `test_postgres_db_init_applies_retention_pruning` | Verifies Postgres `db_init()` applies retention pruning after migrations and removes expired run, snapshot, artifact, and body-store metadata/files. |
 | `test_migration_helper_copies_fixture_into_isolated_postgres_schema` | Builds a SQLite fixture with runs, artifacts, body-store pointers, secrets metadata, JSON columns, and search text, migrates it into an isolated Postgres schema, then verifies row counts, JSON values, file pointers, and search parity. |
+
+#### `test_production_install.py`
+
+| Test | Description |
+| --- | --- |
+| `test_production_compose_uses_pinned_public_image_and_no_source_mount` | Verifies production Compose pins the Docker Hub release, keeps source out of the mount set, persists operator paths, binds loopback, and retains optional profiles and scanner settings. |
+| `test_runtime_image_includes_app_and_excludes_local_overlays` | Verifies the Dockerfile adds the app after scanner layers, declares and installs the project license and RubyGem manifest, excludes operator-owned local overlays, and wires private overlay staging into the image smoke path. |
+| `test_container_license_inventory_matches_dockerfile_and_release` | Verifies project package metadata uses `AGPL-3.0-only`; Nmap and Masscan have explicit reviewed records; and every top-level apt, pip, Git, versioned, and RubyGem container dependency remains covered by the release-specific inventory and notices. |
+| `test_license_checkers_fail_closed_and_preserve_excluded_files` | Mutates temporary source and container-license fixtures to prove missing, conflicting, duplicate, stale, or changed license data fails closed, the complete AGPLv3 text is required, notice insertion preserves shebang and doctype placement, and generated or upstream files aren't relabeled. |
+| `test_cli_distributions_include_complete_agpl_license` | Builds the CLI source archive and wheel, then verifies both publish `License-Expression: AGPL-3.0-only` and contain the complete project license. |
+| `test_release_payload_is_exact_versioned_neutral_and_checksummed` | Verifies repeated generation produces identical payload bytes with the project license, valid checksums, release-correct config links, public image references, named release assertions, always-retained allowlisted publication diagnostics, direct manifest-copy promotion, no private deployment hostname, and no volatile pull timing. |
+| `test_release_image_publication_handles_publish_retry_and_conflict_branches` | Runs the protected GitLab and Docker Hub image publication entry points with local command doubles, covering first publication, identical retry, immutable-tag conflict, failed publish, and missing or malformed digests without leaking registry secrets. |
+| `test_release_payload_publication_handles_upload_retry_and_conflict_branches` | Runs installer-payload publication with a local package-registry double and covers first upload, identical reuse, conflicting immutable content, and upload failure without exposing the job token. |
+| `test_release_payload_rejects_invalid_provenance_before_writing` | Verifies malformed, mismatched, or injection-shaped image digests and invalid size metrics are rejected before a payload directory is written, while valid measured values reach the installed release manifest. |
+| `test_release_version_gate_covers_runtime_and_distribution_files` | Verifies the explicit and ordinary-pipeline offline release gates accept matching runtime/distribution versions and report every stale version source. |
+| `test_installer_creates_private_operator_files_without_starting` | Runs the generated installer against local release fixtures and verifies private permissions, generated Postgres credentials, stable release metadata, the Docker Compose 2.20.0 minimum, Compose validation, pulled-image digest verification and mismatch failures, and no automatic startup. |
+| `test_installer_accepts_its_verified_bootstrap_files_in_current_directory` | Verifies an operator can download the installer and checksum files into a new directory, inspect them, and install in that same directory. |
+| `test_installer_rejects_checksum_mismatch_before_creating_target` | Verifies a changed payload fails checksum validation before the target directory is created. |
+| `test_installer_rejects_non_https_payload_sources` | Verifies public installer downloads reject non-HTTPS sources and identify a failed payload by basename and release without exposing URL credentials or generated secrets. |
+| `test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_target` | Syntax-checks the generated POSIX installer, exercises its `shasum` fallback, and verifies missing tools, old Compose, unavailable Docker, invalid Compose, and secret-generation failures leave no managed target or staging directory behind. |
+| `test_installer_rejects_unsafe_targets` | Verifies the installer refuses non-empty unmanaged directories and directory symlinks. |
 
 #### `test_request_kill_and_commands.py`
 

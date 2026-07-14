@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 FROM python:3.14.6-slim
 
 ARG TARGETARCH
@@ -34,7 +37,7 @@ ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.5.0
+ARG APP_VERSION=2.6.0
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -44,13 +47,15 @@ LABEL org.opencontainers.image.title="darklab_shell" \
       org.opencontainers.image.source="https://gitlab.com/darklab.sh/darklab_shell" \
       org.opencontainers.image.url="https://shell.darklab.sh/" \
       org.opencontainers.image.vendor="darklab.sh" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       sh.darklab.app.name="darklab_shell" \
       sh.darklab.app.version="${APP_VERSION}" \
       sh.darklab.git.revision="${VCS_REF}" \
-      sh.darklab.python.version="${PYTHON_VERSION}"
+      sh.darklab.python.version="${PYTHON_VERSION}" \
+      sh.darklab.image.architecture="${TARGETARCH}"
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -65,6 +70,8 @@ RUN apt-get install -y --no-install-recommends \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
                         ca-certificates perl zlib1g-dev unzip inetutils-telnet httping
+
+RUN mkdir -p /usr/share/doc/darklab-shell/licenses
 
 # Update the man page database
 RUN mandb -c
@@ -101,6 +108,7 @@ RUN multiarch="$(gcc -print-multiarch)" && \
     ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir="lib/${multiarch}" shared zlib && \
     make -j"$(nproc)" && \
     make install_sw install_ssldirs && \
+    install -m 0644 LICENSE.txt /usr/share/doc/darklab-shell/licenses/OpenSSL.txt && \
     ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
     ln -sfn /etc/ssl/certs /usr/local/ssl/certs && \
     ldconfig
@@ -114,6 +122,7 @@ WORKDIR /tmp
 RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" https://github.com/rbsec/sslscan.git /tmp/sslscan && \
     make -C /tmp/sslscan -j"$(nproc)" && \
     cp /tmp/sslscan/sslscan /usr/local/bin/sslscan && \
+    cp /tmp/sslscan/LICENSE /usr/share/doc/darklab-shell/licenses/sslscan.txt && \
     rm -rf /tmp/sslscan
 
 # Install nuclei.
@@ -137,6 +146,7 @@ RUN go install github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog \
     && go -C /tmp/trufflehog install \
+    && cp /tmp/trufflehog/LICENSE /usr/share/doc/darklab-shell/licenses/TruffleHog.txt \
     && rm -rf /tmp/trufflehog
 
 # Install massdns from a pinned upstream release for resolver-backed DNS tooling.
@@ -144,6 +154,7 @@ WORKDIR /tmp
 RUN git clone --depth 1 --branch "${MASSDNS_VERSION}" https://github.com/blechschmidt/massdns.git /tmp/massdns && \
     make -C /tmp/massdns -j"$(nproc)" && \
     cp /tmp/massdns/bin/massdns /usr/local/bin/massdns && \
+    cp /tmp/massdns/LICENSE /usr/share/doc/darklab-shell/licenses/massdns.txt && \
     rm -rf /tmp/massdns
 
 # Install puredns after massdns so the runtime dependency is available.
@@ -187,7 +198,19 @@ RUN unzip x86_64-linux-rustscan.tar.gz.zip && \
     rm -rf x86_64-linux-rustscan*
 
 # Install wpscan via RubyGems.
-RUN gem install wpscan -v ${WPSCAN_VERSION}
+RUN gem install wpscan -v ${WPSCAN_VERSION} && \
+    ruby -rjson -e '\
+      specs = Gem::Specification.to_a.map { |spec| { \
+        "name" => spec.name, \
+        "version" => spec.version.to_s, \
+        "licenses" => spec.licenses.map(&:to_s).sort, \
+        "homepage" => spec.homepage.to_s, \
+        "default_gem" => spec.default_gem? \
+      } }.sort_by { |spec| [spec["name"], spec["version"], spec["default_gem"].to_s] }; \
+      missing = specs.select { |spec| spec["licenses"].empty? }; \
+      raise "RubyGems missing license metadata: #{missing.map { |spec| spec["name"] }.join(", ")}" unless missing.empty?; \
+      payload = { "schema_version" => 1, "gems" => specs }; \
+      File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", JSON.pretty_generate(payload) + "\\n")'
 
 # Install required Python dependencies from requirements.txt
 WORKDIR /app
@@ -231,6 +254,16 @@ RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
 # scanner user cannot write here. The entrypoint re-applies ownership
 # after the Docker volume mount potentially resets it.
 RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
+
+# Keep the application in the final, inexpensive layer so source changes do
+# not invalidate the scanner toolchain. Development Compose mounts ./app over
+# this copy; released images run directly from it.
+COPY app/ /app/
+
+# Keep the reviewed redistribution inventory and notices with the image.
+COPY LICENSE /usr/share/doc/darklab-shell/LICENSE
+COPY deploy/THIRD_PARTY_NOTICES.txt deploy/container-licenses.json /usr/share/doc/darklab-shell/
+COPY deploy/third-party-licenses/ /usr/share/doc/darklab-shell/licenses/
 
 # Copy entrypoint script — runs as root to fix /data ownership after volume
 # mount, then drops to appuser via gosu before starting Gunicorn

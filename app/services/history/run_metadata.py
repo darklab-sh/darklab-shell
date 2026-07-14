@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Shared run/history helpers used by browser routes and API v1."""
 
 from __future__ import annotations

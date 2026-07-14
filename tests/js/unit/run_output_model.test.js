@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'

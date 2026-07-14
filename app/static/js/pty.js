@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Interactive PTY support for allowlisted screen tools. The backend owns the
 // PTY process; xterm.js owns terminal rendering, keyboard input, and paste.
 

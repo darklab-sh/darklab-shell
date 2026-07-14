@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared Project UI/data helpers.
 // Loaded before shell_chrome.js; shell chrome supplies runtime binding callbacks.
 

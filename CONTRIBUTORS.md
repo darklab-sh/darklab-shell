@@ -1,12 +1,14 @@
 # Contributors
 
-darklab_shell is designed, built, and maintained by [nona](https://github.com/nona).
+darklab_shell is designed, built, and maintained by [mmayhew](https://gitlab.com/darklab.sh).
 
 ---
 
 ## Contributing
 
 Contributions, bug reports, and feature suggestions are welcome. Before opening a merge request, review the [Contributor Guide](CONTRIBUTING.md) for local setup, coding conventions, tests, and merge request expectations.
+
+Contributions are accepted under the project's [`AGPL-3.0-only` license](LICENSE). Contributors keep the copyright in their work while allowing it to be distributed as part of darklab_shell under those terms.
 
 Key references for contributors:
 

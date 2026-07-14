@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Read-only API v1 routes for health, history, Atlas, and Projects."""
 
 from __future__ import annotations

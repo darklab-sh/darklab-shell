@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── History pure helpers ─────────────────────────────────────────────────
 // Loaded before history.js. DOM, route calls, and modal wiring stay in
 // history.js; deterministic filter, label, and formatting helpers live here.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """App-mediated workspace helpers.
 
 This module intentionally does not expose shell navigation or redirection.

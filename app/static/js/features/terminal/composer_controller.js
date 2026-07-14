@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Terminal composer controller ──
 // Owns prompt focus/paste behavior, autocomplete loading, and keyboard handling.
 

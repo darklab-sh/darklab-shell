@@ -25,6 +25,8 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Team Ownership: Session Tokens Stay Actors](#team-ownership-session-tokens-stay-actors)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
 - [Deployment and Packaging Decisions](#deployment-and-packaging-decisions)
+  - [Network Copyleft with GNU AGPLv3](#network-copyleft-with-gnu-agplv3)
+  - [One Image, Two Compose Modes, and Dual Registry Publishing](#one-image-two-compose-modes-and-dual-registry-publishing)
   - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
   - [nmap Capabilities](#nmap-capabilities)
   - [Go Binary Installation](#go-binary-installation)
@@ -333,6 +335,32 @@ Allow-listed tools can have specific flags blocked through `policy.deny` entries
 ---
 
 ## Deployment and Packaging Decisions
+
+### Network Copyleft with GNU AGPLv3
+
+**darklab_shell's original source code and documentation use `AGPL-3.0-only`.**
+
+MIT was considered because it is short and easy to adopt, but it would allow a proprietary fork to reuse the project without sharing its changes. GPLv3 would keep distributed derivatives under the GPL, but darklab_shell is mainly a network application: a modified hosted version could be used without distributing the program and therefore without returning its source. AGPLv3 adds the network source offer that matches the project goal.
+
+The license does not prohibit commercial use. Companies can run, host, support, and sell services around darklab_shell under the same terms. The boundary is openness, not payment: a modified network version must prominently offer every remote user its complete Corresponding Source at no charge through a standard or customary copying method. A noncommercial restriction was rejected because it would conflict with the project's open-source goals and make ordinary organizational use unclear. The complete `LICENSE` text controls.
+
+Official releases expose their matching source tag through the built-in **What is this?** FAQ entry, record `AGPL-3.0-only` in package and OCI metadata, and carry the complete license in the image and installer payload. That FAQ entry is the official build's default source link, not a declaration that one placement satisfies every modified service. Modified deployments must replace the official link and remain responsible for making their offer prominent to all remote users and providing their complete corresponding source at no charge. Bundled tools, libraries, fonts, and wordlists are not relicensed; their separate terms stay in `THIRD_PARTY_NOTICES.txt` and `container-licenses.json`.
+
+Project-owned source uses short, machine-readable `SPDX-FileCopyrightText` and `SPDX-License-Identifier` notices instead of repeating the full multi-paragraph AGPL boilerplate in every file. This keeps the license attached when a file is copied without burying the source under legal text. Generated bundles and third-party material are explicitly excluded from the project header, and the lint guard fails when new project-owned source has no notice. The root `LICENSE` is the single full-text copy; a second `LICENSES/AGPL-3.0-only.txt` copy and a formal REUSE-compliance claim were deliberately left out.
+
+### One Image, Two Compose Modes, and Dual Registry Publishing
+
+**Released images contain the app, while development mounts the source tree over that same runtime.**
+
+The earlier Docker path required a repository checkout because the image contained the scanner toolchain but expected `./app:/app:ro` at runtime. That was useful for development, but it made production installation download the whole repository, find private overrides among shipped files, and build a large tool image locally.
+
+The Dockerfile now copies `/app` after the expensive scanner layers. Development keeps the bind mount for a quick edit loop; production pulls the same image and has no `/app` mount. Keeping one Dockerfile and entrypoint avoids a second production-only runtime that could drift in packages, capabilities, users, health behavior, or read-only filesystem assumptions.
+
+Shipped configuration and operator configuration are separate on purpose. The image owns `/app/conf`, while production mounts `./conf` at `/config`. Only the main `config.local.yaml` uses the separate root today; the other content loaders retain their sibling overlays. The installer can therefore keep the host directory and file private while the root entrypoint stages an `appuser`-readable runtime copy before dropping privileges. Mounting a whole host directory over `/app/conf` was rejected because an old deployment directory could hide new commands, themes, workflows, and defaults after an image upgrade.
+
+GitLab is the canonical registry because the source and release pipeline already live there. CI checks the release-specific redistribution inventory, builds once from a protected semantic-version tag with a registry-backed layer cache, verifies that canonical image, then performs a registry-to-registry carbon copy of the manifest to Docker Hub for the shorter public pull path used by production Compose. Pulling, retagging, and pushing through a daemon was rejected because an image store can translate OCI and Docker manifest media types and change the digest even when the layers are identical. Publishing a second build was rejected because build timestamps and moving upstream inputs could produce different bytes under one release version. Both registries use immutable exact tags, and digest equality is the release boundary. Measured transfer and unpacked sizes travel with the release manifest instead of becoming a stale number in Compose; cold-pull timing stays in a CI artifact because it varies by runner and retry.
+
+The installer is small and deliberately non-magical. A release-specific POSIX script downloads only exact-version files, verifies embedded checksums, validates Compose, creates private operator paths, and prints the pull/start commands. It does not install Docker, use `sudo`, change firewall rules, generate the vault master key, or start services. Security-first docs put download, checksum, and inspection before execution; the pipe-to-shell form is only a convenience path with the trust tradeoff stated plainly.
 
 ### Startup Sequence (entrypoint.sh)
 

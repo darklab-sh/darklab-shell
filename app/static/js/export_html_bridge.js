@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Lightweight export facade for the shell. The full HTML/PDF formatter is
 // loaded only when an export action needs it.
 import { DarklabOutputCore as importedOutputCore } from './core/output_core.js';

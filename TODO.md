@@ -7,6 +7,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Repository-free production installation](#repository-free-production-installation)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -29,7 +30,81 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Repository-free production installation
+
+**Outcome:** Operators can install and run a released darklab_shell stack from a small, versioned deployment directory without cloning the source repository or building the image locally. Developers keep the current source-mounted workflow. CI publishes the canonical self-contained image to the GitLab Container Registry first, then promotes that exact image to Docker Hub for the public, user-facing pull path used by production deployments.
+
+#### Delivery milestones
+
+Each milestone is independently releasable and has its own exit criteria. Milestones 2 through 4 improve the initial install path, but they do not block Milestone 1 unless a task is explicitly marked as a first-public-image gate.
+
+##### Milestone 1: Repository-free install
+
+- [ ] Run the protected `v2.6.0` tag pipeline on a native Linux AMD64 runner. Confirm the repository-free image smoke test, exact-tag immutability/retry behavior, license gate, installer payload, and Docker Hub promotion all complete.
+- [ ] Confirm anonymous access to the GitLab image, Docker Hub mirror, setup files, checksums, and notices. Verify both registries report the same digest and a clean Docker host reaches a healthy app from the installed directory.
+- [ ] Record the pipeline's compressed transfer size, unpacked image size, layer composition, and representative cold-pull time. Add those measured expectations to the operator docs and decide whether SecLists or another tool group justifies a later slim image.
+
+**Milestone 1 exit:** A clean Docker host can verify the installer, create a deployment directory, pull the exact public Docker Hub image tag, confirm it matches the canonical GitLab image digest, and reach a healthy app without Git, Python, Node, a local build, or a source checkout. The existing development stack and sibling `config.local.yaml` behavior still work.
+
+##### Milestone 2: Complete external overlay model
+
+- [ ] Introduce the shared shipped/local config-path resolver and move every supported YAML and text overlay consumer to it without changing that surface's merge, replace, reload, validation, or fallback semantics.
+- [ ] Add the remaining safe, comment-only `*.local.yaml` placeholders and update diagnostics, cache signatures, logging, docs, and regression coverage for the complete overlay inventory.
+- [ ] Decide and document how themes, text replacements, package presets, report templates, tour content, and wordlists participate instead of implying unsupported filenames work.
+
+**Milestone 2 exit:** Every documented local override can live under mounted `./conf`, edits invalidate the correct caches and reload as documented, and an empty local directory leaves all image-bundled defaults visible.
+
+##### Milestone 3: Managed deployment lifecycle
+
+- [ ] Replace the minimal per-file installer payload with the deterministic deployment archive, release manifest, managed-file checksums, exact-release upgrade support, migration help, and safe removal behavior.
+- [ ] Package repository-free backup and restore operations behind Docker/Compose-only commands, then make automated upgrades create and verify a pre-upgrade backup or refuse to continue.
+- [ ] Add two-release upgrade tests that prove operator config, `.env`, data, workspaces, and backups survive while managed files and the image reference advance atomically.
+
+**Milestone 3 exit:** Install, upgrade, backup, restore, migration from a clone-backed deployment, conflict handling, and removal all work without a repository checkout and clearly separate release-managed files from operator-owned data.
+
+##### Milestone 4: Supply-chain and compatibility hardening
+
+- [ ] Make bundle generation fully reproducible, pin or account for moving build inputs, publish SBOM and provenance, scan the image, sign the image digest and checksum manifest, and document verification against an out-of-band trusted identity.
+- [ ] Audit every architecture-specific download before adding `linux/arm64`, and add an explicit Podman/rootless/SELinux test lane before claiming those runtimes as supported.
+- [ ] Revisit image composition using the measured pull-size data. Add a slim or separately packaged wordlist/tool variant only when its maintenance and UX costs are justified.
+
+**Milestone 4 exit:** Published artifacts are traceable and independently verifiable, every advertised architecture/runtime has automated coverage, and image-size tradeoffs are documented with measured data.
+
+#### Remaining implementation detail
+
+##### Milestone 2: external overlays
+
+- [ ] Add one resolver for immutable image defaults and mounted operator overrides, including theme subdirectories and safe filename handling.
+- [ ] Move the command registry, FAQ, welcome content, workflows, banners, hints, and themes to the resolver without changing their merge, replace, reload, validation, or fallback behavior.
+- [ ] Make cache invalidation include every base and local file that can change a loader's result, especially `commands.yaml` and `commands.local.yaml`.
+- [ ] Inventory the rest of `app/conf/` and decide explicitly how package presets, report templates, tour content, text replacements, and wordlists participate.
+- [ ] Add harmless comment-only placeholders only for supported overlays. Preserve operator files and use non-active examples where an empty file would replace shipped content.
+- [ ] Expand startup diagnostics, logs, documentation, and regression coverage to the complete supported overlay inventory without exposing values or secrets.
+
+##### Milestone 3: managed lifecycle
+
+- [ ] Replace the per-file installer payload with a deterministic, checksummed deployment archive in GitLab's Generic Package Registry.
+- [ ] Add managed install and upgrade tooling that validates the current manifest, preserves operator files, creates and verifies a backup, and advances managed files atomically.
+- [ ] Refuse unsafe downgrades, explain that changing an image tag does not reverse database migrations, and provide migration and removal flows for repository-backed deployments.
+- [ ] Package SQLite and Postgres backup and restore operations behind Docker/Compose-only commands while preserving secret-key continuity, workspaces, checksums, retention, and cron-friendly output.
+- [ ] Add two-release install, upgrade, conflict, backup, restore, and migration tests that run only from generated release artifacts.
+- [ ] Update operator docs and the changelog when the managed lifecycle ships, then remove the completed Milestone 3 tasks from this plan.
+
+##### Milestone 4: supply chain and compatibility
+
+- [ ] Make release archives reproducible and account for every moving base image, tool download, source checkout, and build input.
+- [ ] Publish an SBOM and provenance, scan the image under a documented policy, and sign the image digest and checksum manifest against an out-of-band trusted identity.
+- [ ] Audit and parameterize architecture-specific downloads before publishing `linux/arm64`.
+- [ ] Add SELinux-enforcing Docker and rootless Podman compatibility lanes before advertising those host models as supported.
+- [ ] Use measured image-size and pull-time data to decide whether a slim or separately packaged wordlist/tool image is worth maintaining.
+- [ ] Update verification docs and the changelog when the hardening work ships, then remove the completed Milestone 4 tasks and this plan.
+
+#### End-state acceptance criteria
+
+- [ ] All documented local overlays work from mounted `./conf`, preserve shipped defaults, invalidate the right caches, and reload as documented.
+- [ ] Install, upgrade, backup, restore, migration, rollback guidance, and removal work without a repository checkout and distinguish managed files from operator-owned content.
+- [ ] GitLab images, Docker Hub mirrors, packages, checksums, SBOM/provenance, signatures, and release links are anonymously accessible and independently verifiable as documented.
+- [ ] Every advertised architecture and container runtime has automated compatibility coverage.
 
 ---
 

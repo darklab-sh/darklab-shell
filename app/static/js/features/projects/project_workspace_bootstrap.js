@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project workspace binding/bootstrap controller.
 // Loaded before shell_chrome.js; shell chrome supplies elements and controller factories.
 

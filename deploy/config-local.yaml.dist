@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Local darklab_shell configuration overrides.
+#
+# The repository-free /config mount supports only this config.local.yaml file.
+# Other local content overrides still use the source-mounted app/conf path.
+#
+# Add only the settings you want to override. The complete option reference is:
+# https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md

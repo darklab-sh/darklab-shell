@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared horizontal tab-strip overflow-edge controller.
 //
 // Mobile tab rows in the shell (Projects detail tabs, Atlas tabs, future

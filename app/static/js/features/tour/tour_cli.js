@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Terminal-guided onboarding tour command.
 
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';

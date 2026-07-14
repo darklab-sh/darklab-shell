@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushWorkspacePromises, responseJson, setupWorkspace } from './helpers/workspace_harness.js'
 

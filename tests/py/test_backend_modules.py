@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Tests for pure utility functions across the app modules:
   - split_chained_commands      (commands.py)
@@ -2578,6 +2581,128 @@ class TestLoadConfig:
         assert cfg["intel_negative_cache_threatfox_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_securitytrails_quota_seconds"] == 21600
 
+    def test_separate_local_config_directory_overrides_shipped_config(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text(
+                "app_name: shipped-shell\nprompt_username: shipped\n",
+                encoding="utf-8",
+            )
+            (shipped_path / "config.local.yaml").write_text(
+                "prompt_username: sibling\n",
+                encoding="utf-8",
+            )
+            (local_path / "config.local.yaml").write_text(
+                "prompt_username: mounted\n",
+                encoding="utf-8",
+            )
+            (local_path / "commands.local.yaml").write_text(
+                "commands:\n  - root: should-not-load\n",
+                encoding="utf-8",
+            )
+
+            cfg = app_config.load_config(shipped_path, local_path)
+
+        assert cfg["app_name"] == "shipped-shell"
+        assert cfg["prompt_username"] == "mounted"
+        assert app_config.get_config_load_summary()["conf_dir"] == str(shipped_path)
+        assert app_config.get_config_load_summary()["local_conf_dir"] == str(local_path)
+        assert app_config.get_config_load_summary()["local_overlay"] is True
+        overlay_sources = [
+            item["source"] for item in app_config.get_config_load_summary()["overlays"]
+        ]
+        assert overlay_sources == [
+            str(shipped_path / "config.yaml"),
+            str(local_path / "config.local.yaml"),
+        ]
+        assert str(local_path / "commands.local.yaml") not in overlay_sources
+
+    def test_app_local_conf_dir_selects_external_main_overlay(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text("app_name: shipped-shell\n", encoding="utf-8")
+            (local_path / "config.local.yaml").write_text("app_name: mounted-shell\n", encoding="utf-8")
+
+            with mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", str(local_path)):
+                cfg = app_config.load_config(shipped_path)
+
+        assert cfg["app_name"] == "mounted-shell"
+
+    def test_missing_or_comment_only_external_local_config_is_harmless(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text("app_name: shipped-shell\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(app_config.log, "debug") as debug,
+                mock.patch.object(app_config.log, "warning") as warning,
+            ):
+                missing_cfg = app_config.load_config(shipped_path, local_path / "missing")
+                missing_summary = app_config.get_config_load_summary()
+                (local_path / "config.local.yaml").write_text(
+                    "# Add local config overrides here.\n",
+                    encoding="utf-8",
+                )
+                comment_cfg = app_config.load_config(shipped_path, local_path)
+                comment_summary = app_config.get_config_load_summary()
+                unsafe_local_path = local_path / ("line\n" + "x" * 180)
+                unsafe_local_path.mkdir()
+                (unsafe_local_path / "config.local.yaml").write_text(
+                    "unknown_log_safety_key: true\n",
+                    encoding="utf-8",
+                )
+                app_config.load_config(shipped_path, unsafe_local_path)
+                unsafe_summary = app_config.get_config_load_summary()
+
+        assert missing_cfg["app_name"] == "shipped-shell"
+        assert comment_cfg["app_name"] == "shipped-shell"
+        expected_base_source = str(shipped_path / "config.yaml")
+        assert [item["source"] for item in missing_summary["overlays"]] == [expected_base_source]
+        assert [item["source"] for item in comment_summary["overlays"]] == [expected_base_source]
+        assert [item["source"] for item in unsafe_summary["overlays"]] == [expected_base_source]
+        checked = [
+            call.kwargs["extra"]
+            for call in debug.call_args_list
+            if call.args == ("CONFIG_OVERLAY_CHECKED",)
+        ]
+        assert any(
+            item["source"].endswith("missing/config.local.yaml") and item["present"] is False
+            for item in checked
+        )
+        assert any(
+            item["source"] == str(local_path / "config.local.yaml") and item["present"] is True
+            for item in checked
+        )
+        assert "\n" not in unsafe_summary["local_conf_dir"]
+        assert len(unsafe_summary["local_conf_dir"]) <= 240
+        unsafe_checked_source = checked[-1]["source"]
+        assert "\n" not in unsafe_checked_source
+        assert len(unsafe_checked_source) <= 240
+        unknown_warning = next(
+            call
+            for call in warning.call_args_list
+            if call.args == ("CONFIG_UNKNOWN_KEY_IGNORED",)
+        )
+        warning_source = unknown_warning.kwargs["extra"]["source"]
+        assert "\n" not in warning_source
+        assert len(warning_source) <= 240
+
+    def test_external_local_config_failure_reports_mounted_source(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text("app_name: shipped-shell\n", encoding="utf-8")
+            (local_path / "config.local.yaml").write_text("app_name: [\n", encoding="utf-8")
+
+            with mock.patch.object(app_config.log, "error") as error:
+                with pytest.raises(app_config.ConfigLoadError, match="Invalid YAML"):
+                    app_config.load_config(shipped_path, local_path)
+
+        assert error.call_args.kwargs["extra"]["source"] == str(local_path / "config.local.yaml")
+
     def test_unknown_yaml_keys_warn_and_are_ignored(self):
         app_config.CONFIG_LOAD_WARNINGS.clear()
         with tempfile.TemporaryDirectory() as tmp:
@@ -3006,6 +3131,10 @@ class TestLoadConfig:
         warning.assert_not_called()
         info.assert_called_once()
         assert info.call_args.args == ("CONFIG_LOADED",)
+        assert "conf_dir" in info.call_args.kwargs["extra"]
+        assert "local_conf_dir" in info.call_args.kwargs["extra"]
+        assert "local_overlay" in info.call_args.kwargs["extra"]
+        assert "overlays" in info.call_args.kwargs["extra"]
         assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_configured"] is False
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_state"] == "disabled"
@@ -18168,6 +18297,9 @@ class TestThemeRegistry:
             os.unlink(path)
         assert "https://example.invalid/README.md" in cast(str, result[0]["answer"])
         assert "https://example.invalid/README.md" in cast(str, result[0]["answer_html"])
+        assert "corresponding source code" in cast(str, result[0]["answer"])
+        assert app_config.PROJECT_SOURCE in cast(str, result[0]["answer"])
+        assert app_config.PROJECT_SOURCE in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_uses_config_project_readme_by_default(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Options modal encrypted secrets panel.
 import { showToast as importedShowToast } from '../../core/utils.js';
 import { appendLine as importedAppendLine } from '../../output_bridge.js';

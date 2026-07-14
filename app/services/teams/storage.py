@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Storage helpers for the dormant team-mode foundation."""
 
 from __future__ import annotations

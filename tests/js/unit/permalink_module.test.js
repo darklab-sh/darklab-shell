@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { resolve, dirname } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

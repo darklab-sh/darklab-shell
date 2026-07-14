@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Generate the checked-in dark/light theme example files from _THEME_DEFAULTS."""
 
 from __future__ import annotations

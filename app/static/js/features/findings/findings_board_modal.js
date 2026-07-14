@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // First-class findings triage board modal.
 // Reuses the shared project findings board adapter so list and board surfaces
 // keep the same review-state grouping rules.

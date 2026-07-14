@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """FAQ content and rendering helpers for command discovery."""
 
 from collections.abc import Callable
@@ -66,19 +69,19 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             "question": "What is this?",
             "category": "Getting started",
             "answer": (
-                f"{app_name} is a lightweight web interface for running network diagnostic "
-                "and vulnerability scanning commands against remote endpoints, with output streamed "
-                "in real time. It's designed for testing and troubleshooting remote hosts. "
-                f"See the project README: {readme_url}"
+                f"{app_name} is a lightweight web interface for running network diagnostic and vulnerability "
+                "scanning commands against remote endpoints, with output streamed in real time. It's designed "
+                "for testing and troubleshooting remote hosts. "
+                f"See the project README: {readme_url}; corresponding source code: {app_config.PROJECT_SOURCE}"
             ),
             "answer_html": (
-                f"{app_name} is a lightweight web interface for running network diagnostic "
-                "and vulnerability scanning commands against remote endpoints, with output streamed "
-                "in real time. It's designed for testing and troubleshooting remote hosts — things "
-                "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
-                "scans — without needing SSH access to a server. For more detailed information, see "
+                f"{app_name} is a lightweight web interface for running network diagnostic and vulnerability "
+                "scanning commands against remote endpoints, with output streamed in real time. It's designed for "
+                "testing remote hosts with DNS, port, route, HTTP, and web app checks, without SSH access. For details, see "
                 f"the project <a href=\"{html.escape(readme_url, quote=True)}\" target=\"_blank\" "
-                "rel=\"noopener\" class=\"faq-link\">README</a>."
+                "rel=\"noopener noreferrer\" class=\"faq-link\">README</a>. The corresponding "
+                f"<a href=\"{html.escape(app_config.PROJECT_SOURCE, quote=True)}\" target=\"_blank\" "
+                "rel=\"noopener noreferrer\" class=\"faq-link\">source code for this release</a> is in the same repository."
             ),
         },
         {

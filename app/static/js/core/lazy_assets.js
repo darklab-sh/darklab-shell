@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared lazy asset loader for rarely-used scripts and modules.
 import { getAppConfig as importedGetAppConfig } from './config.js';
 import { emitUiEvent as importedEmitUiEvent } from './state.js';

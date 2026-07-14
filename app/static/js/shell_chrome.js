@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shell chrome controller ──
 // Owns the desktop rail (Recent, Workflows, nav) and the bottom HUD.
 // Loaded after the shell core, the active-project HUD helpers, and controller.js.

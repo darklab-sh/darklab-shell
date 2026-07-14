@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral Tabs boundary for tab feature modules that would otherwise cycle
 // through tabs.js during source-mode ESM evaluation.
 //

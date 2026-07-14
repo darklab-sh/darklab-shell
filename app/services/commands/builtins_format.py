@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Formatting helpers shared by built-in terminal command handlers."""
 
 from __future__ import annotations

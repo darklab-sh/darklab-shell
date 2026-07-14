@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Mobile non-active running-tab indicator.
 //
 // The mobile status pill reflects the active tab only; this surface gives a

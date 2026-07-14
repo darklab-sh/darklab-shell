@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Command recall history shared by the prompt, mobile composer, and History chips.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import { cmdInput as importedCmdInput } from '../../core/dom.js';

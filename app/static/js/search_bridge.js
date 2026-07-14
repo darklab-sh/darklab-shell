@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral search boundary for tab lifecycle code. search.js imports tabs.js,
 // so tabs.js reaches search behavior through this bridge instead of importing
 // search.js back and creating a cycle.

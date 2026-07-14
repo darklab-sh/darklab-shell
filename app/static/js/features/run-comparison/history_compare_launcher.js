@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison launcher ──────────────────────────────────────────────
 // Loaded after history.js so it can reuse History drawer state, route helpers,
 // and the result renderer while owning the "choose another run" flow.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Snapshot severity and stable comparison identity on finding occurrences."""
 
 from .runner import Migration

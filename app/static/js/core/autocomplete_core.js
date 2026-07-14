@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Autocomplete pure helpers ────────────────────────────────────────────
 // Loaded before autocomplete.js. Registry/runtime state and DOM rendering stay
 // in autocomplete.js; matching, ranking, token context, and label transforms

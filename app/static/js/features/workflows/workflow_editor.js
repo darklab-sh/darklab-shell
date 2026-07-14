@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Workflows v2 definition editor.
 import { bindPressable } from '../../ui/ui_pressable.js';
 

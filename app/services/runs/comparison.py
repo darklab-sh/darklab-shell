@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Shared run comparison helpers for history and project responses."""
 
 import re
@@ -90,13 +93,13 @@ def run_artifact_compare_items(
     run_scope_sql, run_scope_params = owner_scope.predicate(table_alias="r")
     total = conn.execute(
         "SELECT COUNT(*) AS count FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
-        "WHERE a.run_id = ? AND " + run_scope_sql,  # nosec B608
+        "WHERE a.run_id = ? AND " + run_scope_sql,  # nosec
         (run_id, *run_scope_params),
     ).fetchone()["count"]
     rows = conn.execute(
         "SELECT a.id, a.workspace_path, a.display_name, a.kind, a.byte_size, a.detected_by, "
         "a.content_sha256, a.created FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
-        "WHERE a.run_id = ? AND " + run_scope_sql + " ORDER BY a.created ASC, a.id ASC LIMIT ?",  # nosec B608
+        "WHERE a.run_id = ? AND " + run_scope_sql + " ORDER BY a.created ASC, a.id ASC LIMIT ?",  # nosec
         (run_id, *run_scope_params, limit),
     ).fetchall()
     items = []

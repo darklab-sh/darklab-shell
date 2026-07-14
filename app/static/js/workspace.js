@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Session workspace UI ──
 // App-mediated file helper only. This does not expose shell navigation,
 // redirection, or arbitrary host paths.

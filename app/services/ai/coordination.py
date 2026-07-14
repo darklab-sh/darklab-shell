@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Redis-backed guardrails for AI assist enqueueing and worker calls."""
 
 from __future__ import annotations

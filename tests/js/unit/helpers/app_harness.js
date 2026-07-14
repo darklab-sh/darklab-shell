@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './extract.js'
 import { bindFocusTrap } from '../../../../app/static/js/ui/ui_focus_trap.js'

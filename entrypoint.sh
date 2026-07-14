@@ -1,9 +1,51 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Fix /data ownership after Docker volume mount (which resets it to root)
 # and re-own any existing files (e.g. history.db created by a previous root run)
 # then drop to appuser to run Gunicorn
 chown -R appuser:appuser /data 2>/dev/null || true
 chmod 700 /data 2>/dev/null || true
+
+# Production installs keep the host overlay private (0700 directory, 0600
+# file). Root can read that bind mount, but the app workers cannot. Stage the
+# overlay into a private appuser-owned runtime directory before dropping
+# privileges so reloads use the same effective configuration as startup.
+stage_local_config_overlay() {
+    source_dir="${APP_LOCAL_CONF_DIR:-}"
+    [ -n "$source_dir" ] || return
+
+    source_path="${source_dir%/}/config.local.yaml"
+    [ -e "$source_path" ] || return
+    if [ ! -f "$source_path" ] || [ -L "$source_path" ]; then
+        echo "LOCAL_CONFIG_OVERLAY_INVALID path=$source_path" >&2
+        exit 1
+    fi
+
+    runtime_dir="/tmp/darklab-runtime-conf"
+    rm -rf "$runtime_dir"
+    mkdir "$runtime_dir" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=mkdir path=$runtime_dir" >&2
+        exit 1
+    }
+    cp "$source_path" "$runtime_dir/config.local.yaml" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=copy path=$source_path" >&2
+        exit 1
+    }
+    chown appuser:appuser "$runtime_dir" "$runtime_dir/config.local.yaml" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=chown path=$runtime_dir" >&2
+        exit 1
+    }
+    if ! chmod 700 "$runtime_dir" || ! chmod 600 "$runtime_dir/config.local.yaml"; then
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=chmod path=$runtime_dir" >&2
+        exit 1
+    fi
+    APP_LOCAL_CONF_DIR="$runtime_dir"
+    export APP_LOCAL_CONF_DIR
+}
+
+stage_local_config_overlay
 
 # Normalize the optional per-session workspace mount before dropping to
 # appuser. Bind mounts are commonly root-owned on first boot, so app-mediated

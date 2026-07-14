@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 export const DESKTOP_VISUAL_CONTRACT = {
   name: 'desktop',
   viewport: { width: 1600, height: 900 },

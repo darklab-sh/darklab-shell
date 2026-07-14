@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Database backend selection and small dialect helpers.
 
 SQLite is the implemented backend today. The enum and dialect boundary exist
@@ -708,7 +711,7 @@ def postgres_table_names(conn: Any) -> list[str]:
 
 def postgres_table_row_count(conn: Any, table_name: str) -> int:
     row = conn.execute(
-        "SELECT COUNT(*) AS count FROM " + quote_postgres_identifier(table_name),  # nosec B608
+        "SELECT COUNT(*) AS count FROM " + quote_postgres_identifier(table_name),  # nosec
     ).fetchone()
     return int(row["count"] if row else 0)
 

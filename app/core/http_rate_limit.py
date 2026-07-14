@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Baseline HTTP request guard for dynamic app routes.
 
 Route-specific Flask-Limiter decorators still own command/API/write throttles.

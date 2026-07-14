@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // History run restore and source-line highlight helpers.
 import { getTab as importedGetTab, getTabs as importedGetTabs } from '../../core/state.js';
 import {

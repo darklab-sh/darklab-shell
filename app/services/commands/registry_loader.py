@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """YAML loading, normalization, and overlay merging for command registry files."""
 
 from __future__ import annotations

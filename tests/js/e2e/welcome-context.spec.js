@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { test, expect } from '@playwright/test'
 import { runCommand } from './helpers.js'
 import { CMD, setupWelcomePage } from './welcome.helpers.js'

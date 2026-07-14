@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared Project workspace constants.
 // Loaded before shell_chrome.js so controller composition can pass these values around.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared HTML export helpers ───────────────────────────────────────────────
 // Single source of truth for all export formatting (save html, save pdf,
 // permalink save html). All callers go through these helpers so the rendered

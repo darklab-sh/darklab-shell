@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── App preference pure helpers ───────────────────────────────────────────
 // Loaded before app.js. Storage, cookies, and DOM sync stay in app.js; the
 // supported values and snapshot normalization live here.

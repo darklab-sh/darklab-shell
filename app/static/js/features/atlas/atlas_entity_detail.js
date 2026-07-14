@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { formatPortEntityMetadata as importedFormatPortEntityMetadata } from './atlas_entity_row.js';
 import { verificationStatusLabel as importedVerificationStatusLabel } from '../findings/finding_triage_bridge.js';
 import { setAtlasDetailHandlers as importedSetAtlasDetailHandlers } from './atlas_bridge.js';

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Search pure helpers ──────────────────────────────────────────────────
 // Loaded before search.js. DOM traversal and highlighting stay in search.js;
 // label, count, and summary transforms live here for unit-testable reuse.

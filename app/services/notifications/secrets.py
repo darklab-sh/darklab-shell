@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Notification-channel secret helpers backed by the existing vault."""
 
 from __future__ import annotations

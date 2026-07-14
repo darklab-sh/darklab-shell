@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { DarklabHistoryCore as importedHistoryCore } from '../../core/history_core.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
 import { showToast as importedShowToast } from '../../core/utils.js';

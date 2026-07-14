@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral project-context boundary for shell-owned project actions.
 // Lazy feature modules import these wrappers without importing shell_chrome.js.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Single imperative primitive for modal confirmations in the shell.
 //
 // Every destructive or mode-switching confirmation (kill, history-delete,

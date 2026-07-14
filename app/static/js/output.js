@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared output logic ──
 import { getAppConfig as importedGetAppConfig } from './core/config.js';
 import { DarklabOutputCore as importedOutputCore } from './core/output_core.js';

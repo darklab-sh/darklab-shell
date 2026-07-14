@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Durable workflow execution and step state."""
 
 from __future__ import annotations
@@ -135,7 +138,7 @@ def create_execution(
         _lock_execution_owner(conn, session_id, team_id)
         owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
         active_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions WHERE " + owner_sql  # nosec B608
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE " + owner_sql  # nosec
             + " AND status IN ('queued', 'running', 'canceling')",
             owner_params,
         ).fetchone()
@@ -199,7 +202,7 @@ def list_executions(
     workflow_params = (workflow_id,) if workflow_id else ()
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT * FROM workflow_executions WHERE " + owner_sql  # nosec B608
+            "SELECT * FROM workflow_executions WHERE " + owner_sql  # nosec
             + workflow_sql
             + " ORDER BY created DESC LIMIT ?",
             (*owner_params, *workflow_params, max(1, min(int(limit or 50), 100))),
@@ -210,7 +213,7 @@ def list_executions(
         if execution_ids:
             placeholders = ", ".join("?" for _execution_id in execution_ids)
             step_rows = conn.execute(
-                "SELECT * FROM workflow_execution_steps WHERE execution_id IN ("  # nosec B608
+                "SELECT * FROM workflow_execution_steps WHERE execution_id IN ("  # nosec
                 + placeholders
                 + ") ORDER BY execution_id ASC, step_index ASC",
                 tuple(execution_ids),
@@ -229,7 +232,7 @@ def active_execution_count(session_id: str, *, team_id: str = "") -> int:
     owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions WHERE " + owner_sql  # nosec B608
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE " + owner_sql  # nosec
             + " AND status IN ('queued', 'running', 'canceling')",
             owner_params,
         ).fetchone()
@@ -250,7 +253,7 @@ def get_execution(session_id: str, execution_id: str, *, team_id: str = "") -> d
     owner_sql, owner_params = _owner_where(session_id, team_id=team_id, table_alias="e")
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT e.* FROM workflow_executions e WHERE " + owner_sql + " AND e.id = ?",  # nosec B608
+            "SELECT e.* FROM workflow_executions e WHERE " + owner_sql + " AND e.id = ?",  # nosec
             (*owner_params, execution_id),
         ).fetchone()
         if not row:
@@ -412,7 +415,7 @@ def workflow_provenance_by_run(
         owner_clause, owner_params = _owner_where(session_id, team_id=team_id, table_alias="e")
         owner_sql = " AND " + owner_clause
     rows = conn.execute(
-        "SELECT s.run_id, s.execution_id, s.step_id, s.step_index, s.status AS step_status, "  # nosec B608
+        "SELECT s.run_id, s.execution_id, s.step_id, s.step_index, s.status AS step_status, "  # nosec
         "s.exit_code, s.selected_transition, s.transition_reason, "
         "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
         "FROM workflow_execution_steps s "
@@ -447,7 +450,7 @@ def workflow_provenance_by_run(
         return result
     execution_placeholders = ", ".join("?" for _execution_id in execution_ids)
     step_rows = conn.execute(
-        "SELECT execution_id, step_id, step_index, status, run_id, exit_code, "  # nosec B608
+        "SELECT execution_id, step_id, step_index, status, run_id, exit_code, "  # nosec
         "selected_transition, transition_reason FROM workflow_execution_steps "
         f"WHERE execution_id IN ({execution_placeholders}) "
         "ORDER BY execution_id ASC, step_index ASC",
@@ -722,7 +725,7 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
     now = _now()
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?",  # nosec B608
+            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?",  # nosec
             (*owner_params, execution_id),
         ).fetchone()
         execution = _execution_from_row(row)

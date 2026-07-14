@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral History drawer boundary for runtime consumers that can't import the
 // drawer owner directly without creating broad cycles.
 

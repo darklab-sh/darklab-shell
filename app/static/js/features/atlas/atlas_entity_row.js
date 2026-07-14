@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared Atlas entity row renderer used by Atlas and Project entity lists.
 
 function text(value, fallback = '') {

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Shared database connection wrappers for service-layer operations."""
 
 from __future__ import annotations

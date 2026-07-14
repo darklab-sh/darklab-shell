@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Project run comparison helpers.
 """
@@ -22,7 +25,7 @@ def _project_linked_run_ids(conn, owner_scope, project_id):
     rows = conn.execute(
         "SELECT l.entity_id AS run_id "
         "FROM project_links l JOIN runs r ON r.id = l.entity_id "
-        "WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_scope_sql + " "  # nosec B608
+        "WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_scope_sql + " "  # nosec
         "ORDER BY r.started DESC, l.created DESC",
         (project_id, *run_scope_params),
     ).fetchall()
@@ -44,7 +47,7 @@ def _project_labeled_run_id(conn, owner_scope, project_id, label, excluded_run_i
         "FROM project_links l "
         "JOIN runs r ON r.id = l.entity_id "
         "JOIN entity_labels el ON el.entity_type = 'run' AND el.entity_id = r.id "
-        "WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_scope_sql + " "  # nosec B608
+        "WHERE l.project_id = ? AND l.entity_type = 'run' AND " + run_scope_sql + " "  # nosec
         "AND " + label_scope_sql + " AND el.label = ? "
         f"{excluded_sql}"
         "ORDER BY r.started DESC, l.created DESC LIMIT 1",
@@ -58,7 +61,7 @@ def compare_project_runs(owner_scope, project_id, filters=None):
     with get_db_connect()() as conn:
         project_scope_sql, project_scope_params = owner_scope.predicate(table_alias="p")
         project = conn.execute(
-            "SELECT 1 FROM projects p WHERE " + project_scope_sql + " AND p.id = ?",  # nosec B608
+            "SELECT 1 FROM projects p WHERE " + project_scope_sql + " AND p.id = ?",  # nosec
             (*project_scope_params, project_id),
         ).fetchone()
         if not project:
@@ -93,7 +96,7 @@ def compare_project_runs(owner_scope, project_id, filters=None):
         run_rows = conn.execute(
             "SELECT id, command, started, finished, exit_code, output_line_count, "
             "preview_truncated, full_output_available, full_output_truncated "
-            "FROM runs r WHERE " + run_scope_sql + " AND id IN (?, ?)",  # nosec B608
+            "FROM runs r WHERE " + run_scope_sql + " AND id IN (?, ?)",  # nosec
             (*run_scope_params, left_run_id, right_run_id),
         ).fetchall()
         runs_by_id = {str(row["id"]): dict(row) for row in run_rows}

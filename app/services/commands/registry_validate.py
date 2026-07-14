@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """High-level command validation orchestration for the command registry."""
 
 from typing import Any, Mapping

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { test, expect } from '@playwright/test'
 import {
   runCommand,
@@ -5,6 +8,7 @@ import {
   createShareSnapshot,
   ensurePromptReady,
   clickHistoryRunMenuAction,
+  waitForHistoryCommands,
 } from './helpers.js'
 
 const CMD = 'hostname'
@@ -146,11 +150,10 @@ test.describe('permalink / share', () => {
   }) => {
     await runCommand(page, CMD)
 
-    await openHistoryWithEntries(page)
-    await clickHistoryRunMenuAction(page.locator('.history-entry').first(), 'permalink')
-    const copied = await page.evaluate(() => window.__clipboardText)
-
-    await page.goto(copied)
+    const runs = await waitForHistoryCommands(page, [CMD])
+    const runId = runs.find(run => run.command === CMD)?.id
+    expect(runId).toMatch(/^[0-9a-f-]+$/)
+    await page.goto(`/history/${runId}`)
 
     await expect(page.locator('#toggle-ln')).toHaveText('line numbers: off')
     await expect(page.locator('#toggle-ts')).toHaveText('timestamps: off')

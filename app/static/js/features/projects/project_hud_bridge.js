@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral shell-HUD boundary for preference-driven HUD refreshes.
 
 let renderHudClockHandler = null;
