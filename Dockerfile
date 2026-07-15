@@ -1,9 +1,11 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-FROM python:3.14.6-slim
+ARG PYTHON_BASE_IMAGE=python:3.14.6-slim
+FROM ${PYTHON_BASE_IMAGE}
 
 ARG TARGETARCH
+ARG PYTHON_BASE_DIGEST=unresolved
 ARG GO_VERSION=1.26.5
 ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
@@ -30,6 +32,10 @@ ARG TESTSSL_VERSION=v3.2.3
 ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
+ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
+ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
+ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
+ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
 ARG TCPING_VERSION=v2.7.1
 ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=latest
@@ -55,6 +61,7 @@ LABEL org.opencontainers.image.title="darklab_shell" \
       sh.darklab.app.version="${APP_VERSION}" \
       sh.darklab.git.revision="${VCS_REF}" \
       sh.darklab.python.version="${PYTHON_VERSION}" \
+      sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}" \
       sh.darklab.image.architecture="${TARGETARCH}"
 
 # Remove dpkg config that prevents man pages from being installed
@@ -191,11 +198,21 @@ RUN pip install --upgrade wafw00f==${WAFW00F_VERSION}
 
 # Install rustscan from the official GitHub releases.
 WORKDIR /tmp
-RUN wget "https://github.com/bee-san/RustScan/releases/download/${RUSTSCAN_VERSION}/x86_64-linux-rustscan.tar.gz.zip"
-RUN unzip x86_64-linux-rustscan.tar.gz.zip && \
-    tar xzf x86_64-linux-rustscan.tar.gz && \
-    mv rustscan /usr/local/bin/rustscan && \
-    rm -rf x86_64-linux-rustscan*
+RUN case "${TARGETARCH}" in \
+        amd64) rustscan_asset="${RUSTSCAN_LINUX_AMD64_ASSET}"; rustscan_sha256="${RUSTSCAN_LINUX_AMD64_SHA256}" ;; \
+        arm64) rustscan_asset="${RUSTSCAN_LINUX_ARM64_ASSET}"; rustscan_sha256="${RUSTSCAN_LINUX_ARM64_SHA256}" ;; \
+        *) echo "unsupported RustScan target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    wget -O rustscan.zip \
+        "https://github.com/bee-san/RustScan/releases/download/${RUSTSCAN_VERSION}/${rustscan_asset}" && \
+    printf "%s  rustscan.zip\n" "${rustscan_sha256}" > rustscan.zip.sha256 && \
+    sha256sum -c rustscan.zip.sha256 && \
+    unzip rustscan.zip && \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        tar xzf x86_64-linux-rustscan.tar.gz; \
+    fi && \
+    install -m 0755 rustscan /usr/local/bin/rustscan && \
+    rm -f rustscan rustscan.zip rustscan.zip.sha256 x86_64-linux-rustscan.tar.gz
 
 # Install wpscan via RubyGems.
 RUN gem install wpscan -v ${WPSCAN_VERSION} && \

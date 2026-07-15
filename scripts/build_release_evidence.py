@@ -14,12 +14,32 @@ from pathlib import Path
 from typing import Any
 
 
+ROOT = Path(__file__).resolve().parents[1]
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 DIGEST_RE = re.compile(r"^sha256:([0-9a-f]{64})$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
+BASE_IMAGE_RE = re.compile(r"^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$")
+BUILD_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 EVIDENCE_FORMAT = "darklab_shell.release_evidence.v1"
 PROVENANCE_TYPE = "https://in-toto.io/Statement/v1"
 PROVENANCE_PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
+BUILD_INPUTS_FORMAT = "darklab_shell.release_build_inputs.v1"
+BUILD_INPUT_FILES = (
+    ".dockerignore",
+    "Dockerfile",
+    "app/requirements.txt",
+    "deploy/container-licenses.json",
+    "entrypoint.sh",
+)
+NETWORK_BUILD_TOOLS = (
+    "apt-get",
+    "curl",
+    "gem install",
+    "git clone",
+    "go install",
+    "pip install",
+    "wget",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -40,6 +60,138 @@ def _read_json_object(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _logical_dockerfile_instructions(dockerfile: str) -> list[tuple[int, str]]:
+    instructions: list[tuple[int, str]] = []
+    start_line = 0
+    parts: list[str] = []
+    for line_number, raw_line in enumerate(dockerfile.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if not parts and (not stripped or stripped.startswith("#")):
+            continue
+        if not parts:
+            start_line = line_number
+        continued = stripped.endswith("\\")
+        parts.append(stripped[:-1].rstrip() if continued else stripped)
+        if continued:
+            continue
+        normalized = " ".join(part for part in parts if part)
+        if normalized:
+            instructions.append((start_line, normalized))
+        start_line = 0
+        parts = []
+    if parts:
+        raise ValueError("Dockerfile ends with an unterminated continuation")
+    return instructions
+
+
+def _dockerfile_args(dockerfile: str) -> dict[str, str]:
+    args: dict[str, str] = {}
+    for _line_number, instruction in _logical_dockerfile_instructions(dockerfile):
+        match = re.fullmatch(r"ARG ([A-Za-z_][A-Za-z0-9_]*)(?:=(.*))?", instruction)
+        if match is not None and match.group(2) is not None:
+            args[match.group(1)] = match.group(2)
+    return args
+
+
+def _build_input_inventory(
+    *,
+    version: str,
+    commit_sha: str,
+    base_image: str,
+    base_image_digest: str,
+    build_date: str,
+) -> dict[str, Any]:
+    dockerfile_path = ROOT / "Dockerfile"
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
+    dockerfile_args = _dockerfile_args(dockerfile)
+    dockerfile_args.update({
+        "APP_VERSION": version,
+        "BUILD_DATE": build_date,
+        "PYTHON_BASE_DIGEST": base_image_digest,
+        "PYTHON_BASE_IMAGE": f"{base_image}@{base_image_digest}",
+        "TARGETARCH": "amd64",
+        "VCS_REF": commit_sha,
+    })
+    network_instructions = []
+    for line_number, instruction in _logical_dockerfile_instructions(dockerfile):
+        if not instruction.startswith("RUN "):
+            continue
+        tools = sorted(tool for tool in NETWORK_BUILD_TOOLS if tool in instruction)
+        if not tools:
+            continue
+        network_instructions.append({
+            "line": line_number,
+            "tools": tools,
+            "instruction": instruction,
+            "sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
+        })
+
+    source_files = {}
+    for relative_path in BUILD_INPUT_FILES:
+        path = ROOT / relative_path
+        if not path.is_file():
+            raise ValueError(f"Required build input is missing: {relative_path}")
+        source_files[relative_path] = {"sha256": _sha256(path)}
+
+    moving_selectors = []
+    for name, value in sorted(dockerfile_args.items()):
+        if value.lower() == "latest":
+            moving_selectors.append({
+                "kind": "floating_arg",
+                "name": name,
+                "value": value,
+            })
+    for line_number, instruction in _logical_dockerfile_instructions(dockerfile):
+        if instruction.startswith("RUN ") and "git clone" in instruction and "--branch" not in instruction:
+            moving_selectors.append({
+                "kind": "unversioned_git_clone",
+                "line": line_number,
+                "sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
+            })
+    requirements = (ROOT / "app" / "requirements.txt").read_text(encoding="utf-8")
+    for raw_line in requirements.splitlines():
+        requirement = raw_line.split("#", 1)[0].strip()
+        if requirement and "==" not in requirement:
+            moving_selectors.append({
+                "kind": "version_range",
+                "source": "app/requirements.txt",
+                "value": requirement,
+            })
+
+    return {
+        "format": BUILD_INPUTS_FORMAT,
+        "version": version,
+        "source": {
+            "commit_sha": commit_sha,
+            "files": source_files,
+        },
+        "target_platform": "linux/amd64",
+        "base_image": {
+            "reference": base_image,
+            "digest": base_image_digest,
+            "resolved_reference": f"{base_image}@{base_image_digest}",
+        },
+        "effective_build_args": dict(sorted(dockerfile_args.items())),
+        "network_build_instructions": network_instructions,
+        "moving_selectors": moving_selectors,
+        "reproducibility": {
+            "deployment_archive_byte_reproducible": True,
+            "container_image_byte_reproducible": False,
+            "build_date": build_date,
+            "accounting": (
+                "The exact base manifest, source commit, build-file hashes, effective build "
+                "arguments, and every network-fetching Dockerfile instruction are recorded here. "
+                "The release SBOM records the installed result."
+            ),
+            "limitations": [
+                "Debian repositories and package versions are resolved when the image is built.",
+                "Unpinned direct selectors and transitive Go, Python, and Ruby dependencies can change upstream.",
+                "The first successful publication timestamp is intentionally stored in the OCI image metadata.",
+            ],
+        },
+    }
+
+
 def build_evidence(
     *,
     version: str,
@@ -50,6 +202,9 @@ def build_evidence(
     commit_tag: str,
     pipeline_url: str,
     pipeline_created_at: str,
+    base_image: str,
+    base_image_digest: str,
+    build_date: str,
     sbom_path: Path,
     vulnerability_report_path: Path,
     syft_version: str,
@@ -63,6 +218,12 @@ def build_evidence(
         raise ValueError("Image digest must be sha256:<64 lowercase hex characters>")
     if not COMMIT_RE.fullmatch(commit_sha):
         raise ValueError("Commit SHA must contain 40 to 64 lowercase hex characters")
+    if not BASE_IMAGE_RE.fullmatch(base_image):
+        raise ValueError("Base image must be an exact tagged image reference")
+    if DIGEST_RE.fullmatch(base_image_digest) is None:
+        raise ValueError("Base image digest must be sha256:<64 lowercase hex characters>")
+    if not BUILD_DATE_RE.fullmatch(build_date):
+        raise ValueError("Build date must use UTC YYYY-MM-DDTHH:MM:SSZ format")
     if commit_tag != f"v{version}":
         raise ValueError(f"Commit tag must be v{version}")
     required_strings = {
@@ -119,7 +280,22 @@ def build_evidence(
         encoding="utf-8",
     )
 
+    build_inputs_name = "release-build-inputs.json"
+    build_inputs_path = output_dir / build_inputs_name
+    build_inputs = _build_input_inventory(
+        version=version,
+        commit_sha=commit_sha,
+        base_image=base_image,
+        base_image_digest=base_image_digest,
+        build_date=build_date,
+    )
+    build_inputs_path.write_text(
+        json.dumps(build_inputs, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     digest_hex = digest_match.group(1)
+    base_image_name, base_image_tag = base_image.rsplit(":", 1)
     signer_identity = (
         "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml"
         f"@refs/tags/{commit_tag}"
@@ -151,6 +327,10 @@ def build_evidence(
                         ),
                         "digest": {"gitCommit": commit_sha},
                     },
+                    {
+                        "uri": f"pkg:docker/{base_image_name}@{base_image_tag}",
+                        "digest": {"sha256": base_image_digest.removeprefix("sha256:")},
+                    },
                 ],
             },
             "runDetails": {
@@ -170,6 +350,10 @@ def build_evidence(
                     {
                         "name": vulnerability_name,
                         "digest": {"sha256": _sha256(normalized_vulnerability_report)},
+                    },
+                    {
+                        "name": build_inputs_name,
+                        "digest": {"sha256": _sha256(build_inputs_path)},
                     },
                 ],
             },
@@ -197,6 +381,12 @@ def build_evidence(
             "method": "sigstore-keyless",
             "certificate_identity": signer_identity,
             "certificate_oidc_issuer": "https://gitlab.com",
+        },
+        "build_inputs": {
+            "path": build_inputs_name,
+            "sha256": _sha256(build_inputs_path),
+            "base_image": f"{base_image}@{base_image_digest}",
+            "container_image_byte_reproducible": False,
         },
         "sbom": {
             "path": sbom_name,
@@ -234,6 +424,9 @@ def main() -> int:
     parser.add_argument("--commit-tag", required=True)
     parser.add_argument("--pipeline-url", required=True)
     parser.add_argument("--pipeline-created-at", required=True)
+    parser.add_argument("--base-image", required=True)
+    parser.add_argument("--base-image-digest", required=True)
+    parser.add_argument("--build-date", required=True)
     parser.add_argument("--sbom", type=Path, required=True)
     parser.add_argument("--vulnerability-report", type=Path, required=True)
     parser.add_argument("--syft-version", required=True)
@@ -249,6 +442,9 @@ def main() -> int:
         commit_tag=args.commit_tag,
         pipeline_url=args.pipeline_url,
         pipeline_created_at=args.pipeline_created_at,
+        base_image=args.base_image,
+        base_image_digest=args.base_image_digest,
+        build_date=args.build_date,
         sbom_path=args.sbom,
         vulnerability_report_path=args.vulnerability_report,
         syft_version=args.syft_version,

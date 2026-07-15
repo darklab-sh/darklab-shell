@@ -48,8 +48,8 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 ##### Milestone 4: Supply-chain and compatibility hardening
 
-- [ ] Extend reproducibility from the deterministic deployment archive to the complete release build by pinning or accounting for every moving build input, and publish the expected signing identity somewhere independent of the GitLab release/package origin.
-- [ ] Audit every architecture-specific download before adding `linux/arm64`, and add an explicit Podman/rootless/SELinux test lane before claiming those runtimes as supported.
+- [ ] Publish the expected signing identity somewhere independent of the GitLab release/package origin, such as the Docker Hub repository overview or the project website.
+- [ ] Add a native Linux ARM64 build and bundled-tool smoke lane before publishing a multi-architecture image, and add an explicit Podman/rootless/SELinux test lane before claiming those runtimes as supported.
 - [ ] Revisit image composition using the measured pull-size data. Add a slim or separately packaged wordlist/tool variant only when its maintenance and UX costs are justified.
 
 **Milestone 4 exit:** Published artifacts are traceable and independently verifiable, every advertised architecture/runtime has automated coverage, and image-size tradeoffs are documented with measured data.
@@ -58,8 +58,6 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 ##### Milestone 4: supply chain and compatibility
 
-- [ ] Preserve byte-reproducible deployment archives while accounting for every moving base image, tool download, source checkout, and build input in the complete release build.
-- [ ] Audit and parameterize architecture-specific downloads before publishing `linux/arm64`.
 - [ ] Add SELinux-enforcing Docker and rootless Podman compatibility lanes before advertising those host models as supported.
 - [ ] Use measured image-size and pull-time data to decide whether a slim or separately packaged wordlist/tool image is worth maintaining.
 - [ ] Update verification docs and the changelog when the hardening work ships, then remove the completed Milestone 4 tasks and this plan.

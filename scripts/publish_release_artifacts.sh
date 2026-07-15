@@ -46,7 +46,8 @@ publish_gitlab_image() {
     release_version=${CI_COMMIT_TAG#v}
     gitlab_image="${CI_REGISTRY_IMAGE}:${release_version}"
     cache_image="${CI_REGISTRY_IMAGE}:buildcache"
-    build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' "$repo_root/Dockerfile")
+    require_nonempty gitlab_image_preflight python_base_image "$python_base_image"
     printf 'RELEASE_IMAGE_JOB_STATUS=failed\n' > release-image.env
     release_status_file=release-image-status.txt
     printf 'stage=gitlab_image_publication status=running\n' > "$release_status_file"
@@ -67,9 +68,15 @@ publish_gitlab_image() {
         existing_revision=$(docker image inspect \
             --format '{{index .Config.Labels "sh.darklab.git.revision"}}' "$gitlab_image")
         existing_architecture=$(docker image inspect --format '{{.Architecture}}' "$gitlab_image")
+        python_base_digest=$(docker image inspect \
+            --format '{{index .Config.Labels "sh.darklab.python.base.digest"}}' "$gitlab_image")
+        build_date=$(docker image inspect \
+            --format '{{index .Config.Labels "org.opencontainers.image.created"}}' "$gitlab_image")
         require_equal gitlab_existing_tag version "$release_version" "$existing_version"
         require_equal gitlab_existing_tag revision "$CI_COMMIT_SHA" "$existing_revision"
         require_equal gitlab_existing_tag architecture amd64 "$existing_architecture"
+        require_digest gitlab_existing_tag python_base_digest "$python_base_digest"
+        require_nonempty gitlab_existing_tag build_date "$build_date"
         gitlab_digest=$(jq -r '.Descriptor.digest // empty' gitlab-existing.json)
         require_digest gitlab_existing_tag digest "$gitlab_digest"
         jq -n --arg digest "$gitlab_digest" \
@@ -77,7 +84,18 @@ publish_gitlab_image() {
             > release-build-metadata.json
         printf 'Reusing canonical GitLab image %s at %s\n' "$gitlab_image" "$gitlab_digest"
     else
+        build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        docker buildx imagetools inspect --raw "$python_base_image" > python-base-index.json
+        python_base_digest=$(jq -r '
+            [.manifests[]
+              | select(.platform.os == "linux" and .platform.architecture == "amd64")
+              | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+            ][0].digest // empty
+        ' python-base-index.json)
+        require_digest gitlab_image_build python_base_digest "$python_base_digest"
         docker buildx build --pull --platform linux/amd64 --provenance=false \
+            --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+            --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
             --build-arg "APP_VERSION=${release_version}" \
             --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
             --build-arg "BUILD_DATE=${build_date}" \
@@ -89,6 +107,12 @@ publish_gitlab_image() {
         gitlab_digest=$(jq -r '."containerimage.digest" // empty' release-build-metadata.json)
         require_digest gitlab_image_build digest "$gitlab_digest"
     fi
+    jq -n \
+        --arg image "$python_base_image" \
+        --arg digest "$python_base_digest" \
+        --arg platform "linux/amd64" \
+        '{image: $image, digest: $digest, platform: $platform}' \
+        > python-base-resolution.json
     docker buildx imagetools inspect --raw "$gitlab_image" > gitlab-manifest.json
     compressed_bytes=$(jq -r 'if .layers then [.layers[].size] | add else 0 end' gitlab-manifest.json)
     require_positive_integer gitlab_image_measurement compressed_bytes "$compressed_bytes"
@@ -106,6 +130,9 @@ publish_gitlab_image() {
         "GITLAB_DIGEST=${gitlab_digest}" \
         "GITLAB_COMPRESSED_BYTES=${compressed_bytes}" \
         "GITLAB_UNPACKED_BYTES=${unpacked_bytes}" \
+        "PYTHON_BASE_IMAGE=${python_base_image}" \
+        "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        "RELEASE_BUILD_DATE=${build_date}" \
         "RELEASE_IMAGE_JOB_STATUS=complete" > release-image.env
 }
 

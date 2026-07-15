@@ -464,6 +464,7 @@ def _latest_docker_tag(current_image: str) -> tuple[str | None, str | None]:
 def _docker_base_image() -> str | None:
     if not DOCKERFILE.exists():
         return None
+    docker_args = _dockerfile_args()
     for raw in _read_lines(DOCKERFILE):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -471,7 +472,7 @@ def _docker_base_image() -> str | None:
         if line.upper().startswith("FROM "):
             ref = line.split(None, 1)[1]
             ref = ref.split(" AS ", 1)[0].split(" as ", 1)[0].strip()
-            return ref
+            return _expand_docker_vars(ref, docker_args)
     return None
 
 

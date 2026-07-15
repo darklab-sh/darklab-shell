@@ -335,10 +335,10 @@ The `volumes` entry must be inside `[runners.docker]` — a top-level `volumes` 
 
 Ordinary branches and merge requests build verification-only images. A protected tag matching `vMAJOR.MINOR.PATCH` starts the public release path:
 
-1. validate the reviewed container-license inventory, then build the self-contained image once with a registry-backed BuildKit cache and push the exact tag to the GitLab Container Registry
+1. validate the reviewed container-license inventory, resolve the Python base tag to its exact Linux AMD64 manifest, then build the self-contained image once with that pinned base and a registry-backed BuildKit cache before pushing the exact tag to the GitLab Container Registry
 2. start that image without an `/app` mount and verify its version, architecture, bundled static assets, read-only runtime, private host-config staging, health endpoint, every declared notice path, and the complete installed RubyGem manifest
 3. copy the canonical manifest directly between registries with Buildx imagetools, publish it at `docker.io/darklabsh/darklab-shell`, and require the Docker Hub digest to match
-4. generate a CycloneDX SBOM and full Grype report from the pulled canonical image, fail on fixed Critical findings, bind the tag, commit, pipeline, registry names, and shared digest into SLSA provenance, then keylessly sign both immutable image references with the protected pipeline's GitLab OIDC identity
+4. generate a CycloneDX SBOM, full Grype report, and deterministic build-input inventory from the pulled canonical image and checked-out source; fail on fixed Critical findings; bind the base manifest, tag, commit, pipeline, registry names, and shared digest into SLSA provenance; then keylessly sign both immutable image references with the protected pipeline's GitLab OIDC identity
 5. record compressed/unpacked image sizes and pull timing as CI metadata, then generate the byte-stable exact-version deployment archive, its checksum, `setup.sh`, and the bootstrap checksums
 6. add the evidence files to `SHA256SUMS`, keylessly sign that manifest, publish the payload to the GitLab Generic Package Registry, create stable release links, then anonymously verify the signatures, evidence checksums, images, installer, and running stack
 
@@ -363,7 +363,7 @@ python scripts/build_release_payload.py \
   --dockerhub-digest "sha256:<matching-64-character-lowercase-hex-digest>"
 ```
 
-Use the matching immutable digest reported by the two release-image jobs. The protected pipeline also passes its generated `release-evidence/` directory so the public payload includes the SBOM, scan report, provenance, and evidence index.
+Use the matching immutable digest reported by the two release-image jobs. The protected pipeline also passes its generated `release-evidence/` directory so the public payload includes the SBOM, scan report, build-input inventory, provenance, and evidence index. The inventory documents why the deployment archive is byte-reproducible while the full image is verified by its signed digest and installed-package SBOM instead.
 
 The normal development command stays source-mounted:
 

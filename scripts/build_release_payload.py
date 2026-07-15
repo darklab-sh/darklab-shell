@@ -27,6 +27,7 @@ DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 EVIDENCE_FILES = (
     "darklab-shell.cdx.json",
     "provenance.intoto.jsonl",
+    "release-build-inputs.json",
     "release-evidence.json",
     "vulnerability-report.json",
 )
@@ -141,6 +142,7 @@ def _validate_evidence_dir(
     }:
         raise ValueError("Release evidence image provenance does not match the payload")
     evidence_sections = {
+        "build_inputs": "release-build-inputs.json",
         "sbom": "darklab-shell.cdx.json",
         "provenance": "provenance.intoto.jsonl",
         "vulnerability_scan": "vulnerability-report.json",

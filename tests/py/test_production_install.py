@@ -295,6 +295,11 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
     case "$4" in
         *sh.darklab.app.version*) printf '%s\n' "${FAKE_IMAGE_VERSION:-2.6.0}" ;;
         *sh.darklab.git.revision*) printf '%s\n' "${FAKE_IMAGE_REVISION:-revision-a}" ;;
+        *sh.darklab.python.base.digest*)
+            printf '%s\n' \
+                "${FAKE_PYTHON_BASE_DIGEST:-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
+            ;;
+        *org.opencontainers.image.created*) printf '%s\n' "${FAKE_BUILD_DATE:-2026-07-14T12:00:00Z}" ;;
         *Architecture*) printf '%s\n' "${FAKE_IMAGE_ARCHITECTURE:-amd64}" ;;
         *Size*) printf '%s\n' "${FAKE_IMAGE_SIZE:-2048}" ;;
         *) exit 2 ;;
@@ -319,7 +324,13 @@ if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then
     exit 0
 fi
 if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
-    printf '{"layers":[{"size":1024},{"size":2048}]}\n'
+    case "$*" in
+        *python:*)
+            printf '{"manifests":[{"digest":"%s","platform":{"architecture":"amd64","os":"linux"}}]}\n' \
+                "${FAKE_PYTHON_BASE_DIGEST:-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
+            ;;
+        *) printf '{"layers":[{"size":1024},{"size":2048}]}\n' ;;
+    esac
     exit 0
 fi
 if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "create" ]; then
@@ -361,6 +372,7 @@ def _run_release_publisher(
         "DOCKERHUB_TOKEN": "dockerhub-secret",
         "FAKE_BUILT_DIGEST": digest,
         "FAKE_PROMOTED_DIGEST": digest,
+        "FAKE_PYTHON_BASE_DIGEST": "sha256:" + "b" * 64,
         "FAKE_RELEASE_LOG": str(log_path),
         "FAKE_RELEASE_STATE": str(tmp_path / "published.state"),
     })
@@ -576,12 +588,20 @@ def test_runtime_image_includes_app_and_excludes_local_overlays():
     assert "!scripts/backup_system.py" in dockerignore
     assert "!scripts/restore_system.py" in dockerignore
     assert "wpscan-ruby-gems.json" in dockerfile
+    assert "ARG PYTHON_BASE_IMAGE=python:3.14.6-slim" in dockerfile
+    assert 'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"' in dockerfile
+    assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
+    assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
+    assert 'case "${TARGETARCH}" in' in dockerfile
+    assert 'wget -O rustscan.zip' in dockerfile
+    assert 'sha256sum -c rustscan.zip.sha256' in dockerfile
     assert "stage_local_config_overlays" in entrypoint
     assert 'cp -R "${source_dir%/}/."' in entrypoint
     assert "-type l" in entrypoint
     assert "/tmp/darklab-runtime-conf" in entrypoint
     assert "release-overlay-smoke" in image_smoke
     assert "--installed-image" in image_smoke
+    assert "python_base_digest" in image_smoke
     assert "/app/tools/backup_system.py" in image_smoke
     assert "/app/tools/restore_system.py" in image_smoke
     assert "command -v pg_restore" in image_smoke
@@ -888,6 +908,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["release-image-gitlab"]["artifacts"]["when"] == "always"
     assert parsed_ci["release-image-dockerhub"]["artifacts"]["when"] == "always"
     assert "release-image-status.txt" in parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
+    assert "python-base-resolution.json" in (
+        parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
+    )
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     supply_chain_job = parsed_ci["release-supply-chain"]
     assert supply_chain_job["stage"] == "attest"
@@ -903,6 +926,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     supply_chain_script = "\n".join(supply_chain_job["script"])
     assert "--only-fixed --fail-on critical" in supply_chain_script
+    assert '--base-image "$PYTHON_BASE_IMAGE"' in supply_chain_script
+    assert '--base-image-digest "$PYTHON_BASE_DIGEST"' in supply_chain_script
+    assert '--build-date "$RELEASE_BUILD_DATE"' in supply_chain_script
     assert "--user 0:0" in supply_chain_script
     assert supply_chain_script.count("cosign sign ") == 2
     assert supply_chain_script.count("cosign verify") == 2
@@ -911,6 +937,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "publish_release_artifacts.sh sign-payload release-payload" in payload_script
     assert "cosign sign-blob" in publisher
     assert "cosign verify-blob" in publisher
+    public_smoke_script = "\n".join(parsed_ci["release-public-smoke"]["script"])
+    assert "release-build-inputs.json" in public_smoke_script
     release_links = parsed_ci["release-create"]["release"]["assets"]["links"]
     release_link_names = {link["name"] for link in release_links}
     assert release_link_names == {
@@ -923,6 +951,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "CycloneDX SBOM",
         "SLSA provenance",
         "Release evidence index",
+        "Release build input inventory",
         "Vulnerability report",
     }
     release_link_urls = {link["url"] for link in release_links}
@@ -972,6 +1001,9 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "commit_tag": f"v{RELEASE_VERSION}",
         "pipeline_url": "https://gitlab.com/darklab.sh/darklab_shell/-/pipelines/123",
         "pipeline_created_at": "2026-07-14T12:00:00Z",
+        "base_image": "python:3.14.6-slim",
+        "base_image_digest": "sha256:" + "c" * 64,
+        "build_date": "2026-07-14T12:00:00Z",
         "sbom_path": sbom,
         "vulnerability_report_path": vulnerability_report,
         "syft_version": "1.42.3",
@@ -1001,6 +1033,23 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         ),
         "certificate_oidc_issuer": "https://gitlab.com",
     }
+    build_inputs_path = first_evidence / "release-build-inputs.json"
+    build_inputs = json.loads(build_inputs_path.read_text())
+    assert build_inputs["base_image"]["resolved_reference"] == (
+        "python:3.14.6-slim@sha256:" + "c" * 64
+    )
+    assert build_inputs["reproducibility"]["container_image_byte_reproducible"] is False
+    assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
+    assert any(
+        "apt-get" in instruction["tools"]
+        for instruction in build_inputs["network_build_instructions"]
+    )
+    assert {selector["kind"] for selector in build_inputs["moving_selectors"]} >= {
+        "floating_arg",
+        "unversioned_git_clone",
+        "version_range",
+    }
+    assert evidence_index["build_inputs"]["sha256"] == _sha256(build_inputs_path)
     provenance = json.loads((first_evidence / "provenance.intoto.jsonl").read_text())
     assert provenance["_type"] == "https://in-toto.io/Statement/v1"
     assert provenance["predicateType"] == "https://slsa.dev/provenance/v1"
@@ -1010,6 +1059,10 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     }
     resolved = provenance["predicate"]["buildDefinition"]["resolvedDependencies"]
     assert resolved[0]["digest"]["gitCommit"] == evidence_args["commit_sha"]
+    assert resolved[1] == {
+        "uri": "pkg:docker/python@3.14.6-slim",
+        "digest": {"sha256": "c" * 64},
+    }
 
     payload = tmp_path / "evidenced-payload"
     payload_builder.build_payload(
@@ -1026,6 +1079,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     for name in (
         "darklab-shell.cdx.json",
         "provenance.intoto.jsonl",
+        "release-build-inputs.json",
         "release-evidence.json",
         "vulnerability-report.json",
     ):
@@ -1052,10 +1106,21 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     gitlab_first_dir = tmp_path / "gitlab-first"
     gitlab_first = _run_release_publisher(gitlab_first_dir, "gitlab-image")
     assert gitlab_first.returncode == 0, gitlab_first.stderr
-    assert "buildx build" in (gitlab_first_dir / "release-tools.log").read_text(encoding="utf-8")
+    first_log = (gitlab_first_dir / "release-tools.log").read_text(encoding="utf-8")
+    assert "buildx build" in first_log
+    assert "PYTHON_BASE_IMAGE=python:3.14.6-slim@sha256:" in first_log
+    assert "PYTHON_BASE_DIGEST=sha256:" in first_log
     assert f"GITLAB_DIGEST={digest}" in (
         gitlab_first_dir / "release-image.env"
     ).read_text(encoding="utf-8")
+    base_resolution = json.loads(
+        (gitlab_first_dir / "python-base-resolution.json").read_text(encoding="utf-8")
+    )
+    assert base_resolution == {
+        "digest": "sha256:" + "b" * 64,
+        "image": "python:3.14.6-slim",
+        "platform": "linux/amd64",
+    }
 
     gitlab_retry_dir = tmp_path / "gitlab-retry"
     gitlab_retry = _run_release_publisher(
@@ -1079,6 +1144,7 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert "check=version expected=2.6.0 actual=9.9.9" in gitlab_conflict.stderr
 
     for case_name, overrides in (
+        ("gitlab-invalid-base-digest", {"FAKE_PYTHON_BASE_DIGEST": "sha256:bad"}),
         ("gitlab-build-failure", {"FAKE_BUILD_EXIT": "17"}),
         ("gitlab-missing-digest", {"FAKE_BUILT_DIGEST": ""}),
         ("gitlab-malformed-digest", {"FAKE_BUILT_DIGEST": "sha256:not-a-digest"}),

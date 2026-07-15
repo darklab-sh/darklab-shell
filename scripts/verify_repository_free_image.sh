@@ -4,14 +4,15 @@
 
 set -eu
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
-    echo "usage: verify_repository_free_image.sh IMAGE [EXPECTED_VERSION] [EXPECTED_REVISION]" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 4 ]; then
+    echo "usage: verify_repository_free_image.sh IMAGE [EXPECTED_VERSION] [EXPECTED_REVISION] [EXPECTED_BASE_DIGEST]" >&2
     exit 2
 fi
 
 image=$1
 expected_version=${2:-}
 expected_revision=${3:-}
+expected_base_digest=${4:-}
 suffix=$(printf '%s' "${CI_JOB_ID:-$$}" | tr -cd '0-9A-Za-z' | tail -c 20)
 network="darklab-release-smoke-${suffix}"
 redis="darklab-release-redis-${suffix}"
@@ -66,6 +67,12 @@ license_label=$(docker image inspect \
 require_equal image_metadata architecture amd64 "$image_architecture"
 require_equal image_metadata architecture_label amd64 "$architecture_label"
 require_equal image_metadata license_label AGPL-3.0-only "$license_label"
+if [ -n "$expected_base_digest" ]; then
+    base_digest_label=$(docker image inspect \
+        --format '{{index .Config.Labels "sh.darklab.python.base.digest"}}' "$image") \
+        || verification_failed image_metadata python_base_digest "$expected_base_digest" unavailable
+    require_equal image_metadata python_base_digest "$expected_base_digest" "$base_digest_label"
+fi
 if [ -n "$expected_version" ]; then
     image_version=$(docker image inspect \
         --format '{{index .Config.Labels "sh.darklab.app.version"}}' "$image") \

@@ -15630,15 +15630,29 @@ class TestEntrypointWorkspaceRepair:
         build_args = {str(key): str(value) for key, value in shell_service["build"]["args"].items()}
         labels = {str(key): str(value) for key, value in shell_service["labels"].items()}
         package_version = json.loads((REPO_ROOT / "package.json").read_text())["version"]
-        python_image = re.search(r"^FROM python:(?P<version>[0-9.]+)-slim$", dockerfile, re.MULTILINE)
+        python_base_image = re.search(
+            r"^ARG PYTHON_BASE_IMAGE=python:(?P<version>[0-9.]+)-slim$",
+            dockerfile,
+            re.MULTILINE,
+        )
+        python_from = re.search(
+            r"^FROM \$\{(?P<arg>[A-Z0-9_]+)\}$",
+            dockerfile,
+            re.MULTILINE,
+        )
 
-        assert python_image is not None
+        assert python_base_image is not None
+        assert python_from is not None
+        assert python_from.group("arg") == "PYTHON_BASE_IMAGE"
         assert app_config.APP_VERSION == package_version
         assert f"ARG APP_VERSION={app_config.APP_VERSION}" in dockerfile
         assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}}}"
         assert build_args["VCS_REF"] == "${GIT_SHA:-unknown}"
         assert build_args["BUILD_DATE"] == "${BUILD_DATE:-unknown}"
-        assert f"ARG PYTHON_VERSION={python_image.group('version')}" in dockerfile
+        assert "PYTHON_BASE_IMAGE" not in build_args
+        assert "PYTHON_BASE_DIGEST" not in build_args
+        assert "ARG PYTHON_BASE_DIGEST=unresolved" in dockerfile
+        assert f"ARG PYTHON_VERSION={python_base_image.group('version')}" in dockerfile
         for label in (
             'org.opencontainers.image.version="${APP_VERSION}"',
             'org.opencontainers.image.revision="${VCS_REF}"',
@@ -15646,6 +15660,7 @@ class TestEntrypointWorkspaceRepair:
             'sh.darklab.app.version="${APP_VERSION}"',
             'sh.darklab.git.revision="${VCS_REF}"',
             'sh.darklab.python.version="${PYTHON_VERSION}"',
+            'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"',
         ):
             assert label in dockerfile
         assert labels["sh.darklab.config.database_backend"] == shell_env["DATABASE_BACKEND"]
