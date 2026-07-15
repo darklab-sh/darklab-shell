@@ -27,8 +27,7 @@ APP_VERSION = "2.6.0"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
-PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}"
+PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 APP_LOCAL_CONF_DIR = os.environ.get("APP_LOCAL_CONF_DIR", "")
 DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
@@ -1907,6 +1906,33 @@ def _theme_file_candidates(name):
     return (_THEME_VARIANT_DIR / f"{stem}.yaml",)
 
 
+def _load_theme_mapping(path, *, source):
+    try:
+        with open(path) as f:
+            loaded = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        log.warning(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": _config_log_path(path),
+                "source": source,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return {}
+    if not isinstance(loaded, dict):
+        log.warning(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": _config_log_path(path),
+                "source": source,
+                "error_type": "InvalidRootType",
+            },
+        )
+        return {}
+    return loaded
+
+
 def _load_theme_yaml(name):
     # Support both exact filenames and stem-like names so operator config can be
     # human friendly while the on-disk registry stays filename based.
@@ -1914,26 +1940,14 @@ def _load_theme_yaml(name):
     for theme_path in _theme_file_candidates(name):
         if not os.path.exists(theme_path):
             continue
-        try:
-            with open(theme_path) as f:
-                loaded = yaml.safe_load(f) or {}
-        except yaml.YAMLError:
-            loaded = {}
-        if isinstance(loaded, dict):
-            theme_data.update(loaded)
+        theme_data.update(_load_theme_mapping(theme_path, source="shipped"))
         local_overlay = config_paths.local_overlay_path_for(
             theme_path,
             shipped_conf_dir=_THEME_CONF_DIR,
             local_conf_dir=APP_LOCAL_CONF_DIR or None,
         )
         if local_overlay.exists():
-            try:
-                with open(local_overlay) as f:
-                    local_loaded = yaml.safe_load(f) or {}
-            except yaml.YAMLError:
-                local_loaded = {}
-            if isinstance(local_loaded, dict):
-                theme_data.update(local_loaded)
+            theme_data.update(_load_theme_mapping(local_overlay, source="local"))
         return theme_data
     return {}
 

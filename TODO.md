@@ -40,6 +40,7 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 ##### Milestone 1: Repository-free install
 
+- [ ] Before publishing any public image, obtain a written Nmap NPSL 0.95 waiver or an OEM redistribution license for bundling Nmap with darklab_shell, or get qualified legal approval for the exact distribution. Keep the evidence outside the public repository, then update the reviewed inventory status. The bundled license text and notices don't grant that approval.
 - [ ] Run the protected `v2.6.0` tag pipeline on a native Linux AMD64 runner. Confirm the repository-free image smoke test, exact-tag immutability/retry behavior, license gate, installer payload, and Docker Hub promotion all complete.
 - [ ] Confirm anonymous access to the GitLab image, Docker Hub mirror, setup files, checksums, and notices. Verify both registries report the same digest and a clean Docker host reaches a healthy app from the installed directory.
 - [ ] Record the pipeline's compressed transfer size, unpacked image size, layer composition, and representative cold-pull time. Add those measured expectations to the operator docs and decide whether SecLists or another tool group justifies a later slim image.

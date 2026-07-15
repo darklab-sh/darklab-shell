@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,134
+- behavior tests: 4,138
 - docs/inventory meta-tests: 63
-- `pytest`: 2423 (2373 behavior + 50 meta)
+- `pytest`: 2427 (2377 behavior + 50 meta)
 - `vitest`: 1498 (1485 behavior + 13 meta)
 - `playwright`: 276 behavior
-- total: 4,197
+- total: 4,201
 
 This document is organized in two parts:
 
@@ -871,9 +871,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadFaq.test_workspace_feature_entry_visible_when_workspace_enabled` | Verifies that FAQ entries tagged with `feature: workspace` are visible when Files are enabled. |
 | `TestThemeRegistry.test_missing_label_falls_back_to_humanized_filename` | Checks that missing label falls back to humanized filename. |
 | `TestThemeRegistry.test_unknown_keys_are_ignored_but_valid_css_values_survive` | Checks that unknown keys are ignored but valid css values survive. |
-| `TestThemeRegistry.test_malformed_yaml_falls_back_to_defaults_without_crashing` | Checks that malformed YAML falls back to defaults without crashing. |
+| `TestThemeRegistry.test_malformed_yaml_falls_back_to_defaults_without_crashing` | Checks that malformed shipped YAML logs bounded provenance and falls back to defaults without crashing. |
 | `TestThemeRegistry.test_single_theme_registry_loads_and_can_be_selected` | Checks that single theme registry loads and can be selected. |
-| `TestThemeRegistry.test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately` | Checks that a nested theme overlay from a separate operator root updates its shipped theme and is not listed separately. |
+| `TestThemeRegistry.test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately` | Checks that a nested theme overlay from a separate operator root updates its shipped theme, is not listed separately, and logs safe provenance when malformed. |
 | `TestThemeRegistry.test_light_theme_uses_light_defaults_for_missing_keys` | Checks that light theme uses light defaults for missing keys. |
 | `TestThemeRegistry.test_missing_color_scheme_still_falls_back_to_dark_defaults` | Checks that missing color scheme still falls back to dark defaults. |
 | `TestThemeRegistry.test_theme_example_files_match_generated_defaults` | Detects drift between `_THEME_DEFAULTS` in `app/config.py` and the checked-in `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` files. Fails with `theme_dark.yaml.example is out of sync` if the built-in defaults changed without regenerating the example files. Fix by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing the updated files. |
@@ -891,8 +891,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_empty_yaml_returns_empty` | Checks that empty YAML returns empty. |
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
 | `TestThemeRegistry.test_load_all_faq_normalizes_entry_categories` | Verifies that built-in and custom FAQ entries carry known section categories and fall back to Other for unknown categories. |
-| `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
-| `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
+| `TestThemeRegistry.test_load_all_faq_uses_project_source_in_builtin_answer` | Checks that the built-in FAQ links to the release source and README. |
+| `TestThemeRegistry.test_load_all_faq_uses_config_project_source_by_default` | Checks that the built-in FAQ uses the configured release source by default. |
 | `TestThemeRegistry.test_load_all_faq_promotes_workspace_builtin_entry_when_enabled` | Verifies that the built-in Files FAQ appears near the top of the FAQ when session Files are enabled. |
 | `TestThemeRegistry.test_load_all_faq_hides_workspace_builtin_entry_when_disabled` | Verifies that the built-in Files FAQ is hidden when session Files are disabled. |
 | `TestThemeRegistry.test_load_all_faq_clarifies_snapshot_vs_run_permalink` | Checks that the built-in FAQ explains the difference between share snapshots and run permalinks. |
@@ -1233,7 +1233,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 | Test | Description |
 | --- | --- |
-| `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, and excludes live SQLite files from the copied data directory. |
+| `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, excludes live SQLite files from the copied data directory, and emits exactly one absolute path in machine-result mode. |
 | `test_extra_and_env_files_are_included_without_logging_secret_values` | Verifies env files and repeatable extra files are included while secret-bearing values stay out of the manifest. |
 | `test_repository_free_backup_uses_operator_restore_layout` | Verifies managed deployments package `.env`, local config, data and vault-key continuity, Compose and release metadata into the stable restore layout. |
 | `test_missing_extra_file_fails_unless_operator_allows_it` | Verifies explicit extra files fail loudly when missing unless the operator opts into ignoring missing paths. |
@@ -1647,23 +1647,27 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | Test | Description |
 | --- | --- |
 | `test_production_compose_uses_pinned_public_image_and_no_source_mount` | Verifies production Compose pins the Docker Hub release, keeps source out of the mount set, persists operator paths, binds loopback, and retains optional profiles and scanner settings. |
-| `test_runtime_image_includes_app_and_excludes_local_overlays` | Verifies the Dockerfile adds the app and lifecycle helpers after scanner layers, excludes operator-owned local overlays, and wires validated recursive private overlay staging, Docker/Podman architecture-aware runtime checks, unprivileged bundled-tool probes, trap-safe cleanup, and external-content smoke coverage into the image path. |
+| `test_runtime_image_includes_app_and_excludes_local_overlays` | Verifies the Dockerfile adds the app and lifecycle helpers after scanner layers, excludes operator-owned local overlays, and wires validated recursive private overlay staging, Docker/Podman architecture-aware runtime checks, real config/data/workspace bind mounts, durable restart writes, an unprivileged SYN probe, bundled-tool probes, trap-safe cleanup, and external-content smoke coverage into the image path. |
 | `test_container_license_inventory_matches_dockerfile_and_release` | Verifies project package metadata uses `AGPL-3.0-only`; Nmap and Masscan have explicit reviewed records; and every top-level apt, pip, Git, versioned, and RubyGem container dependency remains covered by the release-specific inventory and notices. |
-| `test_license_checkers_fail_closed_and_preserve_excluded_files` | Mutates temporary source and container-license fixtures to prove missing, conflicting, duplicate, stale, or changed license data fails closed, the complete AGPLv3 text is required, notice insertion preserves shebang and doctype placement, generated or upstream files aren't relabeled, and local Python lint owns the checker. |
+| `test_license_checkers_fail_closed_and_preserve_excluded_files` | Mutates temporary source and container-license fixtures to prove missing, conflicting, duplicate, stale, or changed license data fails closed, including hash-pinned Nmap and WPScan terms; the complete AGPLv3 text is required, notice insertion preserves shebang and doctype placement, generated or upstream files aren't relabeled, and local Python lint owns the checker. |
 | `test_cli_distributions_include_complete_agpl_license` | Builds the CLI source archive and wheel, then verifies both publish `License-Expression: AGPL-3.0-only` and contain the complete project license. |
-| `test_release_payload_is_exact_versioned_neutral_and_checksummed` | Verifies repeated generation produces an identical deterministic final or release-candidate deployment archive with a clean operator/managed boundary, the project license, valid checksums, release-correct config links, public image references, final-only GitLab Release creation, always-retained allowlisted publication diagnostics, direct manifest-copy promotion, CI runtime ownership and job prerequisites, no private deployment hostname, and no volatile pull timing. |
-| `test_release_evidence_is_deterministic_bound_and_tamper_evident` | Verifies deterministic final and release-candidate CycloneDX/Grype normalization, pinned base and build-input accounting, SLSA source/dependency binding, exact Sigstore identity metadata, checksum inclusion, and rejection of tampered evidence before payload creation. |
+| `test_release_payload_is_exact_versioned_neutral_and_checksummed` | Verifies repeated generation produces an identical deterministic final or release-candidate deployment archive with a clean operator/managed boundary, the project license, valid checksums, release-correct config links, public image references, digest-pinned GitLab CLI release creation, the release-blocking bundled-Postgres/default-process backup-and-restore smoke, always-retained allowlisted publication diagnostics, direct manifest-copy promotion, CI runtime ownership and job prerequisites, documented runner and release-administration contracts, candidate discovery paths, no private deployment hostname, and no volatile pull timing. |
+| `test_release_evidence_is_deterministic_bound_and_tamper_evident` | Verifies deterministic final and release-candidate CycloneDX/Grype normalization, pinned base and build-input accounting, the release-creation tool image and CI configuration hash, SLSA source/dependency binding, exact Sigstore identity metadata, checksum inclusion, and rejection of floating tools or tampered evidence before payload creation. |
 | `test_release_image_publication_handles_publish_retry_and_conflict_branches` | Runs final and release-candidate GitLab and Docker Hub image publication entry points with local command doubles, covering first publication, identical retry, immutable-tag conflict, failed publish, and missing or malformed digests without leaking registry secrets. |
 | `test_release_payload_publication_handles_upload_retry_and_conflict_branches` | Runs installer-payload publication with local package-registry and Cosign doubles, covering first upload/signing, identical payload and signature-bundle reuse, conflicting immutable content, upload failure, and checksum/signature conflict rejection without exposing the job token. |
 | `test_release_payload_rejects_invalid_provenance_before_writing` | Verifies malformed, mismatched, or injection-shaped image digests and invalid size metrics are rejected before a payload directory is written, while valid measured values reach the installed release manifest. |
 | `test_release_version_gate_covers_runtime_and_distribution_files` | Verifies the explicit and ordinary-pipeline offline release gates accept final and `-rc.N` versions, require matching runtime/distribution versions, and report every stale version source. |
-| `test_installer_creates_private_operator_files_without_starting` | Runs the generated installer against local release fixtures and verifies private settings and overlay starters, generated Postgres credentials, stable release metadata, the Compose minimum and validation, pulled-image digest checks, and no automatic startup. |
+| `test_installer_creates_private_operator_files_without_starting` | Runs the generated installer against local release fixtures and verifies private settings and overlay starters, generated Postgres credentials, stable release metadata, the Compose minimum and validation, pulled-image digest checks, internal-install help, and no automatic startup. |
 | `test_installer_accepts_its_verified_bootstrap_files_in_current_directory` | Verifies an operator can download the installer and checksum files into a new directory, inspect them, and install in that same directory. |
 | `test_installer_rejects_checksum_mismatch_before_creating_target` | Verifies a changed payload fails checksum validation before the target directory is created. |
 | `test_installer_rejects_non_https_payload_sources` | Verifies public installer downloads reject non-HTTPS sources and identify a failed payload by basename and release without exposing URL credentials or generated secrets. |
 | `test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_target` | Syntax-checks the generated POSIX installer, exercises its `shasum` fallback, and verifies missing tools, old Compose, unavailable Docker, invalid Compose, and secret-generation failures leave no managed target or staging directory behind. |
 | `test_installer_rejects_unsafe_targets` | Verifies the installer refuses non-empty unmanaged directories and directory symlinks. |
-| `test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state` | Installs generated final and release-candidate bundles, orders `rc.1`, `rc.2`, and final upgrades correctly, proves managed-file conflicts and downgrades fail closed, verifies automatic pre-upgrade backup, advances only release-owned files and the image reference, preserves operator state, exercises safe SQLite/Postgres restore handling and migration help, and leaves operator paths behind on removal. |
+| `test_restore_preserves_target_postgres_credentials_and_host_ownership` | Restores a Postgres backup from a deployment with different credentials, verifies the target connection settings stay local, requires a single Postgres transaction, and checks restored paths use the invoking host UID/GID. |
+| `test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction` | Forces `pg_restore` to fail and verifies the original `.env`, config, data, and workspace files remain active with no staging debris. |
+| `test_restore_wrapper_leaves_app_stopped_after_helper_failure` | Verifies a failed managed restore doesn't restart the app and reports the verified safety-backup recovery command after passing host ownership to the helper. |
+| `test_online_upgrade_verifies_signed_manifest_before_downloading_archive` | Verifies online upgrades fail closed on an invalid publisher signature, use the digest-pinned Cosign image and exact GitLab tag identity, and can upgrade without trusting the archive's separately hosted checksum file. |
+| `test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state` | Installs generated final and release-candidate bundles, orders `rc.1`, `rc.2`, and final upgrades correctly, proves corrupt and unsafe archives, managed-file conflicts, partial rollback reporting, and downgrades fail closed, verifies the machine-readable pre-upgrade backup result and stopped Postgres lifecycle, advances only release-owned files and the image reference, reports newly available environment keys without values or `.env` changes, preserves operator state, exercises safe SQLite/Postgres restore handling and migration help, and leaves operator paths behind on removal. |
 
 #### `test_request_kill_and_commands.py`
 
@@ -1899,7 +1903,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestConfigRoute.test_all_new_keys_are_ints` | Checks that all new keys are ints. |
 | `TestConfigRoute.test_command_timeout_reflects_cfg` | Checks that command timeout reflects CFG. |
 | `TestConfigRoute.test_prompt_identity_reflects_cfg` | Checks that prompt username and domain reflect CFG. |
-| `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
+| `TestConfigRoute.test_project_source_is_constant` | Checks that the browser config exposes the release source link. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
 | `TestConfigRoute.test_tour_metadata_reflects_cfg_and_visible_chapters` | Verifies that `/config` exposes tour availability, version, and chapter count from the tour configuration. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |

@@ -470,7 +470,7 @@ export async function loadAppFns({
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],

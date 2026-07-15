@@ -61,7 +61,9 @@ def _manifest(backup_dir: Path) -> dict:
     return json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
 
 
-def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(tmp_path, monkeypatch):
+def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(
+    tmp_path, monkeypatch, capsys
+):
     _clean_env(monkeypatch)
     data_dir = tmp_path / "data"
     _write_sqlite_database(data_dir / "history.db")
@@ -82,10 +84,13 @@ def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(tm
         str(output_dir),
         "--compress",
         "none",
+        "--result-path-only",
     ])
 
     assert rc == 0
     backup_dir = _backup_dirs(output_dir)[0]
+    captured = capsys.readouterr()
+    assert captured.out == f"{backup_dir}\n"
     assert (backup_dir / "database" / "history.db").exists()
     assert not (backup_dir / "data" / "history.db").exists()
     assert (backup_dir / "data" / "run-output" / "artifact.txt").read_text(encoding="utf-8") == "artifact body"

@@ -576,12 +576,12 @@ def load_faq(cfg=None):
     return registry_faq.load_faq(FAQ_FILE, cfg, load_yaml_list_with_local=_load_yaml_list_with_local)
 
 
-def load_all_faq(app_name="darklab_shell", project_readme=None, cfg=None):
+def load_all_faq(app_name="darklab_shell", project_source=None, cfg=None):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
     return registry_faq.load_all_faq(
         FAQ_FILE,
         app_name,
-        project_readme,
+        project_source,
         cfg,
         load_yaml_list_with_local=_load_yaml_list_with_local,
     )

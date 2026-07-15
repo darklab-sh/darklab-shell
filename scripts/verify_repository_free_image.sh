@@ -33,8 +33,14 @@ network="darklab-release-smoke-${suffix}"
 redis="darklab-release-redis-${suffix}"
 shell="darklab-release-shell-${suffix}"
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-overlay_dir=$(mktemp -d "${TMPDIR:-/tmp}/darklab-release-overlay.XXXXXX")
+deployment_parent=${CI_PROJECT_DIR:-${TMPDIR:-/tmp}}
+deployment_dir=$(mktemp -d "$deployment_parent/.darklab-release-deployment.XXXXXX")
+overlay_dir="$deployment_dir/conf"
+data_dir="$deployment_dir/data"
+workspace_dir="$deployment_dir/workspaces"
+mkdir "$overlay_dir" "$data_dir" "$workspace_dir"
 chmod 700 "$overlay_dir"
+chmod 755 "$data_dir" "$workspace_dir"
 printf 'app_name: release-overlay-smoke\n' > "$overlay_dir/config.local.yaml"
 cat > "$overlay_dir/faq.local.yaml" <<'EOF'
 - question: Release overlay smoke
@@ -42,8 +48,12 @@ cat > "$overlay_dir/faq.local.yaml" <<'EOF'
 EOF
 chmod 600 "$overlay_dir/config.local.yaml" "$overlay_dir/faq.local.yaml"
 overlay_mount="$overlay_dir:/config:ro"
+data_mount="$data_dir:/data"
+workspace_mount="$workspace_dir:/workspaces"
 if [ -n "$volume_label" ]; then
     overlay_mount="${overlay_mount},${volume_label}"
+    data_mount="${data_mount},${volume_label}"
+    workspace_mount="${workspace_mount},${volume_label}"
 fi
 
 container() {
@@ -73,7 +83,7 @@ require_nonempty() {
 cleanup() {
     container rm -f "$shell" "$redis" >/dev/null 2>&1 || true
     container network rm "$network" >/dev/null 2>&1 || true
-    rm -rf "$overlay_dir"
+    rm -rf "$deployment_dir"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -173,43 +183,78 @@ container run -d \
     --network "$network" \
     --read-only \
     --tmpfs /tmp \
-    --tmpfs /data \
     --cap-add NET_RAW \
     --cap-add NET_ADMIN \
     -v "$overlay_mount" \
+    -v "$data_mount" \
+    -v "$workspace_mount" \
     -e REDIS_URL="redis://${redis}:6379/0" \
     -e APP_LOCAL_CONF_DIR=/config \
+    -e WORKSPACE_ROOT=/workspaces \
     -e WEB_CONCURRENCY=1 \
     -e WEB_THREADS=2 \
     "$image" >/dev/null
 
-attempt=0
-while [ "$attempt" -lt 90 ]; do
-    if container exec "$shell" curl -fsS http://127.0.0.1:8888/health >/dev/null 2>&1; then
-        mounts=$(container inspect --format '{{json .Mounts}}' "$shell") \
-            || verification_failed runtime_mounts inspect successful failed
-        if printf '%s' "$mounts" | grep -q '"Destination":"/app"'; then
-            verification_failed runtime_mounts app_source_mount absent present
+wait_for_health() {
+    attempt=0
+    while [ "$attempt" -lt 90 ]; do
+        if container exec "$shell" curl -fsS http://127.0.0.1:8888/health >/dev/null 2>&1; then
+            return 0
         fi
-        runtime_config=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
-            || verification_failed runtime_config config_endpoint reachable failed
-        require_nonempty runtime_config config_response "$runtime_config"
-        printf '%s' "$runtime_config" | grep -q '"app_name":"release-overlay-smoke"' \
-            || verification_failed runtime_config app_name release-overlay-smoke mismatch
-        runtime_faq=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/faq) \
-            || verification_failed runtime_config faq_endpoint reachable failed
-        printf '%s' "$runtime_faq" | grep -q 'Release overlay smoke' \
-            || verification_failed runtime_config faq_local_overlay loaded missing
-        exit 0
-    fi
-    if [ "$(container inspect --format '{{.State.Running}}' "$shell" 2>/dev/null || true)" != "true" ]; then
-        container logs "$shell" >&2 || true
-        exit 1
-    fi
-    attempt=$((attempt + 1))
-    sleep 2
-done
+        if [ "$(container inspect --format '{{.State.Running}}' "$shell" 2>/dev/null || true)" != "true" ]; then
+            container logs "$shell" >&2 || true
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+    return 1
+}
 
-container logs "$shell" >&2 || true
-echo "repository-free image did not become healthy" >&2
-exit 1
+wait_for_health || {
+    container logs "$shell" >&2 || true
+    echo "repository-free image did not become healthy" >&2
+    exit 1
+}
+
+mounts=$(container inspect --format '{{json .Mounts}}' "$shell") \
+    || verification_failed runtime_mounts inspect successful failed
+if printf '%s' "$mounts" | grep -q '"Destination":"/app"'; then
+    verification_failed runtime_mounts app_source_mount absent present
+fi
+for destination in /config /data /workspaces; do
+    printf '%s' "$mounts" | grep -q "\"Destination\":\"${destination}\"" \
+        || verification_failed runtime_mounts "$destination" bind missing
+done
+runtime_config=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
+    || verification_failed runtime_config config_endpoint reachable failed
+require_nonempty runtime_config config_response "$runtime_config"
+printf '%s' "$runtime_config" | grep -q '"app_name":"release-overlay-smoke"' \
+    || verification_failed runtime_config app_name release-overlay-smoke mismatch
+runtime_faq=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/faq) \
+    || verification_failed runtime_config faq_endpoint reachable failed
+printf '%s' "$runtime_faq" | grep -q 'Release overlay smoke' \
+    || verification_failed runtime_config faq_local_overlay loaded missing
+
+container exec --user appuser:appuser "$shell" sh -c \
+    'printf "%s\n" data-bind-ok > /data/release-bind-marker && printf "%s\n" workspace-bind-ok > /workspaces/release-bind-marker' \
+    || verification_failed runtime_mounts writable_bind data-and-workspaces failed
+raw_probe=$(container exec --user scanner:appuser -e NMAP_PRIVILEGED=1 "$shell" \
+    nmap -sS -Pn -p 1 127.0.0.1 2>&1) \
+    || verification_failed runtime_capabilities nmap_syn_probe successful "$raw_probe"
+printf '%s' "$raw_probe" | grep -q 'Nmap done' \
+    || verification_failed runtime_capabilities nmap_syn_probe completed "$raw_probe"
+
+container restart "$shell" >/dev/null \
+    || verification_failed runtime_restart shell restarted failed
+wait_for_health || {
+    container logs "$shell" >&2 || true
+    verification_failed runtime_restart health ready timeout
+}
+container exec --user appuser:appuser "$shell" test -f /data/release-bind-marker \
+    || verification_failed runtime_restart data_bind_marker present missing
+container exec --user appuser:appuser "$shell" test -f /workspaces/release-bind-marker \
+    || verification_failed runtime_restart workspace_bind_marker present missing
+
+printf 'repository-free image verification passed image=%s architecture=%s runtime=%s\n' \
+    "$image" "$expected_architecture" "$container_runtime"

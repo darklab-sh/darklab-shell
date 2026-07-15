@@ -24,6 +24,16 @@ class RestoreError(RuntimeError):
     """Raised when a backup cannot be restored safely."""
 
 
+_TARGET_LOCAL_ENV_NAMES = (
+    "DARKLAB_IMAGE",
+    "DATABASE_BACKEND",
+    "DATABASE_URL",
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -74,42 +84,177 @@ def _extract_and_verify(archive_path: Path, destination: Path) -> tuple[Path, di
     return root, manifest
 
 
-def _replace_directory(source: Path, destination: Path) -> None:
-    if not source.is_dir():
-        raise RestoreError(f"backup is missing directory: {source.name}")
-    destination.mkdir(parents=True, exist_ok=True)
-    for child in destination.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-    shutil.copytree(source, destination, dirs_exist_ok=True)
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
 
 
-def _env_value(path: Path, name: str) -> str:
-    prefix = f"{name}="
+def _chown_tree(path: Path, uid: int, gid: int) -> None:
+    if path.is_dir() and not path.is_symlink():
+        for root, directories, files in os.walk(path):
+            for name in (*directories, *files):
+                os.chown(Path(root) / name, uid, gid, follow_symlinks=False)
+    os.chown(path, uid, gid, follow_symlinks=False)
+
+
+def _restore_owner(args: argparse.Namespace) -> tuple[int, int] | None:
+    raw_uid = str(getattr(args, "output_uid", "") or "").strip()
+    raw_gid = str(getattr(args, "output_gid", "") or "").strip()
+    if not raw_uid and not raw_gid:
+        return None
+    if not raw_uid or not raw_gid:
+        raise RestoreError("restore output ownership requires both UID and GID")
+    try:
+        uid = int(raw_uid)
+        gid = int(raw_gid)
+    except ValueError as exc:
+        raise RestoreError("restore output UID and GID must be non-negative integers") from exc
+    if uid < 0 or gid < 0:
+        raise RestoreError("restore output UID and GID must be non-negative integers")
+    return uid, gid
+
+
+class _DirectoryReplacement:
+    """Stage and swap one bind-mounted directory while retaining rollback data."""
+
+    def __init__(self, source: Path, destination: Path, owner: tuple[int, int] | None):
+        if not source.is_dir():
+            raise RestoreError(f"backup is missing directory: {source.name}")
+        self.destination = destination
+        self.destination_existed = destination.exists()
+        destination.mkdir(parents=True, exist_ok=True)
+        destination_stat = destination.stat()
+        self.original_owner = (destination_stat.st_uid, destination_stat.st_gid)
+        self.stage = Path(tempfile.mkdtemp(prefix=".darklab-restore-stage-", dir=destination))
+        self.rollback_dir: Path
+        self.moved_original_names: list[str] = []
+        self.moved_new_names: list[str] = []
+        self.root_owner_changed = False
+        try:
+            self.rollback_dir = Path(
+                tempfile.mkdtemp(prefix=".darklab-restore-rollback-", dir=destination)
+            )
+            shutil.copytree(source, self.stage, dirs_exist_ok=True)
+            if owner is not None:
+                _chown_tree(self.stage, *owner)
+        except Exception:
+            _remove_path(self.stage)
+            rollback_dir = getattr(self, "rollback_dir", None)
+            if rollback_dir is not None:
+                _remove_path(rollback_dir)
+            raise
+        self.owner = owner
+
+    def commit(self) -> None:
+        excluded = {self.stage.name, self.rollback_dir.name}
+        original_names = [child.name for child in self.destination.iterdir() if child.name not in excluded]
+        for name in original_names:
+            os.replace(self.destination / name, self.rollback_dir / name)
+            self.moved_original_names.append(name)
+        for child in list(self.stage.iterdir()):
+            os.replace(child, self.destination / child.name)
+            self.moved_new_names.append(child.name)
+        if self.owner is not None:
+            os.chown(self.destination, *self.owner, follow_symlinks=False)
+            self.root_owner_changed = True
+
+    def rollback(self) -> None:
+        for name in reversed(self.moved_new_names):
+            _remove_path(self.destination / name)
+        for name in reversed(self.moved_original_names):
+            rollback_path = self.rollback_dir / name
+            if rollback_path.exists() or rollback_path.is_symlink():
+                os.replace(rollback_path, self.destination / name)
+        if self.root_owner_changed:
+            os.chown(self.destination, *self.original_owner, follow_symlinks=False)
+        self.cleanup()
+        if not self.destination_existed and self.destination.exists() and not any(self.destination.iterdir()):
+            self.destination.rmdir()
+
+    def cleanup(self) -> None:
+        _remove_path(self.stage)
+        _remove_path(self.rollback_dir)
+
+
+class _FileReplacement:
+    def __init__(self, destination: Path):
+        self.destination = destination
+        descriptor, stage_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.restore-stage-",
+            dir=destination.parent,
+        )
+        os.close(descriptor)
+        self.stage = Path(stage_name)
+        self.rollback_path: Path
+        try:
+            descriptor, rollback_name = tempfile.mkstemp(
+                prefix=f".{destination.name}.restore-rollback-",
+                dir=destination.parent,
+            )
+            os.close(descriptor)
+            self.rollback_path = Path(rollback_name)
+            self.rollback_path.unlink()
+        except Exception:
+            _remove_path(self.stage)
+            raise
+        self.original_moved = False
+        self.new_moved = False
+
+    def commit(self) -> None:
+        os.replace(self.destination, self.rollback_path)
+        self.original_moved = True
+        os.replace(self.stage, self.destination)
+        self.new_moved = True
+
+    def rollback(self) -> None:
+        if self.new_moved:
+            _remove_path(self.destination)
+        if self.original_moved and self.rollback_path.exists():
+            os.replace(self.rollback_path, self.destination)
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        _remove_path(self.stage)
+        _remove_path(self.rollback_path)
+
+
+def _env_values(path: Path, names: tuple[str, ...]) -> dict[str, str]:
+    requested = set(names)
+    values: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith(prefix):
-            return line[len(prefix):]
-    return ""
+        name, separator, value = line.partition("=")
+        if separator and name in requested:
+            values[name] = value
+    return values
 
 
-def _restore_env(source: Path, destination: Path, image: str) -> None:
+def _stage_restored_env(
+    source: Path,
+    replacement: _FileReplacement,
+    preserved_values: dict[str, str],
+    owner: tuple[int, int] | None,
+) -> None:
+    if not source.is_file():
+        raise RestoreError("backup is missing operator/.env")
     lines = source.read_text(encoding="utf-8").splitlines()
-    replaced = False
+    restored_names: set[str] = set()
     output: list[str] = []
     for line in lines:
-        if line.startswith("DARKLAB_IMAGE="):
-            output.append(f"DARKLAB_IMAGE={image}")
-            replaced = True
-        else:
-            output.append(line)
-    if not replaced:
-        output.append(f"DARKLAB_IMAGE={image}")
-    temporary = destination.with_name(f".{destination.name}.restore-{os.getpid()}")
-    temporary.write_text("\n".join(output) + "\n", encoding="utf-8")
-    temporary.chmod(0o600)
-    temporary.replace(destination)
+        name, separator, _value = line.partition("=")
+        if separator and name in preserved_values:
+            output.append(f"{name}={preserved_values[name]}")
+            restored_names.add(name)
+            continue
+        output.append(line)
+    for name in _TARGET_LOCAL_ENV_NAMES:
+        if name in preserved_values and name not in restored_names:
+            output.append(f"{name}={preserved_values[name]}")
+    replacement.stage.write_text("\n".join(output) + "\n", encoding="utf-8")
+    replacement.stage.chmod(0o600)
+    if owner is not None:
+        os.chown(replacement.stage, *owner, follow_symlinks=False)
 
 
 def _restore_postgres(database_url: str, dump_path: Path) -> None:
@@ -136,6 +281,7 @@ def _restore_postgres(database_url: str, dump_path: Path) -> None:
             "pg_restore",
             "--clean",
             "--if-exists",
+            "--single-transaction",
             "--no-owner",
             "--no-acl",
             "--dbname",
@@ -157,9 +303,10 @@ def restore(args: argparse.Namespace) -> None:
     if not archive_path.is_file():
         raise RestoreError(f"backup archive does not exist: {archive_path}")
     env_path = Path(args.env_file).resolve()
-    current_image = _env_value(env_path, "DARKLAB_IMAGE")
-    if not current_image:
+    current_env = _env_values(env_path, _TARGET_LOCAL_ENV_NAMES)
+    if not current_env.get("DARKLAB_IMAGE"):
         raise RestoreError("current .env is missing DARKLAB_IMAGE")
+    owner = _restore_owner(args)
 
     with tempfile.TemporaryDirectory(prefix="darklab-restore-") as temporary_dir:
         backup_root, manifest = _extract_and_verify(archive_path, Path(temporary_dir))
@@ -169,21 +316,64 @@ def restore(args: argparse.Namespace) -> None:
         backend = str(database.get("backend") or "").lower()
         if backend not in {"sqlite", "postgres"}:
             raise RestoreError(f"unsupported database backend in backup: {backend}")
+        current_backend = str(current_env.get("DATABASE_BACKEND") or "sqlite").strip().lower()
+        if current_backend != backend:
+            raise RestoreError(
+                f"backup database backend {backend!r} does not match target backend {current_backend!r}"
+            )
 
-        _replace_directory(backup_root / "operator" / "conf", Path(args.local_conf_dir))
-        _replace_directory(backup_root / "data", Path(args.data_dir))
-        workspace_source = backup_root / "workspaces"
-        if workspace_source.exists():
-            _replace_directory(workspace_source, Path(args.workspace_dir))
-        _restore_env(backup_root / "operator" / ".env", env_path, current_image)
+        replacements: list[_DirectoryReplacement | _FileReplacement] = []
+        try:
+            conf_replacement = _DirectoryReplacement(
+                backup_root / "operator" / "conf",
+                Path(args.local_conf_dir),
+                owner,
+            )
+            replacements.append(conf_replacement)
+            data_replacement = _DirectoryReplacement(backup_root / "data", Path(args.data_dir), owner)
+            replacements.append(data_replacement)
+            workspace_source = backup_root / "workspaces"
+            if workspace_source.exists():
+                replacements.append(_DirectoryReplacement(workspace_source, Path(args.workspace_dir), owner))
+            env_replacement = _FileReplacement(env_path)
+            replacements.append(env_replacement)
+            _stage_restored_env(
+                backup_root / "operator" / ".env",
+                env_replacement,
+                current_env,
+                owner,
+            )
 
-        if backend == "sqlite":
-            sqlite_backup = backup_root / "database" / "history.db"
-            if not sqlite_backup.is_file():
-                raise RestoreError("SQLite backup is missing database/history.db")
-            shutil.copy2(sqlite_backup, Path(args.data_dir) / "history.db")
+            if backend == "sqlite":
+                sqlite_backup = backup_root / "database" / "history.db"
+                if not sqlite_backup.is_file():
+                    raise RestoreError("SQLite backup is missing database/history.db")
+                staged_database = data_replacement.stage / "history.db"
+                shutil.copy2(sqlite_backup, staged_database)
+                if owner is not None:
+                    os.chown(staged_database, *owner, follow_symlinks=False)
+            else:
+                dump_path = backup_root / "database" / "postgres.dump"
+                if not dump_path.is_file():
+                    raise RestoreError("Postgres backup is missing database/postgres.dump")
+                _restore_postgres(args.database_url, dump_path)
+            for replacement in replacements:
+                replacement.commit()
+        except Exception as exc:
+            rollback_errors: list[str] = []
+            for replacement in reversed(replacements):
+                try:
+                    replacement.rollback()
+                except OSError as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            if rollback_errors:
+                raise RestoreError(
+                    f"{exc}; filesystem rollback also failed: {'; '.join(rollback_errors)}"
+                ) from exc
+            raise
         else:
-            _restore_postgres(args.database_url, backup_root / "database" / "postgres.dump")
+            for replacement in replacements:
+                replacement.cleanup()
 
     print(f"Restored verified {backend} backup from {archive_path}")
 
@@ -196,6 +386,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace-dir", default="/workspaces")
     parser.add_argument("--env-file", default="/deployment/.env")
     parser.add_argument("--database-url", default=os.environ.get("DATABASE_URL", ""))
+    parser.add_argument("--output-uid", default=os.environ.get("DARKLAB_RESTORE_OUTPUT_UID", ""))
+    parser.add_argument("--output-gid", default=os.environ.get("DARKLAB_RESTORE_OUTPUT_GID", ""))
     return parser.parse_args()
 
 

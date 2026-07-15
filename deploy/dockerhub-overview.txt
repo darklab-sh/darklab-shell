@@ -10,6 +10,22 @@ Production installation starts from the versioned, checksummed setup files attac
 
 Follow the security-first [Quick Start](https://gitlab.com/darklab.sh/darklab_shell/-/blob/main/README.md#quick-start) to download, verify, and run the production Compose bundle. No source checkout or local image build is required.
 
+## Release Candidates
+
+For `X.Y.Z-rc.N`, use the instructions from that exact candidate tag:
+
+```text
+https://gitlab.com/darklab.sh/darklab_shell/-/blob/vX.Y.Z-rc.N/README.md#quick-start
+```
+
+The matching setup files, checksums, signature bundle, and deployment archive use the same version in GitLab's Generic Package Registry:
+
+```text
+https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/X.Y.Z-rc.N/
+```
+
+Candidate tags are for release validation and may be removed after testing.
+
 ## Verify The Publisher
 
 Protected GitLab tag pipelines keylessly sign this Docker Hub image, the canonical GitLab registry image, and the release checksum manifest with Sigstore/Cosign.

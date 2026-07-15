@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "2.6.0",
-  "reviewed_on": "2026-07-14",
+  "reviewed_on": "2026-07-15",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -67,10 +67,12 @@
     },
     {
       "name": "Debian Nmap package",
-      "source": "https://tracker.debian.org/pkg/nmap",
-      "license": "LicenseRef-Nmap-GPL-2-with-clarifications-and-exceptions",
-      "notice_location": "/usr/share/doc/nmap/copyright",
-      "usage_note": "The Debian DFSG package carries Nmap's GPLv2-based terms with additional clarifications and exceptions. Review the installed notice before redistributing Nmap with another product."
+      "source": "https://svn.nmap.org/nmap-releases/nmap-7.95/LICENSE",
+      "package_source": "https://tracker.debian.org/pkg/nmap",
+      "license": "LicenseRef-Nmap-Public-Source-0.95",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/Nmap-7.95-NPSL-0.95.txt",
+      "redistribution_review": "requires-upstream-waiver-oem-or-legal-approval",
+      "usage_note": "Nmap 7.95 uses NPSL 0.95, which treats software designed to execute Nmap and parse its results as a derivative work when NPSL redistribution rights are required. Publishing this application with Nmap requires an upstream waiver, an OEM license, or qualified legal approval. This inventory entry is not that approval."
     },
     {
       "name": "Debian Masscan package",

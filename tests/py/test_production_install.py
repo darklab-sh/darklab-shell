@@ -31,6 +31,10 @@ EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
 RELEASE_VERSION = "2.6.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
+GITLAB_CLI_IMAGE = (
+    "registry.gitlab.com/gitlab-org/cli:v1.107.0@"
+    "sha256:ea9708890660b1f766d8185ccbc99b8729633bfa34ea9fda35f6ef1fdf90e507"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -89,7 +93,12 @@ def _build_payload(
     return output_dir
 
 
-def _build_payload_for_version(tmp_path: Path, version: str) -> Path:
+def _build_payload_for_version(
+    tmp_path: Path,
+    version: str,
+    *,
+    env_example_append: str = "",
+) -> Path:
     builder = _load_script_module("build_release_payload")
     source_root = tmp_path / f"source-{version}"
     (source_root / "deploy").mkdir(parents=True)
@@ -113,7 +122,7 @@ def _build_payload_for_version(tmp_path: Path, version: str) -> Path:
         env_example_path.read_text(encoding="utf-8").replace(
             f"darklab-shell:{RELEASE_VERSION}",
             f"darklab-shell:{version}",
-        ),
+        ) + env_example_append,
         encoding="utf-8",
     )
     compose = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
@@ -135,28 +144,38 @@ def _build_payload_for_version(tmp_path: Path, version: str) -> Path:
     return output_dir
 
 
-def _build_verified_backup(tmp_path: Path) -> Path:
+def _build_verified_backup(
+    tmp_path: Path,
+    *,
+    backend: str = "sqlite",
+    operator_env: str | None = None,
+) -> Path:
     backup_root = tmp_path / "darklab-backup-test"
-    backup_root.mkdir()
+    backup_root.mkdir(parents=True)
     for directory in ("data", "database", "operator/conf", "workspaces"):
         (backup_root / directory).mkdir(parents=True)
     (backup_root / "data" / ".secrets_master_key").write_text("vault-key\n", encoding="utf-8")
-    (backup_root / "database" / "history.db").write_bytes(b"sqlite-backup")
+    if backend == "sqlite":
+        (backup_root / "database" / "history.db").write_bytes(b"sqlite-backup")
+    else:
+        assert backend == "postgres"
+        (backup_root / "database" / "postgres.dump").write_bytes(b"postgres-backup")
     (backup_root / "operator" / "conf" / "config.local.yaml").write_text(
         "workspace_enabled: true\n",
         encoding="utf-8",
     )
-    (backup_root / "operator" / ".env").write_text(
-        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.5.0\nOPERATOR_SENTINEL=restored\n",
-        encoding="utf-8",
-    )
+    (backup_root / "operator" / ".env").write_text(operator_env or (
+        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.5.0\n"
+        f"DATABASE_BACKEND={backend}\n"
+        "OPERATOR_SENTINEL=restored\n"
+    ), encoding="utf-8")
     (backup_root / "workspaces" / "evidence.txt").write_text("evidence\n", encoding="utf-8")
     (backup_root / "manifest.json").write_text(
         json.dumps({
             "format": "darklab_shell.backup.v1",
             "repository_free": True,
             "app_version": RELEASE_VERSION,
-            "database": {"backend": "sqlite"},
+            "database": {"backend": backend},
         }) + "\n",
         encoding="utf-8",
     )
@@ -189,6 +208,8 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    printf '%s\\n' \"${FAKE_COMPOSE_VERSION:-2.20.0}\"\n"
         "elif [ \"$*\" = \"info\" ]; then\n"
         "    exit \"${FAKE_DOCKER_INFO_EXIT:-0}\"\n"
+        "elif printf '%s' \"$*\" | grep -q ' ps --status running --services postgres$'; then\n"
+        "    [ \"${FAKE_POSTGRES_RUNNING:-0}\" = \"1\" ] && printf 'postgres\\n'\n"
         "elif printf '%s' \"$*\" | grep -q ' config --quiet$'; then\n"
         "    exit \"${FAKE_COMPOSE_CONFIG_EXIT:-0}\"\n"
         "elif printf '%s' \"$*\" | grep -q '/app/tools/backup_system.py'; then\n"
@@ -202,7 +223,11 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    done\n"
         "    [ -n \"$backup_dir\" ] && [ -f \"${FAKE_BACKUP_ARCHIVE:-}\" ] || exit 9\n"
         "    cp \"$FAKE_BACKUP_ARCHIVE\" \"$backup_dir/darklab-backup-auto.tar.gz\"\n"
-        "    printf 'Backup written to /backups/darklab-backup-auto.tar.gz\\n'\n"
+        "    printf '/backups/darklab-backup-auto.tar.gz\\n'\n"
+        "elif printf '%s' \"$*\" | grep -q '/app/tools/restore_system.py'; then\n"
+        "    exit \"${FAKE_RESTORE_EXIT:-0}\"\n"
+        "elif printf '%s' \"$*\" | grep -q ' verify-blob '; then\n"
+        "    exit \"${FAKE_COSIGN_VERIFY_EXIT:-0}\"\n"
         "elif printf '%s' \"$*\" | grep -q '^image inspect '; then\n"
         "    printf 'darklabsh/darklab-shell@%s\\n' \"${FAKE_IMAGE_DIGEST:-sha256:"
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\"\n"
@@ -235,7 +260,7 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
 fi
 if [ "$1" = "inspect" ]; then
     case "$*" in
-        *Mounts*) printf '[]\n' ;;
+        *Mounts*) printf '[{"Destination":"/config"},{"Destination":"/data"},{"Destination":"/workspaces"}]\n' ;;
         *State.Running*) printf 'true\n' ;;
     esac
     exit 0
@@ -245,6 +270,7 @@ if [ "$1" = "exec" ]; then
         */health*) exit 0 ;;
         */config*) printf '{"app_name":"release-overlay-smoke"}\n' ;;
         */faq*) printf '[{"question":"Release overlay smoke"}]\n' ;;
+        *nmap*-sS*) printf 'Nmap done: 1 IP address (1 host up) scanned\n' ;;
     esac
     exit 0
 fi
@@ -666,6 +692,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "container_runtime=${CONTAINER_RUNTIME:-docker}" in image_smoke
     assert 'docker|podman)' in image_smoke
     assert 'overlay_mount="${overlay_mount},${volume_label}"' in image_smoke
+    assert 'data_mount="${data_mount},${volume_label}"' in image_smoke
+    assert 'workspace_mount="${workspace_mount},${volume_label}"' in image_smoke
+    assert '-v "$data_mount"' in image_smoke
+    assert '-v "$workspace_mount"' in image_smoke
+    assert "-e WORKSPACE_ROOT=/workspaces" in image_smoke
+    assert "NMAP_PRIVILEGED=1" in image_smoke
+    assert 'container restart "$shell"' in image_smoke
     assert "/app/tools/backup_system.py" in image_smoke
     assert "/app/tools/restore_system.py" in image_smoke
     assert "command -v pg_restore" in image_smoke
@@ -705,6 +738,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert runtime_result.returncode == 0, runtime_result.stderr
     runtime_calls = runtime_log.read_text(encoding="utf-8")
     assert ":/config:ro,Z" in runtime_calls
+    assert ":/data,Z" in runtime_calls
+    assert ":/workspaces,Z" in runtime_calls
+    assert "NMAP_PRIVILEGED=1" in runtime_calls
+    assert "nmap -sS -Pn -p 1 127.0.0.1" in runtime_calls
+    assert "restart darklab-release-shell-1234" in runtime_calls
     assert "sh.darklab.image.architecture" in runtime_calls
     bundled_result = subprocess.run(
         [
@@ -769,6 +807,31 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     assert ruby_component["notice_location"].endswith("/wpscan-ruby-gems.json")
     component_names = {component["name"] for component in inventory["components"]}
     assert {"Debian Nmap package", "Debian Masscan package"} <= component_names
+    nmap_component = next(
+        component
+        for component in inventory["components"]
+        if component["name"] == "Debian Nmap package"
+    )
+    assert nmap_component["license"] == "LicenseRef-Nmap-Public-Source-0.95"
+    assert nmap_component["notice_location"].endswith("/Nmap-7.95-NPSL-0.95.txt")
+    assert nmap_component["redistribution_review"] == (
+        "requires-upstream-waiver-oem-or-legal-approval"
+    )
+    checker = _load_script_module("check_container_licenses")
+    with pytest.raises(ValueError, match="Nmap upstream waiver, OEM license"):
+        checker.main(require_redistribution_approval=True)
+    approved_nmap_component = {
+        **nmap_component,
+        "redistribution_review": "approved-by-qualified-legal-review",
+    }
+    checker._validate_nmap_redistribution(
+        [approved_nmap_component],
+        require_approval=True,
+    )
+    publisher = (ROOT / "scripts" / "publish_release_artifacts.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'check_container_licenses.py" --release' in publisher
     install_coverage = inventory["dockerfile_install_coverage"]
     assert install_coverage["apt:nmap"] == "Debian Nmap package"
     assert install_coverage["apt:masscan"] == "Debian Masscan package"
@@ -849,7 +912,12 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
             ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt",
             fixture_root / "deploy" / "THIRD_PARTY_NOTICES.txt",
         )
-        for notice in ("WPScan-4.0.1.txt", "frontend-runtime.txt", "OFL-1.1.txt"):
+        for notice in (
+            "Nmap-7.95-NPSL-0.95.txt",
+            "WPScan-4.0.1.txt",
+            "frontend-runtime.txt",
+            "OFL-1.1.txt",
+        ):
             shutil.copy2(
                 ROOT / "deploy" / "third-party-licenses" / notice,
                 fixture_root / "deploy" / "third-party-licenses" / notice,
@@ -873,6 +941,11 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         monkeypatch.setattr(container_checker, "LICENSE_DIR", license_dir)
         monkeypatch.setattr(
             container_checker,
+            "NMAP_LICENSE",
+            license_dir / "Nmap-7.95-NPSL-0.95.txt",
+        )
+        monkeypatch.setattr(
+            container_checker,
             "WPSCAN_LICENSE",
             license_dir / "WPScan-4.0.1.txt",
         )
@@ -886,7 +959,9 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         "duplicate-component",
         "version-arg-drift",
         "missing-notice",
-        "changed-license",
+        "invalid-nmap-review",
+        "changed-nmap-license",
+        "changed-wpscan-license",
     ):
         fixture_root = container_fixture(f"container-{case_name}")
         inventory_path = fixture_root / "deploy" / "container-licenses.json"
@@ -902,6 +977,18 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
                 dockerfile.write("\nARG UNREVIEWED_TOOL_VERSION=1.0.0\n")
         elif case_name == "missing-notice":
             (fixture_root / "deploy" / "third-party-licenses" / "frontend-runtime.txt").unlink()
+        elif case_name == "invalid-nmap-review":
+            next(
+                component
+                for component in inventory["components"]
+                if component["name"] == "Debian Nmap package"
+            )["redistribution_review"] = "self-approved"
+            inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+        elif case_name == "changed-nmap-license":
+            (fixture_root / "deploy" / "third-party-licenses" / "Nmap-7.95-NPSL-0.95.txt").write_text(
+                "changed\n",
+                encoding="utf-8",
+            )
         else:
             (fixture_root / "deploy" / "third-party-licenses" / "WPScan-4.0.1.txt").write_text(
                 "changed\n",
@@ -989,6 +1076,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert not re.search(r"@[A-Z0-9_]+@", all_text)
     assert "docker.io/darklabsh/darklab-shell:2.6.0" in all_text
     assert "registry.gitlab.com/darklab.sh/darklab_shell:2.6.0" in all_text
+    assert (
+        "ghcr.io/sigstore/cosign/cosign:v3.0.6@"
+        "sha256:de9c65609e6bde17e6b48de485ee788407c9502fa08b8f4459f595b21f56cd00"
+    ) in all_text
     assert "/blob/v2.6.0/CONFIGURATION.md" in archive_files[
         "starters/conf/config.local.yaml"
     ].decode("utf-8")
@@ -1037,12 +1128,16 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "(-rc\\.[0-9]+)?" in release_rule
     assert "-rc" not in final_release_rule
     assert parsed_ci["release-create"]["extends"] == ".protected-final-release-tag"
+    assert parsed_ci["variables"]["CI_GITLAB_CLI_IMAGE"] == GITLAB_CLI_IMAGE
+    assert parsed_ci["release-create"]["image"] == "$CI_GITLAB_CLI_IMAGE"
+    assert "gitlab-org/cli:latest" not in ci_config
     for job_name in (
         "release-image-gitlab",
         "release-image-smoke",
         "release-image-dockerhub",
         "release-supply-chain",
         "release-payload-upload",
+        "release-postgres-smoke",
         "release-public-smoke",
     ):
         assert parsed_ci[job_name]["extends"] == ".protected-release-tag"
@@ -1138,6 +1233,30 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     payload_script = "\n".join(parsed_ci["release-payload-upload"]["script"])
     assert "--evidence-dir release-evidence" in payload_script
     assert "publish_release_artifacts.sh sign-payload release-payload" in payload_script
+    postgres_job = parsed_ci["release-postgres-smoke"]
+    postgres_script = "\n".join(postgres_job["script"])
+    assert postgres_job["stage"] == "release"
+    assert "verify_repository_free_postgres.sh" in postgres_script
+    assert postgres_job["artifacts"]["when"] == "always"
+    postgres_needs = {need["job"] for need in postgres_job["needs"]}
+    assert postgres_needs == {"release-image-dockerhub", "release-payload-upload"}
+    release_create_needs = {
+        need["job"]: need for need in parsed_ci["release-create"]["needs"]
+    }
+    assert release_create_needs["release-postgres-smoke"]["artifacts"] is False
+    postgres_verifier = (
+        ROOT / "scripts" / "verify_repository_free_postgres.sh"
+    ).read_text(encoding="utf-8")
+    assert "COMPOSE_PROFILES=postgres" in postgres_verifier
+    assert 'WEB_CONCURRENCY == "4"' in postgres_verifier
+    assert "NOTIFICATION_WORKER_STARTED" in postgres_verifier
+    assert "SCHEDULER_WORKER_STARTED" in postgres_verifier
+    assert '"http://127.0.0.1:${smoke_port}/health"' in postgres_verifier
+    assert '"http://127.0.0.1:${smoke_port}/session/preferences"' in postgres_verifier
+    assert 'darklab-deploy" backup' in postgres_verifier
+    assert 'darklab-deploy" restore' in postgres_verifier
+    assert 'pref_theme_name == "theme_light_blue"' in postgres_verifier
+    assert '--gitlab-cli-image "$CI_GITLAB_CLI_IMAGE"' in supply_chain_script
     assert "cosign sign-blob" in publisher
     assert "cosign verify-blob" in publisher
     public_smoke_script = "\n".join(parsed_ci["release-public-smoke"]["script"])
@@ -1153,12 +1272,40 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         encoding="utf-8"
     )
     assert "README.md#quick-start" in dockerhub_overview
+    assert (
+        "https://gitlab.com/darklab.sh/darklab_shell/-/blob/"
+        "vX.Y.Z-rc.N/README.md#quick-start"
+    ) in dockerhub_overview
+    assert (
+        "https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/"
+        "generic/darklab-shell-deploy/X.Y.Z-rc.N/"
+    ) in dockerhub_overview
     assert "docker.io/darklabsh/darklab-shell" in dockerhub_overview
     assert "https://gitlab.com" in dockerhub_overview
     assert (
         r"^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml"
         r"@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$"
     ) in dockerhub_overview
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert 'privileged = false' in contributing
+    assert (
+        'volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]'
+        in contributing
+    )
+    assert 'volumes = ["/certs/client", "/cache"]' not in contributing
+    assert "saas-linux-small-arm64" in contributing
+    assert "`selinux`, `self-managed`, and `baku`" in contributing
+    assert "`podman`, `self-managed`, and `baal`" in contributing
+    assert "A single `v*` rule is the simplest option" in contributing
+    assert "protected, masked, and hidden variable" in contributing
+    assert "needs only **Read & Write** access" in contributing
+    for variable_name in (
+        "RELEASE_ARM64_COMPATIBILITY_ENABLED",
+        "RELEASE_SELINUX_COMPATIBILITY_ENABLED",
+        "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED",
+    ):
+        assert variable_name in contributing
+    assert r"^[0-9]+\.[0-9]+\.[0-9]+$" in contributing
     release_links = parsed_ci["release-create"]["release"]["assets"]["links"]
     release_link_names = {link["name"] for link in release_links}
     assert release_link_names == {
@@ -1228,7 +1375,16 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "vulnerability_report_path": vulnerability_report,
         "syft_version": "1.42.3",
         "grype_version": "0.112.0",
+        "gitlab_cli_image": GITLAB_CLI_IMAGE,
     }
+    with pytest.raises(ValueError, match="GitLab CLI image must use an exact"):
+        evidence_builder.build_evidence(
+            output_dir=tmp_path / "floating-release-tool",
+            **{
+                **evidence_args,
+                "gitlab_cli_image": "registry.gitlab.com/gitlab-org/cli:latest",
+            },
+        )
     first_evidence = tmp_path / "evidence-a"
     second_evidence = tmp_path / "evidence-b"
     evidence_builder.build_evidence(output_dir=first_evidence, **evidence_args)
@@ -1260,6 +1416,9 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     )
     assert build_inputs["reproducibility"]["container_image_byte_reproducible"] is False
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
+    assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
+    assert build_inputs["release_tool_images"] == {"gitlab_cli": GITLAB_CLI_IMAGE}
+    assert evidence_index["release_tools"] == {"gitlab_cli_image": GITLAB_CLI_IMAGE}
     assert any(
         "apt-get" in instruction["tools"]
         for instruction in build_inputs["network_build_instructions"]
@@ -1409,9 +1568,14 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     dockerhub_first_dir = tmp_path / "dockerhub-first"
     dockerhub_first = _run_release_publisher(dockerhub_first_dir, "dockerhub-image")
     assert dockerhub_first.returncode == 0, dockerhub_first.stderr
-    assert "buildx imagetools create" in (
+    dockerhub_first_log = (
         dockerhub_first_dir / "release-tools.log"
     ).read_text(encoding="utf-8")
+    assert "buildx imagetools create" in dockerhub_first_log
+    assert (
+        f"registry.example.test/darklab/shell:2.6.0@{digest}"
+        in dockerhub_first_log
+    )
     assert f"DOCKERHUB_DIGEST={digest}" in (
         dockerhub_first_dir / "dockerhub-image.env"
     ).read_text(encoding="utf-8")
@@ -1689,6 +1853,16 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     )
     assert lifecycle_status.returncode == 0, lifecycle_status.stderr
     assert "managed files are intact" in lifecycle_status.stdout
+    lifecycle_help = subprocess.run(
+        [str(target / "darklab-deploy"), "help"],
+        cwd=target,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert lifecycle_help.returncode == 0, lifecycle_help.stderr
+    assert "install --bundle DIR --target DIR" in lifecycle_help.stdout
+    assert "used internally by setup.sh" in lifecycle_help.stdout
     (target / "conf" / "config.local.yaml").write_text("# operator edit\n", encoding="utf-8")
     operator_edit_status = subprocess.run(
         [str(target / "darklab-deploy"), "status"],
@@ -1885,6 +2059,7 @@ def test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_targe
         bin_dir, _log_path = _fake_docker(case_dir)
         commands = (
             "sh",
+            "awk",
             "basename",
             "cat",
             "chmod",
@@ -1994,10 +2169,266 @@ def test_installer_rejects_unsafe_targets(tmp_path: Path, unsafe_kind: str):
     assert "target directory must" in result.stderr
 
 
-def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(tmp_path: Path):
+def test_restore_preserves_target_postgres_credentials_and_host_ownership(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source_env = (
+        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.5.0\n"
+        "DATABASE_BACKEND=postgres\n"
+        "DATABASE_URL=postgresql://source:source-password@postgres:5432/source_db\n"
+        "POSTGRES_DB=source_db\n"
+        "POSTGRES_USER=source\n"
+        "POSTGRES_PASSWORD=source-password\n"
+        "POSTGRES_PASSWORD=source-password-duplicate\n"
+        "OPERATOR_SENTINEL=restored\n"
+    )
+    backup = _build_verified_backup(tmp_path, backend="postgres", operator_env=source_env)
+    restore_helper = _load_script_module("restore_system")
+    restore_target = tmp_path / "restore-target"
+    restore_data = restore_target / "data"
+    restore_conf = restore_target / "conf"
+    restore_workspaces = restore_target / "workspaces"
+    for directory in (restore_data, restore_conf, restore_workspaces):
+        directory.mkdir(parents=True)
+        (directory / "stale.txt").write_text("stale\n", encoding="utf-8")
+    restore_env = restore_target / ".env"
+    target_database_url = "postgresql://target:target-password@postgres:5432/target_db"
+    restore_env.write_text(
+        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0\n"
+        "DATABASE_BACKEND=postgres\n"
+        f"DATABASE_URL={target_database_url}\n"
+        "POSTGRES_DB=target_db\n"
+        "POSTGRES_USER=target\n"
+        "POSTGRES_PASSWORD=target-password\n",
+        encoding="utf-8",
+    )
+    captured_restore: dict[str, Any] = {}
+
+    def capture_pg_restore(command, **kwargs):
+        captured_restore["command"] = command
+        captured_restore["env"] = kwargs["env"]
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(restore_helper.subprocess, "run", capture_pg_restore)
+    expected_uid = 12001 if os.geteuid() == 0 else os.getuid()
+    expected_gid = 12002 if os.geteuid() == 0 else os.getgid()
+    restore_helper.restore(SimpleNamespace(
+        archive=str(backup),
+        data_dir=str(restore_data),
+        local_conf_dir=str(restore_conf),
+        workspace_dir=str(restore_workspaces),
+        env_file=str(restore_env),
+        database_url=target_database_url,
+        output_uid=str(expected_uid),
+        output_gid=str(expected_gid),
+    ))
+
+    restored_env = restore_env.read_text(encoding="utf-8")
+    assert "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0" in restored_env
+    assert f"DATABASE_URL={target_database_url}" in restored_env
+    assert "POSTGRES_DB=target_db" in restored_env
+    assert "POSTGRES_USER=target" in restored_env
+    assert "POSTGRES_PASSWORD=target-password" in restored_env
+    assert "source-password" not in restored_env
+    assert "OPERATOR_SENTINEL=restored" in restored_env
+    assert captured_restore["env"]["PGPASSWORD"] == "target-password"
+    assert "--single-transaction" in captured_restore["command"]
+    restored_paths = (
+        restore_env,
+        restore_conf,
+        restore_conf / "config.local.yaml",
+        restore_data,
+        restore_data / ".secrets_master_key",
+        restore_workspaces,
+        restore_workspaces / "evidence.txt",
+    )
+    assert {(path.stat().st_uid, path.stat().st_gid) for path in restored_paths} == {
+        (expected_uid, expected_gid)
+    }
+
+
+def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
+    tmp_path: Path,
+    monkeypatch,
+):
+    backup = _build_verified_backup(tmp_path, backend="postgres")
+    restore_helper = _load_script_module("restore_system")
+    restore_target = tmp_path / "restore-target"
+    restore_data = restore_target / "data"
+    restore_conf = restore_target / "conf"
+    restore_workspaces = restore_target / "workspaces"
+    original_paths = {
+        restore_data / "original.txt": b"original data\n",
+        restore_conf / "original.txt": b"original conf\n",
+        restore_workspaces / "original.txt": b"original workspace\n",
+    }
+    for path, content in original_paths.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    restore_env = restore_target / ".env"
+    target_database_url = "postgresql://target:target-password@postgres:5432/target_db"
+    original_env = (
+        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0\n"
+        "DATABASE_BACKEND=postgres\n"
+        f"DATABASE_URL={target_database_url}\n"
+        "POSTGRES_PASSWORD=target-password\n"
+    ).encode()
+    restore_env.write_bytes(original_env)
+    captured_command: list[str] = []
+
+    def fail_pg_restore(command, **_kwargs):
+        captured_command.extend(command)
+        return SimpleNamespace(returncode=3, stderr="forced restore failure")
+
+    monkeypatch.setattr(restore_helper.subprocess, "run", fail_pg_restore)
+    with pytest.raises(restore_helper.RestoreError, match="forced restore failure"):
+        restore_helper.restore(SimpleNamespace(
+            archive=str(backup),
+            data_dir=str(restore_data),
+            local_conf_dir=str(restore_conf),
+            workspace_dir=str(restore_workspaces),
+            env_file=str(restore_env),
+            database_url=target_database_url,
+            output_uid=str(os.getuid()),
+            output_gid=str(os.getgid()),
+        ))
+
+    assert "--single-transaction" in captured_command
+    assert restore_env.read_bytes() == original_env
+    for path, content in original_paths.items():
+        assert path.read_bytes() == content
+    assert not list(restore_target.rglob(".darklab-restore-*"))
+    assert not [path for path in restore_target.iterdir() if ".restore-" in path.name]
+
+
+def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path):
+    payload = _build_payload(tmp_path)
+    install_dir = tmp_path / "managed deployment"
+    installed = _run_setup(payload, install_dir, tmp_path / "setup-run")
+    assert installed.returncode == 0, installed.stderr
+    backup = _build_verified_backup(tmp_path / "backup-source")
+    lifecycle_dir = tmp_path / "lifecycle"
+    lifecycle_dir.mkdir()
+    bin_dir, log_path = _fake_docker(lifecycle_dir)
+    env = os.environ.copy()
+    env.update({
+        "FAKE_BACKUP_ARCHIVE": str(backup),
+        "FAKE_DOCKER_LOG": str(log_path),
+        "FAKE_RESTORE_EXIT": "7",
+        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+    })
+
+    restored = subprocess.run(
+        [str(install_dir / "darklab-deploy"), "restore", str(backup)],
+        cwd=install_dir,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert restored.returncode != 0
+    assert "restore failed; the app remains stopped" in restored.stderr
+    assert "Recover with: ./darklab-deploy restore" in restored.stderr
+    docker_log = log_path.read_text(encoding="utf-8")
+    assert " stop shell" in docker_log
+    assert "/app/tools/restore_system.py" in docker_log
+    assert f"--output-uid {os.getuid()}" in docker_log
+    assert f"--output-gid {os.getgid()}" in docker_log
+    assert " up -d shell" not in docker_log
+
+
+def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_path: Path):
     current_payload = _build_payload_for_version(tmp_path, RELEASE_VERSION)
     next_version = "2.6.1"
     next_payload = _build_payload_for_version(tmp_path, next_version)
+    package_root = tmp_path / "package-root"
+    version_root = package_root / next_version
+    version_root.mkdir(parents=True)
+    archive_name = f"darklab-shell-deploy-{next_version}.tar.gz"
+    for source in next_payload.iterdir():
+        if source.name != f"{archive_name}.sha256":
+            shutil.copy2(source, version_root / source.name)
+    (version_root / "SHA256SUMS.sigstore.json").write_text(
+        '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n',
+        encoding="utf-8",
+    )
+
+    install_dir = tmp_path / "managed deployment"
+    installed = _run_setup(current_payload, install_dir, tmp_path / "setup-run")
+    assert installed.returncode == 0, installed.stderr
+    backup = _build_verified_backup(tmp_path / "backup-source")
+    lifecycle_dir = tmp_path / "lifecycle"
+    lifecycle_dir.mkdir()
+    bin_dir, log_path = _fake_docker(lifecycle_dir)
+    env = os.environ.copy()
+    env.update({
+        "DARKLAB_SETUP_ALLOW_TEST_URLS": "1",
+        "FAKE_COSIGN_VERIFY_EXIT": "23",
+        "FAKE_DOCKER_LOG": str(log_path),
+        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+    })
+    command = [
+        str(install_dir / "darklab-deploy"),
+        "upgrade",
+        next_version,
+        "--base-url",
+        package_root.as_uri(),
+        "--backup",
+        str(backup),
+    ]
+
+    rejected = subprocess.run(
+        command,
+        cwd=install_dir,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert rejected.returncode != 0
+    assert "publisher signature verification failed" in rejected.stderr
+    assert json.loads((install_dir / "release-manifest.json").read_text())["version"] == (
+        RELEASE_VERSION
+    )
+    env["FAKE_COSIGN_VERIFY_EXIT"] = "0"
+    upgraded = subprocess.run(
+        command,
+        cwd=install_dir,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert upgraded.returncode == 0, upgraded.stderr
+    assert json.loads((install_dir / "release-manifest.json").read_text())["version"] == (
+        next_version
+    )
+    docker_log = log_path.read_text(encoding="utf-8")
+    assert (
+        "ghcr.io/sigstore/cosign/cosign:v3.0.6@"
+        "sha256:de9c65609e6bde17e6b48de485ee788407c9502fa08b8f4459f595b21f56cd00"
+    ) in docker_log
+    assert "verify-blob /release/SHA256SUMS" in docker_log
+    assert "--bundle /release/SHA256SUMS.sigstore.json" in docker_log
+    assert (
+        "--certificate-identity "
+        "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.1"
+    ) in docker_log
+    assert "--certificate-oidc-issuer https://gitlab.com" in docker_log
+
+
+def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(tmp_path: Path):
+    current_payload = _build_payload_for_version(tmp_path, RELEASE_VERSION)
+    next_version = "2.6.1"
+    next_payload = _build_payload_for_version(
+        tmp_path,
+        next_version,
+        env_example_append="\nNEW_RELEASE_SETTING=available\n",
+    )
     install_dir = tmp_path / "managed deployment"
     setup_dir = tmp_path / "setup-run"
     installed = _run_setup(current_payload, install_dir, setup_dir)
@@ -2030,6 +2461,168 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         "PATH": f"{bin_dir}{os.pathsep}{lifecycle_env['PATH']}",
     })
     next_archive = next_payload / f"darklab-shell-deploy-{next_version}.tar.gz"
+
+    rollback_install_dir = tmp_path / "rollback deployment"
+    rollback_installed = _run_setup(
+        current_payload,
+        rollback_install_dir,
+        tmp_path / "rollback-setup",
+    )
+    assert rollback_installed.returncode == 0, rollback_installed.stderr
+    rollback_secret = "rollback-secret-must-not-be-logged"
+    with (rollback_install_dir / ".env").open("a", encoding="utf-8") as env_file:
+        env_file.write(f"ROLLBACK_SECRET={rollback_secret}\n")
+    rollback_operator_files = {
+        "conf/operator.local.yaml": "operator config\n",
+        "data/operator-state.txt": "operator data\n",
+        "workspaces/operator-evidence.txt": "operator workspace\n",
+    }
+    for relative_path, content in rollback_operator_files.items():
+        operator_path = rollback_install_dir / relative_path
+        operator_path.parent.mkdir(parents=True, exist_ok=True)
+        operator_path.write_text(content, encoding="utf-8")
+    failure_bin = tmp_path / "rollback-failure-bin"
+    failure_bin.mkdir()
+    real_cp = shutil.which("cp")
+    real_mv = shutil.which("mv")
+    assert real_cp is not None
+    assert real_mv is not None
+    cp_wrapper = failure_bin / "cp"
+    cp_wrapper.write_text(
+        "#!/bin/sh\nexec \"$REAL_CP\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    cp_wrapper.chmod(0o755)
+    mv_wrapper = failure_bin / "mv"
+    mv_wrapper.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in */.env.next.*) exit 74 ;; esac\n"
+        "exec \"$REAL_MV\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    mv_wrapper.chmod(0o755)
+    rollback_env = {
+        **lifecycle_env,
+        "PATH": f"{failure_bin}{os.pathsep}{lifecycle_env['PATH']}",
+        "REAL_CP": real_cp,
+        "REAL_MV": real_mv,
+    }
+    verified_rollback = subprocess.run(
+        [
+            str(rollback_install_dir / "darklab-deploy"),
+            "upgrade",
+            next_version,
+            "--archive",
+            str(next_archive),
+            "--backup",
+            str(backup),
+        ],
+        cwd=rollback_install_dir,
+        env=rollback_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert verified_rollback.returncode != 0
+    assert "verified rollback restored the previous managed files and .env" in (
+        verified_rollback.stderr
+    )
+    assert "ERROR upgrade rollback incomplete" not in verified_rollback.stderr
+    assert rollback_secret not in verified_rollback.stderr
+    assert json.loads(
+        (rollback_install_dir / "release-manifest.json").read_text(encoding="utf-8")
+    )["version"] == RELEASE_VERSION
+    for relative_path, content in rollback_operator_files.items():
+        assert (rollback_install_dir / relative_path).read_text(encoding="utf-8") == content
+
+    cp_wrapper.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in */rollback/compose.yaml) exit 73 ;; esac\n"
+        "exec \"$REAL_CP\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    cp_wrapper.chmod(0o755)
+    partial_rollback = subprocess.run(
+        [
+            str(rollback_install_dir / "darklab-deploy"),
+            "upgrade",
+            next_version,
+            "--archive",
+            str(next_archive),
+            "--backup",
+            str(backup),
+        ],
+        cwd=rollback_install_dir,
+        env=rollback_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert partial_rollback.returncode != 0
+    assert "rollback check failed action=restore path=compose.yaml" in partial_rollback.stderr
+    assert "ERROR upgrade rollback incomplete" in partial_rollback.stderr
+    assert "deployment may contain mixed release files" in partial_rollback.stderr
+    assert f"Recover from verified pre-upgrade backup: {backup}" in partial_rollback.stderr
+    assert "verified rollback restored" not in partial_rollback.stderr
+    assert rollback_secret not in partial_rollback.stderr
+    for relative_path, content in rollback_operator_files.items():
+        assert (rollback_install_dir / relative_path).read_text(encoding="utf-8") == content
+
+    corrupt_archive = tmp_path / "corrupt-release.tar.gz"
+    corrupt_archive.write_bytes(b"not a gzip archive\n")
+    corrupt_archive.with_name(f"{corrupt_archive.name}.sha256").write_text(
+        f"{_sha256(corrupt_archive)}  {corrupt_archive.name}\n",
+        encoding="utf-8",
+    )
+    corrupt_upgrade = subprocess.run(
+        [
+            str(install_dir / "darklab-deploy"),
+            "upgrade",
+            next_version,
+            "--archive",
+            str(corrupt_archive),
+            "--backup",
+            str(backup),
+        ],
+        cwd=install_dir,
+        env=lifecycle_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert corrupt_upgrade.returncode != 0
+    assert "archive could not be listed: corrupt-release.tar.gz" in corrupt_upgrade.stderr
+
+    unsafe_source = tmp_path / "unsafe-release-entry"
+    unsafe_source.write_text("must not escape\n", encoding="utf-8")
+    unsafe_archive = tmp_path / "unsafe-release.tar.gz"
+    with tarfile.open(unsafe_archive, "w:gz") as archive:
+        archive.add(unsafe_source, arcname="../escape")
+    unsafe_archive.with_name(f"{unsafe_archive.name}.sha256").write_text(
+        f"{_sha256(unsafe_archive)}  {unsafe_archive.name}\n",
+        encoding="utf-8",
+    )
+    unsafe_upgrade = subprocess.run(
+        [
+            str(install_dir / "darklab-deploy"),
+            "upgrade",
+            next_version,
+            "--archive",
+            str(unsafe_archive),
+            "--backup",
+            str(backup),
+        ],
+        cwd=install_dir,
+        env=lifecycle_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert unsafe_upgrade.returncode != 0
+    assert "archive contains an unsafe path: ../escape" in unsafe_upgrade.stderr
+    assert json.loads((install_dir / "release-manifest.json").read_text())["version"] == (
+        RELEASE_VERSION
+    )
 
     original_compose = (install_dir / "compose.yaml").read_bytes()
     (install_dir / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
@@ -2069,8 +2662,14 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         text=True,
     )
     assert upgraded.returncode == 0, upgraded.stderr
+    assert "--archive checks the adjacent .sha256 only" in upgraded.stderr
     assert "from 2.6.0 to 2.6.1" in upgraded.stdout
+    assert "New settings are available in .env.example:" in upgraded.stdout
+    assert "  NEW_RELEASE_SETTING" in upgraded.stdout
+    assert "NEW_RELEASE_SETTING=available" not in upgraded.stdout
+    assert "Your existing .env was not changed" in upgraded.stdout
     assert (install_dir / "backups" / "darklab-backup-auto.tar.gz").is_file()
+    assert "--result-path-only" in log_path.read_text(encoding="utf-8")
     manifest = json.loads((install_dir / "release-manifest.json").read_text())
     assert manifest["version"] == next_version
     assert "docker.io/darklabsh/darklab-shell:2.6.1" in (
@@ -2079,9 +2678,56 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     env_text = (install_dir / ".env").read_text(encoding="utf-8")
     assert "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.1" in env_text
     assert operator_files[".env"] in env_text
+    assert "NEW_RELEASE_SETTING" not in env_text
+    assert "NEW_RELEASE_SETTING=available" in (
+        install_dir / ".env.example"
+    ).read_text(encoding="utf-8")
     for relative_path, content in operator_files.items():
         if relative_path != ".env":
             assert (install_dir / relative_path).read_text(encoding="utf-8") == content
+
+    postgres_env_text = f"{env_text}DATABASE_BACKEND=postgres\n"
+    (install_dir / ".env").write_text(postgres_env_text, encoding="utf-8")
+    log_path.write_text("", encoding="utf-8")
+    stopped_postgres_backup = subprocess.run(
+        [str(install_dir / "darklab-deploy"), "backup"],
+        cwd=install_dir,
+        env=lifecycle_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert stopped_postgres_backup.returncode == 0, stopped_postgres_backup.stderr
+    stopped_postgres_log = log_path.read_text(encoding="utf-8").splitlines()
+    postgres_start = next(
+        index for index, line in enumerate(stopped_postgres_log)
+        if " up -d --wait postgres" in line
+    )
+    postgres_backup = next(
+        index for index, line in enumerate(stopped_postgres_log)
+        if "/app/tools/backup_system.py" in line
+    )
+    postgres_stop = next(
+        index for index, line in enumerate(stopped_postgres_log)
+        if " stop postgres" in line
+    )
+    assert postgres_start < postgres_backup < postgres_stop
+
+    log_path.write_text("", encoding="utf-8")
+    running_postgres_env = {**lifecycle_env, "FAKE_POSTGRES_RUNNING": "1"}
+    running_postgres_backup = subprocess.run(
+        [str(install_dir / "darklab-deploy"), "backup"],
+        cwd=install_dir,
+        env=running_postgres_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert running_postgres_backup.returncode == 0, running_postgres_backup.stderr
+    running_postgres_log = log_path.read_text(encoding="utf-8")
+    assert " up -d --wait postgres" not in running_postgres_log
+    assert " stop postgres" not in running_postgres_log
+    (install_dir / ".env").write_text(env_text, encoding="utf-8")
 
     downgrade = subprocess.run(
         [
@@ -2175,6 +2821,8 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         workspace_dir=str(restore_workspaces),
         env_file=str(restore_env),
         database_url="",
+        output_uid=str(os.getuid()),
+        output_gid=str(os.getgid()),
     ))
     assert (restore_data / "history.db").read_bytes() == b"sqlite-backup"
     assert (restore_data / ".secrets_master_key").read_text(encoding="utf-8") == "vault-key\n"
@@ -2202,6 +2850,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         restore_helper.subprocess.run = original_run
     assert "private-password" not in " ".join(captured_restore["command"])
     assert captured_restore["env"]["PGPASSWORD"] == "private-password"
+    assert "--single-transaction" in captured_restore["command"]
     assert captured_restore["command"][-2:] == ["darklab_shell", str(tmp_path / "postgres.dump")]
 
     removed = subprocess.run(

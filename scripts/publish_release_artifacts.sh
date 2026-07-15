@@ -58,7 +58,7 @@ publish_gitlab_image() {
     trap write_gitlab_status EXIT
 
     python3 "$script_dir/check_versions.sh" --release-version "$release_version"
-    python3 "$script_dir/check_container_licenses.py"
+    python3 "$script_dir/check_container_licenses.py" --release
     echo "$CI_REGISTRY_PASSWORD" \
         | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     if docker manifest inspect -v "$gitlab_image" > gitlab-existing.json 2>/dev/null; then
@@ -168,7 +168,7 @@ publish_dockerhub_image() {
     if ! docker buildx imagetools create \
         --prefer-index=false \
         --tag "$dockerhub_release_image" \
-        "$GITLAB_IMAGE" > dockerhub-copy.txt 2>&1; then
+        "${GITLAB_IMAGE}@${GITLAB_DIGEST}" > dockerhub-copy.txt 2>&1; then
         cat dockerhub-copy.txt
         exit 1
     fi

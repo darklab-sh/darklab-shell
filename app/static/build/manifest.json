@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.081eb19177d9.js",
-      "hash": "4e5df86722b701f571224c3c3ae9686e7c864c89d47a833a9411293cb0b4deac",
+      "path": "/static/build/shell-bootstrap.80ebef62ab13.js",
+      "hash": "d112fb8e348399c1bb9a2c8b33f55cd0326b60091da7f8acc7dc5f50429f536e",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -170,7 +170,7 @@
       "source_hashes": {
         "/static/js/app.js": "bef950da5d06d47d17202440a4aa70271cdc715ef66d2dd39caaed2f80b25231",
         "/static/js/autocomplete.js": "8cedc623ae1ca35d3f4cf3a6273eb53cc115b14ea08b4713e6f06ee7407a2a8a",
-        "/static/js/controller.js": "690e2c97785192f962da73fe699a56a18b60e61857569c31a8e63e0d85787263",
+        "/static/js/controller.js": "6fbd0c070d31937fc01961baa6809466a44b9185b1e5bfb45d44721611dd4d32",
         "/static/js/controller_action_bridge.js": "9ada2d50fd147c91c5eada310cc5f36aeb8fe5c5f2d09ec2c1596608367206f2",
         "/static/js/core/app_preferences_core.js": "d97d08ede72ab582c638c440aeb469a8273f86508bae0899421bc322f23d129a",
         "/static/js/core/autocomplete_core.js": "12e7cb9398f778c9925f6111f1325fa79192d5f81594839d0875fb8d8c3d6d8b",

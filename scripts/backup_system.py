@@ -1572,10 +1572,11 @@ def _apply_retention_plan(
     summary["removal_failures"] = removal_failures
     failures = int(summary.get("inspection_failures") or 0) + removal_failures
     summary["failures"] = failures
-    _info(
-        f"Retention: examined {int(summary.get('candidates_examined') or 0)} backup(s), "
-        f"removed {removed}, failures {failures}."
-    )
+    if not getattr(ctx.args, "result_path_only", False):
+        _info(
+            f"Retention: examined {int(summary.get('candidates_examined') or 0)} backup(s), "
+            f"removed {removed}, failures {failures}."
+        )
 
 
 def _prepare_requested_inputs(ctx: BackupContext) -> None:
@@ -1802,6 +1803,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lock-file", default="", help="Lock file path. Defaults to <output-dir>/.backup.lock.")
     parser.add_argument("--command-timeout", type=int, default=3600, help="Timeout for pg_dump and Docker copy/export commands.")
     parser.add_argument("--dry-run", action="store_true", help="Resolve config and planned sources without writing a backup.")
+    parser.add_argument(
+        "--result-path-only",
+        action="store_true",
+        help="Print only the completed backup path to stdout for machine callers.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1821,9 +1827,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_gid = os.environ.get("DARKLAB_BACKUP_OUTPUT_GID", "")
         if output_uid.isdigit() and output_gid.isdigit():
             os.chown(result, int(output_uid), int(output_gid))
-        _info(f"Backup written to {result}")
-        if ctx.warnings:
-            _info(f"Completed with {len(ctx.warnings)} warning(s). Review the warning output and manifest.json.")
+        if args.result_path_only:
+            print(result, flush=True)
+        else:
+            _info(f"Backup written to {result}")
+            if ctx.warnings:
+                _info(f"Completed with {len(ctx.warnings)} warning(s). Review the warning output and manifest.json.")
         return 0
     except BackupError as exc:
         print(f"backup failed: {exc}", file=sys.stderr)

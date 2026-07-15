@@ -20,6 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DOCKERHUB_IMAGE = "docker.io/darklabsh/darklab-shell"
 DEFAULT_GITLAB_IMAGE = "registry.gitlab.com/darklab.sh/darklab_shell"
+COSIGN_IMAGE = (
+    "ghcr.io/sigstore/cosign/cosign:v3.0.6@"
+    "sha256:de9c65609e6bde17e6b48de485ee788407c9502fa08b8f4459f595b21f56cd00"
+)
+PROJECT_URL = "https://gitlab.com/darklab.sh/darklab_shell"
 PACKAGE_NAME = "darklab-shell-deploy"
 PROJECT_PACKAGE_API = "https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic"
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$")
@@ -218,6 +223,8 @@ def build_payload(
         "GITLAB_DIGEST": gitlab_digest,
         "DOCKERHUB_IMAGE": expected_image,
         "DOCKERHUB_DIGEST": dockerhub_digest,
+        "COSIGN_IMAGE": COSIGN_IMAGE,
+        "PROJECT_URL": PROJECT_URL,
         "COMPRESSED_BYTES": str(compressed_bytes),
         "UNPACKED_BYTES": str(unpacked_bytes),
     }

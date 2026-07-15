@@ -27,7 +27,7 @@ function loadTabsFns({
   maxTabs = 3,
   maxOutputLines = 100,
   version = undefined,
-  projectReadme = undefined,
+  projectSource = undefined,
   shareRedactionEnabled = true,
   shareRedactionRules = [],
   confirmPermalinkRedactionChoice = () =>
@@ -106,7 +106,7 @@ function loadTabsFns({
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
         ...(version !== undefined && { version }),
-        ...(projectReadme !== undefined && { project_readme: projectReadme }),
+        ...(projectSource !== undefined && { project_source: projectSource }),
       },
       setStatus: () => {},
       clearSearch: () => {},

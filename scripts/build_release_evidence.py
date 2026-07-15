@@ -19,12 +19,17 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$")
 DIGEST_RE = re.compile(r"^sha256:([0-9a-f]{64})$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
 BASE_IMAGE_RE = re.compile(r"^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$")
+GITLAB_CLI_IMAGE_RE = re.compile(
+    r"^registry\.gitlab\.com/gitlab-org/cli:v[0-9]+\.[0-9]+\.[0-9]+"
+    r"@sha256:[0-9a-f]{64}$"
+)
 BUILD_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 EVIDENCE_FORMAT = "darklab_shell.release_evidence.v1"
 PROVENANCE_TYPE = "https://in-toto.io/Statement/v1"
 PROVENANCE_PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 BUILD_INPUTS_FORMAT = "darklab_shell.release_build_inputs.v1"
 BUILD_INPUT_FILES = (
+    ".gitlab-ci.yml",
     ".dockerignore",
     "Dockerfile",
     "app/requirements.txt",
@@ -100,6 +105,7 @@ def _build_input_inventory(
     base_image: str,
     base_image_digest: str,
     build_date: str,
+    gitlab_cli_image: str,
 ) -> dict[str, Any]:
     dockerfile_path = ROOT / "Dockerfile"
     dockerfile = dockerfile_path.read_text(encoding="utf-8")
@@ -171,6 +177,9 @@ def _build_input_inventory(
             "digest": base_image_digest,
             "resolved_reference": f"{base_image}@{base_image_digest}",
         },
+        "release_tool_images": {
+            "gitlab_cli": gitlab_cli_image,
+        },
         "effective_build_args": dict(sorted(dockerfile_args.items())),
         "network_build_instructions": network_instructions,
         "moving_selectors": moving_selectors,
@@ -209,6 +218,7 @@ def build_evidence(
     vulnerability_report_path: Path,
     syft_version: str,
     grype_version: str,
+    gitlab_cli_image: str,
     output_dir: Path,
 ) -> None:
     if not VERSION_RE.fullmatch(version):
@@ -227,6 +237,8 @@ def build_evidence(
         raise ValueError("Base image digest must be sha256:<64 lowercase hex characters>")
     if not BUILD_DATE_RE.fullmatch(build_date):
         raise ValueError("Build date must use UTC YYYY-MM-DDTHH:MM:SSZ format")
+    if not GITLAB_CLI_IMAGE_RE.fullmatch(gitlab_cli_image):
+        raise ValueError("GitLab CLI image must use an exact vMAJOR.MINOR.PATCH tag and digest")
     if commit_tag != f"v{version}":
         raise ValueError(f"Commit tag must be v{version}")
     required_strings = {
@@ -291,6 +303,7 @@ def build_evidence(
         base_image=base_image,
         base_image_digest=base_image_digest,
         build_date=build_date,
+        gitlab_cli_image=gitlab_cli_image,
     )
     build_inputs_path.write_text(
         json.dumps(build_inputs, indent=2, sort_keys=True) + "\n",
@@ -391,6 +404,9 @@ def build_evidence(
             "base_image": f"{base_image}@{base_image_digest}",
             "container_image_byte_reproducible": False,
         },
+        "release_tools": {
+            "gitlab_cli_image": gitlab_cli_image,
+        },
         "sbom": {
             "path": sbom_name,
             "format": "CycloneDX JSON",
@@ -434,6 +450,7 @@ def main() -> int:
     parser.add_argument("--vulnerability-report", type=Path, required=True)
     parser.add_argument("--syft-version", required=True)
     parser.add_argument("--grype-version", required=True)
+    parser.add_argument("--gitlab-cli-image", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     build_evidence(
@@ -452,6 +469,7 @@ def main() -> int:
         vulnerability_report_path=args.vulnerability_report,
         syft_version=args.syft_version,
         grype_version=args.grype_version,
+        gitlab_cli_image=args.gitlab_cli_image,
         output_dir=args.output_dir,
     )
     return 0

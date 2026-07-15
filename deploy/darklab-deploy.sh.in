@@ -6,6 +6,8 @@ set -eu
 
 RELEASE_VERSION="@RELEASE_VERSION@"
 PACKAGE_ROOT_URL="@PACKAGE_ROOT_URL@"
+COSIGN_IMAGE="@COSIGN_IMAGE@"
+PROJECT_URL="@PROJECT_URL@"
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 
 usage() {
@@ -15,6 +17,8 @@ Usage: darklab-deploy COMMAND [OPTIONS]
 Manage a repository-free darklab_shell deployment.
 
 Commands:
+  install --bundle DIR --target DIR
+                                 Install a verified bundle (used internally by setup.sh)
   status                         Validate managed files and show the installed release
   backup [--keep-days DAYS]      Create and verify a SQLite or Postgres backup
   restore BACKUP                 Restore a verified backup after taking a safety backup
@@ -24,7 +28,7 @@ Commands:
   version                        Print the installed deployment-tool version
 
 Upgrade options:
-  --archive PATH                 Use an already downloaded deployment archive
+  --archive PATH                 Use an operator-verified archive and adjacent .sha256
   --backup PATH                  Use an existing backup instead of creating one
   --base-url URL                 Override the package root URL (HTTPS only)
 EOF
@@ -49,6 +53,34 @@ json_string() {
     sed -n \
         "s/^[[:space:]]*\"${json_key}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\"[[:space:]]*,\\{0,1\\}[[:space:]]*$/\\1/p" \
         "$json_path"
+}
+
+new_env_keys() {
+    operator_env=$1
+    release_env=$2
+    awk '
+        function env_key(line, equals_at, key) {
+            sub(/\r$/, "", line)
+            sub(/^[ \t]+/, "", line)
+            if (line !~ /^[A-Za-z_][A-Za-z0-9_]*[ \t]*=/) return ""
+            equals_at = index(line, "=")
+            key = substr(line, 1, equals_at - 1)
+            sub(/[ \t]+$/, "", key)
+            return key
+        }
+        FNR == NR {
+            key = env_key($0)
+            if (key != "") present[key] = 1
+            next
+        }
+        {
+            key = env_key($0)
+            if (key != "" && !present[key] && !reported[key]) {
+                print key
+                reported[key] = 1
+            }
+        }
+    ' "$operator_env" "$release_env"
 }
 
 safe_relative_path() {
@@ -82,11 +114,22 @@ verify_checksum_tree() {
 
 verify_tar_paths() {
     verify_tar_archive=$1
-    tar -tzf "$verify_tar_archive" | while IFS= read -r archive_path; do
+    tar_listing=$(mktemp "${TMPDIR:-/tmp}/darklab-tar-listing.XXXXXX")
+    if ! tar -tzf "$verify_tar_archive" > "$tar_listing"; then
+        rm -f "$tar_listing"
+        fail "archive could not be listed: $(basename "$verify_tar_archive")"
+    fi
+    unsafe_archive_path=""
+    while IFS= read -r archive_path || [ -n "$archive_path" ]; do
         trimmed=${archive_path%/}
-        safe_relative_path "$trimmed" \
-            || fail "archive contains an unsafe path: $archive_path"
-    done
+        if ! safe_relative_path "$trimmed"; then
+            unsafe_archive_path=$archive_path
+            break
+        fi
+    done < "$tar_listing"
+    rm -f "$tar_listing"
+    [ -z "$unsafe_archive_path" ] \
+        || fail "archive contains an unsafe path: $unsafe_archive_path"
 }
 
 extract_deployment_archive() {
@@ -118,7 +161,7 @@ verify_backup_archive() {
 
 require_common_tools() {
     missing=""
-    for command_name in basename chmod cp docker find grep gzip id mkdir mktemp mv od rm sed tail tar tr; do
+    for command_name in awk basename chmod cp docker find grep gzip id mkdir mktemp mv od rm sed tail tar tr; do
         if ! command -v "$command_name" >/dev/null 2>&1; then
             missing="${missing} ${command_name}"
         fi
@@ -221,6 +264,18 @@ managed_status() {
         "$installed_version" "$installed_image"
 }
 
+uses_bundled_postgres() {
+    database_backend=$(sed -n 's/^DATABASE_BACKEND=//p' "$script_dir/.env" | tail -n 1)
+    [ "$database_backend" = "postgres" ] || return 1
+    database_url=$(sed -n 's/^DATABASE_URL=//p' "$script_dir/.env" | tail -n 1)
+    case "$database_url" in
+        postgresql://postgres:*|postgresql://postgres/*|postgresql://*@postgres:*|postgresql://*@postgres/*)
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 version_is_newer() {
     old_version=$1
     new_version=$2
@@ -248,19 +303,43 @@ download_release_archive() {
     base_url=$2
     destination=$3
     archive_name="darklab-shell-deploy-${version}.tar.gz"
+    checksum_manifest="$destination/SHA256SUMS"
+    sigstore_bundle="$destination/SHA256SUMS.sigstore.json"
     case "$base_url" in
         https://*) ;;
         file://*) [ "${DARKLAB_SETUP_ALLOW_TEST_URLS:-0}" = "1" ] \
             || fail "non-HTTPS release URL is not allowed" ;;
         *) fail "release URL must use HTTPS" ;;
     esac
+    curl -fsSL "$base_url/SHA256SUMS" -o "$checksum_manifest" 2>/dev/null \
+        || fail "could not download signed checksum manifest for $version"
+    curl -fsSL "$base_url/SHA256SUMS.sigstore.json" -o "$sigstore_bundle" 2>/dev/null \
+        || fail "could not download checksum signature for $version"
+    signing_identity="${PROJECT_URL}//.gitlab-ci.yml@refs/tags/v${version}"
+    if ! docker run --rm --user 0:0 \
+        --volume "$destination:/release:ro,Z" \
+        "$COSIGN_IMAGE" verify-blob /release/SHA256SUMS \
+        --bundle /release/SHA256SUMS.sigstore.json \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer https://gitlab.com; then
+        fail "publisher signature verification failed for release $version"
+    fi
+    expected=$(awk -v archive="$archive_name" '
+        $2 == archive && NF == 2 && length($1) == 64 && $1 !~ /[^0-9a-f]/ {
+            matches += 1
+            digest = $1
+        }
+        END {
+            if (matches == 1) print digest
+            else exit 1
+        }
+    ' "$checksum_manifest") \
+        || fail "signed checksum manifest does not contain exactly one entry for $archive_name"
     curl -fsSL "$base_url/$archive_name" -o "$destination/$archive_name" 2>/dev/null \
         || fail "could not download release archive for $version"
-    curl -fsSL "$base_url/$archive_name.sha256" -o "$destination/$archive_name.sha256" 2>/dev/null \
-        || fail "could not download release checksum for $version"
-    expected=$(sed 's/[[:space:]].*$//' "$destination/$archive_name.sha256")
     actual=$(sha256_file "$destination/$archive_name")
     [ "$actual" = "$expected" ] || fail "release archive checksum mismatch for $version"
+    printf '%s  %s\n' "$expected" "$archive_name" > "$destination/$archive_name.sha256"
     printf '%s\n' "$destination/$archive_name"
 }
 
@@ -288,6 +367,7 @@ create_repository_free_backup() {
     workspace_root=$(sed -n 's/^WORKSPACE_ROOT=//p' "$script_dir/.env")
     set -- \
         --repository-free \
+        --result-path-only \
         --output-dir /backups \
         --env-file /deployment/.env \
         --conf-dir /app/conf \
@@ -305,6 +385,19 @@ create_repository_free_backup() {
     if [ -n "$keep_days" ]; then
         set -- "$@" --keep-days "$keep_days"
     fi
+    stop_postgres_after_backup=false
+    if uses_bundled_postgres; then
+        if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            ps --status running --services postgres | grep -qx 'postgres'; then
+            stop_postgres_after_backup=true
+            if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+                up -d --wait postgres >&2; then
+                rm -rf "$backup_log" "$backup_verify_stage"
+                fail "could not start the bundled Postgres service for backup"
+            fi
+        fi
+    fi
+    backup_failed=false
     if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
         run --rm --no-deps --user 0:0 --entrypoint python3 \
         --volume "$script_dir:/deployment:ro" \
@@ -314,25 +407,46 @@ create_repository_free_backup() {
         --env "DARKLAB_BACKUP_OUTPUT_UID=$host_uid" \
         --env "DARKLAB_BACKUP_OUTPUT_GID=$host_gid" \
         shell /app/tools/backup_system.py "$@" > "$backup_log"; then
+        backup_failed=true
+    fi
+    if [ "$stop_postgres_after_backup" = true ] && \
+        ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            stop postgres >&2; then
+        cat "$backup_log" >&2
+        rm -rf "$backup_log" "$backup_verify_stage"
+        fail "could not stop the temporary Postgres service after backup"
+    fi
+    if [ "$backup_failed" = true ]; then
         cat "$backup_log" >&2
         rm -rf "$backup_log" "$backup_verify_stage"
         fail "repository-free backup failed"
     fi
-    backup_name=$(sed -n 's|^Backup written to /backups/||p' "$backup_log" | tail -n 1)
-    [ -n "$backup_name" ] || {
+    backup_container_path=$(cat "$backup_log")
+    case "$backup_container_path" in
+        /backups/darklab-backup-*.tar.gz)
+            backup_name=${backup_container_path#/backups/}
+            ;;
+        *) backup_name="" ;;
+    esac
+    case "$backup_name" in
+        *[!A-Za-z0-9._-]*) backup_name="" ;;
+    esac
+    if [ -z "$backup_name" ] || [ "$backup_container_path" != "/backups/$backup_name" ]; then
         cat "$backup_log" >&2
         rm -rf "$backup_log" "$backup_verify_stage"
-        fail "backup helper did not report its archive"
-    }
+        fail "backup helper did not return a valid archive path"
+    fi
     backup_path="$script_dir/backups/$backup_name"
     verify_backup_archive "$backup_path" "$backup_verify_stage"
     if [ "$output_mode" = "path" ]; then
-        cat "$backup_log" >&2
+        printf 'Backup written to %s\n' "$backup_path" >&2
     else
-        cat "$backup_log"
+        printf 'Backup written to %s\n' "$backup_path"
     fi
     rm -rf "$backup_log" "$backup_verify_stage"
-    printf '%s\n' "$backup_path"
+    if [ "$output_mode" = "path" ]; then
+        printf '%s\n' "$backup_path"
+    fi
 }
 
 backup_command() {
@@ -359,6 +473,8 @@ restore_command() {
     verify_backup_archive "$restore_archive" "$restore_verify_stage"
     rm -rf "$restore_verify_stage"
     safety_backup=$(create_repository_free_backup "" path)
+    host_uid=$(id -u)
+    host_gid=$(id -g)
     docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell \
         || fail "could not stop the app before restore"
     if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
@@ -370,10 +486,10 @@ restore_command() {
         --data-dir /data \
         --local-conf-dir /deployment/conf \
         --workspace-dir /workspaces \
-        --env-file /deployment/.env; then
-        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" up -d shell \
-            >/dev/null 2>&1 || true
-        fail "restore failed; the pre-restore backup is $safety_backup"
+        --env-file /deployment/.env \
+        --output-uid "$host_uid" \
+        --output-gid "$host_gid"; then
+        fail "restore failed; the app remains stopped. Recover with: ./darklab-deploy restore \"$safety_backup\""
     fi
     docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" up -d shell \
         || fail "restore completed but the app could not be restarted"
@@ -399,6 +515,10 @@ upgrade_release() {
             *) fail "unknown upgrade option: $1" ;;
         esac
     done
+    if [ -n "$archive" ]; then
+        printf '%s\n' \
+            "darklab-deploy: --archive checks the adjacent .sha256 only; verify the publisher signature before continuing" >&2
+    fi
     managed_status >/dev/null
     current_version=$(json_string "$script_dir/release-manifest.json" version)
     [ "$requested_version" != "$current_version" ] || fail "release $requested_version is already installed"
@@ -433,6 +553,7 @@ upgrade_release() {
         "$upgrade_stage/.env" > "$upgrade_stage/.env.next"
     grep -q "^DARKLAB_IMAGE=${next_image}$" "$upgrade_stage/.env.next" \
         || fail ".env is missing DARKLAB_IMAGE"
+    added_env_keys=$(new_env_keys "$script_dir/.env" "$bundle_root/.env.example")
     docker compose --env-file "$upgrade_stage/.env.next" \
         -f "$bundle_root/compose.yaml" config --quiet \
         || fail "release Compose configuration is invalid"
@@ -472,7 +593,56 @@ upgrade_release() {
             cp "$upgrade_stage/rollback/managed-files.sha256" "$script_dir/managed-files.sha256" 2>/dev/null || true
             cp "$upgrade_stage/rollback/.env" "$script_dir/.env" 2>/dev/null || true
             rm -f "$script_dir"/.*.next.$$ 2>/dev/null || true
-            printf 'darklab-deploy: upgrade failed; restored the previous managed files\n' >&2
+            rollback_failures=0
+            report_rollback_failure() {
+                rollback_failures=$((rollback_failures + 1))
+                printf 'darklab-deploy: rollback check failed action=%s path=%.160s\n' \
+                    "$1" "$2" >&2
+            }
+            rollback_files_match() {
+                rollback_expected=$1
+                rollback_actual=$2
+                [ -f "$rollback_expected" ] && [ -f "$rollback_actual" ] || return 1
+                rollback_expected_digest=$(sha256_file "$rollback_expected" 2>/dev/null) \
+                    || return 1
+                rollback_actual_digest=$(sha256_file "$rollback_actual" 2>/dev/null) \
+                    || return 1
+                [ "$rollback_expected_digest" = "$rollback_actual_digest" ]
+            }
+            while IFS= read -r rollback_row || [ -n "$rollback_row" ]; do
+                [ -n "$rollback_row" ] || continue
+                rollback_expected=${rollback_row%%  *}
+                rollback_path=${rollback_row#*  }
+                rollback_actual=""
+                if [ -f "$script_dir/$rollback_path" ]; then
+                    rollback_actual=$(sha256_file "$script_dir/$rollback_path" 2>/dev/null) || true
+                fi
+                if [ -z "$rollback_actual" ] \
+                    || [ "$rollback_actual" != "$rollback_expected" ]; then
+                    report_rollback_failure restore "$rollback_path"
+                fi
+            done < "$upgrade_stage/rollback/managed-files.sha256"
+            while IFS= read -r next_row || [ -n "$next_row" ]; do
+                [ -n "$next_row" ] || continue
+                next_path=${next_row#*  }
+                if ! grep -Fq "  $next_path" "$upgrade_stage/rollback/managed-files.sha256" \
+                    && [ -e "$script_dir/$next_path" ]; then
+                    report_rollback_failure remove "$next_path"
+                fi
+            done < "$upgrade_stage/next/managed-files.sha256"
+            rollback_files_match \
+                "$upgrade_stage/rollback/managed-files.sha256" \
+                "$script_dir/managed-files.sha256" \
+                || report_rollback_failure restore managed-files.sha256
+            rollback_files_match "$upgrade_stage/rollback/.env" "$script_dir/.env" \
+                || report_rollback_failure restore .env
+            if [ "$rollback_failures" -eq 0 ]; then
+                printf '%s\n' \
+                    'darklab-deploy: upgrade failed; verified rollback restored the previous managed files and .env' >&2
+            else
+                printf '%s\n' \
+                    "darklab-deploy: ERROR upgrade rollback incomplete failures=$rollback_failures; deployment may contain mixed release files. Recover from verified pre-upgrade backup: $backup" >&2
+            fi
         fi
         rm -rf "$upgrade_stage"
         exit "$rollback_status"
@@ -505,6 +675,13 @@ upgrade_release() {
     rm -rf "$upgrade_stage"
     printf 'Upgraded managed deployment files from %s to %s.\n' \
         "$current_version" "$requested_version"
+    if [ -n "$added_env_keys" ]; then
+        printf 'New settings are available in .env.example:\n'
+        printf '%s\n' "$added_env_keys" | while IFS= read -r env_key; do
+            printf '  %s\n' "$env_key"
+        done
+        printf 'Your existing .env was not changed. Review .env.example before restarting.\n'
+    fi
     printf 'The verified pre-upgrade backup is %s. Pull, verify, and restart when ready:\n' "$backup"
     printf '  docker compose pull\n  ./verify-release-image.sh\n  docker compose up -d\n'
 }

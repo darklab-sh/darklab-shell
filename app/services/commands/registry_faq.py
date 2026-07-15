@@ -45,8 +45,8 @@ def _faq_entry_enabled(item, cfg=None):
     return _feature_enabled(feature, cfg)
 
 
-def _project_readme_url(project_readme=None):
-    return project_readme or app_config.PROJECT_README
+def _project_source_url(project_source=None):
+    return project_source or app_config.PROJECT_SOURCE
 
 
 def _normalize_faq_category(value):
@@ -62,8 +62,8 @@ def _normalize_faq_entry(entry):
     return normalized
 
 
-def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
-    readme_url = _project_readme_url(project_readme)
+def _builtin_faq(app_name="darklab_shell", project_source=None, cfg=None):
+    source_url = _project_source_url(project_source)
     entries = [
         {
             "question": "What is this?",
@@ -72,16 +72,19 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
                 f"{app_name} is a lightweight web interface for running network diagnostic and vulnerability "
                 "scanning commands against remote endpoints, with output streamed in real time. It's designed "
                 "for testing and troubleshooting remote hosts. "
-                f"See the project README: {readme_url}; corresponding source code: {app_config.PROJECT_SOURCE}"
+                "It uses the Nmap Security Scanner for supported network scans: https://nmap.org/. "
+                "For details, the project's README, supporting documentation, and source code for this release "
+                f"are available in the darklab_shell GitLab repository: {source_url}"
             ),
             "answer_html": (
                 f"{app_name} is a lightweight web interface for running network diagnostic and vulnerability "
                 "scanning commands against remote endpoints, with output streamed in real time. It's designed for "
-                "testing remote hosts with DNS, port, route, HTTP, and web app checks, without SSH access. For details, see "
-                f"the project <a href=\"{html.escape(readme_url, quote=True)}\" target=\"_blank\" "
-                "rel=\"noopener noreferrer\" class=\"faq-link\">README</a>. The corresponding "
-                f"<a href=\"{html.escape(app_config.PROJECT_SOURCE, quote=True)}\" target=\"_blank\" "
-                "rel=\"noopener noreferrer\" class=\"faq-link\">source code for this release</a> is in the same repository."
+                "testing remote hosts with DNS, port, route, HTTP, and web app checks, without SSH access. For details, "
+                "the project's README, supporting documentation, and source code for this release are available in the "
+                f"<a href=\"{html.escape(source_url, quote=True)}\" target=\"_blank\" "
+                "rel=\"noopener noreferrer\" class=\"faq-link\">darklab_shell GitLab repository</a>. "
+                "Supported network scans use the <a href=\"https://nmap.org/\" target=\"_blank\" "
+                "rel=\"noopener noreferrer\" class=\"faq-link\">Nmap Security Scanner</a>."
             ),
         },
         {
@@ -408,7 +411,6 @@ _FAQ_CODE_RE = re.compile(r'`([^`]+)`')
 
 def _faq_inline_markup(text):
     text = html.escape(str(text), quote=False)
-
     def repl_chip(match):
         raw = match.group(1).strip()
         if not raw:
@@ -437,7 +439,6 @@ def render_faq_markup(text):
     """Render a safe FAQ mini-markup string to HTML."""
     if text is None:
         return ""
-
     lines = str(text).replace('\r\n', '\n').replace('\r', '\n').split('\n')
     blocks = []
     i = 0
@@ -446,7 +447,6 @@ def render_faq_markup(text):
         if not line.strip():
             i += 1
             continue
-
         stripped = line.lstrip()
         if stripped.startswith('- ') or stripped.startswith('* '):
             items = []
@@ -495,13 +495,13 @@ def load_faq(path: str, cfg=None, *, load_yaml_list_with_local: Callable[[str], 
 def load_all_faq(
     path: str,
     app_name: str = "darklab_shell",
-    project_readme=None,
+    project_source=None,
     cfg=None,
     *,
     load_yaml_list_with_local: Callable[[str], list],
 ) -> list[dict[str, object]]:
     """Return the built-in FAQ entries followed by any custom FAQ entries."""
-    builtins: list[dict[str, object]] = [dict(item) for item in deepcopy(_builtin_faq(app_name, project_readme, cfg))]
+    builtins: list[dict[str, object]] = [dict(item) for item in deepcopy(_builtin_faq(app_name, project_source, cfg))]
     return [
         *builtins,
         *load_faq(path, cfg, load_yaml_list_with_local=load_yaml_list_with_local),

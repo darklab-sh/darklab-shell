@@ -21,6 +21,8 @@ DOCKERFILE = ROOT / "Dockerfile"
 INVENTORY = ROOT / "deploy" / "container-licenses.json"
 NOTICE = ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt"
 LICENSE_DIR = ROOT / "deploy" / "third-party-licenses"
+NMAP_LICENSE = LICENSE_DIR / "Nmap-7.95-NPSL-0.95.txt"
+NMAP_LICENSE_SHA256 = "9d9a9a763c0e6145172cfe7d8483e23b38ce60b6c79a82e4894242917bdae6d3"
 WPSCAN_LICENSE = LICENSE_DIR / "WPScan-4.0.1.txt"
 WPSCAN_LICENSE_SHA256 = "72eaecf9c3497bb34fb5722eba38a4b3b0ae39235c17378547101b8329b51008"
 IMAGE_INVENTORY = Path("/usr/share/doc/darklab-shell/container-licenses.json")
@@ -187,7 +189,38 @@ def _validate_install_coverage(
         )
 
 
-def main() -> int:
+def _validate_nmap_redistribution(
+    components: list[object],
+    *,
+    require_approval: bool,
+) -> None:
+    nmap_components = [
+        component
+        for component in components
+        if isinstance(component, dict) and component.get("name") == "Debian Nmap package"
+    ]
+    if len(nmap_components) != 1:
+        raise ValueError("container license inventory must contain one Debian Nmap package")
+    component = nmap_components[0]
+    if component.get("license") != "LicenseRef-Nmap-Public-Source-0.95":
+        raise ValueError("Debian Nmap package must declare NPSL 0.95")
+    review = component.get("redistribution_review")
+    allowed_reviews = {
+        "requires-upstream-waiver-oem-or-legal-approval",
+        "approved-by-upstream-waiver",
+        "approved-by-oem-license",
+        "approved-by-qualified-legal-review",
+    }
+    if review not in allowed_reviews:
+        raise ValueError("Debian Nmap package has an invalid redistribution review status")
+    if require_approval and not str(review).startswith("approved-by-"):
+        raise ValueError(
+            "public image publication requires an Nmap upstream waiver, OEM license, "
+            "or qualified legal approval"
+        )
+
+
+def main(*, require_redistribution_approval: bool = False) -> int:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
     components = inventory.get("components")
@@ -217,6 +250,10 @@ def main() -> int:
             raise ValueError(f"{name} has not completed license review")
 
     _validate_install_coverage(inventory, names, dockerfile)
+    _validate_nmap_redistribution(
+        components,
+        require_approval=require_redistribution_approval,
+    )
 
     docker_version_args = _version_args(dockerfile) - {"APP_VERSION"}
     declared_version_args = _declared_version_args(components)
@@ -227,13 +264,22 @@ def main() -> int:
             f"license inventory version args drifted; missing={missing_args}, unknown={unknown_args}"
         )
 
-    required_files = [NOTICE, WPSCAN_LICENSE, LICENSE_DIR / "frontend-runtime.txt", LICENSE_DIR / "OFL-1.1.txt"]
+    required_files = [
+        NOTICE,
+        NMAP_LICENSE,
+        WPSCAN_LICENSE,
+        LICENSE_DIR / "frontend-runtime.txt",
+        LICENSE_DIR / "OFL-1.1.txt",
+    ]
     for path in required_files:
         if not path.is_file() or path.stat().st_size == 0:
             raise ValueError(f"required third-party notice is missing or empty: {path.relative_to(ROOT)}")
     wpscan_hash = hashlib.sha256(WPSCAN_LICENSE.read_bytes()).hexdigest()
     if wpscan_hash != WPSCAN_LICENSE_SHA256:
         raise ValueError("WPScan v4.0.1 license text differs from the reviewed upstream file")
+    nmap_hash = hashlib.sha256(NMAP_LICENSE.read_bytes()).hexdigest()
+    if nmap_hash != NMAP_LICENSE_SHA256:
+        raise ValueError("Nmap v7.95 NPSL 0.95 text differs from the reviewed upstream file")
 
     print(
         f"Container license inventory covers {len(components)} component groups "
@@ -245,6 +291,8 @@ def main() -> int:
 if __name__ == "__main__":
     if sys.argv[1:] == ["--installed-image"]:
         raise SystemExit(validate_installed_image())
+    if sys.argv[1:] == ["--release"]:
+        raise SystemExit(main(require_redistribution_approval=True))
     if sys.argv[1:]:
         raise SystemExit(f"unknown arguments: {' '.join(sys.argv[1:])}")
     raise SystemExit(main())

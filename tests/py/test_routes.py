@@ -12456,7 +12456,7 @@ class TestConfigRoute:
         client = get_client()
         data = json.loads(client.get("/config").data)
         for key in (
-            "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
+            "app_name", "project_source", "prompt_username", "prompt_domain", "default_theme",
             "max_tabs", "max_output_lines", "high_volume_output_line_threshold",
             "high_volume_output_status_interval_lines", "evidence_package_max_mb",
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
@@ -12556,11 +12556,16 @@ class TestConfigRoute:
         assert data["prompt_username"] == "ops"
         assert data["prompt_domain"] == "darklab"
 
-    def test_project_readme_is_constant(self):
+    def test_project_source_is_constant(self):
         client = get_client()
-        with mock.patch("config.PROJECT_README", "https://example.invalid/README.md"):
+        assert config.PROJECT_SOURCE == (
+            f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{config.APP_VERSION}#darklab_shell"
+        )
+        with mock.patch("config.PROJECT_SOURCE", "https://example.invalid/source"):
             data = json.loads(client.get("/config").data)
-        assert data["project_readme"] == "https://example.invalid/README.md"
+            body = client.get("/").get_data(as_text=True)
+        assert data["project_source"] == "https://example.invalid/source"
+        assert body.count('href="https://example.invalid/source"') == 2
 
     def test_welcome_timing_reflects_cfg(self):
         client = get_client()

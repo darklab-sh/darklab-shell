@@ -18072,7 +18072,17 @@ class TestThemeRegistry:
         themes_map = {theme["name"]: theme for theme in themes}
         assert "broken_theme" in themes_map
         assert themes_map["broken_theme"]["label"] == "Broken Theme"
-        assert app_config.load_theme("broken_theme")["bg"] == app_config._THEME_DEFAULTS["dark"]["bg"]
+        with mock.patch.object(app_config.log, "warning") as warning:
+            theme = app_config.load_theme("broken_theme")
+        assert theme["bg"] == app_config._THEME_DEFAULTS["dark"]["bg"]
+        warning.assert_called_once_with(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": str(theme_dir / "broken_theme.yaml"),
+                "source": "shipped",
+                "error_type": "ParserError",
+            },
+        )
 
     def test_single_theme_registry_loads_and_can_be_selected(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -18121,6 +18131,22 @@ class TestThemeRegistry:
         assert app_config.load_theme("base_theme")["bg"] == "#202020"
         assert app_config.load_theme("base_theme")["surface"] == "#1a1a1a"
         assert app_config._theme_file_candidates("../base_theme") == ()
+
+        secret_marker = "theme-secret-must-not-be-logged"
+        local_overlay = local_theme_dir / "base_theme.local.yaml"
+        local_overlay.write_text(f"bg: [\n# {secret_marker}\n", encoding="utf-8")
+        with mock.patch.object(app_config.log, "warning") as warning:
+            fallback_theme = app_config.load_theme("base_theme")
+        assert fallback_theme["bg"] == "#101010"
+        warning.assert_called_once_with(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": str(local_overlay),
+                "source": "local",
+                "error_type": "ParserError",
+            },
+        )
+        assert secret_marker not in repr(warning.call_args)
 
     def test_light_theme_uses_light_defaults_for_missing_keys(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -18356,35 +18382,36 @@ class TestThemeRegistry:
         assert categories["Custom question?"] == "Core features"
         assert categories["Unknown category?"] == "Other"
 
-    def test_load_all_faq_uses_project_readme_in_builtin_answer(self):
+    def test_load_all_faq_uses_project_source_in_builtin_answer(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
             path = f.name
         try:
             with mock.patch("services.commands.registry.FAQ_FILE", path):
-                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/source#readme")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/README.md" in cast(str, result[0]["answer"])
-        assert "https://example.invalid/README.md" in cast(str, result[0]["answer_html"])
-        assert "corresponding source code" in cast(str, result[0]["answer"])
-        assert app_config.PROJECT_SOURCE in cast(str, result[0]["answer"])
-        assert app_config.PROJECT_SOURCE in cast(str, result[0]["answer_html"])
+        assert "https://example.invalid/source#readme" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/source#readme" in cast(str, result[0]["answer_html"])
+        assert "source code for this release" in cast(str, result[0]["answer"])
+        assert "darklab_shell GitLab repository" in cast(str, result[0]["answer_html"])
+        assert "Nmap Security Scanner" in cast(str, result[0]["answer"])
+        assert 'href="https://nmap.org/"' in cast(str, result[0]["answer_html"])
 
-    def test_load_all_faq_uses_config_project_readme_by_default(self):
+    def test_load_all_faq_uses_config_project_source_by_default(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
             path = f.name
         try:
             with mock.patch("services.commands.registry.FAQ_FILE", path), mock.patch(
-                "config.PROJECT_README",
-                "https://example.invalid/config-readme",
+                "config.PROJECT_SOURCE",
+                "https://example.invalid/config-source",
             ):
                 result = load_all_faq("darklab_shell")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer"])
-        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer_html"])
+        assert "https://example.invalid/config-source" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/config-source" in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_promotes_workspace_builtin_entry_when_enabled(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
