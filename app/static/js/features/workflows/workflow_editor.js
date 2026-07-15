@@ -3,6 +3,7 @@
 
 // Workflows v2 definition editor.
 import { bindPressable } from '../../ui/ui_pressable.js';
+import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
 
 const WORKFLOW_INPUT_TYPES = [
   ['text', 'Text'],
@@ -179,6 +180,10 @@ function captureRows(stepRow) {
   return [...(stepRow?.querySelectorAll('[data-workflow-editor-capture]') || [])];
 }
 
+function exitCodeRows(stepRow) {
+  return [...(stepRow?.querySelectorAll('[data-workflow-editor-exit-code]') || [])];
+}
+
 function createCaptureSourceSelect(value) {
   const select = document.createElement('select');
   select.className = 'form-select workflow-editor-capture-source';
@@ -335,6 +340,94 @@ function addTransitionOption(select, value, label) {
   select.appendChild(option);
 }
 
+function createExitCodeRow(route = {}, stepIndex = 0, routeIndex = 0, onRemove = null) {
+  const row = document.createElement('div');
+  row.className = 'workflow-editor-exit-code-route';
+  row.dataset.workflowEditorExitCode = '1';
+
+  const header = document.createElement('div');
+  header.className = 'workflow-editor-item-header';
+  const title = document.createElement('span');
+  title.className = 'workflow-editor-exit-code-title';
+  title.textContent = `Route ${routeIndex + 1}`;
+  header.append(
+    title,
+    iconButton('×', 'Remove exact exit-code route', 'workflow-editor-remove-exit-code', () => onRemove?.(row)),
+  );
+
+  const codeInput = textInput('workflow-editor-exit-code', route.code, '1', 12);
+  codeInput.inputMode = 'numeric';
+  codeInput.setAttribute('aria-label', 'Exit code');
+  const destination = transitionSelect(
+    'workflow-editor-exit-code-destination',
+    'Exact exit-code destination',
+  );
+  destination.dataset.initialValue = String(route.destination || '__next__');
+  destination.addEventListener('change', () => {
+    destination.classList.remove('has-missing-destination');
+  });
+  row.append(
+    header,
+    field('Exit code', codeInput, `steps.${stepIndex}.next.codes.${routeIndex}.code`),
+    field('Go to', destination, `steps.${stepIndex}.next.codes.${routeIndex}.destination`),
+  );
+  return row;
+}
+
+function createExitCodeSection(step, stepIndex) {
+  const section = document.createElement('section');
+  section.className = 'workflow-editor-code-routes';
+  section.dataset.workflowField = `steps.${stepIndex}.next.codes`;
+  const header = document.createElement('div');
+  header.className = 'workflow-editor-section-header';
+  const title = document.createElement('span');
+  title.className = 'workflow-editor-subsection-title';
+  title.textContent = 'Exact exit codes';
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'btn btn-ghost btn-compact workflow-editor-add-exit-code';
+  addButton.textContent = '+ Route';
+  header.append(title, addButton);
+  const hint = document.createElement('span');
+  hint.className = 'workflow-editor-route-hint';
+  hint.textContent = 'Checked before the success or failure route.';
+  const sectionError = document.createElement('span');
+  sectionError.className = 'form-error u-hidden';
+  sectionError.setAttribute('aria-live', 'polite');
+  const list = document.createElement('div');
+  list.className = 'workflow-editor-exit-code-list';
+  section.append(header, hint, sectionError, list);
+
+  const refreshRoutes = () => {
+    const stepRow = section.closest('[data-workflow-editor-step]');
+    const currentStepIndex = stepRows().indexOf(stepRow);
+    exitCodeRows(section).forEach((row, index) => {
+      row.querySelector('.workflow-editor-exit-code-title').textContent = `Route ${index + 1}`;
+      row.querySelectorAll('[data-workflow-field]').forEach((node) => {
+        node.dataset.workflowField = node.dataset.workflowField
+          .replace(/^steps\.\d+/, `steps.${currentStepIndex >= 0 ? currentStepIndex : stepIndex}`)
+          .replace(/codes\.\d+/, `codes.${index}`);
+      });
+    });
+  };
+  const addRoute = (route = {}) => {
+    const row = createExitCodeRow(route, stepIndex, exitCodeRows(section).length, (target) => {
+      target.remove();
+      refreshRoutes();
+      clearErrors();
+    });
+    list.appendChild(row);
+    refreshRoutes();
+    refreshTransitionOptions();
+  };
+  bindPressable(addButton, { onActivate: () => addRoute(), refocusComposer: false });
+  const rawCodes = step.next?.codes;
+  if (rawCodes && typeof rawCodes === 'object' && !Array.isArray(rawCodes)) {
+    Object.entries(rawCodes).forEach(([code, destination]) => addRoute({ code, destination }));
+  }
+  return section;
+}
+
 function createStepRow(step = {}, index = 0, callbacks = {}) {
   const row = document.createElement('div');
   row.className = 'workflow-editor-step panel-row';
@@ -346,10 +439,14 @@ function createStepRow(step = {}, index = 0, callbacks = {}) {
   const title = document.createElement('span');
   title.className = 'workflow-editor-item-title workflow-editor-step-title';
   title.textContent = `Step ${index + 1}`;
-  header.append(
-    title,
+  const actions = document.createElement('div');
+  actions.className = 'workflow-editor-item-actions';
+  actions.append(
+    iconButton('↑', 'Move workflow step up', 'workflow-editor-move-up', () => callbacks.move?.(row, -1)),
+    iconButton('↓', 'Move workflow step down', 'workflow-editor-move-down', () => callbacks.move?.(row, 1)),
     iconButton('×', 'Remove workflow step', 'workflow-editor-remove-step', () => callbacks.remove?.(row)),
   );
+  header.append(title, actions);
 
   const idInput = textInput('workflow-editor-step-id', step.id || `step_${index + 1}`, 'resolve', 64);
   row.dataset.workflowStepIdCurrent = idInput.value;
@@ -373,6 +470,7 @@ function createStepRow(step = {}, index = 0, callbacks = {}) {
     field('Command', cmdInput, `steps.${index}.cmd`),
     field('Note', noteInput, `steps.${index}.note`),
     transitions,
+    createExitCodeSection(step, index),
     createCaptureSection(step, index),
   );
   return row;
@@ -401,8 +499,46 @@ function refreshFieldPaths() {
           .replace(/captures\.\d+/, `captures.${captureIndex}`);
       });
     });
+    exitCodeRows(row).forEach((routeRow, routeIndex) => {
+      routeRow.querySelector('.workflow-editor-exit-code-title').textContent = `Route ${routeIndex + 1}`;
+      routeRow.querySelectorAll('[data-workflow-field]').forEach((node) => {
+        node.dataset.workflowField = node.dataset.workflowField.replace(/codes\.\d+/, `codes.${routeIndex}`);
+      });
+    });
+    row.querySelector('.workflow-editor-move-up').disabled = index === 0;
+    row.querySelector('.workflow-editor-move-down').disabled = index === rows.length - 1;
     row.querySelector('.workflow-editor-remove-step').disabled = rows.length <= 1;
   });
+}
+
+function refreshTransitionSelect(select, {
+  ids,
+  currentId,
+  nextId,
+  fallback,
+  allowNext = false,
+  keepMissing = false,
+} = {}) {
+  const previous = select.dataset.initialValue || select.value || fallback;
+  select.innerHTML = '';
+  if (allowNext) {
+    addTransitionOption(select, '__next__', nextId ? `Next step (${nextId})` : 'Complete');
+  }
+  addTransitionOption(select, 'complete', 'Complete');
+  addTransitionOption(select, 'stop', 'Stop');
+  ids.forEach((id) => {
+    if (!id || id === currentId) return;
+    addTransitionOption(select, id, id);
+  });
+  const available = [...select.options].some(option => option.value === previous);
+  if (!available && previous && keepMissing) {
+    addTransitionOption(select, previous, `Missing step (${previous})`);
+    select.options[select.options.length - 1].dataset.workflowMissingDestination = '1';
+  }
+  select.value = (available || (keepMissing && previous)) ? previous : fallback;
+  select.classList.toggle('has-missing-destination', !available && keepMissing && !!previous);
+  delete select.dataset.initialValue;
+  if (typeof importedSyncAppSelect === 'function') importedSyncAppSelect(select);
 }
 
 function refreshTransitionOptions() {
@@ -413,21 +549,16 @@ function refreshTransitionOptions() {
     const currentId = ids[index];
     const success = row.querySelector('.workflow-editor-step-success');
     const failure = row.querySelector('.workflow-editor-step-failure');
-    [success, failure].forEach((select) => {
-      const previous = select.dataset.initialValue || select.value || (select === success ? '__next__' : 'stop');
-      select.innerHTML = '';
-      if (select === success) {
-        addTransitionOption(select, '__next__', nextId ? `Next step (${nextId})` : 'Complete');
-      }
-      addTransitionOption(select, 'complete', 'Complete');
-      addTransitionOption(select, 'stop', 'Stop');
-      ids.forEach((id) => {
-        if (!id || id === currentId) return;
-        addTransitionOption(select, id, id);
+    refreshTransitionSelect(success, {
+      ids, currentId, nextId, fallback: '__next__', allowNext: true,
+    });
+    refreshTransitionSelect(failure, {
+      ids, currentId, nextId, fallback: 'stop',
+    });
+    exitCodeRows(row).forEach((routeRow) => {
+      refreshTransitionSelect(routeRow.querySelector('.workflow-editor-exit-code-destination'), {
+        ids, currentId, nextId, fallback: '__next__', allowNext: true, keepMissing: true,
       });
-      const available = [...select.options].some(option => option.value === previous);
-      select.value = available ? previous : (select === success ? '__next__' : 'stop');
-      delete select.dataset.initialValue;
     });
   });
 }
@@ -463,7 +594,8 @@ function showErrors(errors) {
       if (message) unresolved.push(message);
       return;
     }
-    const error = container.querySelector('.form-error');
+    const error = container.querySelector(':scope > .form-error')
+      || container.querySelector('.form-error');
     const control = container.querySelector('input, select, textarea');
     if (error) {
       error.textContent = message;
@@ -477,6 +609,46 @@ function showErrors(errors) {
 function resolveTransition(value, index, ids) {
   if (value !== '__next__') return value;
   return ids[index + 1] || 'complete';
+}
+
+function canonicalExitCode(value) {
+  const text = String(value || '').trim();
+  if (!/^[+-]?\d+$/.test(text)) return null;
+  try {
+    return BigInt(text).toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+function validateExitCodeRoutes() {
+  const errors = [];
+  stepRows().forEach((row, stepIndex) => {
+    const seen = new Set();
+    exitCodeRows(row).forEach((routeRow, routeIndex) => {
+      const codeInput = routeRow.querySelector('.workflow-editor-exit-code');
+      const destination = routeRow.querySelector('.workflow-editor-exit-code-destination');
+      const rawCode = String(codeInput?.value || '').trim();
+      const code = canonicalExitCode(rawCode);
+      const codeField = `steps.${stepIndex}.next.codes.${routeIndex}.code`;
+      if (!rawCode) {
+        errors.push({ field: codeField, message: 'Exit code is required.' });
+      } else if (code === null) {
+        errors.push({ field: codeField, message: 'Enter a whole-number exit code.' });
+      } else if (seen.has(code)) {
+        errors.push({ field: codeField, message: 'Exit codes must be unique within a step.' });
+      } else {
+        seen.add(code);
+      }
+      if (destination?.selectedOptions?.[0]?.dataset.workflowMissingDestination === '1') {
+        errors.push({
+          field: `steps.${stepIndex}.next.codes.${routeIndex}.destination`,
+          message: 'Choose an available destination or remove this route.',
+        });
+      }
+    });
+  });
+  return errors;
 }
 
 function serializeParameter(row) {
@@ -500,12 +672,21 @@ function payloadFromEditor(workflow = null) {
   const ids = rows.map(row => String(row.querySelector('.workflow-editor-step-id')?.value || '').trim());
   const steps = rows.map((row, index) => {
     const original = row._workflowOriginal || {};
-    const originalNext = original.next && typeof original.next === 'object' ? original.next : {};
     const next = {
       success: resolveTransition(row.querySelector('.workflow-editor-step-success')?.value, index, ids),
       failure: resolveTransition(row.querySelector('.workflow-editor-step-failure')?.value, index, ids),
     };
-    if (originalNext.codes && typeof originalNext.codes === 'object') next.codes = originalNext.codes;
+    const codes = {};
+    exitCodeRows(row).forEach((routeRow) => {
+      const code = canonicalExitCode(routeRow.querySelector('.workflow-editor-exit-code')?.value);
+      const destination = resolveTransition(
+        routeRow.querySelector('.workflow-editor-exit-code-destination')?.value,
+        index,
+        ids,
+      );
+      if (code !== null && destination) codes[code] = destination;
+    });
+    if (Object.keys(codes).length) next.codes = codes;
     const captures = captureRows(row).map((captureRow) => {
       const source = String(captureRow.querySelector('.workflow-editor-capture-source')?.value || '');
       const optionInput = captureRow.querySelector('.workflow-editor-capture-option');
@@ -582,13 +763,24 @@ function createWorkflowEditorController({ apiFetch, onSaved, reloadCatalog, show
     const refs = editorRefs();
     if (!refs.steps) return;
     const row = createStepRow(step, stepRows().length, {
+      move: (target, delta) => {
+        const rows = stepRows();
+        const index = rows.indexOf(target);
+        const destination = rows[index + delta];
+        if (!destination) return;
+        if (delta < 0) refs.steps.insertBefore(target, destination);
+        else refs.steps.insertBefore(destination, target);
+        refresh();
+      },
       remove: (target) => {
         target.remove();
         refresh();
       },
       rename: (target, oldId, newId) => {
         stepRows().forEach((candidate) => {
-          candidate.querySelectorAll('.workflow-editor-step-success, .workflow-editor-step-failure').forEach((select) => {
+          candidate.querySelectorAll(
+            '.workflow-editor-step-success, .workflow-editor-step-failure, .workflow-editor-exit-code-destination',
+          ).forEach((select) => {
             if (select.value === oldId) select.dataset.initialValue = newId;
           });
         });
@@ -641,6 +833,7 @@ function createWorkflowEditorController({ apiFetch, onSaved, reloadCatalog, show
     const clientErrors = [];
     if (!payload.title) clientErrors.push({ field: 'title', message: 'Workflow name is required.' });
     if (!payload.steps.length) clientErrors.push({ field: 'steps', message: 'Add at least one command step.' });
+    clientErrors.push(...validateExitCodeRoutes());
     if (clientErrors.length) {
       showErrors(clientErrors);
       setMessage(clientErrors[0].message, true);

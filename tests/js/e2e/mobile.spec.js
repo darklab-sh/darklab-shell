@@ -859,6 +859,35 @@ test.beforeEach(async ({ page }) => {
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
   })
 
+  test('workflow exact exit-code routes stack cleanly in the mobile editor', async ({ page }) => {
+    await openMobileWorkflows(page)
+    await page.locator('#workflow-new-btn').click()
+    await expect(page.locator('#workflow-editor-overlay')).toHaveClass(/\bopen\b/)
+    const firstStep = page.locator('[data-workflow-editor-step]').first()
+    await firstStep.locator('.workflow-editor-add-exit-code').click()
+    const route = firstStep.locator('[data-workflow-editor-exit-code]').first()
+    await expect(route.locator('.workflow-editor-exit-code')).toBeVisible()
+    await expect(route.locator('.workflow-editor-exit-code-destination')).toBeVisible()
+
+    const layout = await route.evaluate((row) => {
+      const codeField = row.querySelector('[data-workflow-field$="code"]')?.getBoundingClientRect()
+      const destinationField = row.querySelector('[data-workflow-field$="destination"]')?.getBoundingClientRect()
+      const routeBox = row.getBoundingClientRect()
+      return {
+        codeWidth: codeField?.width || 0,
+        destinationWidth: destinationField?.width || 0,
+        routeWidth: routeBox.width,
+        codeBottom: codeField?.bottom || 0,
+        destinationTop: destinationField?.top || 0,
+      }
+    })
+    expect(layout.codeWidth).toBeGreaterThan(layout.routeWidth * 0.8)
+    expect(layout.destinationWidth).toBeGreaterThan(layout.routeWidth * 0.8)
+    expect(layout.destinationTop).toBeGreaterThanOrEqual(layout.codeBottom)
+    await route.locator('.workflow-editor-remove-exit-code').click()
+    await expect(firstStep.locator('[data-workflow-editor-exit-code]')).toHaveCount(0)
+  })
+
   test('workflows sheet exposes the shared recent execution controls', async ({ page }) => {
     let listReads = 0
     let canceled = false

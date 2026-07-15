@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -25,7 +26,9 @@ from services.workflows.compiler import (
     compile_workflow_definition,
     normalize_workflow_input_value,
     render_step_command,
+    render_step_display_command,
     resolve_workflow_inputs,
+    workflow_private_values,
 )
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
 from services.workflows.storage import (
@@ -35,8 +38,36 @@ from services.workflows.storage import (
     create_execution,
     finalize_run_step,
     get_execution,
+    public_execution,
 )
 from services.runs.start import BrokeredRunStartResult
+
+
+_PRIVATE_EXECUTION_FIELDS = {
+    "session_id",
+    "team_id",
+    "definition_snapshot",
+    "input_values",
+    "variables",
+    "workspace_cwd",
+    "actor_member_id",
+    "actor_role",
+    "owner_client_id",
+    "owner_tab_id",
+}
+
+
+def _assert_public_execution_payload(
+    execution: dict[str, object],
+    *private_values: str,
+) -> None:
+    assert not (_PRIVATE_EXECUTION_FIELDS & execution.keys())
+    for step in cast(list[dict[str, object]], execution.get("steps") or []):
+        assert "id" not in step
+        assert "execution_id" not in step
+    serialized = json.dumps(execution, sort_keys=True)
+    for value in private_values:
+        assert value not in serialized
 
 
 def _v2_definition() -> dict[str, Any]:
@@ -173,16 +204,76 @@ def test_v2_compiler_rejects_duplicate_variables_invalid_transitions_and_unreach
         compile_workflow_definition(unreachable)
 
 
+def test_v2_compiler_normalizes_and_rejects_duplicate_exact_exit_codes():
+    definition = _v2_definition()
+    definition["steps"][1]["next"]["codes"] = {"+02": "complete", "-0": "stop"}
+    compiled = compile_workflow_definition(definition)
+    compiled_steps = cast(list[dict[str, Any]], compiled["steps"])
+    compiled_next = cast(dict[str, Any], compiled_steps[1]["next"])
+    assert compiled_next["codes"] == {"2": "complete", "0": "stop"}
+
+    duplicate = _v2_definition()
+    duplicate["steps"][1]["next"]["codes"] = {"2": "complete", "02": "stop"}
+    with pytest.raises(WorkflowDefinitionError, match="exit codes must be unique") as exc_info:
+        compile_workflow_definition(duplicate)
+    assert exc_info.value.field == "steps.1.next.codes"
+
+    invalid = _v2_definition()
+    invalid["steps"][1]["next"]["codes"] = {"two": "complete"}
+    with pytest.raises(WorkflowDefinitionError, match="invalid workflow exit code") as exc_info:
+        compile_workflow_definition(invalid)
+    assert exc_info.value.field == "steps.1.next.codes"
+
+    response = make_test_app().test_client().post(
+        "/session/workflows",
+        json=invalid,
+        headers={"X-Session-ID": "workflow-exit-code-field-error"},
+    )
+    assert response.status_code == 400
+    assert response.get_json()["errors"] == [{
+        "field": "steps.1.next.codes",
+        "message": "invalid workflow exit code 'two'",
+    }]
+
+
 def test_typed_inputs_are_canonicalized_and_rendered_as_shell_scalars():
-    definition = compile_execution_definition(_v2_definition())
+    source = _v2_definition()
+    source["inputs"][0]["sensitive"] = True
+    definition = compile_execution_definition(source)
     inputs = resolve_workflow_inputs(definition, {"target": "Example.COM", "ports": "80, 8000-8002"})
     steps = cast(list[dict[str, object]], definition["steps"])
     command = render_step_command(steps[0], {**inputs, "target": "host; echo unsafe"})
+    display_command = render_step_display_command(
+        steps[0],
+        definition,
+        {**inputs, "target": "host; echo unsafe"},
+    )
+    capture_display_command = render_step_display_command(
+        steps[1],
+        definition,
+        {**inputs, "resolved_ip": "192.0.2.44"},
+    )
 
     assert inputs == {"target": "example.com", "ports": "80,8000-8002"}
     assert command == "printf '%s\\n' 'host; echo unsafe'"
+    assert display_command == "printf '%s\\n' [redacted]"
+    assert capture_display_command == "nmap -p 80,8000-8002 [captured:resolved_ip]"
+    assert set(workflow_private_values(
+        definition,
+        {**inputs, "resolved_ip": "192.0.2.44"},
+    )) == {"example.com", "192.0.2.44"}
+    public_failure = public_execution({
+        "definition_snapshot": definition,
+        "variables": {**inputs, "resolved_ip": "192.0.2.44"},
+        "failure_detail": "example.com failed after 192.0.2.44",
+        "steps": [{"error_detail": "could not use 192.0.2.44"}],
+    })
+    assert public_failure["failure_detail"] == "[redacted] failed after [redacted]"
+    assert public_failure["steps"][0]["error_detail"] == "could not use [redacted]"
     with pytest.raises(WorkflowDefinitionError, match="missing variables: target"):
         render_step_command(steps[0], {})
+    with pytest.raises(WorkflowDefinitionError, match="missing variables: target"):
+        render_step_display_command(steps[0], definition, {})
 
 
 def test_typed_input_boundaries_reject_unsafe_paths_controls_and_sizes():
@@ -578,7 +669,13 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
         lambda execution_id: launches.append(execution_id) or {"execution_id": execution_id},
     )
 
-    workflow_response = client.post("/session/workflows", json=_v2_definition(), headers=owner_headers)
+    workflow_definition = _v2_definition()
+    workflow_definition["inputs"][0]["sensitive"] = True
+    workflow_response = client.post(
+        "/session/workflows",
+        json=workflow_definition,
+        headers=owner_headers,
+    )
     workflow = workflow_response.get_json()["workflow"]
     owner_create = client.post(
         "/workflow-executions",
@@ -602,6 +699,22 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
     assert owner_create.status_code == 202
     assert operator_create.status_code == 202
     assert viewer_create.status_code == 403
+    _assert_public_execution_payload(
+        owner_execution,
+        "owner.example",
+        "operator.example",
+        owner_token,
+        operator_token,
+        viewer_token,
+    )
+    _assert_public_execution_payload(
+        operator_execution,
+        "owner.example",
+        "operator.example",
+        owner_token,
+        operator_token,
+        viewer_token,
+    )
     for headers in (owner_headers, operator_headers, viewer_headers):
         listed = client.get("/workflow-executions?limit=10", headers=headers)
         detail = client.get(
@@ -619,6 +732,29 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
         }
         assert detail.status_code == 200
         assert events.status_code == 200
+        for item in listed.get_json()["executions"]:
+            _assert_public_execution_payload(
+                item,
+                "owner.example",
+                "operator.example",
+                owner_token,
+                operator_token,
+                viewer_token,
+            )
+        _assert_public_execution_payload(
+            detail.get_json()["execution"],
+            "owner.example",
+            "operator.example",
+            owner_token,
+            operator_token,
+            viewer_token,
+        )
+        serialized_events = json.dumps(events.get_json(), sort_keys=True)
+        assert "owner.example" not in serialized_events
+        assert "operator.example" not in serialized_events
+        assert owner_token not in serialized_events
+        assert operator_token not in serialized_events
+        assert viewer_token not in serialized_events
 
     assert client.get(
         f"/workflow-executions/{owner_execution['id']}",
@@ -678,6 +814,22 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
     assert viewer_cancel.status_code == 403
     assert operator_cancel.status_code == 200
     assert owner_cancel.status_code == 200
+    _assert_public_execution_payload(
+        operator_cancel.get_json()["execution"],
+        "owner.example",
+        "operator.example",
+        owner_token,
+        operator_token,
+        viewer_token,
+    )
+    _assert_public_execution_payload(
+        owner_cancel.get_json()["execution"],
+        "owner.example",
+        "operator.example",
+        owner_token,
+        operator_token,
+        viewer_token,
+    )
     assert team_pid_reads == [(run_id, team_id)]
     assert validated == [(run_id, 5201, operator_token, team_id)]
     assert signaled == [5201]
@@ -726,6 +878,7 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
 
     assert response.status_code == 202
     assert launches == [execution["id"]]
+    _assert_public_execution_payload(execution, "example.com", "61001-61003", session_id)
     listed = client.get(
         "/workflow-executions?limit=10",
         headers={"X-Session-ID": session_id},
@@ -839,9 +992,12 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
         f"/workflow-executions/{execution['id']}",
         headers={"X-Session-ID": session_id},
     ).get_json()["execution"]
+    stored_execution = get_execution(session_id, execution["id"])
     assert update_response.status_code == 200
     assert delete_response.status_code == 200
-    assert saved_execution["definition_snapshot"]["title"] == "Resolve and scan"
+    _assert_public_execution_payload(saved_execution, "example.com", "61001-61003", session_id)
+    assert stored_execution is not None
+    assert stored_execution["definition_snapshot"]["title"] == "Resolve and scan"
     with get_db_connect()() as conn:
         audit_rows = conn.execute(
             "SELECT event_type, target_type, target_id, details FROM audit_events "
@@ -937,7 +1093,9 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
 
     make_test_app()
     session_id = "workflow-engine-" + uuid.uuid4().hex
-    definition = compile_execution_definition(_v2_definition())
+    source = _v2_definition()
+    source["inputs"][0]["sensitive"] = True
+    definition = compile_execution_definition(source)
     execution = create_execution(
         session_id=session_id,
         team_id="",
@@ -960,6 +1118,8 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
             key: kwargs[key]
             for key in (
                 "original_command",
+                "display_command",
+                "private_values",
                 "session_id",
                 "team_id",
                 "workspace_cwd",
@@ -985,6 +1145,14 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
         "printf '%s\\n' example.com",
         "nmap -p 443 192.0.2.44",
     ]
+    assert [item["display_command"] for item in launched] == [
+        "printf '%s\\n' [redacted]",
+        "nmap -p 443 [captured:resolved_ip]",
+    ]
+    assert [set(cast(tuple[str, ...], item["private_values"])) for item in launched] == [
+        {"example.com"},
+        {"example.com", "192.0.2.44"},
+    ]
     assert all(item["session_id"] == session_id for item in launched)
     assert all(item["team_id"] == "" for item in launched)
     assert all(item["workspace_cwd"] == "cases/external-review" for item in launched)
@@ -992,6 +1160,204 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     assert all(item["owner_client_id"] == "client-workflow-context" for item in launched)
     assert all(item["owner_tab_id"] == "tab-workflow-context" for item in launched)
     assert stored["status"] == "completed"
+
+
+def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, caplog):
+    from blueprints import run as run_routes
+    from dataclasses import replace
+    from services.runs.contracts import RunPreparationError, RunSpawnError
+    from services.runs import finalization as run_finalization
+
+    client = make_test_app().test_client()
+    session_id = "workflow-lifecycle-" + uuid.uuid4().hex
+    private_value = "workflow-private-" + uuid.uuid4().hex
+    denied_value = "workflow-denied-" + uuid.uuid4().hex
+    spawn_value = "workflow-spawn-" + uuid.uuid4().hex
+    missing_value = "workflow-missing-" + uuid.uuid4().hex
+    raw_command = f"true {private_value}"
+    display_command = "true [redacted]"
+    headers = {"X-Session-ID": session_id}
+    project_response = client.post("/projects", json={"name": "Workflow privacy"}, headers=headers)
+    project_id = project_response.get_json()["project"]["id"]
+    caplog.set_level(logging.DEBUG, logger="shell")
+
+    launched_commands: list[str] = []
+    active_commands: list[str] = []
+    metric_commands: list[str] = []
+    notification_commands: list[str] = []
+    real_popen = run_routes.subprocess.Popen
+    real_active_run_register = run_routes.active_run_register
+
+    def capture_popen(argv, **kwargs):
+        launched_commands.append(str(argv[-1]))
+        return real_popen(argv, **kwargs)
+
+    def capture_active_run(*args, **kwargs):
+        active_commands.append(str(args[3]))
+        return real_active_run_register(*args, **kwargs)
+
+    monkeypatch.setattr(run_routes, "is_command_allowed", lambda _command: (True, ""))
+    monkeypatch.setattr(
+        run_routes,
+        "rewrite_command",
+        lambda command, **_kwargs: (command, None),
+    )
+    monkeypatch.setattr(run_routes, "runtime_missing_command_name", lambda _command: None)
+    monkeypatch.setattr(run_routes, "publish_run_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_routes, "active_run_register", capture_active_run)
+    monkeypatch.setattr(run_routes.subprocess, "Popen", capture_popen)
+    monkeypatch.setattr(run_routes, "STDBUF_BIN", None)
+    monkeypatch.setattr(
+        run_finalization.app_metrics,
+        "record_completed_run",
+        lambda command, *_args, **_kwargs: metric_commands.append(str(command)),
+    )
+    monkeypatch.setattr(
+        run_finalization,
+        "enqueue_run_complete",
+        lambda **kwargs: notification_commands.append(str(kwargs["command"])),
+    )
+
+    started = run_routes._start_brokered_run_service(
+        original_command=raw_command,
+        display_command=display_command,
+        session_id=session_id,
+        client_ip="127.0.0.1",
+        handlers=run_routes._run_start_handlers(),
+        link_project_id=project_id,
+        private_values=(private_value,),
+        thread_name_prefix="workflow-run",
+    )
+
+    saved_command = ""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with get_db_connect()() as conn:
+            row = conn.execute(
+                "SELECT command, finished FROM runs WHERE id = ?",
+                (started.run_id,),
+            ).fetchone()
+        if row and row["finished"] and metric_commands and notification_commands:
+            saved_command = str(row["command"])
+            break
+        time.sleep(0.01)
+
+    assert launched_commands == [raw_command]
+    assert active_commands == [display_command]
+    assert saved_command == display_command
+    assert metric_commands == [display_command]
+    assert notification_commands == [display_command]
+    history_response = client.get(f"/history/{started.run_id}?json=1", headers=headers)
+    project_runs_response = client.get(f"/projects/{project_id}/runs", headers=headers)
+    assert history_response.status_code == 200
+    assert project_runs_response.status_code == 200
+    assert history_response.get_json()["command"] == display_command
+    project_run = next(
+        item
+        for item in project_runs_response.get_json()["runs"]
+        if item["id"] == started.run_id
+    )
+    assert project_run["command"] == display_command
+
+    monkeypatch.setattr(
+        run_routes,
+        "is_command_allowed",
+        lambda _command: (False, f"blocked {denied_value} by command policy"),
+    )
+    with pytest.raises(RunPreparationError, match=r"blocked \[redacted\] by command policy"):
+        run_routes._start_brokered_run_service(
+            original_command=f"true {denied_value}",
+            display_command=display_command,
+            session_id=session_id,
+            client_ip="127.0.0.1",
+            handlers=run_routes._run_start_handlers(),
+            private_values=(denied_value,),
+        )
+
+    monkeypatch.setattr(run_routes, "is_command_allowed", lambda _command: (True, ""))
+    monkeypatch.setattr(
+        run_routes.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(OSError(f"spawn failed for {spawn_value}")),
+    )
+    with pytest.raises(RunSpawnError, match=r"spawn failed for \[redacted\]"):
+        run_routes._start_brokered_run_service(
+            original_command=f"true {spawn_value}",
+            display_command=display_command,
+            session_id=session_id,
+            client_ip="127.0.0.1",
+            handlers=run_routes._run_start_handlers(),
+            private_values=(spawn_value,),
+        )
+
+    missing_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def capture_missing_run(*args, **kwargs):
+        missing_calls.append((args, kwargs))
+        return "run-missing-private"
+
+    monkeypatch.setattr(
+        run_routes,
+        "runtime_missing_command_name",
+        lambda _command: missing_value,
+    )
+    missing_handlers = replace(
+        run_routes._run_start_handlers(),
+        brokered_synthetic_run=capture_missing_run,
+    )
+    missing_display_command = "[redacted] --help"
+    missing_started = run_routes._start_brokered_run_service(
+        original_command=f"{missing_value} --help",
+        display_command=missing_display_command,
+        session_id=session_id,
+        client_ip="127.0.0.1",
+        handlers=missing_handlers,
+        private_values=(missing_value,),
+    )
+    assert missing_started.run_id == "run-missing-private"
+    assert missing_calls[0][0][0] == missing_display_command
+    assert missing_value not in json.dumps(missing_calls, default=str)
+
+    lifecycle_records = {
+        record.getMessage(): record
+        for record in caplog.records
+        if record.getMessage() in {
+            "RUN_START",
+            "RUN_END",
+            "CMD_DENIED",
+            "CMD_MISSING",
+            "RUN_SPAWN_ERROR",
+        }
+    }
+    assert lifecycle_records.keys() == {
+        "RUN_START",
+        "RUN_END",
+        "CMD_DENIED",
+        "CMD_MISSING",
+        "RUN_SPAWN_ERROR",
+    }
+    assert lifecycle_records["CMD_MISSING"].cmd == missing_display_command
+    assert lifecycle_records["CMD_MISSING"].missing == "[redacted]"
+    assert all(
+        getattr(record, "cmd", "") == display_command
+        for name, record in lifecycle_records.items()
+        if name != "CMD_MISSING"
+    )
+    serialized_logs = json.dumps(
+        [
+            {
+                key: str(value)
+                for key, value in vars(record).items()
+                if key not in {"exc_info", "exc_text", "stack_info"}
+            }
+            for record in caplog.records
+        ],
+        sort_keys=True,
+    )
+    for value in (private_value, denied_value, spawn_value, missing_value):
+        assert value not in serialized_logs
 
 
 def test_required_capture_failure_uses_failure_branch_without_leaking_values(monkeypatch, caplog):

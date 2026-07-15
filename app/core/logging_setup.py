@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from config import APP_VERSION
+from core.startup_logging import drain_config_log_records
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -151,6 +152,9 @@ def configure_logging(cfg: Mapping[str, Any]) -> None:
     Runtime bootstrap calls this before process, database, or app startup work
     emits operational logs.
     """
+    logger = logging.getLogger("shell")
+    buffered_records = drain_config_log_records(logger)
+
     level_name = str(cfg.get("log_level", "INFO")).upper()
     level      = getattr(logging, level_name, logging.INFO)
     fmt_name   = str(cfg.get("log_format", "text")).lower()
@@ -164,7 +168,6 @@ def configure_logging(cfg: Mapping[str, Any]) -> None:
     handler.setFormatter(formatter)
     handler.setLevel(logging.DEBUG)  # handler accepts all; the logger level gates first
 
-    logger = logging.getLogger("shell")
     logger.handlers.clear()
     logger.addHandler(handler)
     logger.setLevel(level)
@@ -173,5 +176,9 @@ def configure_logging(cfg: Mapping[str, Any]) -> None:
     # Suppress Werkzeug's built-in request lines; we cover request logging
     # via before_request / after_request hooks in app.py instead.
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+    for record in buffered_records:
+        if record.levelno >= level:
+            logger.handle(record)
 
     logger.info("LOGGING_CONFIGURED", extra={"level": level_name, "format": fmt_name, "app_version": APP_VERSION})

@@ -2807,6 +2807,10 @@ describe('app helpers', () => {
     secondStep.querySelector('.workflow-editor-step-id').value = 'scan'
     secondStep.querySelector('.workflow-editor-step-id').dispatchEvent(new Event('input', { bubbles: true }))
     secondStep.querySelector('.workflow-editor-step-command').value = 'nmap -sV {{resolved_ip}}'
+    firstStep.querySelector('.workflow-editor-add-exit-code').click()
+    const exactRoute = firstStep.querySelector('[data-workflow-editor-exit-code]')
+    exactRoute.querySelector('.workflow-editor-exit-code').value = '2'
+    exactRoute.querySelector('.workflow-editor-exit-code-destination').value = 'scan'
 
     const payload = payloadFromEditor()
     expect(payload.version).toBe(2)
@@ -2826,8 +2830,92 @@ describe('app helpers', () => {
       source: 'first_nonempty_line',
       required: true,
     }])
-    expect(payload.steps[0].next).toEqual({ success: 'scan', failure: 'stop' })
+    expect(payload.steps[0].next).toEqual({
+      success: 'scan',
+      failure: 'stop',
+      codes: { 2: 'scan' },
+    })
     expect(payload.steps[1].next).toEqual({ success: 'complete', failure: 'stop' })
+  })
+
+  it('keeps exact exit-code routes visible through step edits and validates route fields', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ items: [] }),
+    }))
+    const { openWorkflowEditor, payloadFromEditor } = await loadAppFns({ apiFetch })
+    const initialApiCallCount = apiFetch.mock.calls.length
+    openWorkflowEditor({
+      id: 'usr_exact_routes',
+      source: 'user',
+      version: 2,
+      title: 'Exact routes',
+      description: '',
+      inputs: [],
+      steps: [
+        {
+          id: 'probe',
+          cmd: 'intel unsupported value',
+          next: { codes: { 1: 'inspect', 7: 'stop' }, success: 'complete', failure: 'stop' },
+        },
+        { id: 'inspect', cmd: 'help', next: { success: 'complete', failure: 'stop' } },
+        { id: 'archive', cmd: 'status', next: { success: 'complete', failure: 'stop' } },
+      ],
+    })
+
+    const probe = document.querySelectorAll('[data-workflow-editor-step]')[0]
+    const routes = probe.querySelectorAll('[data-workflow-editor-exit-code]')
+    expect([...routes].map(row => row.querySelector('.workflow-editor-exit-code').value))
+      .toEqual(['1', '7'])
+    expect(routes[0].querySelector('.workflow-editor-exit-code-destination').value).toBe('inspect')
+
+    const inspect = document.querySelectorAll('[data-workflow-editor-step]')[1]
+    inspect.querySelector('.workflow-editor-step-id').value = 'analyze'
+    inspect.querySelector('.workflow-editor-step-id').dispatchEvent(new Event('input', { bubbles: true }))
+    expect(routes[0].querySelector('.workflow-editor-exit-code-destination').value).toBe('analyze')
+    inspect.querySelector('.workflow-editor-move-down').click()
+    expect(payloadFromEditor().steps.map(step => step.id)).toEqual(['probe', 'archive', 'analyze'])
+    expect(payloadFromEditor().steps[0].next.codes).toEqual({ 1: 'analyze', 7: 'stop' })
+    routes[1].querySelector('.workflow-editor-exit-code').value = '9'
+    routes[1].querySelector('.workflow-editor-exit-code-destination').value = 'archive'
+    expect(payloadFromEditor().steps[0].next.codes).toEqual({ 1: 'analyze', 9: 'archive' })
+    routes[1].querySelector('.workflow-editor-exit-code').value = '7'
+    routes[1].querySelector('.workflow-editor-exit-code-destination').value = 'stop'
+
+    inspect.querySelector('.workflow-editor-remove-step').click()
+    const missingDestination = routes[0].querySelector('.workflow-editor-exit-code-destination')
+    expect(missingDestination.value).toBe('analyze')
+    expect(missingDestination.selectedOptions[0].textContent).toBe('Missing step (analyze)')
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(apiFetch).toHaveBeenCalledTimes(initialApiCallCount)
+    expect(missingDestination.getAttribute('aria-invalid')).toBe('true')
+    expect(routes[0].querySelector('[data-workflow-field$="destination"] .form-error').textContent)
+      .toBe('Choose an available destination or remove this route.')
+
+    routes[0].querySelector('.workflow-editor-remove-exit-code').click()
+    probe.querySelector('.workflow-editor-add-exit-code').click()
+    const duplicate = probe.querySelectorAll('[data-workflow-editor-exit-code]')[1]
+    duplicate.querySelector('.workflow-editor-exit-code').value = '+07'
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(apiFetch).toHaveBeenCalledTimes(initialApiCallCount)
+    expect(duplicate.querySelector('[data-workflow-field$="code"] .form-error').textContent)
+      .toBe('Exit codes must be unique within a step.')
+
+    duplicate.querySelector('.workflow-editor-exit-code').value = 'not-a-code'
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(duplicate.querySelector('[data-workflow-field$="code"] .form-error').textContent)
+      .toBe('Enter a whole-number exit code.')
+    duplicate.querySelector('.workflow-editor-remove-exit-code').click()
+    expect(payloadFromEditor().steps[0].next.codes).toEqual({ 7: 'stop' })
   })
 
   it('marks workflow capture-fed command previews as available only during the playbook', async () => {
@@ -2871,7 +2959,10 @@ describe('app helpers', () => {
       status: 400,
       json: () => Promise.resolve({
         error: 'parameter ID is invalid',
-        errors: [{ field: 'inputs.0.id', message: 'Use lowercase letters and underscores.' }],
+        errors: [
+          { field: 'inputs.0.id', message: 'Use lowercase letters and underscores.' },
+          { field: 'steps.0.next.codes', message: 'Exit-code routes are invalid.' },
+        ],
       }),
     }))
     const { openWorkflowEditor } = await loadAppFns({ apiFetch })
@@ -2880,6 +2971,8 @@ describe('app helpers', () => {
     document.querySelector('.workflow-editor-step-command').value = 'dig darklab.sh'
     document.getElementById('workflow-editor-add-parameter').click()
     document.querySelector('.workflow-editor-parameter-id').value = 'Bad ID'
+    document.querySelector('.workflow-editor-add-exit-code').click()
+    document.querySelector('.workflow-editor-exit-code').value = '1'
 
     document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
       bubbles: true,
@@ -2892,6 +2985,8 @@ describe('app helpers', () => {
     })
     expect(document.querySelector('[data-workflow-field="inputs.0.id"] .form-error').textContent)
       .toBe('Use lowercase letters and underscores.')
+    expect(document.querySelector('[data-workflow-field="steps.0.next.codes"] > .form-error').textContent)
+      .toBe('Exit-code routes are invalid.')
   })
 
   it('renders recent workflow execution progress, branches, captures, and linked runs', async () => {

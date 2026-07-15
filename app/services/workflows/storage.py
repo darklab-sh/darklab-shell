@@ -17,14 +17,45 @@ from core.database_backend import (
     postgres_advisory_lock_id,
     sqlite_table_exists,
 )
+from services.runs.private_data import redact_private_values
 from services.teams.scope import personal_owner_context, shared_owner_predicate
 from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
+from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
 
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running", "canceling")
 TERMINAL_EXECUTION_STATUSES = ("completed", "failed", "canceled")
 MAX_EXECUTION_FAILURE_DETAIL = 500
+PUBLIC_EXECUTION_FIELDS = (
+    "id",
+    "workflow_id",
+    "workflow_source",
+    "title",
+    "status",
+    "current_step_id",
+    "project_id",
+    "created",
+    "updated",
+    "finished",
+    "failure_code",
+    "failure_detail",
+)
+PUBLIC_EXECUTION_STEP_FIELDS = (
+    "step_id",
+    "step_index",
+    "status",
+    "run_id",
+    "exit_code",
+    "capture_names",
+    "selected_transition",
+    "transition_reason",
+    "error_code",
+    "error_detail",
+    "started",
+    "finished",
+    "created",
+)
 
 
 def _now() -> str:
@@ -89,6 +120,46 @@ def _step_from_row(row: Any) -> dict[str, Any]:
     result["capture_names"] = _dialect().decode_json_list(result.get("capture_names"))
     if result.get("run_id"):
         result["stream"] = f"/runs/{result['run_id']}/stream"
+    return result
+
+
+def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return the execution state used by browser and terminal surfaces."""
+    if not execution:
+        return {}
+    definition = execution.get("definition_snapshot")
+    variables = execution.get("variables")
+    private_values = workflow_private_values(
+        definition if isinstance(definition, Mapping) else {},
+        variables if isinstance(variables, Mapping) else {},
+    )
+    result = {
+        field: execution.get(field)
+        for field in PUBLIC_EXECUTION_FIELDS
+        if field in execution
+    }
+    if "failure_detail" in result:
+        result["failure_detail"] = redact_private_values(
+            result["failure_detail"],
+            private_values,
+        )
+    raw_steps = execution.get("steps")
+    steps = raw_steps if isinstance(raw_steps, list) else []
+    result["steps"] = []
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        public_step = {
+            field: step.get(field)
+            for field in PUBLIC_EXECUTION_STEP_FIELDS
+            if field in step
+        }
+        if "error_detail" in public_step:
+            public_step["error_detail"] = redact_private_values(
+                public_step["error_detail"],
+                private_values,
+            )
+        result["steps"].append(public_step)
     return result
 
 

@@ -67,10 +67,20 @@ def render_workflow_text(value: str, inputs: dict[str, str]) -> str:
     return WORKFLOW_TOKEN_RE.sub(lambda match: inputs.get(match.group(1), ""), value or "")
 
 
-def render_workflow_command(value: str, variables: dict[str, str]) -> str:
+def render_workflow_command(
+    value: str,
+    variables: dict[str, str],
+    *,
+    placeholders: dict[str, str] | None = None,
+) -> str:
     """Render workflow variables as single shell-safe scalar arguments."""
+    safe_placeholders = placeholders or {}
     return WORKFLOW_TOKEN_RE.sub(
-        lambda match: shlex.quote(str(variables.get(match.group(1), ""))),
+        lambda match: (
+            safe_placeholders[match.group(1)]
+            if match.group(1) in safe_placeholders
+            else shlex.quote(str(variables.get(match.group(1), "")))
+        ),
         value or "",
     )
 

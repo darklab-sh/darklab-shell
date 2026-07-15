@@ -76,15 +76,24 @@ def _validate_graph(
             destinations.append(step_ids[index + 1])
         codes = next_value.get("codes")
         if isinstance(codes, Mapping):
+            normalized_codes: dict[str, object] = {}
             for code, destination in codes.items():
                 try:
-                    int(str(code))
+                    normalized_code = str(int(str(code)))
                 except ValueError as exc:
                     raise WorkflowDefinitionError(
                         f"invalid workflow exit code {code!r}",
                         field=f"steps.{index}.next.codes",
                     ) from exc
+                if normalized_code in normalized_codes:
+                    raise WorkflowDefinitionError(
+                        "workflow exit codes must be unique",
+                        field=f"steps.{index}.next.codes",
+                    )
+                normalized_codes[normalized_code] = destination
                 destinations.append(destination)
+            if isinstance(next_value, dict):
+                next_value["codes"] = normalized_codes
         for destination in destinations:
             if not destination:
                 continue
@@ -417,6 +426,71 @@ def render_step_command(step: Mapping[str, object], variables: Mapping[str, str]
     if not command:
         raise WorkflowDefinitionError("workflow step rendered an empty command")
     return command
+
+
+def render_step_display_command(
+    step: Mapping[str, object],
+    definition: Mapping[str, object],
+    variables: Mapping[str, str],
+) -> str:
+    """Render a value-safe command for run metadata, logs, and history."""
+    missing = workflow_tokens(str(step.get("cmd") or "")) - set(variables)
+    if missing:
+        raise WorkflowDefinitionError(
+            f"workflow step is missing variables: {', '.join(sorted(missing))}"
+        )
+    raw_inputs = definition.get("inputs")
+    inputs = (
+        [item for item in raw_inputs if isinstance(item, Mapping)]
+        if isinstance(raw_inputs, list)
+        else []
+    )
+    input_names = {str(item.get("id") or "") for item in inputs}
+    placeholders = {
+        str(item.get("id") or ""): "[redacted]"
+        for item in inputs
+        if item.get("sensitive") and item.get("id")
+    }
+    placeholders.update(
+        {
+            name: f"[captured:{name}]"
+            for name in variables
+            if name not in input_names
+        }
+    )
+    command = render_workflow_command(
+        str(step.get("cmd") or ""),
+        dict(variables),
+        placeholders=placeholders,
+    ).strip()
+    if not command:
+        raise WorkflowDefinitionError("workflow step rendered an empty command")
+    return command
+
+
+def workflow_private_values(
+    definition: Mapping[str, object],
+    variables: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Return sensitive inputs and capture values that metadata must not expose."""
+    raw_inputs = definition.get("inputs")
+    inputs = (
+        [item for item in raw_inputs if isinstance(item, Mapping)]
+        if isinstance(raw_inputs, list)
+        else []
+    )
+    input_names = {str(item.get("id") or "") for item in inputs}
+    private_names = {
+        str(item.get("id") or "")
+        for item in inputs
+        if item.get("sensitive") and item.get("id")
+    }
+    private_names.update(name for name in variables if name not in input_names)
+    return tuple(
+        str(variables[name])
+        for name in sorted(private_names)
+        if name in variables and str(variables[name])
+    )
 
 
 def definition_json(definition: Mapping[str, object]) -> str:

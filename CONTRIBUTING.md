@@ -223,8 +223,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2427 pytest + 1498 Vitest + 276 Playwright = 4,201 tests**.
-That total includes 4,138 behavior tests plus 63 docs/inventory meta-tests.
+Current totals: **2435 pytest + 1499 Vitest + 278 Playwright = 4,212 tests**.
+That total includes 4,149 behavior tests plus 63 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration

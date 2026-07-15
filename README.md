@@ -22,6 +22,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Configuration](#configuration)
 - [Installed Tools](#installed-tools)
+- [Raw-Packet Scanning](#raw-packet-scanning)
 - [Production Deployment](#production-deployment)
 - [Security & Process Isolation](#security--process-isolation)
 - [License](#license)
@@ -68,7 +69,8 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior, command outcome summaries, and default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` (with `--json` for a machine-readable entry), `commands search <term>`, and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, subcommands, and per-tool knowledge guidance (notes, gotchas, safe defaults, and artifact behavior) from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, manage team scope, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
-- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. The Workflows workspace is available from **Browse all workflows** in the desktop rail, the mobile menu, or `Alt+G`; its searchable catalog keeps definitions and their inputs together, while a separate Executions tab shows progress and linked runs. Users can save personal or team-scoped v2 playbooks with named typed parameters, masked sensitive fields, stable steps, success/failure routes, and bounded output captures for later steps. Playbooks keep running after the workspace closes
+- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. The Workflows workspace is available from **Browse all workflows** in the desktop rail, the mobile menu, or `Alt+G`; its searchable catalog keeps definitions and their inputs together, while a separate Executions tab shows progress and linked runs. Users can save personal or team-scoped v2 playbooks with named typed parameters, masked sensitive fields, stable steps, success/failure or exact-exit-code routes, and bounded output captures for later steps. Sensitive inputs stay redacted in run summaries, History command text, and shared execution status responses. Playbooks keep running after the workspace closes
+- **Opt-in raw-packet scanning** — Linux Docker deployments can unlock Nmap SYN and other raw modes, Naabu SYN scans, and Masscan without running the container in privileged mode. Each tool activates only after its own capability checks pass, connect-capable tools keep safe fallbacks, and `/diag` explains why a requested mode isn't available. See [Raw-Packet Scanning](#raw-packet-scanning)
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting for commands, APIs, and dynamic app routes, shared PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, an IP-gated `/diag/audit` viewer for filtered audit rows and capped CSV/JSON downloads, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
@@ -311,19 +313,15 @@ When Interactive PTY is enabled, use `mtr --interactive <host>` to open the live
 
 #### nmap
 
-nmap runs as the unprivileged `scanner` user. By default, the app injects `-sT` when no scan mode is supplied and blocks raw-only options. Operators on Linux Docker hosts can set `RAW_PACKET_SCANNING_ENABLED=true` to opt in to capability-backed scanning. Once readiness passes, the app stops forcing `-sT`, sets the trusted `NMAP_PRIVILEGED=1` environment value, and lets Nmap use its normal SYN default or an explicit raw mode such as `-sS`. Plain `-sT` commands stay connect scans. User-supplied `--privileged`, source/decoy/MAC spoofing, and link-layer `--send-eth` remain blocked.
-
-This opt-in uses the existing `NET_RAW` capability and Nmap file capability. It does not enable Docker privileged mode, run scans as root, require host networking, or require Macvlan/IPvlan. `/diag` shows whether the setting is configured, available, and active. Rootless Docker, `no-new-privileges`, a stripped capability bounding set, or a binary that has lost its file capability leaves raw mode unavailable while connect scans continue to work.
-
-The container's scanner firewall blocks `${APP_PORT}` only when the destination is local to the container, so an authorized remote service using the same port can still be scanned. With `RESTRICTED_COMMAND_INPUT_CIDRS` set, the app forces Nmap's `--send-ip` path and blocks `--send-eth` so restricted traffic stays on the owner-matched OUTPUT path. Raw Naabu and Masscan are always held back when restricted CIDRs are configured; separately managed host or bridge firewall rules do not reactivate them.
+nmap runs as the unprivileged `scanner` user and defaults to TCP connect scanning when raw readiness is inactive. The [raw-packet scanning](#raw-packet-scanning) opt-in can expose SYN, UDP, OS detection, traceroute, and raw host-discovery modes on supported Linux Docker deployments. An explicit `-sT` always remains a connect scan, and spoofing or link-layer bypass options stay blocked.
 
 #### naabu
 
-naabu uses `-scan-type c` while raw-packet scanning is disabled or unavailable. When the operator opt-in and runtime checks pass, the app selects SYN mode unless the command explicitly requests connect mode. Deployments with restricted CIDRs keep Naabu in connect mode because packet-socket traffic does not cross the scanner-user OUTPUT rules.
+naabu uses connect mode while [raw-packet scanning](#raw-packet-scanning) is disabled or unavailable. When its readiness check passes, the app can select SYN mode; restricted-CIDR deployments keep Naabu in connect mode.
 
 #### masscan
 
-masscan is a raw-packet-only scanner with no TCP connect fallback, so live scans require the operator opt-in and passing readiness checks. If raw mode is unavailable, RustScan or `nmap -sT` provides a connect-mode alternative. Masscan stays unavailable when restricted CIDRs are configured because its packet-socket traffic bypasses the scanner-user OUTPUT rules.
+masscan has no connect-mode fallback, so live scans require the [raw-packet scanning](#raw-packet-scanning) opt-in and passing readiness checks. When it isn't available, use RustScan or `nmap -sT` instead.
 
 #### wget
 
@@ -349,25 +347,75 @@ When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `
 
 ---
 
+## Raw-Packet Scanning
+
+Raw-packet scanning lets supported Linux Docker deployments use scanner modes that need packet sockets while keeping commands under the unprivileged `scanner` user.
+
+### What It Unlocks
+
+- **Nmap:** its normal SYN default plus explicit SYN, UDP, OS detection, traceroute, and raw host-discovery modes.
+- **Naabu:** SYN scanning when the command doesn't explicitly request connect mode.
+- **Masscan:** live and interactive scans; its help output remains available when raw scanning is inactive.
+
+Autocomplete and the Command Registry show raw-only examples and flags only when the matching tool is ready, so the visible choices match what the deployment can run.
+
+### Safety Boundaries
+
+The feature uses the container's existing `NET_RAW` capability and scanner file capabilities. It doesn't enable Docker privileged mode, run scans as root, use host networking, or require Macvlan/IPvlan. User-supplied Nmap `--privileged`, source/decoy/MAC spoofing, and link-layer `--send-eth` remain blocked.
+
+The scanner firewall blocks the app port only when the destination is local to the container. An authorized remote target using the same port remains scannable.
+
+### Fallbacks and Restricted Networks
+
+Nmap and Naabu continue in connect mode when raw scanning is off or a readiness check fails. Masscan has no connect fallback and points users to RustScan or `nmap -sT` instead.
+
+When `RESTRICTED_COMMAND_INPUT_CIDRS` is set, raw Nmap also requires the protected firewall marker to match the effective CIDR list and uses the IP path enforced by that boundary. Packet-socket Naabu and Masscan stay inactive because their traffic doesn't cross the scanner-user OUTPUT rules. Separate host or bridge firewall rules don't override that restriction.
+
+### Enable and Verify
+
+Set `RAW_PACKET_SCANNING_ENABLED=true` in the production `.env`, then restart the shell container. `/diag` reports configured, available, and active state for each scanner and names the failed prerequisite when a tool can't activate. Common blockers include rootless runtimes, `no-new-privileges`, a stripped capability bounding set, or a scanner binary that has lost its file capability.
+
+See [CONFIGURATION.md](CONFIGURATION.md#raw-packet-scanning) for the full readiness, firewall, and diagnostics reference.
+
+---
+
 ## Production Deployment
+
+### Installation Layout
 
 The release installer creates a small operator-owned directory with `compose.yaml`, `.env`, safe local-overlay starters under `conf/`, `data/`, `workspaces/`, `backups/`, the project license, third-party notices, a release manifest, managed-file checksums, the pulled-image verifier, and the `darklab-deploy` lifecycle command. Production Compose pulls the exact `docker.io/darklabsh/darklab-shell:2.6.0` tag and never mounts the repository or `/app` from the host. The host config directory stays private at `0700` with files at `0600`; on startup, the root entrypoint validates and copies that tree into a private `appuser` runtime directory before it drops privileges.
 
+### Release Verification
+
 Release-page assets include the deterministic deployment archive, its checksums, the signed `SHA256SUMS` bundle, CycloneDX SBOM, SLSA provenance, build-input inventory, evidence index, and full vulnerability report. The build-input inventory records the exact Python base manifest, source and build-file hashes, effective Docker build arguments, and every Dockerfile step that reaches a package registry or source host. The deployment archive is byte-stable; the full scanner image isn't claimed to be byte-reproducible because Debian packages and several transitive tool dependencies resolve when it builds. The signed image digest and SBOM identify the result that was actually released. Cosign verification uses `https://gitlab.com` as the issuer and the exact tag identity `https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/vX.Y.Z`; release-candidate validation uses the matching `vX.Y.Z-rc.N` identity. The independent Docker Hub overview publishes both patterns, and signatures for both registry references are stored alongside their images.
+
+### State and Optional Services
 
 `/data` is durable and contains SQLite, saved output artifacts, and the app-managed vault key. Redis deliberately disables RDB and AOF because it holds coordination, rate-limit, broker, and cache state; a Redis restart can drop in-flight work but doesn't replace the durable app database. Files workspaces use tmpfs by default and disappear when the shell container restarts. To keep Files data, set `WORKSPACE_ROOT=/workspaces` in `.env`, then set `workspace_enabled: true` and `workspace_backend: volume` in `conf/config.local.yaml`; the production stack already mounts the host `./workspaces` directory there.
 
 The default stack uses SQLite and Redis. Set `COMPOSE_PROFILES=postgres` plus `DATABASE_BACKEND=postgres` to use the generated Postgres credentials, or `COMPOSE_PROFILES=llama` to start the optional local model. Raw-packet scanning stays off unless `RAW_PACKET_SCANNING_ENABLED=true`; use the readiness and firewall guidance in [CONFIGURATION.md](CONFIGURATION.md#raw-packet-scanning) before enabling it.
 
+### Supported Runtimes
+
 On SELinux-enforcing hosts, label the private bind mounts for container use, for example `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z` in a local Compose override. Rootless Docker and Podman may not be able to grant the `NET_RAW` and `NET_ADMIN` capabilities used by scanner tools. Docker Compose 2.20.0 or newer on Linux AMD64 is the supported production runtime; Podman remains best effort. Dedicated release gates exercise native ARM64, SELinux-enforcing Docker, and rootless Podman when their matching runners are enabled, but those lanes don't broaden the supported production matrix until they pass.
+
+### Backup and Restore
 
 Use `./darklab-deploy status` to check the installed version, image selection, and release-owned files. `./darklab-deploy backup --keep-days 14` creates and verifies a private archive under `backups/`; SQLite uses the online backup API and Postgres uses `pg_dump` inside a one-off release-image container, so the host needs Docker and Compose but not Python or Postgres client tools. If the bundled Postgres service is stopped, the command starts it for the dump and returns it to the stopped state afterward. Durable Files workspaces are included when `WORKSPACE_ROOT=/workspaces`. Each archive carries `.env`, local config, `/data` including the app-owned vault key, enabled durable workspaces, a redacted manifest, restore notes, and checksums.
 
+Restore a managed backup with `./darklab-deploy restore backups/<archive>.tar.gz`. Restore takes another safety backup first, stops the app, verifies and stages the selected archive, then restores SQLite or Postgres in one transaction before it commits operator files and durable workspaces. It keeps the installed image and target deployment's Postgres credentials, returns restored host files to the invoking operator, and restarts only after everything succeeds. A failure leaves the app stopped and prints the exact safety-backup recovery command instead of starting against partial state.
+
+### Upgrade, Migration, and Removal
+
 Upgrade to an exact newer version with `./darklab-deploy upgrade X.Y.Z`. The command rejects changed release-owned files and downgrades, verifies the release's signed checksum manifest through a digest-pinned Cosign container, checks the exact deployment archive against that manifest, creates and verifies a pre-upgrade backup, validates the new Compose file, then advances the managed files and `DARKLAB_IMAGE` while leaving `.env` settings, `conf/`, `data/`, `workspaces/`, and existing backups in place. When the release adds environment settings, the upgrade lists their names and points to the new `.env.example` without changing the operator's `.env` or printing values. It prints the pull, image-verification, and restart commands instead of starting the new release for you. `--archive /path/to/archive` is the offline path: it checks the adjacent `.sha256` file but expects you to verify the publisher's `SHA256SUMS.sigstore.json` before running the command. Startup can apply forward-only database changes; changing an image tag back doesn't reverse a migration.
 
-Restore a managed backup with `./darklab-deploy restore backups/<archive>.tar.gz`. Restore takes another safety backup first, stops the app, verifies and stages the selected archive, then restores SQLite or Postgres in one transaction before it commits operator files and durable workspaces. It keeps the installed image and target deployment's Postgres credentials, returns restored host files to the invoking operator, and restarts only after everything succeeds. A failure leaves the app stopped and prints the exact safety-backup recovery command instead of starting against partial state. `./darklab-deploy migration-help` explains how to move a clone-backed deployment without copying source-owned files. `./darklab-deploy remove --yes` stops the stack and removes only release-owned files; `.env`, `conf/`, `data/`, `workspaces/`, and `backups/` remain for deliberate cleanup.
+`./darklab-deploy migration-help` explains how to move a clone-backed deployment without copying source-owned files. `./darklab-deploy remove --yes` stops the stack and removes only release-owned files; `.env`, `conf/`, `data/`, `workspaces/`, and `backups/` remain for deliberate cleanup.
+
+### Source-Backed Alternatives
 
 The repository-backed [docker-compose.yml](docker-compose.yml) remains the development and custom-deployment stack. [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is still available for operators who need its GELF, reverse-proxy, external-network, and host-tuning choices; it isn't part of the neutral downloadable production stack.
+
+### Inventory and Monitoring
 
 Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
 
@@ -689,7 +737,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
 │   │   ├── process_redis.py    # Shared Redis client proxy for process-state consumers
 │   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
-│   │   └── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
+│   │   ├── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
+│   │   └── startup_logging.py  # Import-time config log buffering and safe fatal fallback
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to factory construction)
 │   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
 │   ├── requirements.txt        # Python runtime dependencies
@@ -955,6 +1004,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
 │   │   │   ├── persistence.py  # Completed-run save, artifact, Atlas, finding, and project-link persistence helpers
 │   │   │   ├── postfilters.py  # Synthetic jq/workspace/trufflehog output filters used by run streaming
+│   │   │   ├── private_data.py # Private command-value redaction, secret injection, and safe metadata helpers
 │   │   │   ├── process_control.py # Process-group signaling and scanner PID freshness helpers
 │   │   │   ├── project_notices.py # Project-related run notice formatting helpers
 │   │   │   ├── scope.py        # Run scope visibility and command-validation owner helpers
@@ -1470,7 +1520,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_check_versions.py # Dependency version-check helper coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
 │   │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
-│   │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
+│   │   ├── test_logging.py     # Structured logging: formatters, config startup replay, and event coverage
 │   │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
 │   │   ├── test_notifications_channels.py # Slack, Discord, Telegram, and Pushover notification channel coverage
 │   │   ├── test_notifications_email.py # SMTP email notification channel coverage

@@ -23,6 +23,7 @@ import hashlib
 import io
 import importlib.util
 import json
+import logging
 import os
 import random
 import re
@@ -2386,6 +2387,7 @@ class TestLoadConfig:
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
         assert cfg["raw_packet_scanning_enabled"] is True
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
+        assert app_config.get_config_load_summary()["warning_count"] == 1
         warning.assert_has_calls([
             mock.call(
                 "AI_BASE_URL_ALLOWED_CIDR_INVALID",
@@ -2581,6 +2583,7 @@ class TestLoadConfig:
         assert cfg["intel_negative_cache_urlscan_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_threatfox_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_securitytrails_quota_seconds"] == 21600
+        assert app_config.get_config_load_summary()["warning_count"] == 2
 
     def test_separate_local_config_directory_overrides_shipped_config(self):
         with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
@@ -2770,6 +2773,7 @@ class TestLoadConfig:
         assert cfg["database_postgres_jit"] is True
         assert cfg["ai_max_concurrent"] == 4
         assert cfg["audit_export_max_rows"] == 200000
+        assert app_config.get_config_load_summary()["warning_count"] == 2
         warning.assert_has_calls([
             mock.call(
                 "CONFIG_VALUE_CLAMPED",
@@ -2802,7 +2806,6 @@ class TestLoadConfig:
 
         error.assert_called_once_with(
             "CONFIG_LOAD_FAILED",
-            exc_info=False,
             extra={
                 "phase": "root_shape",
                 "source": os.path.join(tmp, "config.yaml"),
@@ -2822,9 +2825,9 @@ class TestLoadConfig:
 
         error.assert_called_once()
         assert error.call_args.args == ("CONFIG_LOAD_FAILED",)
-        assert error.call_args.kwargs["exc_info"] is True
         assert error.call_args.kwargs["extra"]["phase"] == "yaml_parse"
         assert error.call_args.kwargs["extra"]["source"] == os.path.join(tmp, "config.local.yaml")
+        assert error.call_args.kwargs["extra"]["error"] == "ParserError"
 
     def test_nested_overlay_deep_merges_section_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -13926,17 +13929,30 @@ class TestIntelServices:
         )
         provider = ShodanProvider(secret_getter=lambda session, env: None, client=mock.Mock())
 
-        result = lookup_entity(
-            "ip",
-            "8.8.8.8",
-            session_id="session-1",
-            provider_factories=[lambda: provider],
-            redis_client=redis,
-        )
+        shell_logger = logging.getLogger("shell")
+        previous_level = shell_logger.level
+        shell_logger.setLevel(logging.DEBUG)
+        try:
+            with mock.patch.object(shell_logger, "handle") as handle:
+                result = lookup_entity(
+                    "ip",
+                    "8.8.8.8",
+                    session_id="session-1",
+                    provider_factories=[lambda: provider],
+                    redis_client=redis,
+                )
+        finally:
+            shell_logger.setLevel(previous_level)
 
         assert result.providers[0].status == "missing_secret"
         assert result.providers[0].result is None
         provider.client.lookup_ip.assert_not_called()
+        missing_secret_record = next(
+            call.args[0]
+            for call in handle.call_args_list
+            if call.args[0].getMessage() == "INTEL_PROVIDER_MISSING_SECRET"
+        )
+        assert missing_secret_record.reason == "SHODAN_API_KEY is not configured"
 
     def test_lookup_entity_preflights_fofa_email_before_rate_limit_and_client_call(self):
         from services.intel.fofa import FofaProvider

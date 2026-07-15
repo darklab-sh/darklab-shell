@@ -18,14 +18,16 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, create_model
 import config_paths
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
+from core.startup_logging import configure_config_log_fallback, install_config_log_buffer
 
-log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 CONFIG_LOAD_SUMMARY: dict[str, Any] = {}
 
 APP_VERSION = "2.6.0"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
+
+log = install_config_log_buffer(logging.getLogger("shell"), app_version=APP_VERSION)
 
 PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
@@ -71,12 +73,12 @@ def _record_config_load_failure(
     source: str,
     key: str = "",
     error: object | None = None,
-    exc_info: bool = False,
 ) -> None:
     extra = {"phase": phase, "source": _config_log_path(source), "key": key}
     if error is not None:
-        extra["error"] = _config_log_value(error, _MAX_CONFIG_ERROR_VALUE_CHARS)
-    log.error("CONFIG_LOAD_FAILED", exc_info=exc_info, extra=extra)
+        safe_error = type(error).__name__ if isinstance(error, BaseException) else error
+        extra["error"] = _config_log_value(safe_error, _MAX_CONFIG_ERROR_VALUE_CHARS)
+    log.error("CONFIG_LOAD_FAILED", extra=extra)
 
 
 def get_config_load_summary() -> dict[str, Any]:
@@ -110,11 +112,15 @@ def _load_yaml_config(path):
         with open(path) as f:
             loaded = yaml.safe_load(f) or {}
     except yaml.YAMLError as exc:
-        _record_config_load_failure(phase="yaml_parse", source=str(path), error=exc, exc_info=True)
-        raise ConfigLoadError(f"Invalid YAML in {path}: {exc}") from exc
+        _record_config_load_failure(phase="yaml_parse", source=str(path), error=exc)
+        raise ConfigLoadError(
+            f"Invalid YAML in {_config_log_path(path)}: {type(exc).__name__}"
+        ) from None
     if not isinstance(loaded, dict):
         _record_config_load_failure(phase="root_shape", source=str(path), error="expected a mapping")
-        raise ConfigLoadError(f"Invalid config root in {path}: expected a mapping")
+        raise ConfigLoadError(
+            f"Invalid config root in {_config_log_path(path)}: expected a mapping"
+        )
     return loaded
 
 
@@ -209,15 +215,25 @@ def _parse_bool_value(value: Any) -> bool | None:
     return None
 
 
-def _normalize_app_name(value):
+def _normalize_app_name(value, provenance: Mapping[str, str]):
     raw = str(value or PROJECT_NAME).strip() or PROJECT_NAME
     normalized = " ".join(raw.split())
     if len(normalized) <= APP_NAME_MAX_CHARS:
         return normalized
-    log.warning(
-        "APP_NAME_TRUNCATED",
-        extra={"configured_chars": len(normalized), "max_chars": APP_NAME_MAX_CHARS},
-    )
+    source = _config_log_path(_config_source(provenance, "app_name"))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "APP_NAME_TRUNCATED",
+        "key": "app_name",
+        "source": source,
+        "reason": "above_maximum_chars",
+    })
+    log.warning("APP_NAME_TRUNCATED", extra={
+        "key": "app_name",
+        "source": source,
+        "reason": "above_maximum_chars",
+        "configured_chars": len(normalized),
+        "max_chars": APP_NAME_MAX_CHARS,
+    })
     return normalized[:APP_NAME_MAX_CHARS].rstrip() or PROJECT_NAME
 
 
@@ -239,12 +255,19 @@ def _warn_config_value_dropped(
     warning_event: str,
 ) -> None:
     bounded_value = value[:120]
+    source = _config_log_path(_config_source(provenance, key))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "CONFIG_VALUE_DROPPED",
+        "key": key,
+        "source": source,
+        "reason": reason,
+    })
     log.warning(warning_event, extra={value_field: bounded_value})
     log.warning(
         "CONFIG_VALUE_DROPPED",
         extra={
             "key": key,
-            "source": _config_log_path(_config_source(provenance, key)),
+            "source": source,
             "reason": reason,
             value_field: bounded_value,
         },
@@ -258,11 +281,18 @@ def _warn_config_value_defaulted(
     reason: str,
     fallback: Any,
 ) -> None:
+    source = _config_log_path(_config_source(provenance, key))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "CONFIG_VALUE_DEFAULTED",
+        "key": key,
+        "source": source,
+        "reason": reason,
+    })
     log.warning(
         "CONFIG_VALUE_DEFAULTED",
         extra={
             "key": key,
-            "source": _config_log_path(_config_source(provenance, key)),
+            "source": source,
             "reason": reason,
             "fallback": fallback,
         },
@@ -277,9 +307,16 @@ def _warn_config_value_clamped(
     minimum: Any | None = None,
     maximum: Any | None = None,
 ) -> None:
+    source = _config_log_path(_config_source(provenance, key))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "CONFIG_VALUE_CLAMPED",
+        "key": key,
+        "source": source,
+        "reason": reason,
+    })
     extra = {
         "key": key,
-        "source": _config_log_path(_config_source(provenance, key)),
+        "source": source,
         "reason": reason,
     }
     if minimum is not None:
@@ -806,7 +843,7 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
             minimum=defaults["database_pool_min"] or 1,
         )
         defaults["database_pool_max"] = defaults["database_pool_min"] or 1
-    defaults["app_name"] = _normalize_app_name(defaults.get("app_name"))
+    defaults["app_name"] = _normalize_app_name(defaults.get("app_name"), provenance)
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
     full_output_max_mb = _coerce_forgiving_mb_config_value(defaults, "full_output_max_mb", None)
     full_output_max_mb_source = provenance.get("full_output_max_mb", "built-in defaults")
@@ -891,9 +928,10 @@ def _validate_config_model(defaults: dict[str, Any], provenance: dict[str, str],
             source=provenance.get(key, "effective config"),
             key=key,
             error=first_error.get("msg", "invalid value"),
-            exc_info=True,
         )
-        raise ConfigLoadError(f"Invalid app config: {_format_validation_error(exc, provenance, defaults)}") from exc
+        raise ConfigLoadError(
+            f"Invalid app config: {_format_validation_error(exc, provenance, defaults)}"
+        ) from None
     CONFIG_LOAD_SUMMARY.update({
         "schema_field_count": len(schema_fields),
         "derived_keys": len(_DERIVED_CONFIG_DEFAULTS),
@@ -1249,6 +1287,12 @@ def load_config(conf_dir=None, local_conf_dir=None):
         provenance=provenance,
         allowed_paths=allowed_paths,
     )
+    configure_config_log_fallback(
+        log,
+        log_format=defaults.get("log_format", "text"),
+        app_name=defaults.get("app_name", PROJECT_NAME),
+        app_version=APP_VERSION,
+    )
     if base_known_count:
         cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
             "source": base_overlay_log_path,
@@ -1281,6 +1325,12 @@ def load_config(conf_dir=None, local_conf_dir=None):
         source=str(local_overlay_path),
         provenance=provenance,
         allowed_paths=allowed_paths,
+    )
+    configure_config_log_fallback(
+        log,
+        log_format=defaults.get("log_format", "text"),
+        app_name=defaults.get("app_name", PROJECT_NAME),
+        app_version=APP_VERSION,
     )
     if local_known_count:
         cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({

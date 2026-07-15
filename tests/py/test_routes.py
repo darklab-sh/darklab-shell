@@ -25,6 +25,7 @@ import time
 import uuid
 import zipfile
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -18310,14 +18311,23 @@ class TestRunRoute:
         assert json.loads(resp.data) == {"error": "blocked"}
         popen.assert_not_called()
 
-    def test_brokered_run_starts_real_process_and_registers_active_run(self):
+    def test_brokered_run_starts_real_process_and_registers_active_run(self, caplog):
+        from blueprints import run as run_routes
+
         client = get_client()
         fake_proc = _RouteFakeProc(pid=8765)
         _CapturedThread.instances = []
+        caplog.set_level(logging.DEBUG, logger="shell")
+        private_value = "workflow-private-value.example"
+        raw_workflow_command = f"printf '%s\\n' {private_value}"
+        display_workflow_command = "printf '%s\\n' [redacted]"
 
         with mock.patch("blueprints.run.broker_available", return_value=True), \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", return_value=("ping darklab.sh", "rewritten")), \
+             mock.patch(
+                 "blueprints.run.rewrite_command",
+                 side_effect=lambda command, **_kwargs: (command, "rewritten"),
+             ), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register") as pid_register, \
@@ -18331,31 +18341,73 @@ class TestRunRoute:
                 json={"command": "ping darklab.sh", "tab_id": "tab-1"},
                 headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
             )
+            workflow_handlers = replace(
+                run_routes._run_start_handlers(),
+                workspace_notice_lines=lambda _validation: [
+                    f"[workspace] reading {private_value}",
+                    "[workspace] writing public.txt",
+                ],
+                workspace_artifacts_from_validation=lambda *_args: [
+                    {
+                        "workspace_path": private_value,
+                        "display_name": private_value,
+                        "kind": "input",
+                    },
+                    {
+                        "workspace_path": "public.txt",
+                        "display_name": "public.txt",
+                        "kind": "output",
+                    },
+                ],
+            )
+            workflow_started = run_routes._start_brokered_run_service(
+                original_command=raw_workflow_command,
+                display_command=display_workflow_command,
+                session_id="session-1",
+                client_ip="127.0.0.1",
+                handlers=workflow_handlers,
+                owner_client_id="client-workflow",
+                owner_tab_id="tab-workflow",
+                private_values=(private_value,),
+                thread_name_prefix="workflow-run",
+            )
 
         assert resp.status_code == 202
         assert json.loads(resp.data) == {
             "run_id": "run-real",
             "stream": "/runs/run-real/stream",
         }
-        launched = popen.call_args.args[0]
+        launched = popen.call_args_list[0].args[0]
         assert launched[:3] == ["/usr/bin/stdbuf", "-oL", "-eL"]
         assert launched[-2:] == ["-c", "ping darklab.sh"]
-        pid_register.assert_called_once_with("run-real", 8765)
-        active_register.assert_called_once()
-        assert active_register.call_args.args[:4] == (
+        workflow_launched = popen.call_args_list[1].args[0]
+        assert workflow_launched[-2:] == ["-c", raw_workflow_command]
+        assert pid_register.call_count == 2
+        assert active_register.call_count == 2
+        assert active_register.call_args_list[0].args[:4] == (
             "run-real",
             8765,
             "session-1",
             "ping darklab.sh",
         )
-        assert active_register.call_args.kwargs == {
+        assert active_register.call_args_list[0].kwargs == {
             "owner_client_id": "client-1",
             "owner_tab_id": "tab-1",
         }
-        publish.assert_called_once()
-        assert publish.call_args.args[:2] == ("run-real", "started")
-        assert publish.call_args.args[2]["run_id"] == "run-real"
-        assert len(_CapturedThread.instances) == 1
+        assert active_register.call_args_list[1].args[:4] == (
+            "run-real",
+            8765,
+            "session-1",
+            display_workflow_command,
+        )
+        assert active_register.call_args_list[1].kwargs == {
+            "owner_client_id": "client-workflow",
+            "owner_tab_id": "tab-workflow",
+        }
+        assert publish.call_count == 2
+        assert publish.call_args_list[0].args[:2] == ("run-real", "started")
+        assert publish.call_args_list[0].args[2]["run_id"] == "run-real"
+        assert len(_CapturedThread.instances) == 2
         thread = _CapturedThread.instances[0]
         assert thread.started is True
         assert thread.daemon is True
@@ -18365,6 +18417,21 @@ class TestRunRoute:
         assert thread.kwargs["session_id"] == "session-1"
         assert thread.kwargs["original_command"] == "ping darklab.sh"
         assert thread.kwargs["rewrite_notice"] == "rewritten"
+        workflow_thread = _CapturedThread.instances[1]
+        assert workflow_started.run_id == "run-real"
+        assert workflow_thread.started is True
+        assert workflow_thread.name == "workflow-run-run-real"
+        assert workflow_thread.kwargs["original_command"] == display_workflow_command
+        assert workflow_thread.kwargs["workspace_notices"] == [
+            "[workspace] writing public.txt",
+        ]
+        assert workflow_thread.kwargs["workspace_artifacts"] == [{
+            "workspace_path": "public.txt",
+            "display_name": "public.txt",
+            "kind": "output",
+        }]
+        assert private_value not in json.dumps(workflow_thread.kwargs, default=str)
+        assert private_value not in caplog.text
 
     def test_interactive_pty_start_persists_team_scope(self):
         client = get_client()

@@ -9,7 +9,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: F401
+from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: E501,F401
+from services.runs import private_data
 from services.teams.scope import OwnerContext, owner_context_for_scope
 
 
@@ -39,18 +40,10 @@ class BrokeredRunStartResult:
     exit_code: int | None = None
 
 
-def status_for_exit_code(exit_code: object) -> str:
-    if not isinstance(exit_code, (int, str, bytes, bytearray)):
-        return "complete"
-    try:
-        return "succeeded" if int(exit_code) == 0 else "failed"
-    except (TypeError, ValueError):
-        return "complete"
-
-
 def start_brokered_run(
     *,
     original_command: str,
+    display_command: str = "",
     session_id: str,
     client_ip: str,
     handlers: RunStartHandlers,
@@ -60,9 +53,12 @@ def start_brokered_run(
     team_role: str = "",
     workspace_cwd: str = "",
     link_project_id: str = "",
+    private_values: tuple[str, ...] = (),
     thread_name_prefix: str = "run-broker",
     run_created_hook: Callable[[str, object | None], None] | None = None,
 ) -> BrokeredRunStartResult:
+    safe_command = str(display_command or original_command)
+    safe_private_values = private_data.normalized_private_values(private_values)
     owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
     if handlers.resolves_exact_special_builtin_command(original_command):
         if link_project_id:
@@ -79,7 +75,7 @@ def start_brokered_run(
         if team_id:
             synthetic_kwargs["team_id"] = team_id
         run_id = handlers.brokered_synthetic_run(
-            handlers.history_safe_command_for_storage(original_command),
+            handlers.history_safe_command_for_storage(safe_command),
             session_id,
             client_ip,
             events,
@@ -90,11 +86,18 @@ def start_brokered_run(
         return BrokeredRunStartResult(
             run_id=run_id,
             cmd_type="builtin",
-            status=status_for_exit_code(exit_code),
+            status=private_data.status_for_exit_code(exit_code),
             exit_code=exit_code,
         )
 
-    prepared_input = handlers.prepare_command_input(original_command, session_id, client_ip)
+    prepared_input = private_data.prepare_command_input(
+        handlers,
+        original_command,
+        safe_command,
+        session_id,
+        client_ip,
+        safe_private_values,
+    )
     if handlers.resolve_builtin_command(prepared_input.execution_command):
         if link_project_id:
             raise RunStartRejected(
@@ -110,7 +113,7 @@ def start_brokered_run(
         if team_id:
             synthetic_kwargs["team_id"] = team_id
         run_id = handlers.brokered_synthetic_run(
-            handlers.history_safe_command_for_storage(original_command),
+            handlers.history_safe_command_for_storage(safe_command),
             session_id,
             client_ip,
             handlers.filter_builtin_command_events(
@@ -125,28 +128,22 @@ def start_brokered_run(
         return BrokeredRunStartResult(
             run_id=run_id,
             cmd_type="builtin",
-            status=status_for_exit_code(exit_code),
+            status=private_data.status_for_exit_code(exit_code),
             exit_code=exit_code,
         )
 
-    if team_id:
-        prepared_real = handlers.prepare_real_command(
-            original_command,
-            prepared_input.execution_command,
-            session_id,
-            client_ip,
-            workspace_cwd,
-            team_id=team_id,
-            owner_context=owner_context,
-        )
-    else:
-        prepared_real = handlers.prepare_real_command(
-            original_command,
-            prepared_input.execution_command,
-            session_id,
-            client_ip,
-            workspace_cwd,
-        )
+    prepared_real = private_data.prepare_real_command(
+        handlers,
+        original_command,
+        prepared_input.execution_command,
+        safe_command,
+        session_id,
+        client_ip,
+        workspace_cwd,
+        safe_private_values,
+        team_id=team_id,
+        owner_context=owner_context,
+    )
     if prepared_real.missing_runtime:
         if link_project_id:
             raise RunStartRejected(
@@ -158,10 +155,10 @@ def start_brokered_run(
         if team_id:
             synthetic_kwargs["team_id"] = team_id
         run_id = handlers.brokered_synthetic_run(
-            original_command,
+            safe_command,
             session_id,
             client_ip,
-            [{"type": "output", "text": handlers.runtime_missing_command_message(prepared_real.missing_runtime)}],
+            [{"type": "output", "text": handlers.runtime_missing_command_message(private_data.display_missing_runtime(prepared_real))}],  # noqa: E501
             127,
             **synthetic_kwargs,
             **({"run_created_hook": run_created_hook} if run_created_hook else {}),
@@ -173,26 +170,30 @@ def start_brokered_run(
             exit_code=127,
         )
 
-    start_kwargs: dict[str, Any] = {}
-    if owner_client_id:
-        start_kwargs["owner_client_id"] = owner_client_id
-    if owner_tab_id:
-        start_kwargs["owner_tab_id"] = owner_tab_id
-    if team_id:
-        start_kwargs["team_id"] = team_id
-        start_kwargs["owner_context"] = owner_context
     started = handlers.start_real_command_process(
-        original_command,
+        safe_command,
         session_id,
         client_ip,
         prepared_real,
-        **start_kwargs,
+        **private_data.real_start_kwargs(
+            owner_client_id=owner_client_id,
+            owner_tab_id=owner_tab_id,
+            team_id=team_id,
+            owner_context=owner_context,
+            private_values=safe_private_values,
+        ),
     )
     attach_started_run(started, run_created_hook)
     handlers.publish_run_event(
         started.run_id,
         "started",
         {"run_id": started.run_id, "started": started.run_started},
+    )
+    workspace_notices, workspace_artifacts = private_data.public_workspace_metadata(
+        handlers,
+        prepared_real.validation,
+        session_id,
+        safe_private_values,
     )
     threading.Thread(
         target=handlers.brokered_real_run_worker,
@@ -202,7 +203,7 @@ def start_brokered_run(
             "session_id": session_id,
             "team_id": team_id,
             "client_ip": client_ip,
-            "original_command": original_command,
+            "original_command": safe_command,
             "run_started": started.run_started,
             "capture": started.capture,
             "signal_classifier": started.signal_classifier,
@@ -210,8 +211,8 @@ def start_brokered_run(
             "workspace_path_filter": started.workspace_path_filter,
             "variable_notice": prepared_input.variable_notice,
             "rewrite_notice": prepared_real.rewrite_notice,
-            "workspace_notices": handlers.workspace_notice_lines(prepared_real.validation),
-            "workspace_artifacts": handlers.workspace_artifacts_from_validation(prepared_real.validation, session_id),
+            "workspace_notices": workspace_notices,
+            "workspace_artifacts": workspace_artifacts,
             "owner_tab_id": owner_tab_id,
             "link_project_id": link_project_id,
         },

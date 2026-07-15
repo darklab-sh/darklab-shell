@@ -18,7 +18,12 @@ from services.runs.output_store import load_run_output_events_for_run
 from services.teams.capabilities import Capability, role_can
 from services.teams.storage import get_member, get_team
 from services.workflows.captures import WorkflowCaptureAccumulator
-from services.workflows.compiler import WorkflowDefinitionError, render_step_command
+from services.workflows.compiler import (
+    WorkflowDefinitionError,
+    render_step_command,
+    render_step_display_command,
+    workflow_private_values,
+)
 from services.workflows import storage
 
 
@@ -278,6 +283,15 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
         return None
     try:
         command = render_step_command(step, variables if isinstance(variables, Mapping) else {})
+        display_command = render_step_display_command(
+            step,
+            definition if isinstance(definition, Mapping) else {},
+            variables if isinstance(variables, Mapping) else {},
+        )
+        private_values = workflow_private_values(
+            definition if isinstance(definition, Mapping) else {},
+            variables if isinstance(variables, Mapping) else {},
+        )
     except WorkflowDefinitionError as exc:
         changed = storage.fail_step_launch(execution_id, step_id, "render_failed", str(exc))
         if changed:
@@ -330,6 +344,8 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
         )
         started = run_routes._start_brokered_run_service(
             original_command=command,
+            display_command=display_command,
+            private_values=private_values,
             session_id=str(execution.get("session_id") or ""),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),

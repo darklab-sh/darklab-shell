@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,138
+- behavior tests: 4,149
 - docs/inventory meta-tests: 63
-- `pytest`: 2427 (2377 behavior + 50 meta)
-- `vitest`: 1498 (1485 behavior + 13 meta)
-- `playwright`: 276 behavior
-- total: 4,201
+- `pytest`: 2435 (2385 behavior + 50 meta)
+- `vitest`: 1499 (1486 behavior + 13 meta)
+- `playwright`: 278 behavior
+- total: 4,212
 
 This document is organized in two parts:
 
@@ -1384,6 +1384,10 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestConfigureLogging.test_reconfigure_does_not_duplicate_handlers` | Checks that reconfigure does not duplicate handlers. |
 | `TestConfigureLogging.test_werkzeug_logger_silenced_to_error` | Checks that werkzeug logger silenced to error. |
 | `TestConfigureLogging.test_log_level_lowercase_accepted` | Checks that log level lowercase accepted. |
+| `TestConfigStartupLogging.test_debug_startup_replays_forgiving_warning_once` | Checks that fresh DEBUG startup replays a forgiving config warning once in text and GELF output with its structured context and warning count. |
+| `TestConfigStartupLogging.test_error_threshold_filters_nonfatal_config_records` | Checks that the effective ERROR threshold filters buffered nonfatal config records. |
+| `TestConfigStartupLogging.test_unknown_local_key_keeps_source_but_not_value` | Checks that an unknown local key reports its source once without logging its value. |
+| `TestConfigStartupLogging.test_fatal_local_overlay_uses_safe_structured_fallback` | Checks that a fatal local overlay emits one redacted structured text or GELF fallback before bootstrap can configure logging. |
 | `TestCmdDeniedEvent.test_cmd_denied_emits_warning` | Checks that command denied emits warning. |
 | `TestCmdDeniedEvent.test_cmd_denied_extra_has_ip` | Checks that command denied extra has IP. |
 | `TestCmdDeniedEvent.test_cmd_denied_extra_has_reason` | Checks that command denied extra has reason. |
@@ -2093,7 +2097,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunRoute.test_brokered_run_missing_runtime_returns_synthetic_stream_reference` | Verifies that brokered command starts return a synthetic stream reference when an allowed runtime is missing. |
 | `TestRunRoute.test_brokered_run_rejects_invalid_command_payloads` | Verifies that brokered command starts reject malformed, missing, non-string, and blank command payloads. |
 | `TestRunRoute.test_brokered_run_disallowed_command_returns_403_before_spawning` | Verifies that brokered command starts reject denied real commands before spawning a process. |
-| `TestRunRoute.test_brokered_run_starts_real_process_and_registers_active_run` | Verifies that brokered real command starts spawn a process, register active-run metadata, publish `started`, and schedule the broker worker. |
+| `TestRunRoute.test_brokered_run_starts_real_process_and_registers_active_run` | Verifies that brokered real command starts spawn a process, register active-run metadata, publish `started`, and schedule the broker worker, while a workflow display command reaches metadata and worker finalization without replacing the raw process command or retaining private workspace notices/artifact summaries. |
 | `TestRunRoute.test_interactive_pty_start_persists_team_scope` | Verifies that team-scoped interactive PTY starts pass the active team scope into the PTY runtime. |
 | `TestRunRoute.test_brokered_run_events_returns_session_scoped_backfill` | Verifies that brokered event backfill returns personal and team-authorized events with event IDs. |
 | `TestRunRoute.test_brokered_run_events_rejects_runs_outside_session` | Verifies that brokered event backfill rejects run IDs outside the current session before reading broker events. |
@@ -2650,7 +2654,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_legacy_definition_gets_snapshot_local_step_ids` | Verifies legacy workflows compile into durable snapshots with generated ordered step ids. |
 | `test_v2_compiler_rejects_forward_capture_references_and_cycles` | Verifies v2 definitions reject capture use when any incoming branch can skip its producer, plus cyclic transition graphs. |
 | `test_v2_compiler_rejects_duplicate_variables_invalid_transitions_and_unreachable_steps` | Verifies v2 definitions reject duplicate parameters, unknown transition targets, and steps that no branch can reach. |
-| `test_typed_inputs_are_canonicalized_and_rendered_as_shell_scalars` | Verifies typed target and port-set inputs are normalized and substituted as one shell-safe argument, while missing runtime variables fail closed. |
+| `test_v2_compiler_normalizes_and_rejects_duplicate_exact_exit_codes` | Verifies exact exit-code keys are canonical integers, canonical duplicates and invalid values are rejected, and user-workflow route errors identify the exact-code field. |
+| `test_typed_inputs_are_canonicalized_and_rendered_as_shell_scalars` | Verifies typed target and port-set inputs are normalized and substituted as one shell-safe argument, sensitive inputs and prior captures receive value-free display placeholders, and missing runtime variables fail closed. |
 | `test_typed_input_boundaries_reject_unsafe_paths_controls_and_sizes` | Verifies target, Files, and wordlist values are normalized while invalid ports, path escapes, controls, and oversized input are rejected. |
 | `test_capture_accumulator_ignores_noise_and_supports_entities_and_json_pointer` | Verifies bounded captures ignore progress noise and extract eligible lines, structured entities, and JSON Pointer scalars. |
 | `test_capture_accumulator_reports_required_misses_without_using_notices` | Verifies notices don't satisfy line captures and required misses return a bounded error. |
@@ -2659,10 +2664,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_execution_state_machine_routes_failures_and_skips_unvisited_branches` | Verifies nonzero steps follow explicit fallback branches, unvisited branches are skipped, and unhandled failures stop. |
 | `test_execution_cancel_marks_active_and_pending_steps_terminal` | Verifies cancellation marks active and pending workflow steps terminal, returns the linked run it changed, and wins a late-finalization race. |
 | `test_cancel_route_contains_missing_and_failed_process_signals` | Verifies cancellation remains terminal when the linked process is missing or can't be validated or signaled, records bounded diagnostics, and prevents late finalization from advancing the playbook. |
-| `test_team_execution_routes_enforce_roles_scope_and_team_process_control` | Verifies team owners and operators can start and cancel shared executions, viewers remain read-only, archived or removed membership is rejected, owner scopes stay isolated, and team cancellation signals the bound process group. |
-| `test_execution_routes_are_scoped_and_launch_server_execution` | Verifies durable routes enforce owner and workflow filters, active limits, event replay, transition-safe run signaling, and immutable snapshots after the source is edited or deleted. |
+| `test_team_execution_routes_enforce_roles_scope_and_team_process_control` | Verifies team owners and operators can start and cancel shared executions, viewers remain read-only, every readable role receives the same value-free public execution shape, archived or removed membership is rejected, owner scopes stay isolated, and team cancellation signals the bound process group. |
+| `test_execution_routes_are_scoped_and_launch_server_execution` | Verifies durable routes enforce owner and workflow filters, active limits, event replay, transition-safe run signaling, public response projection, and private immutable snapshots after the source is edited or deleted. |
 | `test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_projects` | Verifies History and Projects expose linked-run ancestry without leaking input, variable, snapshot, or command values. |
-| `test_server_orchestrator_launches_capture_fed_steps_through_normal_run_service` | Verifies server orchestration uses the normal run service, feeds a captured value into the next rendered step, and preserves the execution's owner, workspace, Project, client, and tab context on every launch. |
+| `test_server_orchestrator_launches_capture_fed_steps_through_normal_run_service` | Verifies server orchestration gives the normal run service separate raw and display commands, feeds a captured value into the next rendered step, and preserves the execution's owner, workspace, Project, client, and tab context on every launch. |
+| `test_sensitive_workflow_run_redacts_real_lifecycle_metadata` | Verifies a real brokered process receives the raw value while active metadata, DEBUG/INFO/WARN/ERROR records, saved History and Project rows, metrics, notifications, and command-policy/spawn failures receive only the redacted display command. |
 | `test_required_capture_failure_uses_failure_branch_without_leaking_values` | Verifies a successful command with a missing required capture keeps exit code zero, marks the step failed, follows the failure branch, records the capture-failure metric, and keeps private inputs out of logs, events, audit rows, and notifications. |
 | `test_server_orchestrator_rejects_interactive_pty_steps` | Verifies a registry-declared interactive trigger fails before a workflow step reaches the run broker. |
 | `test_server_orchestrator_records_broker_or_policy_launch_failures` | Verifies broker and launch-time policy errors leave the execution and active step in a durable failed state, including a policy change between steps without binding a second run. |
@@ -2734,9 +2740,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `scopes remembered workflow values and never stores sensitive parameters` | Verifies remembered form values stay within their owner and workflow scope while sensitive values use masked controls and are never persisted in browser storage. |
 | `deduplicates workflow subcommands that share runtime insert text` | Verifies that runtime workflow subcommands replace placeholder-decorated static hints when both insert the same command text. |
 | `renders saved workflows above built-ins and keeps the workspace open after deletion` | Verifies that saved workflows render before built-ins, expose edit controls, and refresh the shared catalog while selecting the next definition after deletion. |
-| `authors explicit typed parameters and stable step transitions in the workflow editor` | Verifies the editor serializes typed parameters, stable step IDs, and default success/failure destinations into a v2 definition. |
+| `authors explicit typed parameters and stable step transitions in the workflow editor` | Verifies the editor serializes typed parameters, stable step IDs, default success/failure destinations, and an exact exit-code route into a v2 definition. |
+| `keeps exact exit-code routes visible through step edits and validates route fields` | Verifies exact-code routes follow renamed steps, remain stable across reordering, visibly invalidate deleted destinations, support removal, and reject duplicate or non-integer codes before save. |
 | `marks workflow capture-fed command previews as available only during the playbook` | Verifies later-step capture references stay visible and non-runnable until the server-owned playbook produces them. |
-| `places structured workflow save errors beside the matching editor field` | Verifies structured server errors mark and explain the matching workflow editor control. |
+| `places structured workflow save errors beside the matching editor field` | Verifies structured server errors mark and explain matching parameter and exact-exit-code controls. |
 | `renders recent workflow execution progress, branches, captures, and linked runs` | Verifies that Recent Executions shows durable status, elapsed time, selected branches, capture names, and linked run ids. |
 | `shows playbook ancestry on history rows and links sibling step runs` | Verifies History rows display workflow and step ancestry and let operators open sibling runs through the shared Run Details path. |
 | `wires workflow execution attach, open, cancel, and refresh actions` | Verifies that active and finished execution rows expose the correct shared panel actions. |
@@ -4588,6 +4595,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
 | `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the backdrop — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
+| `workflow exact exit-code routes stack cleanly in the mobile editor` | Verifies exact-code inputs and destinations use the shared controls, stack to the available mobile width, and remain removable. |
 | `workflows sheet exposes the shared recent execution controls` | Verifies that the mobile Workflows sheet opens its Executions tab, shows durable status and captures, attaches the linked active run to the terminal, reopens, and confirms cancellation. |
 | `mobile Projects creates, links, drills by count chip, and opens row actions` | Verifies the real mobile Projects browser flow for creating a project, linking the last run, using a count chip to drill into Runs, and opening row actions in a mobile action sheet. |
 | `mobile Projects can launch run comparison from the runs tab` | Verifies that the mobile Projects compare stepper hands off to the shared run comparison overlay, closes the Projects sheet, and avoids the generic compare failure toast. |
@@ -4833,7 +4841,8 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `workflow inputs persist when the workflow modal is reopened` | Verifies that workflow form values persist across closing and reopening the workflows modal. |
 | `recent execution status can be canceled and restored after reopening` | Verifies that the desktop Workflows panel shows branch, capture, linked-run, and current-step state, confirms server cancellation, and refreshes the canceled execution after reopening. |
 | `runs a real capture-fed playbook and reopens its linked run` | Verifies a saved v2 playbook starts through the real server, captures normalized output into its next command, completes its branch, survives panel close/reopen, and opens a linked run in Run Details. |
-| `creates, edits, and deletes a user workflow from the workflows modal` | Verifies that the workflows modal can create, run, edit, and delete a typed v2 workflow, switches a panel-owned run to the Executions tab without writing progress into the terminal, keeps the workspace open after deletion, and removes the deleted workflow from the desktop rail without a page refresh. |
+| `authors and runs an exact exit-code branch through the workflow editor` | Verifies the editor saves an exact code route and a real nonzero built-in run follows that route to its matching step. |
+| `creates, edits, and deletes a user workflow from the workflows modal` | Verifies that the workflows modal can create, reopen, remove an exact-code route from, run, edit, and delete a typed v2 workflow, switches a panel-owned run to the Executions tab without writing progress into the terminal, keeps the workspace open after deletion, and removes the deleted workflow from the desktop rail without a page refresh. |
 | `rail workflow plus opens the new workflow editor without toggling the section` | Verifies that the desktop rail workflow `+` button opens the new workflow editor without collapsing the Workflows rail section. |
 | `run all executes rendered workflow steps sequentially in the same tab` | Verifies that `Run all` executes the rendered workflow commands sequentially in the active tab instead of opening separate tabs. |
 | `rail browse and workflow entries open one workspace with global executions` | Verifies that the rail exposes a full-catalog entry, a specific workflow row wins over both first-open and prior selection state, and the Executions tab remains scope-wide. |

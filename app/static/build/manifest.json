@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.3e5aff1a21d5.css",
-      "hash": "3e5aff1a21d5c3f82e1608fc87e78757f4863e32dc5d90c736a309970eb3885f",
+      "path": "/static/build/app.1c58d7579a1b.css",
+      "hash": "1c58d7579a1bab23d253ec5b41cfae003e9479a1897b5c008bdd72faad81835f",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -22,7 +22,7 @@
         "/static/css/core/fonts.css": "914c2b233046e7c8db325a5b6ba796de9bf8ca106b0b5c120c1e4738ddbe4020",
         "/static/css/core/base.css": "905154591bdd0a119b99e830dacc4ed405a53ff5630677e53b31c9b01ce4fb7b",
         "/static/css/shell.css": "ee3ab81bf01e8daed797b8b8aea4a007943f3f9899542a17b1ff85f8af4a38c5",
-        "/static/css/primitives/components.css": "db369470ce900e51c40173438258af8410e215588c023376bbb4ff2761b983dd",
+        "/static/css/primitives/components.css": "cc2b6e816c3a98d748049e9f9e6e8ad5f252ecd96cfff3b060cb24d20b09ebd3",
         "/static/css/welcome.css": "a903960078807dddbd3b361e1ae546fde87411f0b29e035b1659dffe346f6ae3",
         "/static/css/shell-chrome.css": "9560cf0be78ace064cc87d3af44beb93af9498ac6354c012aef0e56abb10dcad",
         "/static/css/mobile.css": "239d2b513bd1a8dc652a136e1a115fd5d5f509649bc3e5160aaaff6c9cc9533d",
@@ -388,8 +388,8 @@
       "hash": "1eaaffb0a619f3d3933aeae42238305de1c2f8c658d7d8e37fdb9fda1ff57159"
     },
     "/static/js/features/preferences/session_token_controls.js": {
-      "path": "/static/build/static-session-token-controls.fffb28fac7c7.js",
-      "hash": "74ef8e04eb3eb1c52729cbe9b5e2760daec46faf4187b1f357cf7ef08979486f"
+      "path": "/static/build/static-session-token-controls.69b433ef9a28.js",
+      "hash": "32b11d0710545b9b4940ea49a320cfaba0dd169bcefef57fe0026fc79ece79de"
     },
     "/static/js/features/preferences/teams_panel.js": {
       "path": "/static/build/static-teams-panel.5e4295461905.js",
@@ -556,8 +556,8 @@
       "hash": "5e49f2f8759306e23be4c4e8cc14217485d768bf8c9a50c440880a8c6cf3d148"
     },
     "/static/js/features/workflows/workflow_editor.js": {
-      "path": "/static/build/static-workflow-editor.9854cb87cede.js",
-      "hash": "a496405c0105fe1de90cc3849acaff70e7b28a708493ab2aab671434ff899de5"
+      "path": "/static/build/static-workflow-editor.e3e21161d78d.js",
+      "hash": "512e2f33e1140aee8b24d7cf2b198257854ef0ff938917f6a447bd2274a3ab2d"
     },
     "/static/js/features/workflows/workflow_executions.js": {
       "path": "/static/build/static-workflow-executions.48742217e5d1.js",
@@ -568,8 +568,8 @@
       "hash": "49d5f2c7fff5727a40cf21a3ee63e549548a3be8fc64005fb08a6f8ef5ad22f0"
     },
     "/static/js/features/workflows/workflows.js": {
-      "path": "/static/build/static-workflows.dd9159dd143b.js",
-      "hash": "c4b1dba33aa6a84a71ffbd101ed31849d1e0aa513ab50518783830f079c3e0bf"
+      "path": "/static/build/static-workflows.151bc4cd8de6.js",
+      "hash": "571083885df096433e8fceb65dada967c73eb3850b938f7f6d762a50593f4974"
     },
     "/static/js/features/workspace/workspace_drag_drop.js": {
       "path": "/static/build/static-workspace-drag-drop.7d9d0bb58eea.js",
@@ -624,8 +624,8 @@
       "hash": "27d9aadb09ee5c9981235f9ea4bfe5cf7f8eb9fb7760922c3c284206c6c040b5"
     },
     "/static/css/features/workflows.css": {
-      "path": "/static/build/static-workflows.67fb9c886668.css",
-      "hash": "67fb9c8866686ad1a5513911b3635a32caa88aaace0e62bb7ca21d23fb4cfd33"
+      "path": "/static/build/static-workflows.08dc5e924044.css",
+      "hash": "08dc5e9240442af7472ac90a5f8033ad17d3731237f6c05f5919b300e5940c10"
     },
     "/static/css/features/workspace.css": {
       "path": "/static/build/static-workspace.6018d1e21365.css",

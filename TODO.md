@@ -97,6 +97,11 @@ These are possible future improvements, split by whether they look worth carryin
 - **Project Monitoring CLI surface.**
   - Possible future `darklab monitoring <project_id>` and `darklab monitoring ack <project_id> <fire_id> --state STATE [--note NOTE]` commands could expose the Project Monitoring dashboard, rollups, and fire triage flow without opening the browser.
   - Keep this lower priority than watcher creation, Project assignment, policy controls, and baseline acceptance, which are already available through `darklab watch`.
+- **Headless API and CLI follow-through.**
+  - Let scripts and CI start, inspect, cancel, and follow durable workflows through token-authenticated API routes and matching `darklab workflow` commands. Expose saved-run comparison through the same headless surface once its permission, team-scope, and bounded-output contracts are defined.
+  - Put the workflow execution event cursor to work for browser refresh or headless replay, or retire it if execution polling remains the supported path.
+  - Add `darklab --version` for the installed client. Treat connected-server version and client/server compatibility reporting as a separate decision.
+  - Bring the existing API v1 AI assists to the CLI with summary and next-command commands that handle cached, queued, in-progress, disabled, and failed states cleanly.
 - **Revisit PTY transport after real usage.**
   - The current Redis-brokered SSE plus POST endpoints keep deployment simple, but WebSockets may be worth it if latency, throughput, or bidirectional control becomes a real limitation.
 - **Split `pty.js` and `pty_service.py` if PTY work grows again.**

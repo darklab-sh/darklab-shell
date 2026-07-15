@@ -534,11 +534,11 @@ Client-visible error codes include `session_required`, `file_required`,
 | -------- | ---------- | ------------- |
 | `POST` | `/workflow-executions` | Compiles a scoped workflow, validates typed inputs, snapshots the active workspace/project context, and starts the first durable v2 step. |
 | `GET` | `/workflow-executions` | Lists recent executions with ordered step summaries in the active personal/team scope, with an optional `workflow_id` filter for scoped workflow views. |
-| `GET` | `/workflow-executions/<execution_id>` | Returns one immutable definition snapshot plus ordered step, transition, capture-name, and linked-run state. |
+| `GET` | `/workflow-executions/<execution_id>` | Returns one public execution summary plus ordered step, transition, capture-name, and linked-run state. |
 | `GET` | `/workflow-executions/<execution_id>/events` | Replays bounded lifecycle events after an integer cursor without returning commands or input/capture values. |
 | `POST` | `/workflow-executions/<execution_id>/cancel` | Cancels pending workflow work and signals every linked run made active by the canceled transition. |
 
-Workflow execution is bounded by `workflow_active_execution_limit` per personal/team owner and `workflow_execution_max_runtime_seconds` per execution. Postgres takes an owner-scoped transaction advisory lock around the active-count claim and insert. Before each step, the engine rechecks durable personal tokens plus the current team, initiating token, membership, and run capability. Web startup follows an immutable `(created, id)` cursor through bounded pages of active execution rows after stale run metadata cleanup: unbound launch claims return to pending, completed linked runs advance from saved normalized output, live broker runs remain attached, and missing runs fail with bounded recovery metadata. A workflow-hook exception marks only the execution failed; the completed run remains saved.
+Workflow execution is bounded by `workflow_active_execution_limit` per personal/team owner and `workflow_execution_max_runtime_seconds` per execution. Postgres takes an owner-scoped transaction advisory lock around the active-count claim and insert. Before each step, the engine rechecks durable personal tokens plus the current team, initiating token, membership, and run capability. Create, list, detail, and cancel responses use one fixed public serializer that omits the definition snapshot, input and variable maps, workspace context, owner scope, actor context, and browser ownership hints for every role. Web startup follows an immutable `(created, id)` cursor through bounded pages of active execution rows after stale run metadata cleanup: unbound launch claims return to pending, completed linked runs advance from saved normalized output, live broker runs remain attached, and missing runs fail with bounded recovery metadata. A workflow-hook exception marks only the execution failed; the completed run remains saved.
 
 ### Project Routes
 
@@ -952,6 +952,7 @@ The Python backend is split into focused layers with acyclic dependencies:
 ```mermaid
 flowchart TB
   Config["config.py"]
+  StartupLogging["startup_logging.py"]
   Logging["logging_setup.py"]
 
   subgraph Infra["Infrastructure + Shared Helpers"]
@@ -982,7 +983,8 @@ flowchart TB
   Bootstrap["runtime_bootstrap.py"]
   Wsgi["wsgi.py"]
 
-  Config --> Logging
+  Config --> StartupLogging
+  StartupLogging --> Logging
   Logging --> Helpers
   Logging --> Database
   Logging --> Process
@@ -1060,11 +1062,11 @@ This boundary view answers a different question than the dependency graph above:
 
 Legacy workflows remain browser-owned linear queues. Explicit v2 workflows are server-owned durable executions. `services.workflows.compiler` validates the complete graph, rejects capture use unless every incoming path has produced the value, and validates typed values. Runtime rendering fails closed if a saved snapshot still lacks a referenced variable. `services.workflows.storage` saves an immutable definition snapshot and one pending row per stable step id.
 
-`services.workflows.executions` claims one pending step with a compare-and-set update, renders substitutions as shell-safe scalar arguments, and launches the command through `services.runs.start.start_brokered_run()`. The generated run id is bound to the step before output begins. A bounded `WorkflowCaptureAccumulator` observes normalized `LineEvent` objects without changing transcript persistence. After normal run finalization has saved the run and structured metadata, the workflow hook claims that step exactly once, stores capture names and execution-local values, records the selected transition, and either launches the next step or marks the remaining branch rows skipped.
+`services.workflows.executions` claims one pending step with a compare-and-set update and renders two commands. The raw command quotes every substituted value as one shell scalar and is used for policy validation, rewriting, secret lookup, and process launch. The display command replaces sensitive inputs with `[redacted]` and earlier captures with named placeholders, then continues through active-run metadata, output classification, lifecycle logs, saved History command text, metrics, and notifications. `services.runs.private_data` owns private-value normalization, safe failure text, secret-environment lookup, and filtering for workspace notices and artifact summaries that would repeat a private value. Both command forms enter `services.runs.start.start_brokered_run()` through separate arguments so the normal run lifecycle owns the boundary. The generated run id is bound to the step before output begins. A bounded `WorkflowCaptureAccumulator` observes normalized `LineEvent` objects without changing transcript persistence. After normal run finalization has saved the run and structured metadata, the workflow hook claims that step exactly once, stores capture names and execution-local values, records the selected transition, and either launches the next step or marks the remaining branch rows skipped.
 
-The execution snapshot preserves the initiating personal/team scope, workspace folder, active project, actor role, browser ownership hints, and source workflow identity. The bounded events route derives replayable state from those durable rows, so a browser can resume from a cursor without another event store. History and project run payloads include a value-free workflow ancestry summary and sibling step links only after normal run authorization. Workflow lifecycle logs contain ids, counts, statuses, exit outcomes, and transition reasons; they don't include rendered commands, parameter values, captured values, targets, paths, or output text.
+The execution snapshot preserves the initiating personal/team scope, workspace folder, active project, actor role, browser ownership hints, and source workflow identity. Browser and terminal routes read a public projection rather than serializing that private row. The bounded events route derives replayable state from the durable rows, so a browser can resume from a cursor without another event store. History and project run payloads include a value-free workflow ancestry summary and sibling step links only after normal run authorization. Workflow lifecycle logs contain ids, counts, statuses, exit outcomes, and transition reasons; they don't include rendered commands, parameter values, captured values, targets, paths, or output text. Normal run logs and summaries receive only the display command; command output remains unchanged and can still contain a value printed by the tool itself.
 
-The Workflows surface keeps catalog identity/loading in `features/workflows/workflow_catalog.js`, typed values, source pickers, remembered state, and previews in `features/workflows/workflow_parameters.js`, definition authoring in `features/workflows/workflow_editor.js`, and durable requests plus Executions-tab rendering in `features/workflows/workflow_executions.js`. The remaining controller coordinates those modules with the terminal and modal bridges. Every browser entry point opens one workspace: the **Workflows** tab uses a searchable, source-filtered catalog with `panel-row` navigation and an unframed selected detail, while the **Executions** tab owns active-scope execution history and polling. Desktop keeps the catalog and detail side by side; mobile drills from the same catalog into the same detail and back without a separate workflow implementation. Selecting a rail workflow changes workspace selection only, so execution history never inherits stale definition filters. Deleting a definition refreshes the shared catalog/rail while leaving the workspace and historical executions available. The editor owns typed parameter rows, stable step IDs, success/failure destinations, bounded capture selectors, and field-level server errors while preserving exact-code settings it doesn't edit yet. Sensitive fields use masked controls; terminal answers use the shared secret composer mode without transcript echo, and inline sensitive flags are rejected after redaction. Browser command previews render known inputs only; references to earlier captures remain visible and non-runnable until the server-owned playbook produces them. The shared desktop modal and mobile sheet read the same active-scope execution list, poll only while the Executions tab is visible, refresh on reopen and scope changes, and stop polling when that view closes without canceling server-owned work. Active linked runs attach through the runner's Status Monitor path; finished linked runs open through the shared Run Details boundary.
+The Workflows surface keeps catalog identity/loading in `features/workflows/workflow_catalog.js`, typed values, source pickers, remembered state, and previews in `features/workflows/workflow_parameters.js`, definition authoring in `features/workflows/workflow_editor.js`, and durable requests plus Executions-tab rendering in `features/workflows/workflow_executions.js`. The remaining controller coordinates those modules with the terminal and modal bridges. Every browser entry point opens one workspace: the **Workflows** tab uses a searchable, source-filtered catalog with `panel-row` navigation and an unframed selected detail, while the **Executions** tab owns active-scope execution history and polling. Desktop keeps the catalog and detail side by side; mobile drills from the same catalog into the same detail and back without a separate workflow implementation. Selecting a rail workflow changes workspace selection only, so execution history never inherits stale definition filters. Deleting a definition refreshes the shared catalog/rail while leaving the workspace and historical executions available. The editor owns typed parameter rows, reorderable steps with stable IDs, success/failure destinations, repeatable exact-exit-code routes, bounded capture selectors, and field-level server errors. Route destinations follow step renames, remain stable across reordering, and show a missing-step choice after destination deletion so the user can repair or remove the route. Client validation rejects blank, non-integer, and duplicate exact codes before save; the compiler canonicalizes integer keys and applies the same field-level validation to every source. Sensitive fields use masked controls; terminal answers use the shared secret composer mode without transcript echo, and inline sensitive flags are rejected after redaction. Browser command previews render known inputs only; references to earlier captures remain visible and non-runnable until the server-owned playbook produces them. The shared desktop modal and mobile sheet read the same active-scope execution list, poll only while the Executions tab is visible, refresh on reopen and scope changes, and stop polling when that view closes without canceling server-owned work. Active linked runs attach through the runner's Status Monitor path; finished linked runs open through the shared Run Details boundary.
 
 ### AI Assist Runtime
 
@@ -1760,7 +1762,7 @@ erDiagram
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, session-token migration, and shared team workflows.
-- `workflow_executions` — one immutable compiled workflow snapshot per durable run, including owner scope, source workflow, resolved inputs, execution-local variables, current state, workspace/project context, initiating actor, browser ownership hints, and bounded failure metadata.
+- `workflow_executions` — one immutable compiled workflow snapshot per durable run, including owner scope, source workflow, resolved inputs, execution-local variables, current state, workspace/project context, initiating actor, browser ownership hints, and bounded failure metadata. Route responses use a public field allowlist instead of returning this private row.
 - `workflow_execution_steps` — one ordered row per execution step with stable step id, unique linked run id, status, exit code, capture-name summary, selected transition/reason, and bounded error metadata.
 - `recent_values` — one row per recently used autocomplete value per personal/team scope `(session_id, team_id, kind, value, last_used, use_count)`. `kind` is one of `domain`, `ip`, `url`, or `port_set`; each kind is capped independently at 10 entries. URL recents keep the scheme, host, and path but drop query strings and fragments before storage.
 - `secrets` — one row per encrypted secret name per vault scope `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Personal scopes use the user's session token as the stored `session_token`; team scopes use the team id as the stored vault-scope id. Storage also rejects attempts to bind the same consumer env name to two different secrets in one scope, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
@@ -1841,6 +1843,8 @@ This section groups log emission, health/status surfaces, and the operator diagn
 ### Logging
 
 The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
+
+Configuration loading starts before runtime bootstrap can build the final logger. `startup_logging.py` captures those records in memory without attaching a handler, and `configure_logging()` replays each one once through the selected formatter while applying the effective level. If configuration can't finish, the same boundary writes one safe `CONFIG_LOAD_FAILED` record in the most recent usable text or GELF format. That fallback includes only bounded phase, source, key, and error-type context; it doesn't include parser contents, configuration values, or a traceback. Ignored, dropped, defaulted, clamped, and truncated configuration values all contribute to the `warning_count` reported by `CONFIG_VALIDATED` and `CONFIG_LOADED`.
 
 Structured events use the `session` field for request correlation. Anonymous session IDs are logged as-is, while `tok_` session-token values are masked before logging because they are bearer credentials.
 
@@ -2207,7 +2211,7 @@ The current event inventory is:
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
-| ERROR | `CONFIG_LOAD_FAILED` | config loading | phase, source, key, error (+ traceback when available) |
+| ERROR | `CONFIG_LOAD_FAILED` | config loading | phase, source, key, error |
 | ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
 | ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
 | ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
@@ -2351,12 +2355,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 4,138
+- behavior tests: 4,149
 - docs/inventory meta-tests: 63
-- `pytest`: 2427 (2377 behavior + 50 meta)
-- `vitest`: 1498 (1485 behavior + 13 meta)
-- `playwright`: 276 behavior
-- total: 4,201
+- `pytest`: 2435 (2385 behavior + 50 meta)
+- `vitest`: 1499 (1486 behavior + 13 meta)
+- `playwright`: 278 behavior
+- total: 4,212
 
 ### Testing Architecture
 

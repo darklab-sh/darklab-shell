@@ -1961,6 +1961,35 @@ test.describe('workflows modal', () => {
     await expect(page.locator('#history-run-modal')).toContainText('RUN DETAILS')
   })
 
+  test('authors and runs an exact exit-code branch through the workflow editor', async ({ page }) => {
+    await openWorkflowsModal(page)
+    const title = `Exact exit branch ${Date.now()}`
+    await page.locator('#workflow-new-btn').click()
+    await page.locator('#workflow-editor-title-input').fill(title)
+    const firstStep = page.locator('[data-workflow-editor-step]').first()
+    await firstStep.locator('.workflow-editor-step-command').fill('intel unsupported value')
+    await page.locator('#workflow-editor-add-step').click()
+    const matchedStep = page.locator('[data-workflow-editor-step]').nth(1)
+    await matchedStep.locator('.workflow-editor-step-id').fill('matched')
+    await matchedStep.locator('.workflow-editor-step-command').fill('help')
+    await firstStep.locator('.workflow-editor-add-exit-code').click()
+    const exactRoute = firstStep.locator('[data-workflow-editor-exit-code]').first()
+    await exactRoute.locator('.workflow-editor-exit-code').fill('1')
+    await exactRoute.locator('.workflow-editor-exit-code-destination').selectOption('matched')
+
+    const createdWorkflow = await saveWorkflowEditorAndWait(page, 'POST')
+    expect(createdWorkflow?.steps?.[0]?.next?.codes).toEqual({ 1: 'matched' })
+    const workflowCard = page.locator(
+      `#workflows-overlay .workflow-card[data-workflow-id="${createdWorkflow.id}"]`,
+    )
+    await expect(workflowCard).toBeVisible()
+    await workflowCard.locator('.workflow-run-all').click()
+    await expect(page.locator('[data-workflows-view="executions"]')).toHaveAttribute('aria-selected', 'true')
+    const execution = page.locator('[data-workflow-execution-id]', { hasText: title }).first()
+    await expect(execution).toContainText('Completed', { timeout: 15_000 })
+    await expect(execution).toContainText('to matched (exit code:1)')
+  })
+
   test('creates, edits, and deletes a user workflow from the workflows modal', async ({ page }) => {
     // Two save-and-render cycles plus modal open/close exceeds the default 30s
     // budget on slow CI runners; give the test enough headroom.
@@ -1988,6 +2017,10 @@ test.describe('workflows modal', () => {
     const secondEditorStep = page.locator('[data-workflow-editor-step]').nth(1)
     await secondEditorStep.locator('.workflow-editor-step-id').fill('inspect')
     await secondEditorStep.locator('.workflow-editor-step-command').fill('printf %s {{registration_line}}')
+    await firstEditorStep.locator('.workflow-editor-add-exit-code').click()
+    const exactRoute = firstEditorStep.locator('[data-workflow-editor-exit-code]').first()
+    await exactRoute.locator('.workflow-editor-exit-code').fill('2')
+    await exactRoute.locator('.workflow-editor-exit-code-destination').selectOption('inspect')
     const createdWorkflow = await saveWorkflowEditorAndWait(page, 'POST')
     expect(createdWorkflow?.id).toBeTruthy()
     expect(createdWorkflow?.version).toBe(2)
@@ -2000,7 +2033,7 @@ test.describe('workflows modal', () => {
     expect(createdWorkflow?.steps?.[0]).toMatchObject({
       id: 'step_1',
       captures: [{ name: 'registration_line', source: 'first_nonempty_line', required: true }],
-      next: { success: 'inspect', failure: 'stop' },
+      next: { codes: { 2: 'inspect' }, success: 'inspect', failure: 'stop' },
     })
     expect(createdWorkflow?.steps?.[1]).toMatchObject({
       id: 'inspect',
@@ -2059,8 +2092,12 @@ test.describe('workflows modal', () => {
     await expect(page.locator('.workflow-editor-parameter-sensitive').first()).toBeChecked()
     await expect(page.locator('.workflow-editor-step-id').first()).toHaveValue('step_1')
     await expect(page.locator('.workflow-editor-capture-name').first()).toHaveValue('registration_line')
+    await expect(page.locator('.workflow-editor-exit-code').first()).toHaveValue('2')
+    await expect(page.locator('.workflow-editor-exit-code-destination').first()).toHaveValue('inspect')
+    await page.locator('.workflow-editor-remove-exit-code').first().click()
     await page.locator('.workflow-editor-step-command').first().fill('dig {{domain}} A')
-    await saveWorkflowEditorAndWait(page, 'PUT')
+    const updatedWorkflow = await saveWorkflowEditorAndWait(page, 'PUT')
+    expect(updatedWorkflow?.steps?.[0]?.next?.codes).toBeUndefined()
 
     await expect(userCard.locator('.workflow-step-cmd').first()).toContainText('dig {{domain}} A')
 

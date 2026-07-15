@@ -104,7 +104,9 @@ Each parameter supports `id`, `label`, `type`, `required`, `default`, `placehold
 
 The browser remembers non-sensitive values by personal/team scope and workflow id. Values removed from a definition are cleared from the saved form state. Parameters marked `sensitive: true` use masked controls, stay redacted in command previews, run only through `Run all`, and aren't written to browser storage. In the terminal, omit sensitive flags from `workflow run`; the app prompts without echoing the answer and rejects inline values with a redacted command echo.
 
-Starting an execution stores every supplied value, including values marked `sensitive`, in the owner-scoped workflow execution record. Those values enter the app database and its backups even though they aren't remembered by the browser or shown in workflow logs and summaries. Don't use workflow inputs for credentials or tokens that shouldn't become workflow history. Put supported command credentials in **Options → Secrets** instead, where the app can inject them without adding them to the workflow definition or execution inputs.
+Starting an execution stores every supplied value, including values marked `sensitive`, in the owner-scoped workflow execution record. Those values enter the app database and its backups. They aren't remembered by the browser or returned by workflow execution status routes, and sensitive inputs appear as `[redacted]` in active-run summaries, History command text, Run Details, logs, metrics, and notifications. Values captured from earlier steps appear there as named placeholders such as `[captured:resolved_ip]`. The raw values are used only while the server validates and starts the command.
+
+This protects app-managed command metadata; it doesn't scrub the command's own output. If a tool prints a sensitive input, that text can still enter its saved output. Don't use workflow inputs for credentials or tokens that shouldn't become workflow history. Put supported command credentials in **Options → Secrets** instead, where the app can inject them without adding them to the workflow definition or execution inputs.
 
 Browser previews substitute known inputs for readability. The server performs the authoritative rendering immediately before each step, quotes every value as one shell scalar, and sends the result through the normal command policy, secret, workspace, target, feature, and runtime-readiness checks. A policy or readiness change can therefore stop a later step even when the preview looked valid at execution start.
 
@@ -119,6 +121,8 @@ Every v2 step needs a stable `id` and a `cmd`. Step IDs, like parameter and capt
 - `codes`: exact exit-code destinations. Quote YAML keys such as `"2"`; exact codes take precedence over `success` and `failure`.
 
 A destination is another step id, `complete`, or `stop`. `complete` finishes the execution successfully. `stop` finishes it as failed. If a successful step has no transition, it advances to the next ordered step or completes when it is last. An unhandled failure stops. Unvisited steps are recorded as skipped.
+
+In the workflow editor, use **+ Route** under **Exact exit codes** to add as many code-specific destinations as the step needs. Exit codes must be whole numbers and unique within that step. Renaming a destination updates the visible routes, reordering keeps routes attached to their stable step IDs, and deleting a destination marks it as missing until you choose another destination or remove the route.
 
 Definitions are rejected when they contain duplicate ids, undeclared variables, capture use on any path that can skip its producer, unknown destinations, unreachable steps, or cycles. Operator files with malformed YAML or an unsupported explicit version are also rejected and logged without including their contents.
 
@@ -163,9 +167,11 @@ The browser uses owner-scoped routes under `/workflow-executions`:
 | ------ | ----- | ------- |
 | `POST` | `/workflow-executions` | Validate inputs, snapshot context, and start a v2 execution. |
 | `GET` | `/workflow-executions` | List recent executions for the active personal/team scope, optionally filtered by `workflow_id`. |
-| `GET` | `/workflow-executions/<id>` | Read the definition snapshot and ordered step state. |
+| `GET` | `/workflow-executions/<id>` | Read public execution and ordered step state. |
 | `GET` | `/workflow-executions/<id>/events` | Replay bounded value-free lifecycle events after an integer cursor. |
 | `POST` | `/workflow-executions/<id>/cancel` | Cancel pending steps and signal the active run. |
+
+Create, list, detail, and cancel responses contain only the status fields the Workflows panel and terminal need. They omit the immutable definition snapshot, supplied inputs, execution-local variables, workspace context, session/team ownership fields, actor details, and browser ownership hints. The same public shape is returned to owners, operators, and viewers who can read a team execution.
 
 The event feed includes `started`, `step_started`, `step_completed`, `capture_saved`, `completed`, `failed`, and `canceled` events. Its payloads contain bounded ids, status, exit code, transition, timestamp, run links, and capture names, but not commands or input/capture values.
 

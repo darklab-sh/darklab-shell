@@ -21,10 +21,14 @@ Run with: pytest tests/ (from the repo root)
 import io
 import json
 import logging
+import os
 import sqlite3
+import subprocess
+import sys
 import time
 import uuid
 import unittest.mock as mock
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +54,66 @@ def _emit(formatter, level, msg, extra=None):
     logger.setLevel(logging.DEBUG)
     logger.log(level, msg, extra=extra or {})
     return buf.getvalue().strip()
+
+
+def _run_config_startup(
+    tmp_path: Path,
+    *,
+    base_config: str,
+    local_config: str = "",
+    fatal: bool = False,
+    configure_twice: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    shipped_dir = tmp_path / "shipped"
+    local_dir = tmp_path / "local"
+    shipped_dir.mkdir()
+    local_dir.mkdir()
+    (shipped_dir / "config.yaml").write_text(base_config, encoding="utf-8")
+    if local_config:
+        (local_dir / "config.local.yaml").write_text(local_config, encoding="utf-8")
+
+    env = os.environ.copy()
+    for name in tuple(env):
+        if name.startswith(("AI_", "DATABASE_")) or name in {
+            "APP_CONF_DIR",
+            "APP_LOCAL_CONF_DIR",
+            "ASSET_BUNDLE_MODE",
+            "PROMETHEUS_MULTIPROC_DIR",
+            "RAW_PACKET_SCANNING_ENABLED",
+            "RESTRICTED_COMMAND_INPUT_CIDRS",
+            "WORKSPACE_ROOT",
+        }:
+            env.pop(name, None)
+    env.update({
+        "APP_CONF_DIR": str(shipped_dir),
+        "APP_LOCAL_CONF_DIR": str(local_dir),
+        "PYTHONPATH": str(repo_root / "app"),
+    })
+
+    if fatal:
+        program = "import config"
+    else:
+        calls = ["configure_runtime_logging()"]
+        if configure_twice:
+            calls.append("configure_runtime_logging()")
+        calls.append("log_loaded_config()")
+        program = (
+            "from runtime_bootstrap import configure_runtime_logging, log_loaded_config; "
+            + "; ".join(calls)
+        )
+    return subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _gelf_records(stderr: str) -> list[dict]:
+    return [json.loads(line) for line in stderr.splitlines() if line.startswith("{")]
 
 
 def get_client(*, use_forwarded_for=True):
@@ -411,6 +475,127 @@ class TestConfigureLogging:
     def test_log_level_lowercase_accepted(self):
         configure_logging({"log_level": "debug"})
         assert self._logger().level == logging.DEBUG
+
+
+class TestConfigStartupLogging:
+    @pytest.mark.parametrize("log_format", ["text", "gelf"])
+    def test_debug_startup_replays_forgiving_warning_once(self, tmp_path, log_format):
+        result = _run_config_startup(
+            tmp_path,
+            base_config=(
+                "app_name: startup-test\n"
+                "log_level: DEBUG\n"
+                f"log_format: {log_format}\n"
+                "raw_packet_scanning_enabled: banana\n"
+            ),
+            configure_twice=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.count("CONFIG_SOURCE_SELECTED") == 1
+        assert result.stderr.count("CONFIG_VALUE_DEFAULTED") == 1
+        assert result.stderr.count("CONFIG_VALIDATED") == 1
+        assert result.stderr.count("CONFIG_LOADED") == 1
+        if log_format == "gelf":
+            records = _gelf_records(result.stderr)
+            warning = next(item for item in records if item["short_message"] == "CONFIG_VALUE_DEFAULTED")
+            loaded = next(item for item in records if item["short_message"] == "CONFIG_LOADED")
+            assert warning["_key"] == "raw_packet_scanning_enabled"
+            assert warning["_reason"] == "invalid_bool"
+            assert warning["_fallback"] is False
+            assert loaded["_warning_count"] == 1
+        else:
+            warning = next(
+                line for line in result.stderr.splitlines()
+                if "CONFIG_VALUE_DEFAULTED" in line
+            )
+            loaded = next(
+                line for line in result.stderr.splitlines()
+                if "CONFIG_LOADED" in line
+            )
+            assert "key=raw_packet_scanning_enabled" in warning
+            assert "reason=invalid_bool" in warning
+            assert "fallback=False" in warning
+            assert "warning_count=1" in loaded
+
+    def test_error_threshold_filters_nonfatal_config_records(self, tmp_path):
+        result = _run_config_startup(
+            tmp_path,
+            base_config=(
+                "log_level: ERROR\n"
+                "log_format: text\n"
+                "raw_packet_scanning_enabled: banana\n"
+                "unknown_startup_key: ignored\n"
+            ),
+        )
+
+        assert result.returncode == 0
+        assert result.stderr == ""
+
+    def test_unknown_local_key_keeps_source_but_not_value(self, tmp_path):
+        secret_value = "release-secret-must-not-appear"
+        result = _run_config_startup(
+            tmp_path,
+            base_config="log_level: INFO\nlog_format: text\n",
+            local_config=f"unknown_password: {secret_value}\n",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.count("CONFIG_UNKNOWN_KEY_IGNORED") == 1
+        warning = next(
+            line for line in result.stderr.splitlines()
+            if "CONFIG_UNKNOWN_KEY_IGNORED" in line
+        )
+        loaded = next(
+            line for line in result.stderr.splitlines()
+            if "CONFIG_LOADED" in line
+        )
+        assert "key=unknown_password" in warning
+        assert str(tmp_path / "local" / "config.local.yaml") in warning
+        assert "warning_count=1" in loaded
+        assert secret_value not in result.stderr
+
+    @pytest.mark.parametrize("log_format", ["text", "gelf"])
+    def test_fatal_local_overlay_uses_safe_structured_fallback(self, tmp_path, log_format):
+        secret_value = "release-secret-must-not-appear"
+        result = _run_config_startup(
+            tmp_path,
+            base_config=(
+                "app_name: startup-test\n"
+                "log_level: DEBUG\n"
+                f"log_format: {log_format}\n"
+            ),
+            local_config=(
+                "notifications:\n"
+                "  smtp:\n"
+                f"    password_secret_id: [{secret_value}\n"
+            ),
+            fatal=True,
+        )
+
+        assert result.returncode != 0
+        assert result.stderr.count("CONFIG_LOAD_FAILED") == 1
+        assert secret_value not in result.stderr
+        if log_format == "gelf":
+            records = _gelf_records(result.stderr)
+            assert len(records) == 1
+            failure = records[0]
+            assert failure["short_message"] == "CONFIG_LOAD_FAILED"
+            assert failure["level"] == 3
+            assert failure["_app"] == "startup-test"
+            assert failure["_phase"] == "yaml_parse"
+            assert failure["_source"] == str(tmp_path / "local" / "config.local.yaml")
+            assert failure["_error"] == "ParserError"
+            assert "full_message" not in failure
+        else:
+            failure = next(
+                line for line in result.stderr.splitlines()
+                if "CONFIG_LOAD_FAILED" in line
+            )
+            assert "[ERROR]" in failure
+            assert "phase=yaml_parse" in failure
+            assert f"source={tmp_path / 'local' / 'config.local.yaml'}" in failure
+            assert "error=ParserError" in failure
 
 
 # ── Log event emission ────────────────────────────────────────────────────────

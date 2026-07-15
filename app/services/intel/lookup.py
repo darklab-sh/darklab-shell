@@ -218,7 +218,7 @@ def _lookup_provider(
             "run_id": run_id,
             "provider": provider.name,
             "entity_type": entity_type,
-            "message": str(exc),
+            "reason": str(exc),
         })
         app_metrics.record_intel_lookup(provider.name, "missing_secret", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="missing_secret", message=str(exc))

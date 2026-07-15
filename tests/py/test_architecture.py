@@ -189,6 +189,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/output_model.py", 534, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/output_store.py", 423, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/persistence.py", 161, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/private_data.py", 246, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/start.py", 219, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/streaming.py", 156, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_filters.py", 317, "split-package-ratchet"),

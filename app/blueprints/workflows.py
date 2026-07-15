@@ -34,6 +34,7 @@ from services.workflows.storage import (
     create_execution,
     get_execution,
     list_executions,
+    public_execution,
 )
 from services.workflows.user_workflows import get_user_workflow
 
@@ -169,7 +170,7 @@ def workflow_executions_create():
         },
         **route_audit_fields(session_id, request, scope),
     )
-    return jsonify({"execution": current, "launch": launch}), 202
+    return jsonify({"execution": public_execution(current), "launch": launch}), 202
 
 
 @workflows_bp.route("/workflow-executions")
@@ -186,12 +187,15 @@ def workflow_executions_list():
         limit = 50
     workflow_id = str(request.args.get("workflow_id") or "").strip()[:200]
     return jsonify({
-        "executions": list_executions(
-            session_id,
-            team_id=scope.team_id,
-            workflow_id=workflow_id,
-            limit=limit,
-        ),
+        "executions": [
+            public_execution(execution)
+            for execution in list_executions(
+                session_id,
+                team_id=scope.team_id,
+                workflow_id=workflow_id,
+                limit=limit,
+            )
+        ],
     })
 
 
@@ -206,7 +210,7 @@ def workflow_executions_get(execution_id: str):
     execution = get_execution(session_id, execution_id, team_id=scope.team_id)
     if not execution:
         return jsonify({"error": "workflow execution not found"}), 404
-    return jsonify({"execution": execution})
+    return jsonify({"execution": public_execution(execution)})
 
 
 @workflows_bp.route("/workflow-executions/<execution_id>/events")
@@ -300,4 +304,4 @@ def workflow_executions_cancel(execution_id: str):
             details={"action": "cancel", "status": "canceled", "count": canceled_steps},
             **route_audit_fields(session_id, request, scope),
         )
-    return jsonify({"execution": execution})
+    return jsonify({"execution": public_execution(execution)})
