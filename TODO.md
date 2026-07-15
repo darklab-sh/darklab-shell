@@ -36,7 +36,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 #### Delivery milestones
 
-Each remaining milestone is independently releasable and has its own exit criteria. Milestones 3 and 4 improve the initial install path, but they do not block Milestone 1 unless a task is explicitly marked as a first-public-image gate.
+Each remaining milestone is independently releasable and has its own exit criteria. Milestone 4 improves the initial install path, but it does not block Milestone 1 unless a task is explicitly marked as a first-public-image gate.
 
 ##### Milestone 1: Repository-free install
 
@@ -46,17 +46,9 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 **Milestone 1 exit:** A clean Docker host can verify the installer, create a deployment directory, pull the exact public Docker Hub image tag, confirm it matches the canonical GitLab image digest, and reach a healthy app without Git, Python, Node, a local build, or a source checkout. The existing development stack and sibling `config.local.yaml` behavior still work.
 
-##### Milestone 3: Managed deployment lifecycle
-
-- [ ] Replace the minimal per-file installer payload with the deterministic deployment archive, release manifest, managed-file checksums, exact-release upgrade support, migration help, and safe removal behavior.
-- [ ] Package repository-free backup and restore operations behind Docker/Compose-only commands, then make automated upgrades create and verify a pre-upgrade backup or refuse to continue.
-- [ ] Add two-release upgrade tests that prove operator config, `.env`, data, workspaces, and backups survive while managed files and the image reference advance atomically.
-
-**Milestone 3 exit:** Install, upgrade, backup, restore, migration from a clone-backed deployment, conflict handling, and removal all work without a repository checkout and clearly separate release-managed files from operator-owned data.
-
 ##### Milestone 4: Supply-chain and compatibility hardening
 
-- [ ] Make bundle generation fully reproducible, pin or account for moving build inputs, publish SBOM and provenance, scan the image, sign the image digest and checksum manifest, and document verification against an out-of-band trusted identity.
+- [ ] Extend reproducibility from the deterministic deployment archive to the complete release build by pinning or accounting for every moving build input, and publish the expected signing identity somewhere independent of the GitLab release/package origin.
 - [ ] Audit every architecture-specific download before adding `linux/arm64`, and add an explicit Podman/rootless/SELinux test lane before claiming those runtimes as supported.
 - [ ] Revisit image composition using the measured pull-size data. Add a slim or separately packaged wordlist/tool variant only when its maintenance and UX costs are justified.
 
@@ -64,19 +56,9 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 #### Remaining implementation detail
 
-##### Milestone 3: managed lifecycle
-
-- [ ] Replace the per-file installer payload with a deterministic, checksummed deployment archive in GitLab's Generic Package Registry.
-- [ ] Add managed install and upgrade tooling that validates the current manifest, preserves operator files, creates and verifies a backup, and advances managed files atomically.
-- [ ] Refuse unsafe downgrades, explain that changing an image tag does not reverse database migrations, and provide migration and removal flows for repository-backed deployments.
-- [ ] Package SQLite and Postgres backup and restore operations behind Docker/Compose-only commands while preserving secret-key continuity, workspaces, checksums, retention, and cron-friendly output.
-- [ ] Add two-release install, upgrade, conflict, backup, restore, and migration tests that run only from generated release artifacts.
-- [ ] Update operator docs and the changelog when the managed lifecycle ships, then remove the completed Milestone 3 tasks from this plan.
-
 ##### Milestone 4: supply chain and compatibility
 
-- [ ] Make release archives reproducible and account for every moving base image, tool download, source checkout, and build input.
-- [ ] Publish an SBOM and provenance, scan the image under a documented policy, and sign the image digest and checksum manifest against an out-of-band trusted identity.
+- [ ] Preserve byte-reproducible deployment archives while accounting for every moving base image, tool download, source checkout, and build input in the complete release build.
 - [ ] Audit and parameterize architecture-specific downloads before publishing `linux/arm64`.
 - [ ] Add SELinux-enforcing Docker and rootless Podman compatibility lanes before advertising those host models as supported.
 - [ ] Use measured image-size and pull-time data to decide whether a slim or separately packaged wordlist/tool image is worth maintaining.
@@ -84,7 +66,6 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 #### End-state acceptance criteria
 
-- [ ] Install, upgrade, backup, restore, migration, rollback guidance, and removal work without a repository checkout and distinguish managed files from operator-owned content.
 - [ ] GitLab images, Docker Hub mirrors, packages, checksums, SBOM/provenance, signatures, and release links are anonymously accessible and independently verifiable as documented.
 - [ ] Every advertised architecture and container runtime has automated compatibility coverage.
 

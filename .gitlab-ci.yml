@@ -11,6 +11,10 @@ variables:
   CI_NODE_IMAGE: "node:26.5.0-slim"
   CI_DOCKER_IMAGE: "docker:29.6.1"
   DOCKERHUB_IMAGE: "docker.io/darklabsh/darklab-shell"
+  SYFT_VERSION: "1.42.3"
+  SYFT_IMAGE: "anchore/syft:v1.42.3@sha256:5999d209a342e55e9edf70bf8930fb5b86d8f2a783fa401178372c50e21b1d36"
+  GRYPE_VERSION: "0.112.0"
+  GRYPE_IMAGE: "anchore/grype:v0.112.0@sha256:391bfda62888fb4e98ff5c4c81598f7431a3c1eac3f8519d69d1ff00df247c1d"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -31,6 +35,7 @@ stages:
   - publish
   - verify
   - promote
+  - attest
   - release
   - post-release
 
@@ -366,7 +371,7 @@ release-image-smoke:
   before_script: []
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-    - docker pull "$GITLAB_IMAGE"
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
     - sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA"
 
 release-image-dockerhub:
@@ -394,17 +399,99 @@ release-image-dockerhub:
       - dockerhub-image-status.txt
     expire_in: 1 week
 
-release-payload-upload:
-  stage: release
-  image: $CI_DEFAULT_IMAGE
+release-supply-chain:
+  stage: attest
+  image: $CI_DOCKER_IMAGE
   extends: .protected-release-tag
   needs:
     - job: release-image-gitlab
       artifacts: true
     - job: release-image-dockerhub
       artifacts: true
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  variables:
+    COSIGN_YES: "true"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apt-get update -q && apt-get install -y -q curl
+    - apk add --no-cache cosign jq python3
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - docker pull "$SYFT_IMAGE"
+    - docker pull "$GRYPE_IMAGE"
+    - mkdir release-evidence-input
+    - >-
+      docker run --rm
+      --user 0:0
+      -v /var/run/docker.sock:/var/run/docker.sock
+      -v "$CI_PROJECT_DIR/release-evidence-input:/evidence"
+      "$SYFT_IMAGE"
+      "docker:${GITLAB_IMAGE}@${GITLAB_DIGEST}"
+      -o cyclonedx-json=/evidence/darklab-shell.cdx.json
+    - >-
+      docker run --rm
+      -v "$CI_PROJECT_DIR/release-evidence-input:/evidence:ro"
+      "$GRYPE_IMAGE"
+      "sbom:/evidence/darklab-shell.cdx.json"
+      --only-fixed --fail-on critical -o json
+      > release-evidence-input/vulnerability-report.json
+    - >-
+      python3 scripts/build_release_evidence.py
+      --version "$RELEASE_VERSION"
+      --gitlab-image "$GITLAB_IMAGE"
+      --dockerhub-image "$DOCKERHUB_RELEASE_IMAGE"
+      --digest "$GITLAB_DIGEST"
+      --commit-sha "$CI_COMMIT_SHA"
+      --commit-tag "$CI_COMMIT_TAG"
+      --pipeline-url "$CI_PIPELINE_URL"
+      --pipeline-created-at "$CI_PIPELINE_CREATED_AT"
+      --sbom release-evidence-input/darklab-shell.cdx.json
+      --vulnerability-report release-evidence-input/vulnerability-report.json
+      --syft-version "$SYFT_VERSION"
+      --grype-version "$GRYPE_VERSION"
+      --output-dir release-evidence
+    - cosign sign "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - cosign sign "$DOCKERHUB_RELEASE_IMAGE@$DOCKERHUB_DIGEST"
+    - >-
+      cosign verify
+      --certificate-identity "${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      --certificate-oidc-issuer "$CI_SERVER_URL"
+      "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - >-
+      cosign verify
+      --certificate-identity "${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      --certificate-oidc-issuer "$CI_SERVER_URL"
+      "$DOCKERHUB_RELEASE_IMAGE@$DOCKERHUB_DIGEST"
+  artifacts:
+    when: always
+    paths:
+      - release-evidence-input/darklab-shell.cdx.json
+      - release-evidence-input/vulnerability-report.json
+      - release-evidence/
+    expire_in: 1 week
+
+release-payload-upload:
+  stage: release
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-dockerhub
+      artifacts: true
+    - job: release-supply-chain
+      artifacts: true
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  variables:
+    COSIGN_YES: "true"
+  before_script:
+    - apk add --no-cache cosign curl python3
   script:
     - >-
       python scripts/build_release_payload.py
@@ -414,6 +501,8 @@ release-payload-upload:
       --dockerhub-digest "$DOCKERHUB_DIGEST"
       --compressed-bytes "$GITLAB_COMPRESSED_BYTES"
       --unpacked-bytes "$GITLAB_UNPACKED_BYTES"
+      --evidence-dir release-evidence
+    - scripts/publish_release_artifacts.sh sign-payload release-payload
     - scripts/publish_release_artifacts.sh payload release-payload
   artifacts:
     paths:
@@ -431,6 +520,7 @@ release-create:
       artifacts: true
     - job: release-payload-upload
       artifacts: true
+    - job: release-supply-chain
   before_script: []
   script:
     - echo "Creating release links for darklab_shell ${CI_COMMIT_TAG}"
@@ -446,12 +536,20 @@ release-create:
           url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/setup.sh.sha256
         - name: SHA256SUMS
           url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/SHA256SUMS
-        - name: GNU AGPLv3 project license
-          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/LICENSE
-        - name: Third-party notices
-          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/THIRD_PARTY_NOTICES.txt
-        - name: Container license inventory
-          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/container-licenses.json
+        - name: SHA256SUMS Sigstore bundle
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/SHA256SUMS.sigstore.json
+        - name: Deployment archive
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/darklab-shell-deploy-${RELEASE_VERSION}.tar.gz
+        - name: Deployment archive checksum
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/darklab-shell-deploy-${RELEASE_VERSION}.tar.gz.sha256
+        - name: CycloneDX SBOM
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/darklab-shell.cdx.json
+        - name: SLSA provenance
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/provenance.intoto.jsonl
+        - name: Release evidence index
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/release-evidence.json
+        - name: Vulnerability report
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/vulnerability-report.json
 
 release-public-smoke:
   stage: post-release
@@ -467,7 +565,7 @@ release-public-smoke:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache curl jq
+    - apk add --no-cache cosign curl jq
   script:
     - |
       release_check_failed() {
@@ -538,8 +636,29 @@ release-public-smoke:
       package_url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}"
       curl -fsSLO "${package_url}/setup.sh"
       curl -fsSLO "${package_url}/setup.sh.sha256"
+      curl -fsSLO "${package_url}/SHA256SUMS"
+      curl -fsSLO "${package_url}/SHA256SUMS.sigstore.json"
+      for evidence_file in \
+        darklab-shell.cdx.json provenance.intoto.jsonl release-evidence.json vulnerability-report.json; do
+        curl -fsSLO "${package_url}/${evidence_file}"
+        grep "  ${evidence_file}$" SHA256SUMS | sha256sum -c -
+      done
+      signing_identity="${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      cosign verify-blob SHA256SUMS \
+        --bundle SHA256SUMS.sigstore.json \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL"
+      cosign verify \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL" \
+        "$GITLAB_IMAGE@$GITLAB_DIGEST"
+      cosign verify \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL" \
+        "$DOCKERHUB_RELEASE_IMAGE@$DOCKERHUB_DIGEST"
       sha256sum -c setup.sh.sha256
       sh setup.sh --dir "$CI_PROJECT_DIR/release-install"
+      "$CI_PROJECT_DIR/release-install/darklab-deploy" status
       docker compose \
         --env-file "$CI_PROJECT_DIR/release-install/.env" \
         -f "$CI_PROJECT_DIR/release-install/compose.yaml" \

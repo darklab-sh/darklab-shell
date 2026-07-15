@@ -986,6 +986,8 @@ For SELinux-enforcing hosts, add a local Compose override with private relabelin
 
 After `docker compose pull`, run `./verify-release-image.sh` before starting the stack. It requires the GitLab and Docker Hub digests in `release-manifest.json` to agree, confirms `.env` still selects that reviewed release image, and checks the pulled image's repository digest. A mismatch stops with a named error instead of starting an unverified image.
 
+Release assets add publisher identity on top of those digest checks. `SHA256SUMS.sigstore.json` is a keyless Sigstore bundle for the checksum manifest, and both immutable image references carry Cosign signatures. Verify them with issuer `https://gitlab.com` and certificate identity `https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/vX.Y.Z`. The matching `release-evidence.json` ties the shared digest to the tag, commit, pipeline, CycloneDX SBOM, SLSA provenance, and Grype report. Release CI records every match and blocks fixed Critical vulnerabilities.
+
 Before an upgrade, stop writes and verify a backup of the selected database, `.env`, `conf/`, host `data/`, persistent workspaces, and `release-manifest.json`. The production stack mounts that deployment-directory `./data` path at `/data` inside the container. Run the new installer in a separate empty directory, compare its managed files, preserve operator-owned state, then update `DARKLAB_IMAGE` to the exact new tag and recreate the shell. Startup may apply a forward-only schema migration, and changing the tag back doesn't reverse it.
 
 The repository-backed [docker-compose.yml](docker-compose.yml) remains the local development and custom-deployment stack. It builds the same Dockerfile, then mounts `./app:/app:ro` over the bundled application:
@@ -1136,7 +1138,18 @@ workspace_backend: volume
 
 ## Operator Backups
 
-Use [`scripts/backup_system.py`](scripts/backup_system.py) when you want a scheduled backup that matches the deployment the app is actually running with. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
+Repository-free installs include the backup and restore path in `darklab-deploy`. It runs the image's backup helper in a one-off Compose container, so the host only needs Docker and Compose:
+
+```bash
+./darklab-deploy backup --keep-days 14
+./darklab-deploy restore backups/darklab-backup-<timestamp>.tar.gz
+```
+
+Managed backups include the SQLite snapshot or Postgres dump, `.env`, `conf/`, `/data` including `.secrets_master_key`, durable `/workspaces` when `WORKSPACE_ROOT=/workspaces`, release metadata, a redacted manifest, restore notes, and checksums. The archive stays under the private `backups/` directory and is owned by the host user who ran the command. Restore verifies the archive and creates another verified backup before it stops the app or writes any state. It restores operator settings and data but keeps the image selected by the current release manifest.
+
+`./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, or the pre-upgrade backup fails. A supplied `--backup /path/to/archive` must pass the same checksum verification. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. Afterward, run the printed pull, image-verification, and restart commands. Changing an image tag never reverses a database migration.
+
+Repository-backed deployments can call [`scripts/backup_system.py`](scripts/backup_system.py) directly when they want a scheduled backup that matches a custom source checkout. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
 
 Basic cron-friendly example:
 

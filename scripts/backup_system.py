@@ -32,8 +32,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
-APP_DIR = ROOT / "app"
+ROOT = Path(os.environ.get("DARKLAB_BACKUP_ROOT") or Path(__file__).resolve().parents[1])
+APP_DIR = Path(os.environ.get("DARKLAB_BACKUP_APP_DIR") or ROOT / "app")
 DEFAULT_BACKUP_PREFIX = "darklab-backup"
 DEFAULT_SQLITE_NAME = "history.db"
 CHECKSUM_CHUNK_SIZE = 1024 * 1024
@@ -1250,6 +1250,54 @@ def backup_postgres(ctx: BackupContext, cfg: Mapping[str, Any], destination: Pat
 
 def include_config_files(ctx: BackupContext, stage: Path, compose_files: Sequence[Path]) -> None:
     conf_dir = Path(ctx.args.conf_dir).expanduser().resolve() if ctx.args.conf_dir else APP_DIR / "conf"
+    if getattr(ctx.args, "repository_free", False):
+        local_conf_dir = Path(ctx.args.local_conf_dir).expanduser().resolve()
+        _copy_directory_contents(
+            ctx,
+            local_conf_dir,
+            stage / "operator" / "conf",
+            kind="local_config",
+        )
+        env_file = Path(ctx.args.env_file).expanduser().resolve()
+        operator_env = stage / "operator" / ".env"
+        operator_env.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(env_file, operator_env)
+        operator_env.chmod(0o600)
+        ctx.included.append({
+            "kind": "env",
+            "source": str(env_file),
+            "archive_path": "operator/.env",
+        })
+        release_dir = stage / "release"
+        release_dir.mkdir()
+        for compose_file in compose_files:
+            if compose_file.exists():
+                destination = release_dir / compose_file.name
+                shutil.copy2(compose_file, destination)
+                ctx.included.append({
+                    "kind": "compose",
+                    "source": str(compose_file),
+                    "archive_path": destination.relative_to(stage).as_posix(),
+                })
+        for extra in ctx.args.extra_file or []:
+            source = Path(extra).expanduser().resolve()
+            destination = release_dir / source.name
+            if destination.exists():
+                raise BackupError(f"duplicate repository-free release file name: {source.name}")
+            source_stat = _stat_readable_source(source, kind="extra", missing_ok=True)
+            if source_stat is None:
+                if ctx.args.ignore_missing_extra_file:
+                    ctx.excluded.append({"kind": "extra", "source": str(source), "reason": "missing"})
+                    continue
+                raise BackupError(f"requested file does not exist: {source}")
+            shutil.copy2(source, destination)
+            ctx.included.append({
+                "kind": "extra",
+                "source": str(source),
+                "archive_path": destination.relative_to(stage).as_posix(),
+            })
+        return
+
     copied: set[Path] = set()
 
     def copy_once(path: Path, *, missing_ok: bool = False) -> None:
@@ -1336,6 +1384,7 @@ def build_manifest(
     file_count, total_bytes = _directory_stats(stage)
     manifest = {
         "format": "darklab_shell.backup.v1",
+        "repository_free": bool(getattr(ctx.args, "repository_free", False)),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "app_version": app_version,
         "git_sha": _git_sha(),
@@ -1533,6 +1582,13 @@ def _prepare_requested_inputs(ctx: BackupContext) -> None:
     if ctx.requested_inputs_prepared:
         return
 
+    if getattr(ctx.args, "repository_free", False) and (
+        not ctx.args.env_file or not getattr(ctx.args, "local_conf_dir", "")
+    ):
+        raise BackupError(
+            "repository-free backups require --env-file and --local-conf-dir"
+        )
+
     env_paths = [Path(path).expanduser().resolve() for path in (ctx.args.env_file_multi or [])]
     if ctx.args.env_file:
         env_paths.append(Path(ctx.args.env_file).expanduser().resolve())
@@ -1694,6 +1750,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Additional env file to load.",
     )
     parser.add_argument("--conf-dir", default="", help="Config directory to load instead of app/conf.")
+    parser.add_argument(
+        "--local-conf-dir",
+        default="",
+        help="Operator config overlay directory included by repository-free backups.",
+    )
+    parser.add_argument(
+        "--repository-free",
+        action="store_true",
+        help="Write operator and release files in the managed deployment restore layout.",
+    )
     parser.add_argument("--extra-file", action="append", default=[], help="Extra deployment-specific file to include.")
     parser.add_argument(
         "--ignore-missing-extra-file",
@@ -1751,6 +1817,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         with _backup_lock(ctx):
             result = create_backup(ctx)
+        output_uid = os.environ.get("DARKLAB_BACKUP_OUTPUT_UID", "")
+        output_gid = os.environ.get("DARKLAB_BACKUP_OUTPUT_GID", "")
+        if output_uid.isdigit() and output_gid.isdigit():
+            os.chown(result, int(output_uid), int(output_gid))
         _info(f"Backup written to {result}")
         if ctx.warnings:
             _info(f"Completed with {len(ctx.warnings)} warning(s). Review the warning output and manifest.json.")

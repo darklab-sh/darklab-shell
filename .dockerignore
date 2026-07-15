@@ -22,7 +22,9 @@ tests/
 docs/
 examples/
 assets/
-scripts/
+scripts/*
+!scripts/backup_system.py
+!scripts/restore_system.py
 config/
 data/
 

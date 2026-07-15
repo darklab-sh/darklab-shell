@@ -150,7 +150,7 @@ Before merging a version branch back to `main`:
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
 - Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
 - Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
-- Confirm the protected `vMAJOR.MINOR.PATCH` tag pipeline pushed the canonical GitLab image, passed repository-free smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, and published the checksummed installer payload.
+- Confirm the protected `vMAJOR.MINOR.PATCH` tag pipeline pushed the canonical GitLab image, passed repository-free smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, and published the checksummed installer plus signed release evidence.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
 
 ---
@@ -221,8 +221,8 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2420 pytest + 1498 Vitest + 276 Playwright = 4,194 tests**.
-That total includes 4,131 behavior tests plus 63 docs/inventory meta-tests.
+Current totals: **2423 pytest + 1498 Vitest + 276 Playwright = 4,197 tests**.
+That total includes 4,134 behavior tests plus 63 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -338,12 +338,15 @@ Ordinary branches and merge requests build verification-only images. A protected
 1. validate the reviewed container-license inventory, then build the self-contained image once with a registry-backed BuildKit cache and push the exact tag to the GitLab Container Registry
 2. start that image without an `/app` mount and verify its version, architecture, bundled static assets, read-only runtime, private host-config staging, health endpoint, every declared notice path, and the complete installed RubyGem manifest
 3. copy the canonical manifest directly between registries with Buildx imagetools, publish it at `docker.io/darklabsh/darklab-shell`, and require the Docker Hub digest to match
-4. record compressed/unpacked image sizes and pull timing as CI metadata, then generate the byte-stable exact-version `setup.sh`, checksums, production Compose file, `.env.example`, config placeholder, project license, and third-party notices
-5. publish those files to the GitLab Generic Package Registry, create stable release links, then anonymously pull and verify the public artifacts
+4. generate a CycloneDX SBOM and full Grype report from the pulled canonical image, fail on fixed Critical findings, bind the tag, commit, pipeline, registry names, and shared digest into SLSA provenance, then keylessly sign both immutable image references with the protected pipeline's GitLab OIDC identity
+5. record compressed/unpacked image sizes and pull timing as CI metadata, then generate the byte-stable exact-version deployment archive, its checksum, `setup.sh`, and the bootstrap checksums
+6. add the evidence files to `SHA256SUMS`, keylessly sign that manifest, publish the payload to the GitLab Generic Package Registry, create stable release links, then anonymously verify the signatures, evidence checksums, images, installer, and running stack
 
-Exact semantic-version tags are immutable. The promotion job fails when Docker Hub already holds different content at that tag, and it never rebuilds for the mirror. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are protected, masked-and-hidden GitLab variables; GitLab's built-in job-scoped registry credentials handle the canonical push.
+Exact semantic-version tags are immutable. The promotion job fails when Docker Hub already holds different content at that tag, and it never rebuilds for the mirror. A retried payload job verifies and reuses an existing Sigstore bundle when the remote `SHA256SUMS` is identical; it refuses a changed checksum manifest instead of producing conflicting signature bytes. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are protected, masked-and-hidden GitLab variables; GitLab's built-in job-scoped registry credentials handle the canonical push.
 
 Release verification failures name the stage, invariant, expected value, and a bounded actual value without printing registry credentials or token-bearing URLs. The canonical build and Docker Hub promotion retain only their allowlisted manifests, measurements, copy output, and bounded status summaries when a later check fails; Docker client configuration and credentials are never release artifacts.
+
+The vulnerability policy blocks Critical findings only when the report names an available fix. High findings and unfixed Critical findings remain visible in `vulnerability-report.json` without making every upstream package delay the release indefinitely. Any future suppression needs a reviewed, expiring rule with the affected package, vulnerability, reason, and follow-up owner; don't hide findings in an untracked CI command.
 
 The protected jobs call `scripts/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
 
@@ -355,8 +358,12 @@ Before testing a release payload locally, check the version boundary and build i
 python scripts/check_versions.sh --release-version 2.6.0
 python scripts/build_release_payload.py \
   --version 2.6.0 \
-  --output-dir /tmp/darklab-shell-release
+  --output-dir /tmp/darklab-shell-release \
+  --gitlab-digest "sha256:<matching-64-character-lowercase-hex-digest>" \
+  --dockerhub-digest "sha256:<matching-64-character-lowercase-hex-digest>"
 ```
+
+Use the matching immutable digest reported by the two release-image jobs. The protected pipeline also passes its generated `release-evidence/` directory so the public payload includes the SBOM, scan report, provenance, and evidence index.
 
 The normal development command stays source-mounted:
 

@@ -8,7 +8,7 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
 
 usage() {
-    echo "usage: publish_release_artifacts.sh gitlab-image|dockerhub-image|payload [PAYLOAD_DIR]" >&2
+    echo "usage: publish_release_artifacts.sh gitlab-image|dockerhub-image|sign-payload|payload [PAYLOAD_DIR]" >&2
     exit 2
 }
 
@@ -178,6 +178,47 @@ publish_payload() {
     done
 }
 
+sign_payload() {
+    payload_dir=${1:-}
+    [ -d "$payload_dir" ] || release_check_failed payload_signing payload_directory directory missing
+    require_nonempty payload_signing release_version "${RELEASE_VERSION:-}"
+    require_nonempty payload_signing project_url "${CI_PROJECT_URL:-}"
+    require_nonempty payload_signing commit_tag "${CI_COMMIT_TAG:-}"
+    require_nonempty payload_signing server_url "${CI_SERVER_URL:-}"
+    checksum_file="$payload_dir/SHA256SUMS"
+    bundle_file="$payload_dir/SHA256SUMS.sigstore.json"
+    [ -f "$checksum_file" ] || release_check_failed payload_signing checksum_manifest file missing
+    package_url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}"
+    remote_checksum=remote-SHA256SUMS
+    remote_bundle=remote-SHA256SUMS.sigstore.json
+    remote_checksum_exists=0
+    remote_bundle_exists=0
+    if curl --fail --silent --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        "${package_url}/SHA256SUMS" --output "$remote_checksum"; then
+        remote_checksum_exists=1
+        if ! cmp -s "$checksum_file" "$remote_checksum"; then
+            release_check_failed payload_signing remote_checksum identical different
+        fi
+    fi
+    if curl --fail --silent --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        "${package_url}/SHA256SUMS.sigstore.json" --output "$remote_bundle"; then
+        remote_bundle_exists=1
+    fi
+    if [ "$remote_bundle_exists" -eq 1 ]; then
+        [ "$remote_checksum_exists" -eq 1 ] \
+            || release_check_failed payload_signing remote_checksum present missing
+        cp "$remote_bundle" "$bundle_file"
+        printf 'Reusing existing Sigstore bundle for identical SHA256SUMS\n'
+    else
+        cosign sign-blob "$checksum_file" --bundle "$bundle_file"
+    fi
+    signing_identity="${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+    cosign verify-blob "$checksum_file" \
+        --bundle "$bundle_file" \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL"
+}
+
 mode=${1:-}
 case "$mode" in
     gitlab-image)
@@ -187,6 +228,10 @@ case "$mode" in
     dockerhub-image)
         [ "$#" -eq 1 ] || usage
         publish_dockerhub_image
+        ;;
+    sign-payload)
+        [ "$#" -eq 2 ] || usage
+        sign_payload "$2"
         ;;
     payload)
         [ "$#" -eq 2 ] || usage

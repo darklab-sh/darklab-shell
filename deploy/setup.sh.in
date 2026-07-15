@@ -7,19 +7,8 @@ set -eu
 RELEASE_VERSION="@RELEASE_VERSION@"
 PAYLOAD_BASE_URL="${DARKLAB_SETUP_BASE_URL:-@PAYLOAD_BASE_URL@}"
 ALLOW_TEST_URLS="${DARKLAB_SETUP_ALLOW_TEST_URLS:-0}"
-COMPOSE_SHA256="@COMPOSE_SHA256@"
-ENV_SHA256="@ENV_SHA256@"
-CONFIG_SHA256="@CONFIG_SHA256@"
-VERIFY_IMAGE_SHA256="@VERIFY_IMAGE_SHA256@"
-NOTICES_SHA256="@NOTICES_SHA256@"
-LICENSES_SHA256="@LICENSES_SHA256@"
-PROJECT_LICENSE_SHA256="@PROJECT_LICENSE_SHA256@"
-GITLAB_IMAGE="@GITLAB_IMAGE@"
-GITLAB_DIGEST="@GITLAB_DIGEST@"
-DOCKERHUB_IMAGE="@DOCKERHUB_IMAGE@"
-DOCKERHUB_DIGEST="@DOCKERHUB_DIGEST@"
-COMPRESSED_BYTES="@COMPRESSED_BYTES@"
-UNPACKED_BYTES="@UNPACKED_BYTES@"
+ARCHIVE_NAME="@ARCHIVE_NAME@"
+ARCHIVE_SHA256="@ARCHIVE_SHA256@"
 TARGET_DIR="."
 
 usage() {
@@ -27,7 +16,7 @@ usage() {
 Usage: setup.sh [--dir PATH] [--help] [--version]
 
 Prepare a darklab_shell ${RELEASE_VERSION} deployment directory.
-The script verifies and installs release files but does not pull or start containers.
+The script verifies and installs the release archive but does not pull or start containers.
 EOF
 }
 
@@ -58,7 +47,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 missing=""
-for command_name in basename cat chmod cp curl docker find grep mkdir mktemp mv od rm sed tr; do
+for command_name in basename chmod curl docker find grep gzip mkdir mktemp rm sed tar; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         missing="${missing} ${command_name}"
     fi
@@ -92,19 +81,6 @@ if [ "$compose_major" -lt 2 ] \
 fi
 docker info >/dev/null 2>&1 || fail "the Docker daemon is not reachable"
 
-[ -n "$TARGET_DIR" ] || fail "target directory must not be empty"
-[ "$TARGET_DIR" != "/" ] || fail "refusing to install into /"
-[ ! -L "$TARGET_DIR" ] || fail "target directory must not be a symlink: $TARGET_DIR"
-if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
-    fail "target exists and is not a directory: $TARGET_DIR"
-fi
-if [ -d "$TARGET_DIR" ]; then
-    unexpected_entry=$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 \
-        ! -name setup.sh ! -name setup.sh.sha256 ! -name SHA256SUMS \
-        -print -quit)
-    [ -z "$unexpected_entry" ] || fail "target directory must be empty: $TARGET_DIR"
-fi
-
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | sed 's/[[:space:]].*$//'
@@ -131,160 +107,34 @@ download() {
     esac
 }
 
-verify_file() {
-    path=$1
-    expected=$2
-    actual=$(sha256_file "$path")
-    [ "$actual" = "$expected" ] || fail "checksum mismatch for $(basename "$path")"
+safe_relative_path() {
+    case "$1" in
+        ''|/*|..|../*|*/../*|*/..) return 1 ;;
+        *) return 0 ;;
+    esac
 }
 
 umask 077
 staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/darklab-setup.XXXXXX")
 trap 'rm -rf "$staging_dir"' EXIT HUP INT TERM
 
-download "$PAYLOAD_BASE_URL/compose.yaml" "$staging_dir/compose.yaml"
-download "$PAYLOAD_BASE_URL/.env.example" "$staging_dir/.env.example"
-download "$PAYLOAD_BASE_URL/config.local.yaml" "$staging_dir/config.local.yaml"
-download "$PAYLOAD_BASE_URL/verify-release-image.sh" "$staging_dir/verify-release-image.sh"
-download "$PAYLOAD_BASE_URL/THIRD_PARTY_NOTICES.txt" "$staging_dir/THIRD_PARTY_NOTICES.txt"
-download "$PAYLOAD_BASE_URL/container-licenses.json" "$staging_dir/container-licenses.json"
-download "$PAYLOAD_BASE_URL/LICENSE" "$staging_dir/LICENSE"
-verify_file "$staging_dir/compose.yaml" "$COMPOSE_SHA256"
-verify_file "$staging_dir/.env.example" "$ENV_SHA256"
-verify_file "$staging_dir/config.local.yaml" "$CONFIG_SHA256"
-verify_file "$staging_dir/verify-release-image.sh" "$VERIFY_IMAGE_SHA256"
-verify_file "$staging_dir/THIRD_PARTY_NOTICES.txt" "$NOTICES_SHA256"
-verify_file "$staging_dir/container-licenses.json" "$LICENSES_SHA256"
-verify_file "$staging_dir/LICENSE" "$PROJECT_LICENSE_SHA256"
+archive_path="$staging_dir/$ARCHIVE_NAME"
+download "$PAYLOAD_BASE_URL/$ARCHIVE_NAME" "$archive_path"
+actual_archive_sha256=$(sha256_file "$archive_path")
+[ "$actual_archive_sha256" = "$ARCHIVE_SHA256" ] \
+    || fail "checksum mismatch for $ARCHIVE_NAME"
 
-install_dir="$staging_dir/install"
-mkdir "$install_dir"
-chmod 700 "$install_dir"
-for directory in data conf workspaces backups; do
-    mkdir "$install_dir/$directory"
-    chmod 700 "$install_dir/$directory"
+tar -tzf "$archive_path" | while IFS= read -r archive_entry; do
+    trimmed_entry=${archive_entry%/}
+    safe_relative_path "$trimmed_entry" \
+        || fail "release archive contains an unsafe path: $archive_entry"
 done
-mkdir "$install_dir/conf/themes"
-chmod 700 "$install_dir/conf/themes"
+tar -xzf "$archive_path" -C "$staging_dir"
+bundle_root="$staging_dir/darklab-shell-deploy-$RELEASE_VERSION"
+[ -x "$bundle_root/darklab-deploy" ] \
+    || fail "release archive is missing darklab-deploy"
 
-cp "$staging_dir/compose.yaml" "$install_dir/compose.yaml"
-cp "$staging_dir/.env.example" "$install_dir/.env.example"
-cp "$staging_dir/.env.example" "$install_dir/.env"
-cp "$staging_dir/config.local.yaml" "$install_dir/conf/config.local.yaml"
-cp "$staging_dir/verify-release-image.sh" "$install_dir/verify-release-image.sh"
-cp "$staging_dir/THIRD_PARTY_NOTICES.txt" "$install_dir/THIRD_PARTY_NOTICES.txt"
-cp "$staging_dir/container-licenses.json" "$install_dir/container-licenses.json"
-cp "$staging_dir/LICENSE" "$install_dir/LICENSE"
-
-cat > "$install_dir/conf/commands.local.yaml" <<'EOF'
-# Local command registry additions and same-root overrides.
-# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md#command-registry-and-autocomplete-configuration
-EOF
-cat > "$install_dir/conf/faq.local.yaml" <<'EOF'
-# Local FAQ entries. Keep each item compatible with app/conf/faq.yaml.
-# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md#local-override-files
-EOF
-cat > "$install_dir/conf/welcome.local.yaml" <<'EOF'
-# Local welcome-command entries. Keep each item compatible with app/conf/welcome.yaml.
-# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md#local-override-files
-EOF
-cat > "$install_dir/conf/workflows.local.yaml" <<'EOF'
-# Local guided workflows and v2 playbooks.
-# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/docs/workflows.md
-EOF
-cat > "$install_dir/conf/app_hints.local.txt" <<'EOF'
-# Add one desktop hint per line. Category headers such as [workspace] are supported.
-EOF
-cat > "$install_dir/conf/app_hints_mobile.local.txt" <<'EOF'
-# Add one mobile hint per line. Category headers such as [workspace] are supported.
-EOF
-cat > "$install_dir/conf/themes/darklab_obsidian.local.yaml" <<'EOF'
-# Override only the darklab_obsidian theme keys you want to change.
-# Use <theme-name>.local.yaml to target another shipped theme.
-# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/THEME.md
-EOF
-cat > "$install_dir/conf/ascii.local.txt.example" <<'EOF'
-Rename this file to ascii.local.txt and replace all of its contents with desktop banner art.
-An active ascii.local.txt replaces the shipped banner instead of extending it.
-EOF
-cat > "$install_dir/conf/ascii_mobile.local.txt.example" <<'EOF'
-Rename this file to ascii_mobile.local.txt and replace all of its contents with mobile banner art.
-An active ascii_mobile.local.txt replaces the shipped banner instead of extending it.
-EOF
-cat > "$install_dir/conf/package_presets.local.yaml.example" <<'EOF'
-# Copy the complete package preset catalog here, remove .example, then set:
-# package_presets_file: package_presets.local.yaml
-EOF
-cat > "$install_dir/conf/report_templates.local.yaml.example" <<'EOF'
-# Copy the complete report template catalog here, remove .example, then set:
-# report_templates_file: report_templates.local.yaml
-EOF
-chmod 600 "$install_dir/.env" "$install_dir/conf/config.local.yaml"
-find "$install_dir/conf" -type f -exec chmod 600 {} \;
-chmod 755 "$install_dir/verify-release-image.sh"
-chmod 644 "$install_dir/compose.yaml" "$install_dir/.env.example" \
-    "$install_dir/LICENSE" "$install_dir/THIRD_PARTY_NOTICES.txt" \
-    "$install_dir/container-licenses.json"
-
-postgres_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
-[ "${#postgres_password}" -eq 48 ] || fail "could not generate the Postgres password"
-sed \
-    -e "s|^POSTGRES_PASSWORD=.*$|POSTGRES_PASSWORD=${postgres_password}|" \
-    -e "s|^DATABASE_URL=.*$|DATABASE_URL=postgresql://darklab:${postgres_password}@postgres:5432/darklab_shell|" \
-    "$install_dir/.env" > "$staging_dir/.env"
-cp "$staging_dir/.env" "$install_dir/.env"
-chmod 600 "$install_dir/.env"
-
-cat > "$install_dir/release-manifest.json" <<EOF
-{
-  "version": "${RELEASE_VERSION}",
-  "gitlab_image": "${GITLAB_IMAGE}",
-  "gitlab_digest": "${GITLAB_DIGEST}",
-  "dockerhub_image": "${DOCKERHUB_IMAGE}",
-  "dockerhub_digest": "${DOCKERHUB_DIGEST}",
-  "image_metrics": {
-    "compressed_bytes": ${COMPRESSED_BYTES},
-    "unpacked_bytes": ${UNPACKED_BYTES}
-  },
-  "managed_files": {
-    "compose.yaml": "${COMPOSE_SHA256}",
-    ".env.example": "${ENV_SHA256}",
-    "conf/config.local.yaml": "${CONFIG_SHA256}",
-    "verify-release-image.sh": "${VERIFY_IMAGE_SHA256}",
-    "THIRD_PARTY_NOTICES.txt": "${NOTICES_SHA256}",
-    "container-licenses.json": "${LICENSES_SHA256}",
-    "LICENSE": "${PROJECT_LICENSE_SHA256}"
-  }
-}
-EOF
-chmod 644 "$install_dir/release-manifest.json"
-
-if grep -E '@[A-Z0-9_]+@' \
-    "$install_dir/compose.yaml" \
-    "$install_dir/.env.example" \
-    "$install_dir/.env" \
-    "$install_dir/conf/"*.local.yaml \
-    "$install_dir/conf/"*.local.txt \
-    "$install_dir/conf/"*.example \
-    "$install_dir/conf/themes/"*.local.yaml \
-    "$install_dir/verify-release-image.sh" \
-    "$install_dir/release-manifest.json" >/dev/null 2>&1; then
-    fail "release payload contains an unresolved template value"
-fi
-docker compose \
-    --env-file "$install_dir/.env" \
-    -f "$install_dir/compose.yaml" \
-    config --quiet || fail "release Compose configuration is invalid"
-
-mkdir -p "$TARGET_DIR"
-chmod 700 "$TARGET_DIR"
-for directory in data conf workspaces backups; do
-    mv "$install_dir/$directory" "$TARGET_DIR/$directory"
-done
-for managed_file in compose.yaml .env.example .env release-manifest.json verify-release-image.sh \
-    LICENSE THIRD_PARTY_NOTICES.txt container-licenses.json; do
-    mv "$install_dir/$managed_file" "$TARGET_DIR/$managed_file"
-done
+"$bundle_root/darklab-deploy" install --bundle "$bundle_root" --target "$TARGET_DIR"
 
 cat <<EOF
 darklab_shell ${RELEASE_VERSION} is ready in ${TARGET_DIR}.
@@ -302,5 +152,6 @@ Then run:
   docker compose ps
   docker compose logs -f shell
 
+Use ./darklab-deploy status to check the installed release and managed files.
 The app listens on http://127.0.0.1:8888 by default.
 EOF

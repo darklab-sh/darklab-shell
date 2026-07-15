@@ -69,7 +69,7 @@ RUN apt-get install -y --no-install-recommends \
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
-                        ca-certificates perl zlib1g-dev unzip inetutils-telnet httping
+                        ca-certificates perl postgresql-client zlib1g-dev unzip inetutils-telnet httping
 
 RUN mkdir -p /usr/share/doc/darklab-shell/licenses
 
@@ -259,6 +259,10 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # not invalidate the scanner toolchain. Development Compose mounts ./app over
 # this copy; released images run directly from it.
 COPY app/ /app/
+
+# Repository-free lifecycle helpers run through one-off Compose containers, so
+# operators do not need Python, pg_dump, or a source checkout on the host.
+COPY scripts/backup_system.py scripts/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE

@@ -96,6 +96,8 @@ docker run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$image"
     require_file gunicorn_config /app/gunicorn_conf.py
     require_file base_config /app/conf/config.yaml
     require_file asset_manifest /app/static/build/manifest.json
+    require_file backup_helper /app/tools/backup_system.py
+    require_file restore_helper /app/tools/restore_system.py
     require_file project_license /usr/share/doc/darklab-shell/LICENSE
     grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" /usr/share/doc/darklab-shell/LICENSE \
         || image_check_failed project_license_text AGPL-3.0-only mismatch
@@ -109,6 +111,10 @@ docker run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$image"
     require_file nikto_libwhisker_license /opt/Nikto/COPYING.LibWhisker
     require_file testssl_license /opt/testssl.sh/LICENSE
     require_file seclists_license /usr/share/wordlists/seclists/LICENSE
+    command -v pg_dump >/dev/null 2>&1 \
+        || image_check_failed pg_dump available missing
+    command -v pg_restore >/dev/null 2>&1 \
+        || image_check_failed pg_restore available missing
     test ! -e /app/conf/config.local.yaml \
         || image_check_failed local_overlay_absent absent present
     if [ -n "$EXPECTED_VERSION" ]; then

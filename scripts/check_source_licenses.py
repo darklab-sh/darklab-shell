@@ -57,6 +57,7 @@ ROOT_SOURCE_FILES = frozenset({
 SPECIAL_SOURCE_FILES = frozenset({
     "app/requirements.txt",
     "deploy/config-local.yaml.dist",
+    "deploy/darklab-deploy.sh.in",
     "deploy/setup.sh.in",
     "scripts/hooks/pre-commit",
 })

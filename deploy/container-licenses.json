@@ -32,6 +32,7 @@
     "apt:nmap": "Debian Nmap package",
     "apt:perl": "Python container base and Debian packages",
     "apt:procps": "Python container base and Debian packages",
+    "apt:postgresql-client": "Python container base and Debian packages",
     "apt:python3-requests": "Python container base and Debian packages",
     "apt:ruby-dev": "Python container base and Debian packages",
     "apt:rubygems": "Python container base and Debian packages",

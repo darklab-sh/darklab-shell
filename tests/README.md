@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,131
+- behavior tests: 4,134
 - docs/inventory meta-tests: 63
-- `pytest`: 2420 (2370 behavior + 50 meta)
+- `pytest`: 2423 (2373 behavior + 50 meta)
 - `vitest`: 1498 (1485 behavior + 13 meta)
 - `playwright`: 276 behavior
-- total: 4,194
+- total: 4,197
 
 This document is organized in two parts:
 
@@ -1235,6 +1235,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | --- | --- |
 | `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, and excludes live SQLite files from the copied data directory. |
 | `test_extra_and_env_files_are_included_without_logging_secret_values` | Verifies env files and repeatable extra files are included while secret-bearing values stay out of the manifest. |
+| `test_repository_free_backup_uses_operator_restore_layout` | Verifies managed deployments package `.env`, local config, data and vault-key continuity, Compose and release metadata into the stable restore layout. |
 | `test_missing_extra_file_fails_unless_operator_allows_it` | Verifies explicit extra files fail loudly when missing unless the operator opts into ignoring missing paths. |
 | `test_dry_run_rejects_missing_requested_inputs_before_writing` | Verifies dry runs reject missing primary env, extra env, and extra-file inputs before creating output state while honoring the missing-extra-file opt-out. |
 | `test_unreadable_data_dir_reports_root_guidance_and_cleans_lock` | Verifies unreadable host data directories return root/bind-mount guidance and still clean up the backup lock. |
@@ -1646,13 +1647,14 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | Test | Description |
 | --- | --- |
 | `test_production_compose_uses_pinned_public_image_and_no_source_mount` | Verifies production Compose pins the Docker Hub release, keeps source out of the mount set, persists operator paths, binds loopback, and retains optional profiles and scanner settings. |
-| `test_runtime_image_includes_app_and_excludes_local_overlays` | Verifies the Dockerfile adds the app after scanner layers, excludes operator-owned local overlays, and wires validated recursive private overlay staging, trap-safe ShellCheck cleanup, and external-content smoke coverage into the image path. |
+| `test_runtime_image_includes_app_and_excludes_local_overlays` | Verifies the Dockerfile adds the app and lifecycle helpers after scanner layers, excludes operator-owned local overlays, and wires validated recursive private overlay staging, trap-safe ShellCheck cleanup, and external-content smoke coverage into the image path. |
 | `test_container_license_inventory_matches_dockerfile_and_release` | Verifies project package metadata uses `AGPL-3.0-only`; Nmap and Masscan have explicit reviewed records; and every top-level apt, pip, Git, versioned, and RubyGem container dependency remains covered by the release-specific inventory and notices. |
 | `test_license_checkers_fail_closed_and_preserve_excluded_files` | Mutates temporary source and container-license fixtures to prove missing, conflicting, duplicate, stale, or changed license data fails closed, the complete AGPLv3 text is required, notice insertion preserves shebang and doctype placement, generated or upstream files aren't relabeled, and local Python lint owns the checker. |
 | `test_cli_distributions_include_complete_agpl_license` | Builds the CLI source archive and wheel, then verifies both publish `License-Expression: AGPL-3.0-only` and contain the complete project license. |
-| `test_release_payload_is_exact_versioned_neutral_and_checksummed` | Verifies repeated generation produces identical payload bytes with the project license, valid checksums, release-correct config links, public image references, named release assertions, always-retained allowlisted publication diagnostics, direct manifest-copy promotion, CI runtime ownership and job prerequisites, no private deployment hostname, and no volatile pull timing. |
+| `test_release_payload_is_exact_versioned_neutral_and_checksummed` | Verifies repeated generation produces an identical deterministic deployment archive with a clean operator/managed boundary, the project license, valid checksums, release-correct config links, public image references, named release assertions, always-retained allowlisted publication diagnostics, direct manifest-copy promotion, CI runtime ownership and job prerequisites, no private deployment hostname, and no volatile pull timing. |
+| `test_release_evidence_is_deterministic_bound_and_tamper_evident` | Verifies deterministic CycloneDX/Grype evidence normalization, SLSA subjects and source binding, exact Sigstore identity metadata, checksum-manifest inclusion, and rejection of tampered evidence before payload creation. |
 | `test_release_image_publication_handles_publish_retry_and_conflict_branches` | Runs the protected GitLab and Docker Hub image publication entry points with local command doubles, covering first publication, identical retry, immutable-tag conflict, failed publish, and missing or malformed digests without leaking registry secrets. |
-| `test_release_payload_publication_handles_upload_retry_and_conflict_branches` | Runs installer-payload publication with a local package-registry double and covers first upload, identical reuse, conflicting immutable content, and upload failure without exposing the job token. |
+| `test_release_payload_publication_handles_upload_retry_and_conflict_branches` | Runs installer-payload publication with local package-registry and Cosign doubles, covering first upload/signing, identical payload and signature-bundle reuse, conflicting immutable content, upload failure, and checksum/signature conflict rejection without exposing the job token. |
 | `test_release_payload_rejects_invalid_provenance_before_writing` | Verifies malformed, mismatched, or injection-shaped image digests and invalid size metrics are rejected before a payload directory is written, while valid measured values reach the installed release manifest. |
 | `test_release_version_gate_covers_runtime_and_distribution_files` | Verifies the explicit and ordinary-pipeline offline release gates accept matching runtime/distribution versions and report every stale version source. |
 | `test_installer_creates_private_operator_files_without_starting` | Runs the generated installer against local release fixtures and verifies private settings and overlay starters, generated Postgres credentials, stable release metadata, the Compose minimum and validation, pulled-image digest checks, and no automatic startup. |
@@ -1661,6 +1663,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_installer_rejects_non_https_payload_sources` | Verifies public installer downloads reject non-HTTPS sources and identify a failed payload by basename and release without exposing URL credentials or generated secrets. |
 | `test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_target` | Syntax-checks the generated POSIX installer, exercises its `shasum` fallback, and verifies missing tools, old Compose, unavailable Docker, invalid Compose, and secret-generation failures leave no managed target or staging directory behind. |
 | `test_installer_rejects_unsafe_targets` | Verifies the installer refuses non-empty unmanaged directories and directory symlinks. |
+| `test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state` | Installs generated releases, proves managed-file conflicts and downgrades fail closed, verifies automatic pre-upgrade backup, advances only release-owned files and the image reference, preserves operator state, exercises safe SQLite/Postgres restore handling and migration help, and leaves operator paths behind on removal. |
 
 #### `test_request_kill_and_commands.py`
 
