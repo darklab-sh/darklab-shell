@@ -374,6 +374,7 @@ describe('Mobile Atlas controller', () => {
     document.querySelector('.atlas-mobile-row')?.click()
 
     expect(state.selectedEntityIds.has('ent_ip')).toBe(true)
+    expect(document.querySelector('.atlas-mobile-row.is-selected')?.classList.contains('selection-row')).toBe(true)
     expect(controller.selectEntity).not.toHaveBeenCalled()
 
     document.querySelector('#atlas-mobile-bulk-bar .btn-danger')?.click()

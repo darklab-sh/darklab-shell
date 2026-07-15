@@ -658,6 +658,7 @@ describe('app helpers', () => {
       enabled: true,
     })
     expect(list.textContent).toContain('Hourly darklab')
+    expect(list.querySelector('.schedules-list-row.is-selected')?.classList.contains('selection-row')).toBe(true)
   })
 
   it('pauses resumes and fires schedules from the modal action buttons', async () => {
@@ -922,6 +923,7 @@ describe('app helpers', () => {
       options: { suppress_removals: true },
     })
     expect(list.textContent).toContain('Watch nmap')
+    expect(list.querySelector('.watchers-list-row.is-selected')?.classList.contains('selection-row')).toBe(true)
     expect(detail.textContent).toContain('Last diff')
     expect(detail.textContent).toContain('443/tcp')
     expect(detail.textContent).toContain('Findings: +2, -0, unchanged 14')
@@ -2752,6 +2754,7 @@ describe('app helpers', () => {
     const titles = [...document.querySelectorAll('.workflow-catalog-item-title')].map(el => el.textContent)
     expect(labels).toEqual(['My workflows', 'Built-ins'])
     expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting', 'HTTP Triage'])
+    expect(document.querySelector('.workflow-catalog-item.is-selected')?.classList.contains('selection-row')).toBe(true)
     expect(document.querySelector('.is-user-workflow .workflow-edit-btn')).toBeTruthy()
     const workflowFetchesBefore = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
     await ensureWorkflowCatalogLoaded()

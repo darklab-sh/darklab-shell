@@ -1129,6 +1129,7 @@ describe('core ESM exports', () => {
     })).toBe('8443/tcp https-alt')
 
     const atlasRow = renderAtlasEntityRow({ entity })
+    expect(atlasRow.classList.contains('selection-row')).toBe(true)
     expect(atlasRow.textContent).toContain('2 hits · 1 run')
     expect(atlasRow.textContent).toContain('proto tcp')
     expect(atlasRow.textContent).toContain('service https')
@@ -1140,6 +1141,7 @@ describe('core ESM exports', () => {
     })
     const projectRow = renderProjectEntityRow({
       entity,
+      selected: true,
       title: entity.canonical_value,
       meta: 'Ports · 2 hits',
       detail: projectController.portSummary(entity, { includeHost: true }),
@@ -1149,6 +1151,8 @@ describe('core ESM exports', () => {
     expect(projectRow.textContent).toContain('version nginx')
     expect(projectRow.textContent).toContain('banner nginx TLS')
     expect(projectRow.textContent).toContain('host ent-host-example')
+    expect(projectRow.classList.contains('selection-row')).toBe(true)
+    expect(projectRow.classList.contains('is-selected')).toBe(true)
   })
 
   it('applies host entity filters only to Project port entity requests', async () => {

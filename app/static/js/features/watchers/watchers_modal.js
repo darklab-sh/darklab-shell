@@ -579,11 +579,14 @@ function _renderWatchersList() {
   }
   _watchersState.watchers.forEach((watcher) => {
     const row = document.createElement('div');
-    row.className = 'watchers-list-row panel-row panel-row-clickable';
+    row.className = 'watchers-list-row panel-row panel-row-clickable selection-row';
     row.dataset.watcherId = watcher.id || '';
     row.setAttribute('role', 'button');
     row.tabIndex = 0;
-    if (String(watcher.id || '') === String(_watchersState.selectedId || '')) row.classList.add('active');
+    if (String(watcher.id || '') === String(_watchersState.selectedId || '')) {
+      row.classList.add('is-selected');
+      row.setAttribute('aria-current', 'true');
+    }
     const title = document.createElement('span');
     title.className = 'watchers-list-title';
     title.textContent = _watcherTitle(watcher);

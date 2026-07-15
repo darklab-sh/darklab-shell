@@ -192,8 +192,10 @@ describe('team scope selector', () => {
     const team = document.querySelector('[data-team-scope-option="team_live_1"]')
     expect(personal.classList.contains('dropdown-item')).toBe(true)
     expect(personal.classList.contains('team-scope-option')).toBe(true)
+    expect(personal.classList.contains('selection-row')).toBe(true)
     expect(personal.querySelector('.team-scope-option-marker')?.textContent).toBe('select')
     expect(team.getAttribute('aria-selected')).toBe('true')
+    expect(team.classList.contains('is-selected')).toBe(true)
     expect(team.querySelector('.team-scope-option-marker')?.textContent).toBe('active')
   })
 

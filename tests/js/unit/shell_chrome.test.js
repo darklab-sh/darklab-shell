@@ -1700,6 +1700,7 @@ describe('shell chrome project workspace', () => {
       const mobileRows = [...document.querySelectorAll('.project-mobile-row')]
       expect(mobileRows.map(row => row.dataset.projectId)).toEqual(['project-2', 'project-1'])
       expect(mobileRows.every(row => row.classList.contains('panel-row'))).toBe(true)
+      expect(mobileRows.every(row => row.classList.contains('selection-row'))).toBe(true)
       expect(mobileRows.every(row => !row.hasAttribute('role'))).toBe(true)
       expect(mobileRows.every(row => row.tabIndex < 0)).toBe(true)
       expect(mobileRows.every(row => !row.dataset.projectMobileAction)).toBe(true)
@@ -1728,6 +1729,7 @@ describe('shell chrome project workspace', () => {
       await tick()
 
       expect(document.querySelector('.project-mobile-row.is-selected .project-mobile-name').textContent).toBe('alpha.test')
+      expect(document.querySelector('.project-mobile-row.is-selected')?.classList.contains('selection-row')).toBe(true)
 
       document.querySelector('[data-project-mobile-action="toggle-archived"]').click()
       await tick()
@@ -4262,6 +4264,8 @@ describe('shell chrome project workspace', () => {
     await shell.openProjectWorkspace()
     await tick()
     await tick()
+    expect(Array.from(document.querySelectorAll('.project-workspace-row'))
+      .every(row => row.classList.contains('selection-row'))).toBe(true)
     expect(document.querySelector('.project-target-row')?.textContent).toContain('Primary domain')
     expect(document.querySelector('.project-explorer-meta-row')?.classList.contains('panel-row')).toBe(true)
     expect(Array.from(document.querySelectorAll('.project-explorer-section-heading'))

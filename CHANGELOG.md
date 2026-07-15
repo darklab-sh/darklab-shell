@@ -56,6 +56,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Selectable modal rows now share the clearer Workflows selection style** — Atlas entities and findings, Projects and its entity picker, Schedules, Watchers, and the team-scope selector use the same green border, quiet background, and inset leading marker on desktop and mobile.
+
 ### Fixed
 
 - **The pytest CI job includes the release-install test tools it exercises** — The slim Python job installs `curl` and `jq` alongside Git, so installer and publisher regressions reach their intended assertions instead of failing on missing host commands.

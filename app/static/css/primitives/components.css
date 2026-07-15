@@ -1495,3 +1495,15 @@ body.permalink-page .permalink-error-state {
   background: var(--tab-strip-active-bg);
   color: var(--green);
 }
+
+/* Keep persistent row selection above role-specific hover/press treatments. */
+.selection-row.is-selected,
+.selection-row.is-selected:focus,
+.selection-row.is-selected:focus-visible,
+.selection-row.is-selected:focus-within,
+.selection-row.is-selected:hover:not([aria-disabled="true"]):not(:disabled),
+.selection-row.is-selected:active:not([aria-disabled="true"]):not(:disabled) {
+  border-color: color-mix(in srgb, var(--green) 58%, var(--border));
+  background: var(--theme-button-ghost-hover-bg);
+  box-shadow: inset 3px 0 0 var(--green);
+}

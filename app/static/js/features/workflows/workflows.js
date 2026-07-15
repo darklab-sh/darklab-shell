@@ -908,7 +908,7 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
       }
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'btn btn-ghost panel-row panel-row-clickable workflow-catalog-item';
+      row.className = 'btn btn-ghost panel-row panel-row-clickable selection-row workflow-catalog-item';
       row.dataset.workflowId = String(workflow.id || '');
       const selected = String(workflow.id || '') === selectedWorkflowId;
       row.classList.toggle('is-selected', selected);
