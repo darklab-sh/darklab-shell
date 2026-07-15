@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Custom workflow entries for this instance.
 # Entries are appended after the built-in catalog and reloaded without a restart.
 # Legacy entries can keep their linear title/inputs/steps shape. New playbooks

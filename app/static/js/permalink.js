@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Permalink page controller ──────────────────────────────────────────────
 // Handles live transcript rendering, toggle wiring, save actions, and copy/txt
 // for /history/<run_id> and /share/<id> permalink pages.

@@ -14,7 +14,7 @@ Resolution order for the main app config is:
 
 1. Built-in defaults from `app/config.py`
 2. `app/conf/config.yaml`
-3. Optional untracked `app/conf/config.local.yaml`
+3. Optional local `config.local.yaml`, either beside the shipped file or under `APP_LOCAL_CONF_DIR`
 4. Environment variables for the settings that support them
 
 The loader validates the final config at startup. Malformed YAML, a non-mapping file root, or a structurally invalid value stops startup with a specific key/source message. Unknown keys are ignored and logged as `CONFIG_UNKNOWN_KEY_IGNORED` so typos do not quietly become live settings. Error messages redact secret-looking values, including `ai_api_key`, AI secret names, SMTP password secret ids, credential-bearing DSNs such as `database_url`, and webhook-style fields. Non-secret invalid values are shown in a shortened form so ordinary typos are easier to fix.
@@ -50,7 +50,9 @@ No image rebuild is needed for normal config changes.
 
 ## Local Override Files
 
-Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibling `*.local.*` overlays. These local files are intentionally useful for private deployment changes that should not be committed.
+Most operator-owned files under `app/conf/` and `app/conf/themes/` support `*.local.*` overlays. Source deployments keep those files beside the shipped files. Repository-free production keeps the same relative names under host `./conf`, mounted at `/config`, while immutable defaults remain under `/app/conf`.
+
+The installer keeps the host overlay tree at `0700` with files at `0600`. Container startup rejects symlinks and special files, then stages the tree into a private `appuser`-owned runtime directory before dropping privileges. Restart the shell container after editing a production host overlay so it stages a fresh snapshot. `CONFIG_LOADED` reports the shipped and local roots, while DEBUG diagnostics can list safe relative names for present supported overlays; neither log includes file contents. Missing and comment-only optional overlays are normal and don't produce warnings.
 
 | Base file | Local overlay | Behavior |
 |-----------|---------------|----------|
@@ -65,9 +67,17 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | `app/conf/app_hints_mobile.txt` | `app/conf/app_hints_mobile.local.txt` | Appends mobile hints |
 | `app/conf/themes/<theme>.yaml` | `app/conf/themes/<theme>.local.yaml` | Overlays one named theme |
 
+In a repository-free deployment, drop the leading `app/` from the local column: for example, use `conf/commands.local.yaml` or `conf/themes/darklab_obsidian.local.yaml`. A theme overlay can change a shipped theme but doesn't create a new theme-selector entry.
+
+Malformed shipped or local theme YAML falls back to the valid values that remain. The container logs `THEME_OVERLAY_LOAD_FAILED` with only the bounded path, source type, and parser error type; it never includes theme contents or the raw parser message.
+
+Package presets and report templates are complete replacement catalogs rather than merge overlays. Select `package_presets.local.yaml` or `report_templates.local.yaml` in `config.local.yaml`; relative filenames containing `.local.` resolve from the operator root. `tour.yaml` and `wordlists.yaml` are image-owned catalogs and don't have local overlay filenames.
+
 ---
 
 ## Config File Reload Behavior
+
+The table describes loader behavior when the app process can read an edited file directly, including source-mounted development. Repository-free production reads a private startup snapshot, so any host-side `conf/` change needs `docker compose restart shell` first.
 
 | File | When changes take effect |
 |------|--------------------------|
@@ -80,7 +90,7 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | `conf/tour.yaml` | Immediately for tour renderers |
 | `conf/wordlists.yaml` | Immediately for the `wordlist` command and autocomplete requests |
 | `conf/workflows.yaml` | Immediately for Workflows panel, command registry, and smoke-corpus helpers |
-| `conf/themes/*.yaml` | On next page load, permalink load, diagnostics load, or HTML export |
+| `conf/themes/*.yaml` | After the app process restarts |
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
 | `conf/config.local.yaml` | After `docker compose restart` |
@@ -316,8 +326,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
-| `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped presets |
-| `report_templates_file` | `report_templates.yaml` | Engagement report template catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped templates |
+| `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Normal relative paths use the shipped root; relative `.local.` filenames use the operator root. The catalog reloads when its readable file changes and falls back to shipped presets after an invalid override |
+| `report_templates_file` | `report_templates.yaml` | Engagement report template catalog. Normal relative paths use the shipped root; relative `.local.` filenames use the operator root. The catalog reloads when its readable file changes and falls back to shipped templates after an invalid override |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior. See [docs/notifications.md](docs/notifications.md) for channel setup |
@@ -759,6 +769,8 @@ cp .env.example .env
 
 ```env
 # APP_PORT=8888
+# HOST_BIND_ADDRESS=127.0.0.1
+# DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
@@ -796,15 +808,14 @@ cp .env.example .env
 # these when you want Compose to start Postgres and the app to use it. Add
 # postgres to COMPOSE_PROFILES above when enabling the bundled Postgres service.
 # DATABASE_BACKEND=postgres
-# DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+# DATABASE_URL=
 # DATABASE_POOL_MIN=1
 # DATABASE_POOL_MAX=5
 # DATABASE_POSTGRES_JIT=false
 # POSTGRES_DB=darklab_shell
 # POSTGRES_USER=darklab
-# POSTGRES_PASSWORD=darklab_dev_password
+# POSTGRES_PASSWORD=
 # SECRETS_MASTER_KEY=
-# DOCKER_GELF_ADDRESS=udp://loghost.darklab.sh:12201/
 ```
 
 For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
@@ -812,6 +823,9 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
+| `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `127.0.0.1`; widening it exposes the app beyond the local host |
+| `DARKLAB_IMAGE` | Repository-free production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
+| `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
@@ -958,6 +972,30 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 ## Docker Compose Files
 
+The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls the Linux AMD64 image `docker.io/darklabsh/darklab-shell:2.6.0` and doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on `127.0.0.1` by default, and omits fixed container names so separate Compose project directories don't collide.
+
+Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
+
+Every supported local overlay in `conf/` is active under the production `/config` mount. The entrypoint validates and copies the complete tree into a private runtime path on each container start, so restart after changing any overlay:
+
+```bash
+docker compose restart shell
+```
+
+SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama` profile is independent and can be combined as `COMPOSE_PROFILES=postgres,llama`.
+
+`/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files workspaces stay under tmpfs unless `.env` sets `WORKSPACE_ROOT=/workspaces` and `conf/config.local.yaml` enables the `volume` workspace backend. The production Compose file already maps `./workspaces` to that path.
+
+For SELinux-enforcing hosts, add a local Compose override with private relabeling such as `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z`. Rootless Docker and Podman can reject scanner capabilities even when the YAML is otherwise compatible; Docker Compose 2.20.0 or newer on Linux is the supported runtime.
+
+After `docker compose pull`, run `./verify-release-image.sh` before starting the stack. It requires the GitLab and Docker Hub digests in `release-manifest.json` to agree, confirms `.env` still selects that reviewed release image, and checks the pulled image's repository digest. A mismatch stops with a named error instead of starting an unverified image.
+
+Release assets add publisher identity on top of those digest checks. `SHA256SUMS.sigstore.json` is a keyless Sigstore bundle for the checksum manifest, and both immutable image references carry Cosign signatures. Verify them with issuer `https://gitlab.com` and certificate identity `https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/vX.Y.Z`; release candidates use the same identity ending in `vX.Y.Z-rc.N`. The public [Docker Hub overview](https://hub.docker.com/r/darklabsh/darklab-shell) independently publishes the corresponding final-or-candidate identity pattern. The matching `release-evidence.json` ties the shared digest to the tag, commit, pipeline, CycloneDX SBOM, SLSA provenance, Grype report, and `release-build-inputs.json`. That build-input inventory records the exact Python base manifest and every Dockerfile network-fetching step; the SBOM records what those steps installed. Release CI records every vulnerability match and blocks fixed Critical vulnerabilities.
+
+Before an upgrade, stop writes and verify a backup of the selected database, `.env`, `conf/`, host `data/`, persistent workspaces, and `release-manifest.json`. The production stack mounts that deployment-directory `./data` path at `/data` inside the container. Run the new installer in a separate empty directory, compare its managed files, preserve operator-owned state, then update `DARKLAB_IMAGE` to the exact new tag and recreate the shell. Startup may apply a forward-only schema migration, and changing the tag back doesn't reverse it.
+
+The repository-backed [docker-compose.yml](docker-compose.yml) remains the local development and custom-deployment stack. It builds the same Dockerfile, then mounts `./app:/app:ro` over the bundled application:
+
 The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
 
 ```bash
@@ -1018,7 +1056,7 @@ For release builds, pass the same metadata values you want Docker inventory to s
 
 ```bash
 docker compose build \
-  --build-arg APP_VERSION=2.5.0 \
+  --build-arg APP_VERSION=2.6.0 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
@@ -1104,7 +1142,18 @@ workspace_backend: volume
 
 ## Operator Backups
 
-Use [`scripts/backup_system.py`](scripts/backup_system.py) when you want a scheduled backup that matches the deployment the app is actually running with. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
+Repository-free installs include the backup and restore path in `darklab-deploy`. It runs the image's backup helper in a one-off Compose container, so the host only needs Docker and Compose:
+
+```bash
+./darklab-deploy backup --keep-days 14
+./darklab-deploy restore backups/darklab-backup-<timestamp>.tar.gz
+```
+
+Managed backups include the SQLite snapshot or Postgres dump, `.env`, `conf/`, `/data` including `.secrets_master_key`, durable `/workspaces` when `WORKSPACE_ROOT=/workspaces`, release metadata, a redacted manifest, restore notes, and checksums. The archive stays under the private `backups/` directory and is owned by the host user who ran the command. Restore verifies the archive and creates another verified backup before it stops the app or writes any state. Files are staged inside their destination mounts, and Postgres uses one transaction before staged files are committed. The target deployment keeps its database backend, URL, Postgres credentials, and current image; restored host files return to the UID/GID that invoked the command. A failed restore leaves the app stopped and prints the safety-backup recovery command, so it never deliberately starts against partially restored state.
+
+`./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, or the pre-upgrade backup fails. Every archive must produce a complete readable listing, and each member path is checked before anything is extracted. Online upgrades verify the release's signed `SHA256SUMS` with a digest-pinned Cosign container and the exact GitLab tag identity before downloading the archive. A supplied `--backup /path/to/archive` must pass the same checksum verification. `--archive /path/to/archive` is an operator-trusted offline path: the command checks the adjacent `.sha256` file, but you must verify the publisher's `SHA256SUMS.sigstore.json` separately. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. When a release adds keys to `.env.example`, the command prints only their names and asks you to review the installed example before restarting. It doesn't append defaults, replace existing values, or print values from either file. Afterward, run the printed pull, image-verification, and restart commands. Changing an image tag never reverses a database migration.
+
+Repository-backed deployments can call [`scripts/backup_system.py`](scripts/backup_system.py) directly when they want a scheduled backup that matches a custom source checkout. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
 
 Basic cron-friendly example:
 
@@ -1137,7 +1186,7 @@ The backup includes:
 - Docker named volumes are exported through Docker. When the app container is available, auto-detection uses `docker cp` from the mounted path; explicit `--workspace-source volume:<name>` uses a short-lived helper container.
 - Tmpfs or container-only workspaces are skipped with a warning unless `--include-ephemeral-workspaces` is set.
 
-The script does not always need the app containers to be running. SQLite backups of the bundled Compose stack can run from the host while containers are stopped because `/data` resolves to the host bind mount. Local config files, `.env`, and explicit host paths also do not need running containers. Compose Postgres dumps, `container:name:/path` sources, and `--include-ephemeral-workspaces` do need the relevant container to be running; when it is not available, the script reports that service or container as unavailable instead of treating the logical container path as a host directory. In `--postgres-dump-mode auto`, a `DATABASE_URL` host that matches a Compose service name, such as `postgres`, is treated as a container-network address and dumped through `docker compose exec`. A remote or host-reachable URL keeps using local `pg_dump` even if the supplied stack also has a running Postgres service.
+The script does not always need the app containers to be running. SQLite backups of the bundled Compose stack can run from the host while containers are stopped because `/data` resolves to the host bind mount. Local config files, `.env`, and explicit host paths also do not need running containers. Compose Postgres dumps, `container:name:/path` sources, and `--include-ephemeral-workspaces` do need the relevant container to be running; when it is not available, the script reports that service or container as unavailable instead of treating the logical container path as a host directory. In `--postgres-dump-mode auto`, a `DATABASE_URL` host that matches a Compose service name, such as `postgres`, is treated as a container-network address and dumped through `docker compose exec`. A remote or host-reachable URL keeps using local `pg_dump` even if the supplied stack also has a running Postgres service. The repository-free `darklab-deploy backup` wrapper handles a stopped bundled Postgres service for you: it starts and waits for that service, runs the dump, then stops it again only when it wasn't already running.
 
 When a deployment uses Compose overrides, pass the same Compose files in the same order you use for `docker compose`. The first file supplies the Compose project directory for relative bind mounts, so the production override's `./workspaces:/workspaces` path resolves to repo-root `./workspaces` when you pass `docker-compose.yml` first. The script reads `WORKSPACE_ROOT` from the supplied Compose stack when `--compose-file` is explicit; `--workspace-root` can override the logical app path, and `--workspace-source` can override the physical copy source.
 
@@ -1153,7 +1202,7 @@ python scripts/backup_system.py \
   --output-dir /backups/darklab_shell
 ```
 
-`--data-source` and `--workspace-source` accept `bind:/path`, `volume:name`, or `container:name:/path`. `--workspace-root /path` records the logical app path when it cannot be read from config or Compose. `--include-workspaces never` skips workspace files intentionally. `--dry-run` validates explicitly requested env and extra files, then prints the resolved backend, Postgres dump mode, data directory mapping, Compose files, workspace source, warnings, and skipped items without creating the output directory or lock file. Missing `--extra-file` paths are accepted only when `--ignore-missing-extra-file` is also set.
+`--data-source` and `--workspace-source` accept `bind:/path`, `volume:name`, or `container:name:/path`. `--workspace-root /path` records the logical app path when it cannot be read from config or Compose. `--include-workspaces never` skips workspace files intentionally. `--dry-run` validates explicitly requested env and extra files, then prints the resolved backend, Postgres dump mode, data directory mapping, Compose files, workspace source, warnings, and skipped items without creating the output directory or lock file. Missing `--extra-file` paths are accepted only when `--ignore-missing-extra-file` is also set. Automation can use `--result-path-only` to receive exactly the completed absolute backup path on stdout; warnings still go to stderr.
 
 Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
 
@@ -1326,7 +1375,7 @@ Evidence package presets live in `app/conf/package_presets.yaml` by default. Set
 package_presets_file: package_presets.local.yaml
 ```
 
-Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
+Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so the example works as `app/conf/package_presets.local.yaml` in source deployments and `conf/package_presets.local.yaml` in repository-free deployments. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
 
 A preset controls the wizard defaults only. Users can still adjust the package before creating it, and package size limits, redaction rules, artifact safety checks, and project link validation still apply.
 
@@ -1373,16 +1422,20 @@ Engagement report templates live in `app/conf/report_templates.yaml` by default.
 report_templates_file: report_templates.local.yaml
 ```
 
-Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped templates stay available and the server logs `REPORT_TEMPLATES_OVERRIDE_INVALID`.
+Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so the example works in both deployment layouts. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped templates stay available and the server logs `REPORT_TEMPLATES_OVERRIDE_INVALID`.
 
-### Customize FAQ, Welcome, Commands, Workflows, and Package Presets
+### Customize FAQ, Welcome, Commands, Workflows, and Catalogs
 
-- Add FAQ entries in `app/conf/faq.local.yaml`.
-- Add welcome samples in `app/conf/welcome.local.yaml`.
-- Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
-- Add deployment-specific legacy or v2 workflows in `app/conf/workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
-- Add deployment-specific evidence package presets in `app/conf/package_presets.local.yaml` and point `package_presets_file` at that file.
-- Add deployment-specific report templates in `app/conf/report_templates.local.yaml` and point `report_templates_file` at that file.
+- Add FAQ entries in `faq.local.yaml`.
+- Add welcome samples in `welcome.local.yaml`.
+- Add deployment-specific command registry entries in `commands.local.yaml`.
+- Add deployment-specific legacy or v2 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
+- Add desktop or mobile hints in `app_hints.local.txt` or `app_hints_mobile.local.txt`.
+- Replace banner art with `ascii.local.txt` or `ascii_mobile.local.txt`. These files replace the shipped text, so the installer provides non-active `.example` files instead of empty active placeholders.
+- Add deployment-specific evidence package presets in `package_presets.local.yaml` and point `package_presets_file` at that file.
+- Add deployment-specific report templates in `report_templates.local.yaml` and point `report_templates_file` at that file.
+
+Use these names under `app/conf/` for source deployments or installed `conf/` for repository-free deployments.
 
 ---
 

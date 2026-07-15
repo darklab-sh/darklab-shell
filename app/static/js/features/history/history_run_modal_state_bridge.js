@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral Run Details modal-state boundary for History project helpers.
 
 const HISTORY_RUN_MODAL_STATE_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;

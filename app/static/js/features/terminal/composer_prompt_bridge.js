@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral composer prompt boundary for Preferences -> app prompt updates.
 
 const composerPromptHandlers = {

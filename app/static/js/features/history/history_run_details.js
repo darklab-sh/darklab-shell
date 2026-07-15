@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // darklab_shell History Run Details modal.
 // Loaded after history.js so it can reuse History drawer, restore, metadata,
 // project-link, and compare helpers without keeping the modal in the drawer file.

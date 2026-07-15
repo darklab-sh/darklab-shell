@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /**
  * Extract named pure functions from a browser JS source file for unit testing.
  *

@@ -44,6 +44,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
+- [Repository-Free Self-Hosting](#repository-free-self-hosting)
 - [Operator Backups](#operator-backups)
 - [Session Tokens](#session-tokens)
 - [Team-Mode](#team-mode)
@@ -1410,6 +1411,28 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ---
 
+## Repository-Free Self-Hosting
+
+**Purpose:** install a released darklab_shell stack without cloning or building the source repository.
+
+**Behavior:**
+
+- The release installer creates a small deployment directory from one deterministic archive with production Compose, an environment file, local configuration starters, persistent data folders, managed-file checksums, the project license, third-party notices, a release manifest, a lifecycle command, and a verifier that confirms the pulled image matches both recorded registry digests before startup.
+- The app is licensed under GNU AGPLv3. Its rail footer, mobile menu footer, and FAQ link to the exact source tag and README for each official release. Modified network versions must point that link at their corresponding source and prominently offer it to every remote user at no charge through a standard or customary copying method; the full license controls. Project-owned source files keep short SPDX notices when they're copied separately, while generated and third-party files retain their own notices.
+- Production pulls an exact `docker.io/darklabsh/darklab-shell` release tag. The same image is available from the GitLab Container Registry, and the manifest records both matching digests plus measured image sizes for verification and support. The installed verifier also rejects an image selection that has drifted from that reviewed manifest.
+- Each protected release publishes a CycloneDX SBOM, full Grype vulnerability report, SLSA provenance, and an evidence index tied to the source commit, pipeline, and shared registry digest. Fixed Critical findings block publication. GitLab's keyless Sigstore identity signs both immutable image references and `SHA256SUMS`. The Docker Hub overview publishes the expected issuer and certificate identity separately, and the public smoke path checks that description before it verifies, installs, and starts the release.
+- The app binds to host loopback by default. Operators can review `.env`, local settings, raw-packet scanning, optional Postgres, optional local AI, and reverse-proxy exposure before starting it.
+- Shipped commands, workflows, themes, and other catalogs stay in the image. Matching operator files under `conf/` add to or override those defaults without hiding newer image content.
+- Private host permissions stay intact: container startup validates and stages the complete `conf/` overlay tree into an app-owned runtime copy before the web and worker processes start.
+- The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
+- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, explains clone-to-managed migration, and removes managed files without deleting operator state. Offline archives remain an explicit operator-verified path.
+
+**Limits:** Docker Compose 2.20.0 or newer on Linux is the supported runtime. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
+
+**Configuration:** see the [Quick Start](README.md#quick-start) and [Docker Compose Files](CONFIGURATION.md#docker-compose-files).
+
+---
+
 ## Operator Backups
 
 **Purpose:** scheduled, deployment-aware backups for self-hosted operators.
@@ -1417,7 +1440,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 **Behavior:**
 
 - `scripts/backup_system.py` loads the effective app config and optional `.env` file before it decides what to back up.
-- SQLite deployments get a consistent `history.db` snapshot through SQLite's backup API. Postgres deployments get a custom-format `pg_dump` archive.
+- SQLite deployments get a consistent `history.db` snapshot through SQLite's backup API. Postgres deployments get a custom-format `pg_dump` archive, with the bundled database started temporarily when a managed backup finds it stopped.
 - The backup includes `data_dir`, local config files, `.env` when present, optional `--extra-file` paths, and enabled workspaces.
 - Data and workspace backup use the physical storage source, not just the app's logical path: bind mounts copy the host path, Docker named volumes are exported through Docker, and tmpfs/container-only workspaces require an explicit opt-in.
 - Locked-down host bind mounts must be readable by the user running the script. On Linux production hosts, that often means running the backup as root or choosing a Docker volume/container source instead of a host path.
@@ -1425,12 +1448,13 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Large files are checksummed without loading the whole file into memory, and collision-safe output names keep closely timed backups from replacing each other.
 - Dry runs validate requested env and extra-file paths before writing an output directory or lock file.
 - Retention runs record their cutoff and candidate scan in the manifest, then report examined, removed, and failed counts after the new backup is safely published. Unexpected script failures include a traceback for unattended-job diagnosis.
+- Repository-free installs expose the same engine through `./darklab-deploy backup`; the release image supplies Python and Postgres client tools, while the installed command supplies exact mounts, operator files, and managed release metadata. `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the invoking operator and restart the app; failures leave it stopped with the safety-backup recovery command.
 
 **Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
 
 **Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for cron examples and Docker/Compose flags.
 
-**Related files:** `scripts/backup_system.py`, `app/config.py`, `docker-compose.yml`.
+**Related files:** `scripts/backup_system.py`, `scripts/restore_system.py`, `deploy/darklab-deploy.sh.in`, `app/config.py`, `docker-compose.yml`.
 
 ---
 

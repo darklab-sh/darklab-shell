@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 function cleanupNumber(value) {
   return Math.max(0, Number(value || 0));
 }

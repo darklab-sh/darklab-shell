@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Theme ──
 import { APP_CONFIG as importedAppConfig } from '../../core/config.js';
 import { themeSelect as importedThemeSelect } from '../../core/dom.js';

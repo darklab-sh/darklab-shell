@@ -1,9 +1,56 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Fix /data ownership after Docker volume mount (which resets it to root)
 # and re-own any existing files (e.g. history.db created by a previous root run)
 # then drop to appuser to run Gunicorn
 chown -R appuser:appuser /data 2>/dev/null || true
 chmod 700 /data 2>/dev/null || true
+
+# Production installs keep the host overlay private (0700 directory, 0600
+# files). Root can read that bind mount, but the app workers cannot. Stage the
+# overlay tree into a private appuser-owned runtime directory before dropping
+# privileges so workers can read the complete startup snapshot.
+stage_local_config_overlays() {
+    source_dir="${APP_LOCAL_CONF_DIR:-}"
+    [ -n "$source_dir" ] || return
+
+    [ -e "$source_dir" ] || return
+    if [ ! -d "$source_dir" ] || [ -L "$source_dir" ]; then
+        echo "LOCAL_CONFIG_OVERLAY_INVALID path=$source_dir" >&2
+        exit 1
+    fi
+    invalid_entry=$(find "$source_dir" \( -type l -o \! -type d -a \! -type f \) -print -quit)
+    if [ -n "$invalid_entry" ]; then
+        echo "LOCAL_CONFIG_OVERLAY_INVALID path=$invalid_entry" >&2
+        exit 1
+    fi
+
+    runtime_dir="/tmp/darklab-runtime-conf"
+    rm -rf "$runtime_dir"
+    mkdir "$runtime_dir" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=mkdir path=$runtime_dir" >&2
+        exit 1
+    }
+    cp -R "${source_dir%/}/." "$runtime_dir/" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=copy path=$source_dir" >&2
+        exit 1
+    }
+    chown -R appuser:appuser "$runtime_dir" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=chown path=$runtime_dir" >&2
+        exit 1
+    }
+    if ! find "$runtime_dir" -type d -exec chmod 700 {} \; \
+        || ! find "$runtime_dir" -type f -exec chmod 600 {} \;; then
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=chmod path=$runtime_dir" >&2
+        exit 1
+    fi
+    APP_LOCAL_CONF_DIR="$runtime_dir"
+    export APP_LOCAL_CONF_DIR
+}
+
+stage_local_config_overlays
 
 # Normalize the optional per-session workspace mount before dropping to
 # appuser. Bind mounts are commonly root-owned on first boot, so app-mediated

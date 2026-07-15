@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Tracks active runs the user intentionally detached before reload restore runs.
 // Loaded before pty.js and runner.js because both clear detached restore markers.
 const DETACHED_ACTIVE_RUNS_STORAGE_PREFIX = 'detached_active_runs';

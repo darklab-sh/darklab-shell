@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Session Entity Atlas overlay controller.
 import { downloadBlobAsAttachment as importedDownloadBlobAsAttachment, showToast as importedShowToast } from '../../core/utils.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';

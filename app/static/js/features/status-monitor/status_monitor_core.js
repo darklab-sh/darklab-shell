@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // darklab_shell Status Monitor pure helpers.
 // Rendering, polling, and action wiring stay in status_monitor.js.
 

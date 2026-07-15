@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Schema migration registry.
 
 The checked-in migration stream is the shared schema ledger for SQLite and

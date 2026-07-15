@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Help, FAQ, command catalog, man, type, and which built-in handlers."""
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ import re
 import subprocess
 from typing import cast
 
-from config import PROJECT_README, resolve_effective_cfg
+from config import PROJECT_SOURCE, resolve_effective_cfg
 from services.commands.builtins_catalog import _SYNTHETIC_MAN_EXCLUDED_ROOTS
 from services.commands.builtins_format import (
     format_terminal_link as _format_terminal_link,
@@ -37,7 +40,7 @@ _BACKSPACE_RE = re.compile(r".\x08")
 def run_builtin_help() -> list[dict[str, object]]:
     lines = [
         _output_line("Help and discovery:", "builtin-section"),
-        _output_line(f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}", "builtin-note"),
+        _output_line(f"README: {_format_terminal_link(PROJECT_SOURCE, PROJECT_SOURCE)}", "builtin-note"),
         _output_line("Run `faq` to browse the configured FAQ entries inside the terminal.", "builtin-plain"),
         _output_line("Run `shortcuts` to see the current keyboard shortcuts.", "builtin-plain"),
         _output_line("Run `commands` to browse built-in and allowed external commands.", "builtin-plain"),
@@ -397,11 +400,11 @@ def _run_builtin_man_for_synthetic_topic(
 
 
 def run_builtin_faq() -> list[dict[str, object]]:
-    entries = load_all_faq(resolve_effective_cfg()["app_name"], PROJECT_README)
+    entries = load_all_faq(resolve_effective_cfg()["app_name"], PROJECT_SOURCE)
     if not entries:
         return _text_lines([
             "No configured FAQ entries are available in the web shell.",
-            f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}",
+            f"README: {_format_terminal_link(PROJECT_SOURCE, PROJECT_SOURCE)}",
         ])
 
     lines = [_output_line("Configured FAQ entries:", "builtin-section")]

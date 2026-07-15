@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 default:
   tags:
     - self-hosted
@@ -7,6 +10,15 @@ variables:
   CI_PYTHON_E2E_IMAGE: "python:3.14.6"
   CI_NODE_IMAGE: "node:26.5.0-slim"
   CI_DOCKER_IMAGE: "docker:29.6.1"
+  CI_GITLAB_CLI_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.107.0@sha256:ea9708890660b1f766d8185ccbc99b8729633bfa34ea9fda35f6ef1fdf90e507"
+  DOCKERHUB_IMAGE: "docker.io/darklabsh/darklab-shell"
+  SYFT_VERSION: "1.42.3"
+  SYFT_IMAGE: "anchore/syft:v1.42.3@sha256:5999d209a342e55e9edf70bf8930fb5b86d8f2a783fa401178372c50e21b1d36"
+  GRYPE_VERSION: "0.112.0"
+  GRYPE_IMAGE: "anchore/grype:v0.112.0@sha256:391bfda62888fb4e98ff5c4c81598f7431a3c1eac3f8519d69d1ff00df247c1d"
+  RELEASE_ARM64_COMPATIBILITY_ENABLED: "0"
+  RELEASE_SELINUX_COMPATIBILITY_ENABLED: "0"
+  RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED: "0"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -24,6 +36,12 @@ stages:
   - lint
   - audit
   - build
+  - publish
+  - verify
+  - promote
+  - attest
+  - release
+  - post-release
 
 cache:
   key: "$CI_COMMIT_REF_SLUG"
@@ -40,6 +58,8 @@ test-js-e2e:
     PLAYWRIGHT_PROJECT_COUNT: "3"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -69,7 +89,7 @@ test-py-pytest:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - apt-get update -q && apt-get install -y -q git
+    - apt-get update -q && apt-get install -y -q curl git jq
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
     - pytest tests/py/ -v
@@ -125,9 +145,13 @@ lint-py:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
-    - ruff check --config .tooling/ruff.toml app/ tests/py/
+    - ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/check_source_licenses.py
     - bandit -r app/ -ll -q
+    - python scripts/check_source_licenses.py
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
 lint-js:
@@ -190,6 +214,32 @@ audit-js:
   script:
     - npm run audit:js
 
+container-license-audit:
+  stage: audit
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script: []
+  script:
+    - python scripts/check_container_licenses.py
+
+release-version-audit:
+  stage: audit
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script: []
+  script:
+    - python scripts/check_versions.sh --check-release-version
+
 dependency-version-check:
   stage: audit
   before_script:
@@ -244,9 +294,11 @@ docker-build:
     # On other branches, only build when image-affecting files change
     - changes:
         - Dockerfile
-        - app/requirements.txt
+        - app/**/*
         - .dockerignore
         - docker-compose*.yml
+        - compose*.yaml
+        - deploy/compose*.yaml
     # Allow a manual trigger on any branch for one-off verification
     - when: manual
       allow_failure: true
@@ -281,3 +333,595 @@ docker-build-botis:
   extends: .scheduled-docker-build
   tags:
     - botis
+
+.protected-release-tag:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+
+.protected-final-release-tag:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+
+release-image-gitlab:
+  stage: publish
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script:
+    - apk add --no-cache jq python3
+  script:
+    - scripts/publish_release_artifacts.sh gitlab-image
+  artifacts:
+    when: always
+    reports:
+      dotenv: release-image.env
+    paths:
+      - gitlab-manifest.json
+      - release-build-metadata.json
+      - release-image-metrics.txt
+      - release-image-status.txt
+      - python-base-resolution.json
+    expire_in: 1 week
+
+release-image-smoke:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script: []
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE" amd64
+
+release-image-arm64-smoke:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  services:
+    - name: "${CI_DOCKER_IMAGE}-dind"
+      alias: docker
+      command:
+        - "--mtu=1400"
+  tags:
+    - saas-linux-small-arm64
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ARM64_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - |
+      [ "$(uname -m)" = "aarch64" ] || {
+        printf 'ARM64 compatibility requires a native aarch64 runner; found %s\n' "$(uname -m)" >&2
+        exit 1
+      }
+      release_version=${CI_COMMIT_TAG#v}
+      candidate_image="darklab-shell-arm64-candidate:${CI_COMMIT_SHA}"
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      docker buildx imagetools inspect --raw "$python_base_image" > arm64-python-base-index.json
+      python_base_digest=$(jq -r '
+        [.manifests[]
+          | select(.platform.os == "linux" and .platform.architecture == "arm64")
+          | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+        ][0].digest // empty
+      ' arm64-python-base-index.json)
+      printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || {
+        echo "ARM64 Python base manifest digest is missing or malformed" >&2
+        exit 1
+      }
+      docker build --pull --platform linux/arm64 \
+        --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+        --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --build-arg "APP_VERSION=${release_version}" \
+        --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
+        --build-arg "BUILD_DATE=${CI_PIPELINE_CREATED_AT}" \
+        --tag "$candidate_image" .
+      docker image inspect "$candidate_image" > arm64-image-inspect.json
+      sh scripts/verify_repository_free_image.sh \
+        "$candidate_image" "$release_version" "$CI_COMMIT_SHA" "$python_base_digest" arm64
+      sh scripts/verify_bundled_tools.sh "$candidate_image" arm64
+  artifacts:
+    when: always
+    paths:
+      - arm64-python-base-index.json
+      - arm64-image-inspect.json
+    expire_in: 1 week
+
+release-image-selinux-smoke:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  tags:
+    - selinux
+    - self-managed
+    - baku
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_SELINUX_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+  before_script: []
+  script:
+    - getenforce | tee selinux-enforcement.txt
+    - grep -qx Enforcing selinux-enforcement.txt
+    - docker info --format '{{json .SecurityOptions}}' | tee selinux-docker-security.json
+    - grep -qi selinux selinux-docker-security.json
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - CONTAINER_VOLUME_LABEL=Z sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
+  artifacts:
+    when: always
+    paths:
+      - selinux-enforcement.txt
+      - selinux-docker-security.json
+    expire_in: 1 week
+
+release-image-rootless-podman-smoke:
+  stage: verify
+  tags:
+    - podman
+    - self-managed
+    - baal
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+  before_script: []
+  script:
+    - test "$(id -u)" -ne 0
+    - podman info --format '{{.Host.Security.Rootless}}' | tee podman-rootless.txt
+    - grep -qx true podman-rootless.txt
+    - echo "$CI_REGISTRY_PASSWORD" | podman login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - podman pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - CONTAINER_RUNTIME=podman CONTAINER_VOLUME_LABEL=Z sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
+  after_script:
+    - podman logout "$CI_REGISTRY" >/dev/null 2>&1 || true
+  artifacts:
+    when: always
+    paths:
+      - podman-rootless.txt
+    expire_in: 1 week
+
+release-image-dockerhub:
+  stage: promote
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-smoke
+    - job: release-image-arm64-smoke
+      optional: true
+    - job: release-image-selinux-smoke
+      optional: true
+    - job: release-image-rootless-podman-smoke
+      optional: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - scripts/publish_release_artifacts.sh dockerhub-image
+  artifacts:
+    when: always
+    reports:
+      dotenv: dockerhub-image.env
+    paths:
+      - dockerhub-copy.txt
+      - dockerhub-published.json
+      - dockerhub-image-status.txt
+    expire_in: 1 week
+
+release-supply-chain:
+  stage: attest
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-dockerhub
+      artifacts: true
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  variables:
+    COSIGN_YES: "true"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache cosign jq python3
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - docker pull "$SYFT_IMAGE"
+    - docker pull "$GRYPE_IMAGE"
+    - mkdir release-evidence-input
+    - >-
+      docker run --rm
+      --user 0:0
+      -v /var/run/docker.sock:/var/run/docker.sock
+      -v "$CI_PROJECT_DIR/release-evidence-input:/evidence"
+      "$SYFT_IMAGE"
+      "docker:${GITLAB_IMAGE}@${GITLAB_DIGEST}"
+      -o cyclonedx-json=/evidence/darklab-shell.cdx.json
+    - >-
+      docker run --rm
+      -v "$CI_PROJECT_DIR/release-evidence-input:/evidence:ro"
+      "$GRYPE_IMAGE"
+      "sbom:/evidence/darklab-shell.cdx.json"
+      --only-fixed --fail-on critical -o json
+      > release-evidence-input/vulnerability-report.json
+    - >-
+      python3 scripts/build_release_evidence.py
+      --version "$RELEASE_VERSION"
+      --gitlab-image "$GITLAB_IMAGE"
+      --dockerhub-image "$DOCKERHUB_RELEASE_IMAGE"
+      --digest "$GITLAB_DIGEST"
+      --commit-sha "$CI_COMMIT_SHA"
+      --commit-tag "$CI_COMMIT_TAG"
+      --pipeline-url "$CI_PIPELINE_URL"
+      --pipeline-created-at "$CI_PIPELINE_CREATED_AT"
+      --base-image "$PYTHON_BASE_IMAGE"
+      --base-image-digest "$PYTHON_BASE_DIGEST"
+      --build-date "$RELEASE_BUILD_DATE"
+      --sbom release-evidence-input/darklab-shell.cdx.json
+      --vulnerability-report release-evidence-input/vulnerability-report.json
+      --syft-version "$SYFT_VERSION"
+      --grype-version "$GRYPE_VERSION"
+      --gitlab-cli-image "$CI_GITLAB_CLI_IMAGE"
+      --output-dir release-evidence
+    - cosign sign "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - cosign sign "$DOCKERHUB_RELEASE_IMAGE@$DOCKERHUB_DIGEST"
+    - >-
+      cosign verify
+      --certificate-identity "${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      --certificate-oidc-issuer "$CI_SERVER_URL"
+      "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - >-
+      cosign verify
+      --certificate-identity "${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      --certificate-oidc-issuer "$CI_SERVER_URL"
+      "$DOCKERHUB_RELEASE_IMAGE@$DOCKERHUB_DIGEST"
+  artifacts:
+    when: always
+    paths:
+      - release-evidence-input/darklab-shell.cdx.json
+      - release-evidence-input/vulnerability-report.json
+      - release-evidence/
+    expire_in: 1 week
+
+release-payload-upload:
+  stage: release
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-dockerhub
+      artifacts: true
+    - job: release-supply-chain
+      artifacts: true
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  variables:
+    COSIGN_YES: "true"
+  before_script:
+    - apk add --no-cache cosign curl python3
+  script:
+    - >-
+      python scripts/build_release_payload.py
+      --version "$RELEASE_VERSION"
+      --output-dir release-payload
+      --gitlab-digest "$GITLAB_DIGEST"
+      --dockerhub-digest "$DOCKERHUB_DIGEST"
+      --compressed-bytes "$GITLAB_COMPRESSED_BYTES"
+      --unpacked-bytes "$GITLAB_UNPACKED_BYTES"
+      --evidence-dir release-evidence
+    - scripts/publish_release_artifacts.sh sign-payload release-payload
+    - scripts/publish_release_artifacts.sh payload release-payload
+  artifacts:
+    paths:
+      - release-payload/
+    expire_in: 1 week
+
+release-postgres-smoke:
+  stage: release
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-dockerhub
+      artifacts: true
+    - job: release-payload-upload
+      artifacts: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - sh scripts/verify_repository_free_postgres.sh "$CI_PROJECT_DIR/release-payload"
+  artifacts:
+    when: always
+    paths:
+      - release-postgres-compose.log
+      - release-postgres-install/release-manifest.json
+      - release-postgres-install/postgres-original.json
+      - release-postgres-install/postgres-mutated.json
+      - release-postgres-install/postgres-restored.json
+    expire_in: 1 week
+
+release-create:
+  stage: release
+  image: $CI_GITLAB_CLI_IMAGE
+  extends: .protected-final-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-dockerhub
+      artifacts: true
+    - job: release-payload-upload
+      artifacts: true
+    - job: release-supply-chain
+    - job: release-postgres-smoke
+      artifacts: false
+  before_script: []
+  script:
+    - echo "Creating release links for darklab_shell ${CI_COMMIT_TAG}"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: darklab_shell $CI_COMMIT_TAG
+    description: See CHANGELOG.md for this release's changes and upgrade notes.
+    assets:
+      links:
+        - name: setup.sh
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/setup.sh
+        - name: setup.sh.sha256
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/setup.sh.sha256
+        - name: SHA256SUMS
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/SHA256SUMS
+        - name: SHA256SUMS Sigstore bundle
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/SHA256SUMS.sigstore.json
+        - name: Deployment archive
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/darklab-shell-deploy-${RELEASE_VERSION}.tar.gz
+        - name: Deployment archive checksum
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/darklab-shell-deploy-${RELEASE_VERSION}.tar.gz.sha256
+        - name: CycloneDX SBOM
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/darklab-shell.cdx.json
+        - name: SLSA provenance
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/provenance.intoto.jsonl
+        - name: Release evidence index
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/release-evidence.json
+        - name: Release build input inventory
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/release-build-inputs.json
+        - name: Vulnerability report
+          url: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}/vulnerability-report.json
+
+release-public-smoke:
+  stage: post-release
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-dockerhub
+      artifacts: true
+    - job: release-payload-upload
+    - job: release-create
+      optional: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache cosign curl jq
+  script:
+    - |
+      release_check_failed() {
+        actual=$(printf '%s' "$4" | tr '\r\n\t' '   ')
+        printf 'release verification failed stage=%s check=%s expected=%s actual=%.160s\n' \
+          "$1" "$2" "$3" "$actual" >&2
+        exit 1
+      }
+      require_equal() {
+        [ "$4" = "$3" ] || release_check_failed "$1" "$2" "$3" "$4"
+      }
+      require_contains() {
+        case "$4" in
+          *"$3"*) ;;
+          *) release_check_failed "$1" "$2" "$3" "$4" ;;
+        esac
+      }
+      docker logout "$CI_REGISTRY" >/dev/null 2>&1 || true
+      docker logout docker.io >/dev/null 2>&1 || true
+      docker manifest inspect -v "$GITLAB_IMAGE" > anonymous-gitlab-image.json
+      anonymous_gitlab_digest=$(jq -r '.Descriptor.digest // empty' anonymous-gitlab-image.json)
+      require_equal public_gitlab_image digest "$GITLAB_DIGEST" "$anonymous_gitlab_digest"
+      docker manifest inspect -v "$DOCKERHUB_RELEASE_IMAGE" > anonymous-dockerhub-image.json
+      anonymous_dockerhub_digest=$(jq -r '.Descriptor.digest // empty' anonymous-dockerhub-image.json)
+      require_equal public_dockerhub_image digest "$DOCKERHUB_DIGEST" "$anonymous_dockerhub_digest"
+      curl -fsS \
+        "https://hub.docker.com/v2/namespaces/darklabsh/repositories/darklab-shell" \
+        > dockerhub-repository.json
+      dockerhub_overview=$(jq -r '.full_description // empty' dockerhub-repository.json)
+      require_contains dockerhub_overview oidc_issuer \
+        'https://gitlab.com' "$dockerhub_overview"
+      require_contains dockerhub_overview signing_identity_regexp \
+        '^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+        "$dockerhub_overview"
+    - docker pull "$DOCKERHUB_RELEASE_IMAGE"
+    - sh scripts/verify_repository_free_image.sh "$DOCKERHUB_RELEASE_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - |
+      release_check_failed() {
+        actual=$(printf '%s' "$4" | tr '\r\n\t' '   ')
+        printf 'release verification failed stage=%s check=%s expected=%s actual=%.160s\n' \
+          "$1" "$2" "$3" "$actual" >&2
+        exit 1
+      }
+      require_equal() {
+        [ "$4" = "$3" ] || release_check_failed "$1" "$2" "$3" "$4"
+      }
+      require_nonempty() {
+        [ -n "$3" ] || release_check_failed "$1" "$2" nonempty empty
+      }
+      release_shell_container() {
+        docker compose \
+          --project-name "$smoke_project" \
+          --env-file "$CI_PROJECT_DIR/release-install/.env" \
+          -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+          ps -q shell
+      }
+      wait_for_release_health() {
+        attempt=0
+        until docker exec "$smoke_probe" \
+          curl -fsS "http://127.0.0.1:${smoke_port}/health" >/dev/null 2>&1; do
+          if [ "$attempt" -ge 90 ]; then
+            release_check_failed public_compose_runtime health ready timeout
+          fi
+          shell_container=$(release_shell_container)
+          if [ -n "$shell_container" ] \
+            && [ "$(docker inspect --format '{{.State.Running}}' "$shell_container")" != "true" ]; then
+            release_check_failed public_compose_runtime shell_state running stopped
+          fi
+          attempt=$((attempt + 1))
+          sleep 2
+        done
+        shell_container=$(release_shell_container)
+        require_nonempty public_compose_runtime shell_container "$shell_container"
+        attempt=0
+        while [ "$(docker inspect --format '{{.State.Health.Status}}' "$shell_container")" != "healthy" ]; do
+          if [ "$attempt" -ge 45 ]; then
+            release_check_failed public_compose_runtime compose_health healthy timeout
+          fi
+          attempt=$((attempt + 1))
+          sleep 2
+        done
+      }
+      package_url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/darklab-shell-deploy/${RELEASE_VERSION}"
+      curl -fsSLO "${package_url}/setup.sh"
+      curl -fsSLO "${package_url}/setup.sh.sha256"
+      curl -fsSLO "${package_url}/SHA256SUMS"
+      curl -fsSLO "${package_url}/SHA256SUMS.sigstore.json"
+      for evidence_file in \
+        darklab-shell.cdx.json provenance.intoto.jsonl release-build-inputs.json \
+        release-evidence.json vulnerability-report.json; do
+        curl -fsSLO "${package_url}/${evidence_file}"
+        grep "  ${evidence_file}$" SHA256SUMS | sha256sum -c -
+      done
+      signing_identity="${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      cosign verify-blob SHA256SUMS \
+        --bundle SHA256SUMS.sigstore.json \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL"
+      cosign verify \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL" \
+        "$GITLAB_IMAGE@$GITLAB_DIGEST"
+      cosign verify \
+        --certificate-identity "$signing_identity" \
+        --certificate-oidc-issuer "$CI_SERVER_URL" \
+        "$DOCKERHUB_RELEASE_IMAGE@$DOCKERHUB_DIGEST"
+      sha256sum -c setup.sh.sha256
+      sh setup.sh --dir "$CI_PROJECT_DIR/release-install"
+      "$CI_PROJECT_DIR/release-install/darklab-deploy" status
+      docker compose \
+        --env-file "$CI_PROJECT_DIR/release-install/.env" \
+        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+        config --quiet
+      smoke_project="darklab-release-${CI_JOB_ID}"
+      smoke_probe="darklab-release-probe-${CI_JOB_ID}"
+      smoke_port=$((20000 + CI_JOB_ID % 10000))
+      printf '\nAPP_PORT=%s\nWEB_CONCURRENCY=1\nWEB_THREADS=2\nNOTIFICATION_WORKER_ENABLED=0\nSCHEDULER_ENABLED=0\n' \
+        "$smoke_port" >> "$CI_PROJECT_DIR/release-install/.env"
+      printf '\napp_name: release-compose-smoke\n' \
+        >> "$CI_PROJECT_DIR/release-install/conf/config.local.yaml"
+      docker compose \
+        --project-name "$smoke_project" \
+        --env-file "$CI_PROJECT_DIR/release-install/.env" \
+        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+        pull shell redis
+      "$CI_PROJECT_DIR/release-install/verify-release-image.sh"
+      docker compose \
+        --project-name "$smoke_project" \
+        --env-file "$CI_PROJECT_DIR/release-install/.env" \
+        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+        up -d --pull never
+      docker run -d \
+        --name "$smoke_probe" \
+        --network host \
+        --entrypoint sh \
+        "$DOCKERHUB_RELEASE_IMAGE" \
+        -c 'sleep 300' >/dev/null
+      wait_for_release_health
+      shell_container=$(release_shell_container)
+      require_nonempty public_compose_runtime shell_container "$shell_container"
+      running_image_id=$(docker inspect --format '{{.Image}}' "$shell_container")
+      expected_image_id=$(docker image inspect --format '{{.Id}}' "$DOCKERHUB_RELEASE_IMAGE")
+      require_equal public_compose_runtime image_id "$expected_image_id" "$running_image_id"
+      if ! docker image inspect "$DOCKERHUB_RELEASE_IMAGE" \
+        | jq -e --arg digest "$DOCKERHUB_DIGEST" \
+          '.[0].RepoDigests | any(endswith("@" + $digest))' >/dev/null; then
+        release_check_failed public_compose_runtime repo_digest "$DOCKERHUB_DIGEST" missing
+      fi
+      if ! docker inspect "$shell_container" \
+        | jq -e '.[0].Mounts | all(.Destination != "/app")' >/dev/null; then
+        release_check_failed public_compose_runtime app_source_mount absent present
+      fi
+      if ! docker exec "$smoke_probe" \
+        curl -fsS "http://127.0.0.1:${smoke_port}/config" \
+        | jq -e '.app_name == "release-compose-smoke"' >/dev/null; then
+        release_check_failed public_compose_runtime app_name release-compose-smoke mismatch
+      fi
+      docker exec "$shell_container" sh -c \
+        'printf "%s\n" release-compose-restart > /data/release-compose-restart-marker'
+      docker compose \
+        --project-name "$smoke_project" \
+        --env-file "$CI_PROJECT_DIR/release-install/.env" \
+        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+        restart shell
+      wait_for_release_health
+      shell_container=$(release_shell_container)
+      docker exec "$shell_container" test -f /data/release-compose-restart-marker \
+        || release_check_failed public_compose_runtime durable_data_marker present missing
+  after_script:
+    - |
+      docker rm -f "darklab-release-probe-${CI_JOB_ID}" >/dev/null 2>&1 || true
+      if [ -f "$CI_PROJECT_DIR/release-install/compose.yaml" ]; then
+        docker compose \
+          --project-name "darklab-release-${CI_JOB_ID}" \
+          --env-file "$CI_PROJECT_DIR/release-install/.env" \
+          -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+          logs --no-color > release-compose.log 2>&1 || true
+        docker compose \
+          --project-name "darklab-release-${CI_JOB_ID}" \
+          --env-file "$CI_PROJECT_DIR/release-install/.env" \
+          -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+          down -v --remove-orphans || true
+      fi
+  artifacts:
+    when: always
+    paths:
+      - anonymous-gitlab-image.json
+      - anonymous-dockerhub-image.json
+      - dockerhub-repository.json
+      - release-install/release-manifest.json
+      - release-compose.log
+    expire_in: 1 week

@@ -25,6 +25,8 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Team Ownership: Session Tokens Stay Actors](#team-ownership-session-tokens-stay-actors)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
 - [Deployment and Packaging Decisions](#deployment-and-packaging-decisions)
+  - [Network Copyleft with GNU AGPLv3](#network-copyleft-with-gnu-agplv3)
+  - [One Image, Two Compose Modes, and Dual Registry Publishing](#one-image-two-compose-modes-and-dual-registry-publishing)
   - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
   - [nmap Capabilities](#nmap-capabilities)
   - [Go Binary Installation](#go-binary-installation)
@@ -333,6 +335,38 @@ Allow-listed tools can have specific flags blocked through `policy.deny` entries
 ---
 
 ## Deployment and Packaging Decisions
+
+### Network Copyleft with GNU AGPLv3
+
+**darklab_shell's original source code and documentation use `AGPL-3.0-only`.**
+
+MIT was considered because it is short and easy to adopt, but it would allow a proprietary fork to reuse the project without sharing its changes. GPLv3 would keep distributed derivatives under the GPL, but darklab_shell is mainly a network application: a modified hosted version could be used without distributing the program and therefore without returning its source. AGPLv3 adds the network source offer that matches the project goal.
+
+The license does not prohibit commercial use. Companies can run, host, support, and sell services around darklab_shell under the same terms. The boundary is openness, not payment: a modified network version must prominently offer every remote user its complete Corresponding Source at no charge through a standard or customary copying method. A noncommercial restriction was rejected because it would conflict with the project's open-source goals and make ordinary organizational use unclear. The complete `LICENSE` text controls.
+
+Official releases expose their matching source tag through the built-in **What is this?** FAQ entry, record `AGPL-3.0-only` in package and OCI metadata, and carry the complete license in the image and installer payload. That FAQ entry is the official build's default source link, not a declaration that one placement satisfies every modified service. Modified deployments must replace the official link and remain responsible for making their offer prominent to all remote users and providing their complete corresponding source at no charge. Bundled tools, libraries, fonts, and wordlists are not relicensed; their separate terms stay in `THIRD_PARTY_NOTICES.txt` and `container-licenses.json`.
+
+Project-owned source uses short, machine-readable `SPDX-FileCopyrightText` and `SPDX-License-Identifier` notices instead of repeating the full multi-paragraph AGPL boilerplate in every file. This keeps the license attached when a file is copied without burying the source under legal text. Generated bundles and third-party material are explicitly excluded from the project header, and the lint guard fails when new project-owned source has no notice. The root `LICENSE` is the single full-text copy; a second `LICENSES/AGPL-3.0-only.txt` copy and a formal REUSE-compliance claim were deliberately left out.
+
+### One Image, Two Compose Modes, and Dual Registry Publishing
+
+**Released images contain the app, while development mounts the source tree over that same runtime.**
+
+The earlier Docker path required a repository checkout because the image contained the scanner toolchain but expected `./app:/app:ro` at runtime. That was useful for development, but it made production installation download the whole repository, find private overrides among shipped files, and build a large tool image locally.
+
+The Dockerfile now copies `/app` after the expensive scanner layers. Development keeps the bind mount for a quick edit loop; production pulls the same image and has no `/app` mount. Keeping one Dockerfile and entrypoint avoids a second production-only runtime that could drift in packages, capabilities, users, health behavior, or read-only filesystem assumptions.
+
+Shipped configuration and operator configuration are separate on purpose. The image owns `/app/conf`, while production mounts `./conf` at `/config`. A shared resolver maps supported `*.local.*` files to the operator root and preserves sibling behavior when no separate root is configured. The installer can therefore keep the host tree private while the root entrypoint validates and stages an `appuser`-readable runtime copy before dropping privileges. Mounting a whole host directory over `/app/conf` was rejected because an old deployment directory could hide new commands, themes, workflows, and defaults after an image upgrade.
+
+GitLab is the canonical registry because the source and release pipeline already live there. CI checks the release-specific redistribution inventory, builds once from a protected final or `-rc.N` semantic-version tag with a registry-backed layer cache, verifies that canonical image, then performs a registry-to-registry carbon copy of the manifest to Docker Hub for the shorter public pull path used by production Compose. Pulling, retagging, and pushing through a daemon was rejected because an image store can translate OCI and Docker manifest media types and change the digest even when the layers are identical. Publishing a second build was rejected because build timestamps and moving upstream inputs could produce different bytes under one release version. Both registries use exact tags, and the publisher treats each candidate number as immutable even though candidate artifacts can be removed after validation. Digest equality is the release boundary. Measured transfer and unpacked sizes travel with the release manifest instead of becoming a stale number in Compose; cold-pull timing stays in a CI artifact because it varies by runner and retry.
+
+The installer is small and deliberately non-magical. A release-specific POSIX script downloads one deterministic exact-version archive, verifies its checksum and safe paths, validates the managed-file manifest and Compose, creates private operator paths, and prints the pull/start commands. It does not install Docker, use `sudo`, change firewall rules, generate the vault master key, or start services. Security-first docs put download, checksum, and inspection before execution; the pipe-to-shell form is only a convenience path with the trust tradeoff stated plainly.
+
+After setup, `darklab-deploy` owns the release-managed side of the directory. The manifest and checksum list make local drift visible without treating `.env`, `conf/`, databases, workspaces, or backups as release files. Exact-release upgrades create and verify a backup before replacing managed files, refuse downgrades because image rollback cannot undo schema changes, and leave container startup as an explicit operator action. Backup and restore run the image's Python and Postgres tools in one-off Compose containers so the public host contract stays at POSIX shell, Docker, and Compose. Removal stops the stack and deletes only managed files; migration help keeps clone-backed source files out of the managed directory.
+
+Release trust uses GitLab's keyless Sigstore identity instead of a long-lived private signing key. A protected tag job signs the immutable GitLab and Docker Hub digest references, and the payload job signs `SHA256SUMS`; operators verify the exact `.gitlab-ci.yml@refs/tags/vX.Y.Z` or `.gitlab-ci.yml@refs/tags/vX.Y.Z-rc.N` certificate identity with issuer `https://gitlab.com`. The Docker Hub repository overview publishes that issuer and stable certificate-identity pattern independently of each release payload, and the public smoke job refuses a final or candidate artifact when the live overview no longer contains them. Keeping the reviewed overview text in the repository makes the manual Docker Hub setting auditable without pretending that a checksum served beside the payload is a separate trust root. Syft supplies the CycloneDX inventory and Grype records all matches while blocking fixed Critical findings. Blocking every High or unfixed finding was rejected because it turns upstream remediation lag into a permanent release outage; silent ad hoc suppressions were rejected because they erase the audit trail. SLSA provenance and the release evidence index bind the two registry names, shared digest, source commit, protected tag, pipeline, SBOM, and scan report. Release candidates exercise that entire chain and deliberately stop short of creating a GitLab Release, preserving the final release object as a user-facing milestone rather than a CI rehearsal artifact.
+
+Compatibility claims follow evidence from dedicated release gates. The normal protected-tag smoke job executes the bundled scanner tools as the unprivileged scanner user on Linux AMD64. Native ARM64 uses GitLab's hosted small ARM64 runner with an isolated Docker-in-Docker daemon, while SELinux-enforcing Docker and rootless Podman use self-managed hosts that expose those real host policies. Each has an opt-in protected CI variable so an available environment can block Docker Hub promotion when enabled. Passing source-level or emulated checks was rejected as proof of runtime support: production Compose remains pinned to Linux AMD64, and another platform joins the support matrix only after its native gate is provisioned and passes release images consistently.
 
 ### Startup Sequence (entrypoint.sh)
 

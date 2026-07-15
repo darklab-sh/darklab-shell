@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── App-native status monitor ──
 // First-class session/status surface: centered modal on desktop, bottom sheet
 // on mobile. Active-run attach/kill remains the bottom section.

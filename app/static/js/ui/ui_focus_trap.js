@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared focus-trap helper for modal surfaces.
 //
 // Dialogs (confirm modals, options, theme picker, FAQ, workflows, save menu)

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // History permalink and snapshot link helpers.
 import { shareUrl as importedShareUrl } from '../../core/utils.js';
 

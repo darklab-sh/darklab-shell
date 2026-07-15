@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
 const { DarklabRunnerCore } = fromScript('app/static/js/core/runner_core.js', 'DarklabRunnerCore')

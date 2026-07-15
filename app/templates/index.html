@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -581,7 +584,7 @@
           </button>
         </div>
 
-        <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
+        <a class="menu-footer bottom-sheet-footer" href="{{ project_source or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
       </div>
     </div>
   </div>
@@ -654,7 +657,7 @@
         <button class="rail-nav-item nav-item rail-more-item" data-action="theme" type="button" role="menuitem" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
         <a class="rail-nav-item nav-item rail-more-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
       </div>
-      <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
+      <a class="rail-nav-version" href="{{ project_source or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 
     <div class="rail-resize-handle" id="rail-resize-handle" title="Drag to resize"></div>

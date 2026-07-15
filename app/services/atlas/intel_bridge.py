@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Bridge app-native intel lookups into Atlas snapshots."""
 
 from __future__ import annotations

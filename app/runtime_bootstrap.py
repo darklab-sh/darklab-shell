@@ -1,15 +1,18 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Explicit runtime startup steps for web and worker processes."""
 
 from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
-from config import APP_CONF_DIR, get_config_load_summary, resolve_effective_cfg
+from config import get_config_load_summary, resolve_effective_cfg
 from core.logging_setup import configure_logging
 from services.metrics_environment import setup_prometheus_multiproc_dir
 from services.commands.raw_packets import RAW_PACKET_TOOLS, raw_packet_runtime_status
@@ -18,6 +21,15 @@ log = logging.getLogger("shell")
 
 _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY = "active-run-metadata:startup-cleanup"
 _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS = 60
+_MAX_CONFIG_LOG_FIELD_CHARS = 240
+
+
+def _bounded_config_log_field(value: object) -> str:
+    normalized = "".join(
+        character if character.isprintable() and character not in "\r\n" else "?"
+        for character in str(value or "")
+    )
+    return normalized[:_MAX_CONFIG_LOG_FIELD_CHARS]
 
 
 def configure_runtime_logging(cfg: Mapping[str, Any] | None = None) -> None:
@@ -26,7 +38,6 @@ def configure_runtime_logging(cfg: Mapping[str, Any] | None = None) -> None:
 
 def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
     active_cfg = resolve_effective_cfg(cfg)
-    conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
     load_summary = get_config_load_summary()
     raw_packet_statuses = {
         tool: raw_packet_runtime_status(active_cfg, tool=tool)
@@ -46,6 +57,16 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
         raw_packet_state = "partial"
     else:
         raw_packet_state = "unavailable"
+    log.debug(
+        "CONFIG_OVERLAY_INVENTORY",
+        extra={
+            "supported_local_overlays": int(load_summary.get("supported_local_overlays") or 0),
+            "present_local_overlays": ",".join(
+                _bounded_config_log_field(value)
+                for value in load_summary.get("present_local_overlays") or []
+            ),
+        },
+    )
     raw_packet_fields = {
         f"raw_packet_{tool}_{field}": (
             bool(status[field]) if field == "active" else str(status[field])
@@ -56,8 +77,15 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
     log.info(
         "CONFIG_LOADED",
         extra={
-            "conf_dir": str(conf_dir),
-            "local_overlay": (conf_dir / "config.local.yaml").exists(),
+            "conf_dir": _bounded_config_log_field(load_summary.get("conf_dir")),
+            "local_conf_dir": _bounded_config_log_field(load_summary.get("local_conf_dir")),
+            "local_overlay": bool(load_summary.get("local_overlay", False)),
+            "supported_local_overlays": int(load_summary.get("supported_local_overlays") or 0),
+            "overlays": ",".join(
+                _bounded_config_log_field(item.get("source"))
+                for item in load_summary.get("overlays") or []
+                if isinstance(item, Mapping)
+            ),
             "database_backend": str(active_cfg.get("database_backend") or ""),
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
             "raw_packet_scanning_configured": raw_packet_configured,

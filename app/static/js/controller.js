@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Desktop UI controller ──
 // Bootstraps the page, wires listeners, and coordinates the feature helpers.
 
@@ -832,7 +835,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   const projectText = `${cfg.project_name || 'darklab_shell'}${wmVersion}`;
   document.querySelectorAll('.menu-footer, .rail-nav-version').forEach(el => {
     el.textContent = projectText;
-    if (cfg.project_readme) el.href = cfg.project_readme;
+    if (cfg.project_source) el.href = cfg.project_source;
   });
   syncThemeSelectionControls();
   updateNewTabBtn();

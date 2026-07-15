@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Session persistence helpers owned by the service layer."""
 
 from __future__ import annotations
@@ -525,19 +528,19 @@ def migrate_session_records(
         )
         dialect = dialect_for_backend(get_db_backend())
         stars_insert = conn.execute(
-            "INSERT INTO starred_commands (session_id, command) "  # nosec B608
+            "INSERT INTO starred_commands (session_id, command) "  # nosec
             "SELECT ?, command FROM starred_commands WHERE session_id = ? "
             + dialect.insert_or_ignore_clause(("session_id", "command")),
             (to_session_id, from_session_id),
         )
         prefs_insert = conn.execute(
-            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec B608
+            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec
             "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ? "
             + dialect.insert_or_ignore_clause(("session_id",)),
             (to_session_id, from_session_id),
         )
         vars_insert = conn.execute(
-            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec B608
+            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec
             "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ? "
             + dialect.insert_or_ignore_clause(("session_id", "name")),
             (to_session_id, from_session_id),

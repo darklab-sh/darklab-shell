@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison overlay shell ─────────────────────────────────────────
 // Loaded before history.js. The History drawer still owns launcher/result rendering,
 // while this module owns the compare modal's open/close/focus lifecycle.

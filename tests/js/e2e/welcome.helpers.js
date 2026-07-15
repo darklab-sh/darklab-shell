@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 export const CMD = 'curl http://localhost:5001/health'
 
 export async function setupWelcomePage(page) {

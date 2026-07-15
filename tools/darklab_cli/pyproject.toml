@@ -1,5 +1,8 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +10,8 @@ name = "darklab-cli"
 version = "0.2.0"
 description = "Headless CLI client for darklab_shell API v1"
 requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 
 [project.scripts]
 darklab = "darklab_cli.__main__:main"

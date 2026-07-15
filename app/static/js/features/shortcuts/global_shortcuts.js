@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { getTabs as importedGetTabs } from '../../core/state.js';
 import { activateTab as importedActivateTab } from '../../tabs.js';
 import {

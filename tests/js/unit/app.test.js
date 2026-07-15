@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { readFileSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -1226,7 +1229,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -6651,7 +6654,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -6728,7 +6731,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -6822,7 +6825,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -7346,7 +7349,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],

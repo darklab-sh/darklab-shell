@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral Welcome boundary for eager modules that should not import welcome.js.
 
 let cancelWelcomeHandler = null;

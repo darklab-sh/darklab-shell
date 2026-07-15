@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* ── Terminal export / permalink shared chrome ─────────────────────────────
  * Single source of truth for the header, output, and line styles shared by
  * live permalink/diagnostics pages (linked stylesheet) and standalone HTML

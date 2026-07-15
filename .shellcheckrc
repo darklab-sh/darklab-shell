@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # SC1007: false positive for the `CDPATH= cd` idiom (temporary env-var prefix,
 # not a malformed assignment).
 disable=SC1007

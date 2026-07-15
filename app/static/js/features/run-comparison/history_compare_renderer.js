@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison result renderer ─────────────────────────────────────
 // Transcript hunk rendering, object diff sections, restore actions, and compare fetch flow.
 import { getTabs as importedGetTabs } from '../../core/state.js';

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { test, expect } from '@playwright/test'
 import {
   createShareSnapshot,
@@ -1197,9 +1200,7 @@ test.beforeEach(async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
-    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
-    await page.locator('#mobile-recent-peek').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await openFullMobileHistoryPanel(page)
 
     const timeEl = page.locator('#history-list .history-entry').first().locator('.history-entry-meta span').nth(1)
     await expect(timeEl).not.toHaveText('')

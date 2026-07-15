@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { fromDomScripts } from './helpers/extract.js'
 
 const originalScrollIntoView = Element.prototype.scrollIntoView

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Content and config routes: main index, config, themes, FAQ, autocomplete, welcome.
 """
@@ -128,7 +131,7 @@ def _frontend_config_payload():
         "project_name":          _config.PROJECT_NAME,
         "prompt_username":       cfg["prompt_username"],
         "prompt_domain":         cfg["prompt_domain"],
-        "project_readme":        _config.PROJECT_README,
+        "project_source":        _config.PROJECT_SOURCE,
         "default_theme":         cfg["default_theme"],
         "share_redaction_enabled": cfg["share_redaction_enabled"],
         "share_redaction_rules": _config.get_share_redaction_rules(cfg),
@@ -189,7 +192,7 @@ def index():
         app_name=_config.CFG["app_name"],
         project_name=_config.PROJECT_NAME,
         version=_config.APP_VERSION,
-        project_readme=_config.PROJECT_README,
+        project_source=_config.PROJECT_SOURCE,
         initial_rail=_initial_rail_state(),
         prompt_prefix=_prompt_label(bool(_config.CFG.get("workspace_enabled", False))),
         current_theme=current_theme,
@@ -317,7 +320,7 @@ def command_catalog(root: str, subcommand: str | None = None):
 @content_bp.route("/faq")
 def faq():
     """Return built-in FAQ entries plus any custom faq.yaml entries."""
-    items = load_all_faq(_config.CFG["app_name"], _config.PROJECT_README)
+    items = load_all_faq(_config.CFG["app_name"], _config.PROJECT_SOURCE)
     _log_content_view("/faq", count=len(items))
     return jsonify({"items": items})
 

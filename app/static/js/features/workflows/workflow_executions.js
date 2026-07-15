@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Durable workflow execution requests and Recent Executions rendering.
 
 const ACTIVE_WORKFLOW_EXECUTION_STATUSES = new Set(['queued', 'running', 'canceling']);

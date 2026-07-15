@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project-linking helpers for History rows and Run Details actions.
 import { historyProjectFilter as importedHistoryProjectFilter } from '../../core/dom.js';
 import { DarklabHistoryCore as importedHistoryCore } from '../../core/history_core.js';

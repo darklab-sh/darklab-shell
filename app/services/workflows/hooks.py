@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Failure-isolated hooks from the shared run lifecycle."""
 
 from __future__ import annotations

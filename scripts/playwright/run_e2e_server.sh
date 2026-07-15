@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 set -euo pipefail
 
 PORT="${1:?port required}"
@@ -19,13 +22,13 @@ mkdir -p "$TMP_ROOT"
 DATA_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.data.XXXXXX")"
 WORKSPACE_DIR="$DATA_DIR/workspaces"
 
-# Build a per-slot conf dir so tests always have a predictable config regardless
-# of whether a local config.local.yaml exists on the host.  The base config.yaml
-# is used as-is; the overlay enables the /diag endpoint for loopback connections
-# so Playwright tests can navigate to /diag without forging IP headers.
-CONF_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.conf.XXXXXX")"
-cp "$APP_DIR/conf/config.yaml" "$CONF_DIR/config.yaml"
-cat > "$CONF_DIR/config.local.yaml" << EOF
+# Build a per-slot local config dir so tests always have predictable overrides
+# regardless of whether a config.local.yaml exists on the host. Shipped catalogs
+# stay under app/conf; the overlay enables /diag for loopback connections so
+# Playwright can navigate there without forging IP headers.
+SHIPPED_CONF_DIR="$APP_DIR/conf"
+LOCAL_CONF_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.conf.XXXXXX")"
+cat > "$LOCAL_CONF_DIR/config.local.yaml" << EOF
 # E2E test overlay — not for production use.
 diagnostics_allowed_cidrs:
   - 127.0.0.0/8
@@ -45,9 +48,9 @@ EOF
 
 cd "$APP_DIR"
 if [[ "$SLOT" == capture-* ]]; then
-  APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$CONF_DIR" \
+  APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$SHIPPED_CONF_DIR" APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR" \
     "$PYTHON_BIN" -c "from core.database import db_init; db_init()" >/dev/null
-  APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$CONF_DIR" \
+  APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$SHIPPED_CONF_DIR" APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR" \
     "$PYTHON_BIN" "$REPO_ROOT/scripts/seed_history.py" \
     --fixture visual-flows \
     --token "$CAPTURE_SESSION_TOKEN" \
@@ -67,14 +70,16 @@ if [[ -n "${PW_E2E_SERVER_LOG_DIR:-}" ]]; then
     echo "[e2e-server] starting"
     echo "[e2e-server] slot=$SLOT port=$PORT"
     echo "[e2e-server] data_dir=$DATA_DIR"
-    echo "[e2e-server] conf_dir=$CONF_DIR"
+    echo "[e2e-server] shipped_conf_dir=$SHIPPED_CONF_DIR"
+    echo "[e2e-server] local_conf_dir=$LOCAL_CONF_DIR"
     echo "[e2e-server] workspace_dir=$WORKSPACE_DIR"
     echo "[e2e-server] fake_redis=$APP_FAKE_REDIS"
   } >> "$SERVER_LOG"
 fi
 
 export APP_DATA_DIR="$DATA_DIR"
-export APP_CONF_DIR="$CONF_DIR"
+export APP_CONF_DIR="$SHIPPED_CONF_DIR"
+export APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR"
 export REDIS_URL=""
 export APP_FAKE_REDIS="$APP_FAKE_REDIS"
 export FLASK_APP=wsgi.py

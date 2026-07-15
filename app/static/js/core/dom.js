@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared utility module ──
 // Declared here once so all subsequent modules can reference them as globals.
 // All elements exist in the DOM by the time these scripts are parsed at the end of <body>,

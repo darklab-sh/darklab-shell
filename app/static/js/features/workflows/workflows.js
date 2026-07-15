@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Workflows modal, editor, terminal command, and runtime autocomplete support.
 import {
   emitUiEvent as importedEmitUiEvent,

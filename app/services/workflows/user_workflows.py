@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Personal and team-scoped user-created workflows.
 """
@@ -269,7 +272,7 @@ def create_user_workflow(session_id, data, *, team_id=""):
         for _ in range(10):
             workflow_id = _new_workflow_id()
             result = conn.execute(
-                "INSERT INTO user_workflows "  # nosec B608
+                "INSERT INTO user_workflows "  # nosec
                 "(id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + dialect.insert_or_ignore_clause(("id",)),

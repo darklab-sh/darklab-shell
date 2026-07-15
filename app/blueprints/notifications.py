@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Browser routes for session-owned outbound notification channels."""
 
 from __future__ import annotations

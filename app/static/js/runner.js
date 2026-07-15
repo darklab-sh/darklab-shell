@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared command execution + desktop input wrapper ──
 import { DarklabRunnerCore as importedRunnerCore } from './core/runner_core.js';
 import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_output_model.js';

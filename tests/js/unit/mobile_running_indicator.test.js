@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /**
  * Contract-layer coverage for the mobile running-indicator surface. The
  * running indicator is the trailing chip and pair of edge-glow overlays that

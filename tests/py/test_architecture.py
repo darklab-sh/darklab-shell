@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Architecture boundary tests for the Python application layers."""
 
 from __future__ import annotations
@@ -288,7 +291,13 @@ _BARE_DICT_CFG_SENTINEL_ALLOWLIST = frozenset({
 
 
 def _wc_line_count(path: Path) -> int:
-    return path.read_bytes().count(b"\n")
+    content = path.read_bytes()
+    line_count = content.count(b"\n")
+    header = b"\n".join(content.splitlines()[:12])
+    if b"SPDX-FileCopyrightText:" in header and b"SPDX-License-Identifier:" in header:
+        # The standard two-line notice plus its separator is file metadata, not module code.
+        line_count = max(0, line_count - 3)
+    return line_count
 
 
 _SQL_STRING_PATTERNS = tuple(

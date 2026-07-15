@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Server-side output signal classification.
 
 The browser renders and navigates signals, but the backend owns the command

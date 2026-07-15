@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """SQLite storage helpers for encrypted per-session secrets."""
 
 from __future__ import annotations
@@ -287,7 +290,7 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
     migrated = 0
     migrated_names = []
     insert_sql = (
-        "INSERT INTO secrets "  # nosec B608
+        "INSERT INTO secrets "  # nosec
         "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
         + dialect_for_backend(get_db_backend()).insert_or_ignore_clause(("session_token", "name"))

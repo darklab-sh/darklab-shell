@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """App content loaders used by the command/content registry."""
 
 from __future__ import annotations
@@ -11,7 +14,6 @@ import config as app_config
 from services.workflows import catalog as workflow_catalog
 
 log = logging.getLogger("shell")
-
 
 class TourPayload(TypedDict):
     version: int
@@ -48,10 +50,10 @@ def _load_yaml_list(path: str) -> list:
     return loaded if isinstance(loaded, list) else []
 
 
-def _load_yaml_list_with_local(path: str) -> list:
+def _load_yaml_list_with_local(path: str, *, local_path: str | None = None) -> list:
     merged = []
     merged.extend(_load_yaml_list(path))
-    merged.extend(_load_yaml_list(_local_overlay_path(path)))
+    merged.extend(_load_yaml_list(local_path or _local_overlay_path(path)))
     return merged
 
 
@@ -388,16 +390,13 @@ def normalize_workflow_entry(entry):
     return workflow_catalog.normalize_workflow_entry(entry)
 
 
-def load_workflows(path: str) -> list[dict[str, object]]:
+def load_workflows(path: str, *, local_path: str | None = None) -> list[dict[str, object]]:
     """Read workflows.yaml and return a list of workflow dicts."""
-    return workflow_catalog.load_workflows(path)
+    return workflow_catalog.load_workflows(path, local_path=local_path)
 
 
 def load_all_workflows(
-    path: str,
-    cfg=None,
-    *,
-    suggestion_enabled_for_features,
+    path: str, cfg=None, *, suggestion_enabled_for_features, local_path: str | None = None
 ) -> list[dict[str, object]]:
     """Return the built-in workflows followed by any custom workflow entries."""
     builtins = []
@@ -407,15 +406,15 @@ def load_all_workflows(
             builtins.append(workflow_catalog.workflow_with_catalog_metadata(normalized, "builtin", idx))
     custom = [
         workflow_catalog.workflow_with_catalog_metadata(workflow, "config", idx)
-        for idx, workflow in enumerate(load_workflows(path))
+        for idx, workflow in enumerate(load_workflows(path, local_path=local_path))
         if suggestion_enabled_for_features(workflow, cfg)
     ]
     return [*builtins, *custom]
 
 
-def load_welcome(path: str) -> list[dict[str, object]]:
+def load_welcome(path: str, *, local_path: str | None = None) -> list[dict[str, object]]:
     """Read welcome.yaml and return startup blocks for the welcome typeout."""
-    data = _load_yaml_list_with_local(path)
+    data = _load_yaml_list_with_local(path, local_path=local_path)
     return [
         {
             "cmd": str(item.get("cmd", "")).strip(),
@@ -535,9 +534,9 @@ def load_tour(path: str, cfg=None, *, mobile: bool = False) -> TourPayload:
     }
 
 
-def load_ascii_art(path: str) -> str:
+def load_ascii_art(path: str, *, local_path: str | None = None) -> str:
     """Read banner art as plain text, preferring a local overlay."""
-    local_path = _local_overlay_path(path)
+    local_path = local_path or _local_overlay_path(path)
     if os.path.exists(local_path):
         with open(local_path) as f:
             return f.read().rstrip()
@@ -559,10 +558,10 @@ def _hint_category_enabled(category, cfg=None):
     return True
 
 
-def load_scoped_hints(path: str, cfg=None) -> list[str]:
+def load_scoped_hints(path: str, cfg=None, *, local_path: str | None = None) -> list[str]:
     hints = []
     seen = set()
-    for candidate in (path, _local_overlay_path(path)):
+    for candidate in (path, local_path or _local_overlay_path(path)):
         if not os.path.exists(candidate):
             continue
         category = "general"

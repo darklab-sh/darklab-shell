@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Session-owned notification channel CRUD helpers."""
 
 from __future__ import annotations
@@ -457,7 +460,7 @@ def list_notification_events(
     where_sql = " AND ".join(clauses)
     with database.db_connect() as conn:
         total_row = conn.execute(
-            f"SELECT COUNT(*) AS count FROM notification_events WHERE {where_sql}",  # nosec B608
+            f"SELECT COUNT(*) AS count FROM notification_events WHERE {where_sql}",  # nosec
             params,
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Application configuration and scanner-user setup.
 Imported by database, process, permalinks, and app modules.
@@ -10,22 +13,23 @@ import ipaddress
 import re
 from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
-from pathlib import Path
 from typing import Any, cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, create_model
+import config_paths
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
 log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 CONFIG_LOAD_SUMMARY: dict[str, Any] = {}
 
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
+PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
+APP_LOCAL_CONF_DIR = os.environ.get("APP_LOCAL_CONF_DIR", "")
 DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
 
 _DERIVED_CONFIG_DEFAULTS = {
@@ -41,10 +45,24 @@ _SENSITIVE_URL_CONFIG_KEYS = {
     "database_url",
 }
 _MAX_CONFIG_ERROR_VALUE_CHARS = 120
+_MAX_CONFIG_LOG_PATH_CHARS = 240
 
 
 class ConfigLoadError(RuntimeError):
     """Raised when app config cannot be loaded into a valid model."""
+
+
+def _config_log_value(value: object, limit: int) -> str:
+    normalized = "".join(
+        character if character.isprintable() and character not in "\r\n" else "?"
+        for character in str(value)
+    )
+    return normalized[:limit]
+
+
+def _config_log_path(value: object) -> str:
+    """Return a bounded, single-line path for structured config logs."""
+    return _config_log_value(value, _MAX_CONFIG_LOG_PATH_CHARS)
 
 
 def _record_config_load_failure(
@@ -55,9 +73,9 @@ def _record_config_load_failure(
     error: object | None = None,
     exc_info: bool = False,
 ) -> None:
-    extra = {"phase": phase, "source": source, "key": key}
+    extra = {"phase": phase, "source": _config_log_path(source), "key": key}
     if error is not None:
-        extra["error"] = str(error)[:_MAX_CONFIG_ERROR_VALUE_CHARS]
+        extra["error"] = _config_log_value(error, _MAX_CONFIG_ERROR_VALUE_CHARS)
     log.error("CONFIG_LOAD_FAILED", exc_info=exc_info, extra=extra)
 
 
@@ -226,7 +244,7 @@ def _warn_config_value_dropped(
         "CONFIG_VALUE_DROPPED",
         extra={
             "key": key,
-            "source": _config_source(provenance, key),
+            "source": _config_log_path(_config_source(provenance, key)),
             "reason": reason,
             value_field: bounded_value,
         },
@@ -244,7 +262,7 @@ def _warn_config_value_defaulted(
         "CONFIG_VALUE_DEFAULTED",
         extra={
             "key": key,
-            "source": _config_source(provenance, key),
+            "source": _config_log_path(_config_source(provenance, key)),
             "reason": reason,
             "fallback": fallback,
         },
@@ -261,7 +279,7 @@ def _warn_config_value_clamped(
 ) -> None:
     extra = {
         "key": key,
-        "source": _config_source(provenance, key),
+        "source": _config_log_path(_config_source(provenance, key)),
         "reason": reason,
     }
     if minimum is not None:
@@ -650,7 +668,10 @@ def _redact_config_mapping(data: Mapping[str, Any], prefix: str = "") -> dict[st
 def _warn_unknown_config_key(path: str, source: str) -> None:
     payload = {"key": path, "source": source}
     CONFIG_LOAD_WARNINGS.append(payload)
-    log.warning("CONFIG_UNKNOWN_KEY_IGNORED", extra=payload)
+    log.warning(
+        "CONFIG_UNKNOWN_KEY_IGNORED",
+        extra={"key": path, "source": _config_log_path(source)},
+    )
 
 
 def _merge_config_overlay(
@@ -797,7 +818,9 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
             extra={
                 "legacy_key": "full_output_max_bytes",
                 "target_key": "full_output_max_mb",
-                "source": provenance.get("full_output_max_bytes", "legacy full_output_max_bytes"),
+                "source": _config_log_path(
+                    provenance.get("full_output_max_bytes", "legacy full_output_max_bytes")
+                ),
             },
         )
         CONFIG_LOAD_SUMMARY["legacy_key_migrated"] = True
@@ -887,7 +910,7 @@ def _validate_config_model(defaults: dict[str, Any], provenance: dict[str, str],
     return AppConfig(parsed, schema_model, provenance, schema_defaults)
 
 
-def load_config(conf_dir=None):
+def load_config(conf_dir=None, local_conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
     config.local.yaml is read after config.yaml, so it can override selected
@@ -1178,41 +1201,78 @@ def load_config(conf_dir=None):
     allowed_paths.add("full_output_max_bytes")
     provenance: dict[str, str] = {}
     _record_default_provenance(defaults, provenance)
-    if conf_dir is not None:
-        conf_path = Path(conf_dir)
-    elif APP_CONF_DIR:
-        conf_path = Path(APP_CONF_DIR)
-    else:
-        conf_path = Path(__file__).resolve().parent / "conf"
-    local_overlay_path = conf_path / "config.local.yaml"
+    roots = config_paths.config_roots(
+        conf_dir if conf_dir is not None else APP_CONF_DIR or None,
+        local_conf_dir if local_conf_dir is not None else APP_LOCAL_CONF_DIR or None,
+    )
+    conf_path = roots.shipped
+    local_conf_path = roots.local
+    local_overlay_path = config_paths.config_asset_paths(
+        "config.yaml",
+        shipped_conf_dir=conf_path,
+        local_conf_dir=local_conf_path,
+    ).local
+    conf_log_path = _config_log_path(conf_path)
+    local_conf_log_path = _config_log_path(local_conf_path)
+    base_overlay_path = conf_path / "config.yaml"
+    base_overlay_log_path = _config_log_path(base_overlay_path)
+    local_overlay_log_path = _config_log_path(local_overlay_path)
+    local_overlay_present = local_overlay_path.exists()
     log.debug(
         "CONFIG_SOURCE_SELECTED",
-        extra={"conf_dir": str(conf_path), "local_overlay": local_overlay_path.exists()},
+        extra={
+            "conf_dir": conf_log_path,
+            "local_conf_dir": local_conf_log_path,
+            "local_overlay": local_overlay_present,
+        },
     )
     CONFIG_LOAD_SUMMARY.update({
-        "conf_dir": str(conf_path),
-        "local_overlay": local_overlay_path.exists(),
+        "conf_dir": conf_log_path,
+        "local_conf_dir": local_conf_log_path,
+        "local_overlay": local_overlay_present,
+        "supported_local_overlays": len(
+            config_paths.supported_overlay_assets(shipped_conf_dir=conf_path)
+        ),
+        "present_local_overlays": list(config_paths.present_local_overlays(
+            shipped_conf_dir=conf_path,
+            local_conf_dir=local_conf_path,
+        )),
         "overlays": [],
         "env_keys": [],
     })
-    base_overlay = _load_yaml_config(conf_path / "config.yaml")
+    base_overlay = _load_yaml_config(base_overlay_path)
     base_known_count, base_unknown_count = _overlay_path_counts(base_overlay, allowed_paths)
     _merge_config_overlay(
         defaults,
         base_overlay,
-        source=str(conf_path / "config.yaml"),
+        source=str(base_overlay_path),
         provenance=provenance,
         allowed_paths=allowed_paths,
     )
-    cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
-        "source": str(conf_path / "config.yaml"),
-        "known_keys": base_known_count,
-        "unknown_keys": base_unknown_count,
-    })
-    log.debug(
-        "CONFIG_OVERLAY_APPLIED",
-        extra={"source": str(conf_path / "config.yaml"), "known_keys": base_known_count, "unknown_keys": base_unknown_count},
-    )
+    if base_known_count:
+        cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
+            "source": base_overlay_log_path,
+            "known_keys": base_known_count,
+            "unknown_keys": base_unknown_count,
+        })
+        log.debug(
+            "CONFIG_OVERLAY_APPLIED",
+            extra={
+                "source": base_overlay_log_path,
+                "known_keys": base_known_count,
+                "unknown_keys": base_unknown_count,
+            },
+        )
+    else:
+        log.debug(
+            "CONFIG_OVERLAY_CHECKED",
+            extra={
+                "source": base_overlay_log_path,
+                "present": base_overlay_path.exists(),
+                "known_keys": base_known_count,
+                "unknown_keys": base_unknown_count,
+            },
+        )
     local_overlay = _load_yaml_config_optional(local_overlay_path)
     local_known_count, local_unknown_count = _overlay_path_counts(local_overlay, allowed_paths)
     _merge_config_overlay(
@@ -1222,15 +1282,30 @@ def load_config(conf_dir=None):
         provenance=provenance,
         allowed_paths=allowed_paths,
     )
-    cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
-        "source": str(local_overlay_path),
-        "known_keys": local_known_count,
-        "unknown_keys": local_unknown_count,
-    })
-    log.debug(
-        "CONFIG_OVERLAY_APPLIED",
-        extra={"source": str(local_overlay_path), "known_keys": local_known_count, "unknown_keys": local_unknown_count},
-    )
+    if local_known_count:
+        cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
+            "source": local_overlay_log_path,
+            "known_keys": local_known_count,
+            "unknown_keys": local_unknown_count,
+        })
+        log.debug(
+            "CONFIG_OVERLAY_APPLIED",
+            extra={
+                "source": local_overlay_log_path,
+                "known_keys": local_known_count,
+                "unknown_keys": local_unknown_count,
+            },
+        )
+    else:
+        log.debug(
+            "CONFIG_OVERLAY_CHECKED",
+            extra={
+                "source": local_overlay_log_path,
+                "present": local_overlay_present,
+                "known_keys": local_known_count,
+                "unknown_keys": local_unknown_count,
+            },
+        )
     applied_env_names: list[str] = []
     env_workspace_root = str(os.environ.get("WORKSPACE_ROOT") or "").strip()
     if env_workspace_root:
@@ -1599,7 +1674,7 @@ _THEME_DEFAULTS = {
     },
 }
 
-_THEME_CONF_DIR = Path(__file__).resolve().parent / "conf"
+_THEME_CONF_DIR = config_paths.config_roots(APP_CONF_DIR or None, APP_LOCAL_CONF_DIR or None).shipped
 _THEME_VARIANT_DIR = _THEME_CONF_DIR / "themes"
 _THEME_BASE_CSS_KEYS = (
     "bg",
@@ -1826,7 +1901,36 @@ def _theme_default_family(theme_data: dict) -> str:
 
 def _theme_file_candidates(name):
     stem = _theme_name_stem(name)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", stem):
+        return ()
     return (_THEME_VARIANT_DIR / f"{stem}.yaml",)
+
+
+def _load_theme_mapping(path, *, source):
+    try:
+        with open(path) as f:
+            loaded = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        log.warning(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": _config_log_path(path),
+                "source": source,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return {}
+    if not isinstance(loaded, dict):
+        log.warning(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": _config_log_path(path),
+                "source": source,
+                "error_type": "InvalidRootType",
+            },
+        )
+        return {}
+    return loaded
 
 
 def _load_theme_yaml(name):
@@ -1836,22 +1940,14 @@ def _load_theme_yaml(name):
     for theme_path in _theme_file_candidates(name):
         if not os.path.exists(theme_path):
             continue
-        try:
-            with open(theme_path) as f:
-                loaded = yaml.safe_load(f) or {}
-        except yaml.YAMLError:
-            loaded = {}
-        if isinstance(loaded, dict):
-            theme_data.update(loaded)
-        local_overlay = theme_path.with_name(f"{theme_path.stem}.local{theme_path.suffix}")
+        theme_data.update(_load_theme_mapping(theme_path, source="shipped"))
+        local_overlay = config_paths.local_overlay_path_for(
+            theme_path,
+            shipped_conf_dir=_THEME_CONF_DIR,
+            local_conf_dir=APP_LOCAL_CONF_DIR or None,
+        )
         if local_overlay.exists():
-            try:
-                with open(local_overlay) as f:
-                    local_loaded = yaml.safe_load(f) or {}
-            except yaml.YAMLError:
-                local_loaded = {}
-            if isinstance(local_loaded, dict):
-                theme_data.update(local_loaded)
+            theme_data.update(_load_theme_mapping(local_overlay, source="local"))
         return theme_data
     return {}
 

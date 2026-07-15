@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Prometheus metric definitions and instrumentation helpers."""
 
 from __future__ import annotations

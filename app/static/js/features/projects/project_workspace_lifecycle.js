@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project workspace loading and selection lifecycle.
 // Loaded before shell_chrome.js; shell chrome supplies state accessors and render hooks.
 

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* Mobile chrome — progress bar, recents peek + pull-up sheet,
    bottom-sheet menu, and keyboard-aware edit helper. All rules scoped under
    body.mobile-terminal-mode so they never leak into desktop. Relies on the

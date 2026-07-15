@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Record the URL host-link migration boundary.
 
 URL host links are backfilled by ``database._backfill_url_host_entity_links`` on

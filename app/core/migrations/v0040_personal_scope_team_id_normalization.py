@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Normalize personal-scope team ids for partial-index predicates."""
 
 from .runner import Migration

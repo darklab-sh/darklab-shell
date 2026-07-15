@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { loadTourCliCommand as importedLoadTourCliCommand } from '../../core/lazy_assets.js';
 
 const TOUR_CLI_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;

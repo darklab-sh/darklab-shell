@@ -1,0 +1,157 @@
+#!/usr/bin/env sh
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+set -eu
+
+RELEASE_VERSION="@RELEASE_VERSION@"
+PAYLOAD_BASE_URL="${DARKLAB_SETUP_BASE_URL:-@PAYLOAD_BASE_URL@}"
+ALLOW_TEST_URLS="${DARKLAB_SETUP_ALLOW_TEST_URLS:-0}"
+ARCHIVE_NAME="@ARCHIVE_NAME@"
+ARCHIVE_SHA256="@ARCHIVE_SHA256@"
+TARGET_DIR="."
+
+usage() {
+    cat <<EOF
+Usage: setup.sh [--dir PATH] [--help] [--version]
+
+Prepare a darklab_shell ${RELEASE_VERSION} deployment directory.
+The script verifies and installs the release archive but does not pull or start containers.
+EOF
+}
+
+fail() {
+    printf 'setup: %s\n' "$*" >&2
+    exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dir)
+            [ "$#" -ge 2 ] || fail "--dir requires a path"
+            TARGET_DIR=$2
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --version)
+            printf '%s\n' "$RELEASE_VERSION"
+            exit 0
+            ;;
+        *)
+            fail "unknown option: $1"
+            ;;
+    esac
+done
+
+missing=""
+for command_name in basename chmod curl docker find grep gzip mkdir mktemp rm sed tar; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        missing="${missing} ${command_name}"
+    fi
+done
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    missing="${missing} sha256sum-or-shasum"
+fi
+[ -z "$missing" ] || fail "missing required commands:${missing}"
+
+compose_version=$(docker compose version --short 2>/dev/null) \
+    || fail "Docker Compose 2.20.0 or newer is required"
+compose_version=${compose_version#v}
+compose_version=${compose_version%%-*}
+compose_version=${compose_version%%+*}
+compose_major=${compose_version%%.*}
+compose_remainder=${compose_version#*.}
+[ "$compose_remainder" != "$compose_version" ] \
+    || fail "could not parse Docker Compose version: $compose_version"
+compose_minor=${compose_remainder%%.*}
+compose_patch=${compose_remainder#*.}
+[ "$compose_patch" != "$compose_remainder" ] || compose_patch=0
+compose_patch=${compose_patch%%.*}
+for compose_part in "$compose_major" "$compose_minor" "$compose_patch"; do
+    case "$compose_part" in
+        ''|*[!0-9]*) fail "could not parse Docker Compose version: $compose_version" ;;
+    esac
+done
+if [ "$compose_major" -lt 2 ] \
+    || { [ "$compose_major" -eq 2 ] && [ "$compose_minor" -lt 20 ]; }; then
+    fail "Docker Compose 2.20.0 or newer is required (found $compose_version)"
+fi
+docker info >/dev/null 2>&1 || fail "the Docker daemon is not reachable"
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | sed 's/[[:space:]].*$//'
+    else
+        shasum -a 256 "$1" | sed 's/[[:space:]].*$//'
+    fi
+}
+
+download() {
+    source_url=$1
+    destination=$2
+    payload_name=$(basename "$destination")
+    case "$source_url" in
+        https://*)
+            curl -fsSL --proto '=https' --tlsv1.2 "$source_url" -o "$destination" 2>/dev/null \
+                || fail "download failed for ${payload_name} (release ${RELEASE_VERSION})"
+            ;;
+        file://*)
+            [ "$ALLOW_TEST_URLS" = "1" ] || fail "non-HTTPS payload URL is not allowed"
+            curl -fsSL "$source_url" -o "$destination" 2>/dev/null \
+                || fail "download failed for ${payload_name} (release ${RELEASE_VERSION})"
+            ;;
+        *) fail "payload URL must use HTTPS" ;;
+    esac
+}
+
+safe_relative_path() {
+    case "$1" in
+        ''|/*|..|../*|*/../*|*/..) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+umask 077
+staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/darklab-setup.XXXXXX")
+trap 'rm -rf "$staging_dir"' EXIT HUP INT TERM
+
+archive_path="$staging_dir/$ARCHIVE_NAME"
+download "$PAYLOAD_BASE_URL/$ARCHIVE_NAME" "$archive_path"
+actual_archive_sha256=$(sha256_file "$archive_path")
+[ "$actual_archive_sha256" = "$ARCHIVE_SHA256" ] \
+    || fail "checksum mismatch for $ARCHIVE_NAME"
+
+tar -tzf "$archive_path" | while IFS= read -r archive_entry; do
+    trimmed_entry=${archive_entry%/}
+    safe_relative_path "$trimmed_entry" \
+        || fail "release archive contains an unsafe path: $archive_entry"
+done
+tar -xzf "$archive_path" -C "$staging_dir"
+bundle_root="$staging_dir/darklab-shell-deploy-$RELEASE_VERSION"
+[ -x "$bundle_root/darklab-deploy" ] \
+    || fail "release archive is missing darklab-deploy"
+
+"$bundle_root/darklab-deploy" install --bundle "$bundle_root" --target "$TARGET_DIR"
+
+cat <<EOF
+darklab_shell ${RELEASE_VERSION} is ready in ${TARGET_DIR}.
+
+Review these files before starting:
+  ${TARGET_DIR}/.env
+  ${TARGET_DIR}/conf/
+  ${TARGET_DIR}/compose.yaml
+
+Then run:
+  cd ${TARGET_DIR}
+  docker compose pull
+  ./verify-release-image.sh
+  docker compose up -d
+  docker compose ps
+  docker compose logs -f shell
+
+Use ./darklab-deploy status to check the installed release and managed files.
+The app listens on http://127.0.0.1:8888 by default.
+EOF

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Command loading, validation, and rewriting.
 
@@ -16,6 +19,7 @@ from typing import Any, Mapping
 import yaml
 
 import config as app_config
+import config_paths
 from services.commands import (
     registry_autocomplete,
     registry_cache,
@@ -53,7 +57,7 @@ from services.teams.scope import OwnerContext
 
 log = logging.getLogger("shell")
 _HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_CONF = os.path.join(_HERE, "conf")
+_CONF = app_config.APP_CONF_DIR or os.path.join(_HERE, "conf")
 COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
 BUILTIN_AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "builtin_autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
@@ -101,10 +105,10 @@ class CommandValidationResult:
 
 
 def _local_overlay_path(path):
-    # Every shipped config asset can be overridden by a sibling *.local.* file
-    # so operators can customize behavior without editing tracked defaults.
-    root, ext = os.path.splitext(path)
-    return f"{root}.local{ext}"
+    return os.fspath(config_paths.local_overlay_path_for(
+        path, shipped_conf_dir=app_config.APP_CONF_DIR or _CONF,
+        local_conf_dir=app_config.APP_LOCAL_CONF_DIR or None,
+    ))
 
 
 def _load_yaml_list(path):
@@ -219,8 +223,7 @@ def _merge_commands_registry(base: dict, overlay: dict) -> dict:
 
 
 def _commands_registry_signature_uncached(path: str) -> tuple[tuple[str, int | None, int | None], ...]:
-    root, ext = os.path.splitext(path)
-    candidates = (path, f"{root}.local{ext}")
+    candidates = (path, _local_overlay_path(path))
     signature = []
     for candidate in candidates:
         normalized = os.path.abspath(candidate)
@@ -234,14 +237,13 @@ def _commands_registry_signature_uncached(path: str) -> tuple[tuple[str, int | N
 
 
 def _commands_registry_signature(path: str) -> tuple[tuple[str, int | None, int | None], ...]:
-    cache_key = os.path.abspath(path)
+    cache_key = "\0".join((os.path.abspath(path), os.path.abspath(_local_overlay_path(path))))
     now = monotonic_ns()
     cached = _COMMANDS_REGISTRY_SIGNATURE_CACHE.get(cache_key)
     if cached is not None:
         expires_at, signature = cached
         if now < expires_at:
             return signature
-
     signature = _commands_registry_signature_uncached(path)
     _COMMANDS_REGISTRY_SIGNATURE_CACHE[cache_key] = (now + _COMMANDS_REGISTRY_SIGNATURE_TTL_NS, signature)
     return signature
@@ -258,6 +260,7 @@ def load_commands_registry() -> dict:
         _normalize_registry_autocomplete,
         _empty_autocomplete_context_entry,
         _merge_autocomplete_context,
+        local_path=_local_overlay_path(COMMANDS_REGISTRY_FILE),
     )
     frozen_registry = _freeze_registry_value(registry)
     _COMMANDS_REGISTRY_CACHE["signature"] = signature
@@ -573,12 +576,12 @@ def load_faq(cfg=None):
     return registry_faq.load_faq(FAQ_FILE, cfg, load_yaml_list_with_local=_load_yaml_list_with_local)
 
 
-def load_all_faq(app_name="darklab_shell", project_readme=None, cfg=None):
+def load_all_faq(app_name="darklab_shell", project_source=None, cfg=None):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
     return registry_faq.load_all_faq(
         FAQ_FILE,
         app_name,
-        project_readme,
+        project_source,
         cfg,
         load_yaml_list_with_local=_load_yaml_list_with_local,
     )
@@ -607,7 +610,7 @@ def _workflow_entry_enabled(entry, cfg=None):
 
 def load_workflows():
     """Read workflows.yaml and return a list of workflow dicts."""
-    return registry_content.load_workflows(WORKFLOWS_FILE)
+    return registry_content.load_workflows(WORKFLOWS_FILE, local_path=_local_overlay_path(WORKFLOWS_FILE))
 
 
 def load_all_workflows(cfg=None):
@@ -616,13 +619,14 @@ def load_all_workflows(cfg=None):
         WORKFLOWS_FILE,
         cfg,
         suggestion_enabled_for_features=_suggestion_enabled_for_features,
+        local_path=_local_overlay_path(WORKFLOWS_FILE),
     )
 
 
 def load_welcome():
     """Read welcome.yaml and return startup blocks for the welcome typeout.
     Returns an empty list if the file is missing or empty, disabling the welcome animation."""
-    return registry_content.load_welcome(WELCOME_FILE)
+    return registry_content.load_welcome(WELCOME_FILE, local_path=_local_overlay_path(WELCOME_FILE))
 
 
 def load_tour(cfg=None, *, mobile: bool = False) -> TourPayload:
@@ -637,22 +641,24 @@ def load_tour(cfg=None, *, mobile: bool = False) -> TourPayload:
 def load_ascii_art():
     """Read ascii.txt and return the welcome banner art as plain text.
     Returns an empty string if the file is missing or empty."""
-    return registry_content.load_ascii_art(ASCII_FILE)
+    return registry_content.load_ascii_art(ASCII_FILE, local_path=_local_overlay_path(ASCII_FILE))
 
 
 def load_ascii_mobile_art():
     """Read ascii_mobile.txt and return the compact mobile banner art."""
-    return registry_content.load_ascii_art(ASCII_MOBILE_FILE)
+    return registry_content.load_ascii_art(ASCII_MOBILE_FILE, local_path=_local_overlay_path(ASCII_MOBILE_FILE))
 
 
 def load_welcome_hints(cfg=None):
     """Read app_hints.txt and return enabled app-usage hints."""
-    return registry_content.load_scoped_hints(APP_HINTS_FILE, cfg)
+    return registry_content.load_scoped_hints(APP_HINTS_FILE, cfg, local_path=_local_overlay_path(APP_HINTS_FILE))
 
 
 def load_mobile_welcome_hints(cfg=None):
     """Read app_hints_mobile.txt and return enabled mobile-specific hints."""
-    return registry_content.load_scoped_hints(APP_HINTS_MOBILE_FILE, cfg)
+    return registry_content.load_scoped_hints(
+        APP_HINTS_MOBILE_FILE, cfg, local_path=_local_overlay_path(APP_HINTS_MOBILE_FILE)
+    )
 
 
 def _suggestion_interactive_enabled(item) -> bool:

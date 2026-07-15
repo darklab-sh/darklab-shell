@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -58,7 +61,9 @@ def _manifest(backup_dir: Path) -> dict:
     return json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
 
 
-def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(tmp_path, monkeypatch):
+def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(
+    tmp_path, monkeypatch, capsys
+):
     _clean_env(monkeypatch)
     data_dir = tmp_path / "data"
     _write_sqlite_database(data_dir / "history.db")
@@ -79,10 +84,13 @@ def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(tm
         str(output_dir),
         "--compress",
         "none",
+        "--result-path-only",
     ])
 
     assert rc == 0
     backup_dir = _backup_dirs(output_dir)[0]
+    captured = capsys.readouterr()
+    assert captured.out == f"{backup_dir}\n"
     assert (backup_dir / "database" / "history.db").exists()
     assert not (backup_dir / "data" / "history.db").exists()
     assert (backup_dir / "data" / "run-output" / "artifact.txt").read_text(encoding="utf-8") == "artifact body"
@@ -129,6 +137,65 @@ def test_extra_and_env_files_are_included_without_logging_secret_values(tmp_path
     assert any(path.name == ".env" for path in (backup_dir / "config").rglob(".env"))
     assert any(path.name == "custom.local.yaml" for path in (backup_dir / "config").rglob("custom.local.yaml"))
     assert any(path.name == "docker-compose.local.yml" for path in (backup_dir / "extra").rglob("docker-compose.local.yml"))
+
+
+def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypatch):
+    _clean_env(monkeypatch)
+    data_dir = tmp_path / "data"
+    _write_sqlite_database(data_dir / "history.db")
+    (data_dir / ".secrets_master_key").write_text("vault-key\n", encoding="utf-8")
+    conf_dir = tmp_path / "shipped-conf"
+    _write_config(conf_dir, f"data_dir: {data_dir}\nworkspace_enabled: false\n")
+    local_conf_dir = tmp_path / "operator-conf"
+    local_conf_dir.mkdir()
+    (local_conf_dir / "config.local.yaml").write_text("log_level: INFO\n", encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0\n",
+        encoding="utf-8",
+    )
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    release_manifest = tmp_path / "release-manifest.json"
+    release_manifest.write_text('{"version":"2.6.0"}\n', encoding="utf-8")
+    managed_checksums = tmp_path / "managed-files.sha256"
+    managed_checksums.write_text("test  compose.yaml\n", encoding="utf-8")
+    output_dir = tmp_path / "backups"
+
+    rc = backup_system.main([
+        "--repository-free",
+        "--conf-dir",
+        str(conf_dir),
+        "--local-conf-dir",
+        str(local_conf_dir),
+        "--env-file",
+        str(env_file),
+        "--compose-file",
+        str(compose_file),
+        "--data-source",
+        f"bind:{data_dir}",
+        "--extra-file",
+        str(release_manifest),
+        "--extra-file",
+        str(managed_checksums),
+        "--output-dir",
+        str(output_dir),
+        "--compress",
+        "none",
+    ])
+
+    assert rc == 0
+    backup_dir = _backup_dirs(output_dir)[0]
+    assert (backup_dir / "operator" / ".env").read_bytes() == env_file.read_bytes()
+    assert (backup_dir / "operator" / "conf" / "config.local.yaml").read_bytes() == (
+        local_conf_dir / "config.local.yaml"
+    ).read_bytes()
+    assert (backup_dir / "release" / "compose.yaml").is_file()
+    assert (backup_dir / "release" / "release-manifest.json").is_file()
+    assert (backup_dir / "release" / "managed-files.sha256").is_file()
+    assert (backup_dir / "data" / ".secrets_master_key").is_file()
+    manifest = _manifest(backup_dir)
+    assert manifest["repository_free"] is True
 
 
 def test_missing_extra_file_fails_unless_operator_allows_it(tmp_path, monkeypatch):

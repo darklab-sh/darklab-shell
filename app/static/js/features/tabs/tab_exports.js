@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Tab transcript copy, export, and permalink actions.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import { getTab as importedGetTab } from '../../core/state.js';

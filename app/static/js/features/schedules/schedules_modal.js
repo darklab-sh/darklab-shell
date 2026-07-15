@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Browser schedules modal and handoff actions.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';

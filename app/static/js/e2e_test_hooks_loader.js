@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Keep Playwright-only browser hooks out of ordinary shell startup.
 
 const E2E_HOOK_LOADER_GLOBAL = typeof window !== 'undefined' ? window : globalThis;

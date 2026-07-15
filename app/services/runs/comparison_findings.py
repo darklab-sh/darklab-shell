@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Persisted finding identity, loading, and run-to-run comparison helpers."""
 
 from __future__ import annotations
@@ -115,16 +118,16 @@ def run_finding_compare_items(
     run_scope_sql, run_scope_params = owner_scope.predicate(table_alias="r")
     finding_scope_sql, finding_scope_params = owner_scope.predicate(table_alias="f")
     where_sql = (
-        " WHERE fo.run_id = ? AND " + run_scope_sql + " AND " + finding_scope_sql  # nosec B608
+        " WHERE fo.run_id = ? AND " + run_scope_sql + " AND " + finding_scope_sql  # nosec
     )
     params = (run_id, *run_scope_params, *finding_scope_params)
     total = conn.execute(
-        "SELECT COUNT(*) AS count FROM findings_occurrences fo "  # nosec B608
+        "SELECT COUNT(*) AS count FROM findings_occurrences fo "  # nosec
         "JOIN findings f ON f.id = fo.finding_id JOIN runs r ON r.id = fo.run_id" + where_sql,
         params,
     ).fetchone()["count"]
     rows = conn.execute(
-        "SELECT f.id, f.raw_line, f.title, f.fingerprint, f.status AS review_state, "  # nosec B608
+        "SELECT f.id, f.raw_line, f.title, f.fingerprint, f.status AS review_state, "  # nosec
         "f.tool_root, f.kind, f.subject_key, fo.observed_severity, fo.comparison_key, "
         "fo.snippet AS occurrence_snippet, fo.line_number, f.created "
         "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "

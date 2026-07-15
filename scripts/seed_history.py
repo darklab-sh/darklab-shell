@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Seed the configured history database with realistic runs for a UUID or tok_ session.
 
 Useful for exercising user-facing flows that only reveal themselves with a

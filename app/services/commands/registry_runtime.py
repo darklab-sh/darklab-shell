@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Runtime command adaptation helpers for command registry entries."""
 
 from __future__ import annotations

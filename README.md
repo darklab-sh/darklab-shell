@@ -24,6 +24,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - [Installed Tools](#installed-tools)
 - [Production Deployment](#production-deployment)
 - [Security & Process Isolation](#security--process-isolation)
+- [License](#license)
 - [Documentation Map](#documentation-map)
 - [Project Structure](#project-structure)
 
@@ -79,26 +80,69 @@ See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
 
 ## Quick Start
 
-### Option 1: Run With Docker Compose
+### Option 1: Install a Release With Docker Compose
 
-This is the recommended setup. It gives you the same major runtime pieces as production:
+This is the recommended path for a normal self-hosted deployment. It needs Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool on a Linux AMD64 host. It doesn't need Git, a source checkout, Python, Node, or a local image build.
 
-- the Flask app
-- Redis for rate limiting and active PID tracking
-- the same container filesystem restrictions and capabilities used by the shipped image
+Download the exact release installer and checksum into a temporary review directory:
 
-Steps:
+```bash
+mkdir darklab-shell-download
+cd darklab-shell-download
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh.sha256
+sha256sum -c setup.sh.sha256
+less setup.sh
+```
 
-1. Make sure Docker and Docker Compose are installed and running.
-2. From the repo root, start the stack:
+The checksum above catches download corruption. To verify that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity before running the installer:
 
-   ```bash
-   docker compose up --build
-   ```
+```bash
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/SHA256SUMS.sigstore.json
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0" \
+  --certificate-oidc-issuer "https://gitlab.com"
+grep '  setup.sh$' SHA256SUMS | sha256sum -c -
+```
 
-3. Open [http://localhost:8888](http://localhost:8888).
+After you've reviewed it, create the deployment directory and start the pinned Docker Hub image:
 
-### Option 2: Run Locally Without Docker
+```bash
+sh setup.sh --dir "$HOME/darklab-shell"
+cd "$HOME/darklab-shell"
+docker compose pull
+./verify-release-image.sh
+docker compose up -d
+docker compose ps
+```
+
+Open [http://127.0.0.1:8888](http://127.0.0.1:8888). The loopback-only default keeps the app off the wider network until you deliberately change `HOST_BIND_ADDRESS` or put it behind a trusted reverse proxy.
+
+The canonical image is published in the [GitLab Container Registry](https://gitlab.com/darklab.sh/darklab_shell/container_registry), then the same manifest is copied to [`docker.io/darklabsh/darklab-shell`](https://hub.docker.com/r/darklabsh/darklab-shell) for the Compose pull path. The protected tag pipeline keylessly signs both immutable image references and `SHA256SUMS` with its GitLab OIDC identity. The Docker Hub overview publishes the stable issuer and certificate-identity pattern independently of the GitLab release assets, and the public release check requires that trust information to be present. The release also publishes a CycloneDX SBOM, SLSA provenance, the Grype vulnerability report, a build-input inventory, and a small evidence index tying them to the tag, commit, pipeline, shared image digest, and exact Python base manifest. The release gate fails on Critical findings that have an available fix; all reported matches remain in the downloadable report.
+
+The installed `release-manifest.json` records both image references, matching digests, and compressed and unpacked image sizes. After the pull, `verify-release-image.sh` requires those registry digests to agree, checks that `.env` still selects the reviewed image, and confirms the local image has the recorded digest before startup. CI keeps cold-pull timing as separate run metadata so retrying a release can't change an already published payload. `LICENSE` contains darklab_shell's GNU AGPLv3 terms; `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` list the bundled tools' separate terms, including WPScan's commercial-use note and Nmap's NPSL 0.95 redistribution conditions.
+
+For convenience, the same installer can be streamed directly. This skips the review step above, so use it only when you accept that tradeoff:
+
+```bash
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh | sh -s -- --dir "$HOME/darklab-shell"
+```
+
+### Option 2: Run the Source-Mounted Development Stack
+
+Clone the repository when you're changing the app or want the source tree mounted into the container:
+
+```bash
+git clone https://gitlab.com/darklab.sh/darklab_shell.git
+cd darklab_shell
+docker compose up --build
+```
+
+This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop.
+
+### Option 3: Run Locally Without Docker
 
 This is useful when you want a lighter local development loop and do not need the container runtime.
 
@@ -175,7 +219,7 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Runtime settings live in `app/conf/config.yaml`, with optional untracked overrides in `app/conf/config.local.yaml`. The other operator-owned files under `app/conf/` customize commands, FAQ entries, welcome content, app hints, onboarding tour chapters, workflows, wordlists, and themes.
+Released images keep shipped settings and catalogs under `/app/conf`. Repository-free installs put operator overrides in `./conf`, mounted at `/config`, so image upgrades can refresh defaults without hiding them behind an old host directory. Source-mounted development uses the same `*.local.*` names beside the files in `app/conf`. The production installer includes safe starters for commands, FAQ, welcome content, workflows, hints, and the default theme, plus non-active examples for full replacement catalogs and banner art.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, including:
 
@@ -184,7 +228,7 @@ Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, includ
 - config reload behavior
 - `.env` variables such as `APP_PORT`, `WORKSPACE_ROOT`, `WEB_CONCURRENCY`, `WEB_THREADS`, `DATABASE_BACKEND`, `DATABASE_URL`, and `DOCKER_GELF_ADDRESS`
 - switching between SQLite and Postgres, including Compose profiles, `DATABASE_URL`, and `.env` versus `config.local.yaml` precedence
-- `docker-compose.yml` and `examples/docker-compose.prod.yml`
+- repository-free `compose.yaml`, the source-mounted `docker-compose.yml`, and optional deployment overlays
 - Files/workspace storage recipes
 - production host tuning notes
 
@@ -307,17 +351,23 @@ When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `
 
 ## Production Deployment
 
-The base [docker-compose.yml](docker-compose.yml) is suitable for local use and testing. For production, layer [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) on top of the base stack:
+The release installer creates a small operator-owned directory with `compose.yaml`, `.env`, safe local-overlay starters under `conf/`, `data/`, `workspaces/`, `backups/`, the project license, third-party notices, a release manifest, managed-file checksums, the pulled-image verifier, and the `darklab-deploy` lifecycle command. Production Compose pulls the exact `docker.io/darklabsh/darklab-shell:2.6.0` tag and never mounts the repository or `/app` from the host. The host config directory stays private at `0700` with files at `0600`; on startup, the root entrypoint validates and copies that tree into a private `appuser` runtime directory before it drops privileges.
 
-```bash
-docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
-```
+Release-page assets include the deterministic deployment archive, its checksums, the signed `SHA256SUMS` bundle, CycloneDX SBOM, SLSA provenance, build-input inventory, evidence index, and full vulnerability report. The build-input inventory records the exact Python base manifest, source and build-file hashes, effective Docker build arguments, and every Dockerfile step that reaches a package registry or source host. The deployment archive is byte-stable; the full scanner image isn't claimed to be byte-reproducible because Debian packages and several transitive tool dependencies resolve when it builds. The signed image digest and SBOM identify the result that was actually released. Cosign verification uses `https://gitlab.com` as the issuer and the exact tag identity `https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/vX.Y.Z`; release-candidate validation uses the matching `vX.Y.Z-rc.N` identity. The independent Docker Hub overview publishes both patterns, and signatures for both registry references are stored alongside their images.
 
-The production overlay adds reverse-proxy-aware environment values, GELF Docker log transport, an external Docker network model, persistent workspace storage at `/workspaces`, scanner-friendly `ulimits` and network sysctls, and optional Gunicorn sizing through `.env`.
+`/data` is durable and contains SQLite, saved output artifacts, and the app-managed vault key. Redis deliberately disables RDB and AOF because it holds coordination, rate-limit, broker, and cache state; a Redis restart can drop in-flight work but doesn't replace the durable app database. Files workspaces use tmpfs by default and disappear when the shell container restarts. To keep Files data, set `WORKSPACE_ROOT=/workspaces` in `.env`, then set `workspace_enabled: true` and `workspace_backend: volume` in `conf/config.local.yaml`; the production stack already mounts the host `./workspaces` directory there.
 
-The bundled Redis service is ephemeral: it runs with a read-only root filesystem and disables RDB/AOF persistence because Redis stores coordination, rate-limit, broker, and cache-like state. Durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
+The default stack uses SQLite and Redis. Set `COMPOSE_PROFILES=postgres` plus `DATABASE_BACKEND=postgres` to use the generated Postgres credentials, or `COMPOSE_PROFILES=llama` to start the optional local model. Raw-packet scanning stays off unless `RAW_PACKET_SCANNING_ENABLED=true`; use the readiness and firewall guidance in [CONFIGURATION.md](CONFIGURATION.md#raw-packet-scanning) before enabling it.
 
-Use [`scripts/backup_system.py`](scripts/backup_system.py) for scheduled operator backups. It captures the selected database backend, `/data` artifacts, app-owned secret-key files, local config, `.env`, optional deployment-specific files, and enabled workspace storage. The script records the app's logical paths and the physical host or Docker sources it copies, writes a redacted manifest plus checksums, and is safe to run from cron as a host user that can read the selected bind mounts or Docker sources. Its dry run checks explicit input paths before writing anything, each completed run gets its own output path instead of replacing an earlier backup, and retention runs print concise examined/removed/failure totals for cron logs.
+On SELinux-enforcing hosts, label the private bind mounts for container use, for example `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z` in a local Compose override. Rootless Docker and Podman may not be able to grant the `NET_RAW` and `NET_ADMIN` capabilities used by scanner tools. Docker Compose 2.20.0 or newer on Linux AMD64 is the supported production runtime; Podman remains best effort. Dedicated release gates exercise native ARM64, SELinux-enforcing Docker, and rootless Podman when their matching runners are enabled, but those lanes don't broaden the supported production matrix until they pass.
+
+Use `./darklab-deploy status` to check the installed version, image selection, and release-owned files. `./darklab-deploy backup --keep-days 14` creates and verifies a private archive under `backups/`; SQLite uses the online backup API and Postgres uses `pg_dump` inside a one-off release-image container, so the host needs Docker and Compose but not Python or Postgres client tools. If the bundled Postgres service is stopped, the command starts it for the dump and returns it to the stopped state afterward. Durable Files workspaces are included when `WORKSPACE_ROOT=/workspaces`. Each archive carries `.env`, local config, `/data` including the app-owned vault key, enabled durable workspaces, a redacted manifest, restore notes, and checksums.
+
+Upgrade to an exact newer version with `./darklab-deploy upgrade X.Y.Z`. The command rejects changed release-owned files and downgrades, verifies the release's signed checksum manifest through a digest-pinned Cosign container, checks the exact deployment archive against that manifest, creates and verifies a pre-upgrade backup, validates the new Compose file, then advances the managed files and `DARKLAB_IMAGE` while leaving `.env` settings, `conf/`, `data/`, `workspaces/`, and existing backups in place. When the release adds environment settings, the upgrade lists their names and points to the new `.env.example` without changing the operator's `.env` or printing values. It prints the pull, image-verification, and restart commands instead of starting the new release for you. `--archive /path/to/archive` is the offline path: it checks the adjacent `.sha256` file but expects you to verify the publisher's `SHA256SUMS.sigstore.json` before running the command. Startup can apply forward-only database changes; changing an image tag back doesn't reverse a migration.
+
+Restore a managed backup with `./darklab-deploy restore backups/<archive>.tar.gz`. Restore takes another safety backup first, stops the app, verifies and stages the selected archive, then restores SQLite or Postgres in one transaction before it commits operator files and durable workspaces. It keeps the installed image and target deployment's Postgres credentials, returns restored host files to the invoking operator, and restarts only after everything succeeds. A failure leaves the app stopped and prints the exact safety-backup recovery command instead of starting against partial state. `./darklab-deploy migration-help` explains how to move a clone-backed deployment without copying source-owned files. `./darklab-deploy remove --yes` stops the stack and removes only release-owned files; `.env`, `conf/`, `data/`, `workspaces/`, and `backups/` remain for deliberate cleanup.
+
+The repository-backed [docker-compose.yml](docker-compose.yml) remains the development and custom-deployment stack. [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is still available for operators who need its GELF, reverse-proxy, external-network, and host-tuning choices; it isn't part of the neutral downloadable production stack.
 
 Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
 
@@ -343,7 +393,7 @@ This section is intentionally operator-focused. For the developer-facing details
 
 ### Read-only filesystem
 
-The container filesystem is set to read-only (`read_only: true`) and the app volume is mounted read-only (`./app:/app:ro`). There are two intentional exceptions:
+The container filesystem is read-only (`read_only: true`) in both Compose modes. Development overlays the repository source as `./app:/app:ro`; production runs the `/app` bundled into the image and doesn't mount source from the host. There are two intentional writable exceptions:
 
 - **`/data`** — a writable bind mount for the default SQLite database, run-output artifacts, body-store files, and app-owned secret key file, owned by `appuser` with `chmod 700`. Postgres deployments still use this path for filesystem-backed artifacts and app-owned files. Only Gunicorn can write here; the `scanner` user that runs commands has no access. If `data_dir` is unset and `/data` is not writable, the app falls back to `/tmp` for local/dev runs
 - **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, cache files, and optional Files workspaces. Workspace owner directories are app-managed, sticky, setgid, and group-scoped so `appuser` and `scanner` can share validated files without making them world-readable
@@ -421,6 +471,20 @@ To prevent commands from writing to either path directly, the app blocks any com
 
 ---
 
+## License
+
+Copyright (C) 2026 darklab_shell contributors.
+
+darklab_shell's original source code and documentation are licensed under the [GNU Affero General Public License version 3](LICENSE), using the SPDX expression `AGPL-3.0-only`. You can use, study, modify, distribute, and offer the app as a service under those terms. If you modify darklab_shell and let users interact with it remotely over a network, Section 13 requires the modified version to prominently offer every remote user an opportunity to receive that version's complete Corresponding Source at no charge, through a standard or customary way of copying software. The full [license text](LICENSE) controls.
+
+Project-owned source files carry short SPDX copyright and license notices near the top, so their terms stay clear when a file is copied on its own. Generated bundles and third-party code keep their upstream notices instead of receiving the darklab_shell header. The root `LICENSE` remains the complete license text.
+
+The rail footer, mobile menu footer, and **What is this?** FAQ entry link to the exact GitLab source tag for each official release, with the repository page opened at its README. Operators of modified network deployments remain responsible for pointing that link at their version's complete corresponding source, making the offer prominent to all remote users, and providing the source at no charge. The official placement isn't a blanket guarantee that a modified service meets Section 13.
+
+Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Released images and installer payloads include `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` so those terms remain separate from the project license.
+
+---
+
 ## Documentation Map
 
 - [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
@@ -456,12 +520,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ```text
 .
 ├── .dockerignore               # Docker build-context exclusion list — keeps node_modules, tests, .git out of the image
-├── .env.example                # Environment variable template (copy to .env and edit locally, including optional AI worker/provider settings)
+├── .env.example                # Shared development/production environment template, copied to a private .env by the release installer
 ├── .gitignore                  # Git ignore patterns
-├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
+├── .gitlab-ci.yml              # GitLab CI pipeline — tests, lint, audit, image verification, dual-registry release, and installer publishing
 ├── .gitlab/
 │   └── merge_request_templates/
 │       └── Default.md          # Default GitLab merge request template used by contributors
+├── .mailmap                    # Canonical contributor identity mapping for local and GitLab-authored commits
 ├── .markdownlint-cli2.jsonc    # markdownlint-cli2 config — Markdown lint rules used by npm run lint:md
 ├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
 ├── .tooling/                   # Developer/test/lint tool configuration; app runtime config lives under app/conf/
@@ -487,8 +552,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── CONTRIBUTORS.md            # Project contributors
 ├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
 ├── DOC_STANDARDS.md          # Documentation structure, preferred templates, and review rules for ongoing doc updates
-├── Dockerfile
+├── Dockerfile                  # Shared development/production image with scanner toolchain and bundled /app runtime
 ├── FEATURES.md                # User-facing feature catalog with screenshots and highlights
+├── LICENSE                    # GNU AGPLv3 terms for darklab_shell's original source code and documentation
 ├── README.md                  # This file — top-level overview and project structure map
 ├── THEME.md                   # Theme authoring/reference guide and runtime token behavior
 ├── TODO.md                    # Internal task list, known issues, and product ideas
@@ -556,6 +622,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── wordlists.yaml          # Curated SecLists catalog categories used by the wordlist command and autocomplete
 │   │   └── workflows.yaml          # Guided workflows panel definitions (multi-step diagnostic command sequences)
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
+│   ├── config_paths.py         # Shared shipped-config and operator-overlay path resolver
 │   ├── core/
 │   │   ├── __init__.py         # Core helper package marker
 │   │   ├── database.py         # DB connection, schema init, retention pruning
@@ -1217,6 +1284,20 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── wsgi.py                 # Gunicorn WSGI entrypoint that calls bootstrap()
 ├── assets.config.json         # Frontend asset bundle membership/order for scripts/build_assets.mjs
 ├── assets/                     # README media assets (demo videos)
+├── deploy/
+│   ├── THIRD_PARTY_NOTICES.txt # Operator-facing summary of licenses and special terms for bundled tools, libraries, and fonts
+│   ├── compose.yaml           # Repository-free production stack pinned to the public Docker Hub release
+│   ├── config-local.yaml.dist # Comment-only source for the installed conf/config.local.yaml placeholder
+│   ├── container-licenses.json # Machine-checked release inventory of bundled third-party sources, terms, and notice paths
+│   ├── darklab-deploy.sh.in   # Installed lifecycle command template for status, backup, restore, upgrade, migration, and removal
+│   ├── dockerhub-overview.txt # Tracked Docker Hub overview with independent Cosign issuer and identity verification details
+│   ├── setup.sh.in            # Exact-release POSIX installer template rendered with the archive URL and checksum
+│   ├── third-party-licenses/
+│   │   ├── Nmap-7.95-NPSL-0.95.txt # Reviewed Nmap Public Source License text shipped with the image
+│   │   ├── OFL-1.1.txt        # SIL Open Font License and copyright notices for vendored fonts
+│   │   ├── WPScan-4.0.1.txt   # Unmodified WPScan Public Source License required for redistribution
+│   │   └── frontend-runtime.txt # MIT notices for browser libraries copied into the app bundle
+│   └── verify-release-image.sh # Confirms a pulled production image matches both recorded registry digests
 ├── docker-compose.yml          # Local Compose stack with Redis, optional Postgres, optional local AI providers, and the shell app
 ├── docs/
 │   ├── ai-privacy.md          # Optional AI assist privacy posture and operator checks
@@ -1239,16 +1320,20 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── package-lock.json           # npm dependency lockfile (auto-generated by npm install)
 ├── package.json                # JS dev dependencies and test scripts
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
-├── requirements-dev.txt        # Dev-only dependencies (pytest, Ruff, bandit, pip-audit, yamllint)
+├── requirements-dev.txt        # Dev-only dependencies for tests, lint, audits, and package checks
 ├── scripts/
-│   ├── backup_system.py       # Cron-friendly operator backup helper for SQLite/Postgres, /data artifacts, config, secrets material, and workspaces
+│   ├── backup_system.py       # Cron-friendly source and managed-deployment backup helper for SQLite/Postgres, data, config, secrets, and workspaces
 │   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
 │   ├── build_assets.mjs       # Generates committed minified frontend bundles in app/static/build/ (run via npm run assets:sync)
+│   ├── build_release_evidence.py # Binds build inputs, images, SBOM, scan, source, and pipeline into release evidence
+│   ├── build_release_payload.py # Generates the deterministic exact-version deployment archive, setup script, and SHA-256 manifests
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
 │   ├── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs, manifests, and a review index to /tmp/darklab_shell-ui-capture/
-│   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job; reports production Docker base image plus CI runner images
+│   ├── check_container_licenses.py # Blocks release when Dockerfile tools drift from the reviewed license/notice inventory
+│   ├── check_source_licenses.py # Enforces SPDX notices on project-owned source while excluding generated and third-party files
+│   ├── check_versions.sh       # Dependency drift report plus offline app/Docker/Compose/release version consistency gate
 │   ├── container_smoke_test.sh # Reuses or force-builds the smoke cache image, runs the shared smoke corpus through /runs, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
 │   ├── generate_api_openapi.py # Regenerates docs/api-v1-openapi.json from the Python /api/v1 spec
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
@@ -1261,12 +1346,17 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── playwright/
 │   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
 │   │   └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
+│   ├── publish_release_artifacts.sh # Publishes immutable release images and installer payloads with retry/conflict checks
 │   ├── record_demo.sh          # Records the desktop demo through OBS while Playwright drives the browser
 │   ├── record_demo_mobile.sh   # Records the mobile demo through OBS with the in-page keyboard overlay
+│   ├── restore_system.py      # Verifies and restores managed SQLite/Postgres deployment backups inside the release image
 │   ├── run_playwright.sh       # Local Playwright wrapper — quiet by default, clears ports, and passes through specs/grep/config
 │   ├── run_postgres_tests.sh   # Opt-in Postgres pytest lane with disposable container, host DSN, and Compose-network modes
 │   ├── run_pytest.sh           # Local pytest wrapper — pins repo config/rootdir and keeps collection scoped
-│   └── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
+│   ├── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
+│   ├── verify_bundled_tools.sh # Executes the packaged scanner toolchain as the unprivileged scanner user on a native target architecture
+│   ├── verify_repository_free_image.sh # Starts a released image with the production bind layout and checks architecture, capabilities, persistence, and health
+│   └── verify_repository_free_postgres.sh # Installs a release payload and round-trips API state through bundled-Postgres backup and restore
 ├── tests/
 │   ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
 │   ├── js/
@@ -1389,6 +1479,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
 │   │   ├── test_output_signals_against_line_signal.py # Output signal scope coverage for the typed line-event signal enum
 │   │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
+│   │   ├── test_production_install.py # Production Compose, deterministic release payload, managed lifecycle, and security-first installer coverage
 │   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
 │   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
 │   │   ├── test_run_comparison_enhancements.py # Run comparison severity, adapters, scope, route, and migration coverage
@@ -1403,6 +1494,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
 └── tools/
     └── darklab_cli/
+        ├── LICENSE             # GNU AGPLv3 terms included with the installable CLI distribution
         ├── pyproject.toml      # Installable in-repo darklab CLI package metadata
         └── src/
             └── darklab_cli/

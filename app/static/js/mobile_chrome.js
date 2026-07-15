@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Mobile chrome controller ──
 // Owns the mobile-only UI: progress bar, recent peek row,
 // bottom-sheet menu from the hamburger, and the keyboard-aware edit helper

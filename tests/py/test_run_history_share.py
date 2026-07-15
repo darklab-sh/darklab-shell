@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Higher-value route coverage focused on brokered /runs behaviour,
 history isolation, and share JSON roundtrips.
@@ -30,7 +33,7 @@ import core.database as shell_db
 import services.secrets.storage as secrets_storage
 import services.secrets.vault as secrets_vault
 import services.workspace.files as shell_workspace
-from config import PROJECT_README
+from config import PROJECT_SOURCE
 from core.database import db_connect
 from services.runs.output_model import line_event_from_legacy, to_wire
 from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
@@ -3125,7 +3128,7 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert f"{shell_app_module.CFG['app_name']}\\n" in body
-        assert f"README: see the project README at {PROJECT_README}\\n" in body
+        assert f"README: see the project README at {PROJECT_SOURCE}\\n" in body
         assert '"type": "exit"' in body
 
     def test_builtin_ps_lists_active_session_processes(self):

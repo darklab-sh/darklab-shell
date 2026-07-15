@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project workspace in-browser state.
 // Loaded before shell_chrome.js so chrome wiring can avoid owning modal state directly.
 

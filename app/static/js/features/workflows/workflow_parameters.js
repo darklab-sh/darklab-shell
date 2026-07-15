@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Workflow parameter persistence, value sources, and browser-side previews.
 
 import { getAppState as importedGetAppState } from '../../core/state.js';

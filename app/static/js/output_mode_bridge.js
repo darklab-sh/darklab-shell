@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral output-mode boundary for timestamp preference synchronization.
 
 const OUTPUT_MODE_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;

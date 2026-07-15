@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { bindMobileSheet as importedBindMobileSheet } from '../ui/mobile_sheet.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../ui/overlay_actions_bridge.js';
 import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from './workspace/workspace_autocomplete_cache.js';

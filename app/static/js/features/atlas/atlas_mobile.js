@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Mobile Atlas controller — list-detail drill-in surface that composes
 // the same state, action handlers, and detail renderers as the desktop
 // Atlas overlay (atlas_overlay.js).

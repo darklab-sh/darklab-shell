@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Local darklab_shell configuration overrides.
+#
+# Other supported local content overrides use the same relative names under
+# this repository-free deployment's conf/ directory.
+#
+# Add only the settings you want to override. The complete option reference is:
+# https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md

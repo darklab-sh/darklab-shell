@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Check pinned dependency versions plus production and CI image versions.
 
 The script reads the production Docker base image from Dockerfile and the CI
@@ -28,6 +31,13 @@ PACKAGE_JSON = ROOT / "package.json"
 PACKAGE_LOCK = ROOT / "package-lock.json"
 DOCKERFILE = ROOT / "Dockerfile"
 GITLAB_CI = ROOT / ".gitlab-ci.yml"
+APP_CONFIG = ROOT / "app" / "config.py"
+DEV_COMPOSE = ROOT / "docker-compose.yml"
+PROD_COMPOSE = ROOT / "deploy" / "compose.yaml"
+ENV_EXAMPLE = ROOT / ".env.example"
+OPENAPI_SNAPSHOT = ROOT / "docs" / "api-v1-openapi.json"
+CONTAINER_LICENSE_INVENTORY = ROOT / "deploy" / "container-licenses.json"
+PRODUCTION_INSTALL_TEST = ROOT / "tests" / "py" / "test_production_install.py"
 PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==(.+)$")
 IMAGE_PATTERN = re.compile(r"^([A-Za-z0-9./_-]+?)(?::([^@\s]+))?(?:@.+)?$")
 NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
@@ -252,6 +262,65 @@ def _load_json(path: pathlib.Path) -> dict:
         return {}
 
 
+def _release_version_values() -> dict[str, str]:
+    package = _load_json(PACKAGE_JSON)
+    package_lock = _load_json(PACKAGE_LOCK)
+    openapi = _load_json(OPENAPI_SNAPSHOT)
+    container_licenses = _load_json(CONTAINER_LICENSE_INVENTORY)
+    lock_root = package_lock.get("packages", {}).get("", {}) if isinstance(package_lock, dict) else {}
+
+    def _match(path: pathlib.Path, pattern: str) -> str:
+        match = re.search(pattern, path.read_text(encoding="utf-8"), re.MULTILINE)
+        return match.group(1) if match else "missing"
+
+    return {
+        "app/config.py": _match(APP_CONFIG, r'^APP_VERSION\s*=\s*["\']([^"\']+)["\']'),
+        "package.json": str(package.get("version", "missing")),
+        "package-lock.json": str(package_lock.get("version", "missing")),
+        "package-lock.json root": str(lock_root.get("version", "missing")),
+        "Dockerfile": _match(DOCKERFILE, r"^ARG APP_VERSION=([^\s]+)"),
+        "docker-compose.yml": _match(
+            DEV_COMPOSE,
+            r"APP_VERSION:\s*\$\{APP_VERSION:-([^}]+)\}",
+        ),
+        "deploy/compose.yaml": _match(
+            PROD_COMPOSE,
+            r"docker\.io/darklabsh/darklab-shell:"
+            r"([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)",
+        ),
+        ".env.example": _match(
+            ENV_EXAMPLE,
+            r"^DARKLAB_IMAGE=docker\.io/darklabsh/darklab-shell:([^\s]+)",
+        ),
+        "deploy/container-licenses.json": str(
+            container_licenses.get("reviewed_for_release", "missing")
+        ),
+        "docs/api-v1-openapi.json": str(openapi.get("info", {}).get("version", "missing")),
+        "tests/py/test_production_install.py": _match(
+            PRODUCTION_INSTALL_TEST,
+            r'^RELEASE_VERSION\s*=\s*["\']([^"\']+)["\']',
+        ),
+    }
+
+
+def _check_release_version(expected: str) -> int:
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", expected):
+        print(f"Invalid release version: {expected}", file=sys.stderr)
+        return 2
+    mismatches = {
+        source: actual
+        for source, actual in _release_version_values().items()
+        if actual != expected
+    }
+    if mismatches:
+        print(f"Release version drift; expected {expected}:", file=sys.stderr)
+        for source, actual in mismatches.items():
+            print(f"- {source}: {actual}", file=sys.stderr)
+        return 1
+    print(f"Release version {expected} is consistent across runtime and release files.")
+    return 0
+
+
 def _node_dependencies() -> tuple[dict[str, str], dict[str, str]]:
     payload = _load_json(PACKAGE_JSON)
     if not isinstance(payload, dict):
@@ -406,6 +475,7 @@ def _latest_docker_tag(current_image: str) -> tuple[str | None, str | None]:
 def _docker_base_image() -> str | None:
     if not DOCKERFILE.exists():
         return None
+    docker_args = _dockerfile_args()
     for raw in _read_lines(DOCKERFILE):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -413,7 +483,7 @@ def _docker_base_image() -> str | None:
         if line.upper().startswith("FROM "):
             ref = line.split(None, 1)[1]
             ref = ref.split(" AS ", 1)[0].split(" as ", 1)[0].strip()
-            return ref
+            return _expand_docker_vars(ref, docker_args)
     return None
 
 
@@ -592,7 +662,25 @@ def main() -> int:
         help="Only report GitHub release pins from Dockerfile",
     )
     parser.add_argument("--debug", action="store_true", help="Print registry lookup details for Go pins")
+    release_group = parser.add_mutually_exclusive_group()
+    release_group.add_argument(
+        "--release-version",
+        help=(
+            "Offline check that runtime and release files match this MAJOR.MINOR.PATCH "
+            "or MAJOR.MINOR.PATCH-rc.NUMBER version"
+        ),
+    )
+    release_group.add_argument(
+        "--check-release-version",
+        action="store_true",
+        help="Offline check that release files match the version declared in app/config.py",
+    )
     args = parser.parse_args()
+
+    if args.release_version:
+        return _check_release_version(args.release_version)
+    if args.check_release_version:
+        return _check_release_version(_release_version_values()["app/config.py"])
 
     if sum(bool(flag) for flag in (
         args.python_only,

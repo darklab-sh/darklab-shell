@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 4,110
+- behavior tests: 4,138
 - docs/inventory meta-tests: 63
-- `pytest`: 2399 (2349 behavior + 50 meta)
+- `pytest`: 2427 (2377 behavior + 50 meta)
 - `vitest`: 1498 (1485 behavior + 13 meta)
 - `playwright`: 276 behavior
-- total: 4,173
+- total: 4,201
 
 This document is organized in two parts:
 
@@ -121,7 +121,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. Each server keeps the shipped catalogs under `app/conf` and writes only its private settings overlay to a per-slot temporary directory. The helper uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
 - `npm run test:e2e:source` runs a fast source-mode Playwright slice against boot resilience, share/permalink flows, and the high-risk lazy shell surfaces. It is included in `npm test` so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
@@ -356,6 +356,7 @@ Practical note:
 - For tests that explicitly exercise per-IP rate-limit behavior, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`.
 - For browser tests that need a long-running command, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
+- `npm run lint:licenses` checks SPDX notices on project-owned source used by every test layer while leaving generated fixtures and third-party files under their existing terms.
 - Keep this appendix, README project tree, and configuration reference in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and `CONFIGURATION.md`.
 
 ---
@@ -516,6 +517,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_restricted_command_input_cidrs_env_overrides_yaml_and_drops_invalid_values` | Verifies that `RESTRICTED_COMMAND_INPUT_CIDRS` overrides YAML policy, preserves valid CIDRs, and warns on malformed values. |
 | `TestLoadConfig.test_output_entity_extra_domain_suffixes_normalize_and_drop_invalid_values` | Verifies generic-output extra domain suffix config normalizes case, dots, IDNs, and duplicate values while warning on invalid suffixes. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
+| `TestLoadConfig.test_separate_local_config_directory_overrides_shipped_config` | Verifies separate shipped and local roots select the mounted settings overlay, inventory other supported local files without treating them as settings, and reject path traversal. |
+| `TestLoadConfig.test_app_local_conf_dir_selects_external_main_overlay` | Verifies `APP_LOCAL_CONF_DIR` selects the external main config overlay when no explicit local path is passed. |
+| `TestLoadConfig.test_missing_or_comment_only_external_local_config_is_harmless` | Verifies missing, comment-only, and unknown-only external overlays leave shipped settings unchanged and stay out of the applied-overlay summary; normal empty checks remain warning-free, while DEBUG and validation-warning paths stay bounded and single-line. |
+| `TestLoadConfig.test_external_local_config_failure_reports_mounted_source` | Verifies invalid external config reports the mounted source path without hiding the failing file. |
 | `TestLoadConfig.test_unknown_yaml_keys_warn_and_are_ignored` | Verifies unknown top-level and nested config keys warn with source context and stay out of the effective config. |
 | `TestLoadConfig.test_forgiving_config_fields_coerce_human_values` | Verifies forgiving config fields still coerce human-edited boolean, integer, capped integer, and megabyte values before schema validation. |
 | `TestLoadConfig.test_config_yaml_non_mapping_root_fails_fast` | Verifies that a non-mapping `config.yaml` root fails during config load. |
@@ -536,7 +541,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
-| `TestLoadConfig.test_log_loaded_config_does_not_replay_unknown_keys_as_local_load_failures` | Verifies startup config logging does not replay unknown-key warnings under the removed local-load-failure event. |
+| `TestLoadConfig.test_log_loaded_config_does_not_replay_unknown_keys_as_local_load_failures` | Verifies startup config logging keeps safe present-overlay names at DEBUG and does not replay unknown-key warnings under the removed local-load-failure event. |
 | `TestLoadConfig.test_startup_active_run_cleanup_uses_redis_lock` | Verifies startup active-run metadata cleanup only runs once while the Redis lock is held. |
 | `TestLoadConfig.test_startup_active_run_cleanup_runs_without_redis_lock` | Verifies startup active-run metadata cleanup still runs when no Redis lock client is available. |
 | `TestPackagePresetCatalog.test_default_package_presets_match_current_wizard_ids` | Verifies the shipped package preset catalog keeps the four built-in preset ids and policies. |
@@ -790,12 +795,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestEntrypointWorkspaceRepair.test_docker_static_metadata_labels_match_runtime_config_contract` | Verifies that Docker image labels, Compose container labels, app/package version strings, and the database-backend runtime interpolation stay aligned. |
 | `TestEntrypointWorkspaceRepair.test_compose_redis_is_ephemeral_under_read_only_root` | Verifies that the bundled Redis service disables persistence while running under a read-only root filesystem. |
 | `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
-| `TestEntrypointWorkspaceRepair.test_playwright_server_uses_wsgi_application_entrypoint` | Verifies that the Playwright server helper launches Gunicorn through the `wsgi:application` entrypoint. |
+| `TestEntrypointWorkspaceRepair.test_playwright_server_uses_wsgi_application_entrypoint` | Verifies that the Playwright server helper launches Gunicorn through `wsgi:application`, keeps shipped catalogs under `app/conf`, and isolates per-worker overrides through `APP_LOCAL_CONF_DIR`. |
 | `TestAIRuntimeWiring.test_ai_worker_entrypoint_is_gated_and_supervised` | Verifies that the AI worker entrypoint is disabled by default, gated by `AI_WORKER_ENABLED`, runs as `appuser`, and restarts after exits. |
 | `TestAIRuntimeWiring.test_compose_ai_profile_wires_shell_to_llama_sidecar` | Verifies that the Compose llama profile, shell AI environment, optional dependency, healthcheck, and model cache volume stay wired together. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy, help metadata, smoke metadata, and autocomplete data, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
-| `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
+| `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies an external `commands.local.yaml` appends policy entries, adds new roots, merges same-root fields, and invalidates the command cache when edited. |
 | `TestDerivedCommandRegistry.test_commands_registry_rejects_interactive_pty_with_required_secrets` | Verifies that registry loading rejects interactive PTY commands that also declare required secret env injection. |
 | `TestDerivedCommandRegistry.test_secret_show_consumers_marks_required_and_optional` | Verifies that `secret show-consumers` labels command consumers as required or optional. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
@@ -861,14 +866,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadFaq.test_valid_entries_returned` | Checks valid entries returned handling. |
 | `TestLoadFaq.test_markdown_style_markup_renders_to_answer_html` | Checks that markdown style markup renders to answer HTML. |
 | `TestLoadFaq.test_entries_missing_answer_filtered_out` | Checks that entries missing answer filtered out. |
-| `TestLoadFaq.test_local_overlay_appends_entries` | Checks that local overlay appends entries. |
+| `TestLoadFaq.test_local_overlay_appends_entries` | Checks that an FAQ overlay from a separate operator root appends entries. |
 | `TestLoadFaq.test_workspace_feature_entry_hidden_when_workspace_disabled` | Verifies that FAQ entries tagged with `feature: workspace` are hidden when Files are disabled. |
 | `TestLoadFaq.test_workspace_feature_entry_visible_when_workspace_enabled` | Verifies that FAQ entries tagged with `feature: workspace` are visible when Files are enabled. |
 | `TestThemeRegistry.test_missing_label_falls_back_to_humanized_filename` | Checks that missing label falls back to humanized filename. |
 | `TestThemeRegistry.test_unknown_keys_are_ignored_but_valid_css_values_survive` | Checks that unknown keys are ignored but valid css values survive. |
-| `TestThemeRegistry.test_malformed_yaml_falls_back_to_defaults_without_crashing` | Checks that malformed YAML falls back to defaults without crashing. |
+| `TestThemeRegistry.test_malformed_yaml_falls_back_to_defaults_without_crashing` | Checks that malformed shipped YAML logs bounded provenance and falls back to defaults without crashing. |
 | `TestThemeRegistry.test_single_theme_registry_loads_and_can_be_selected` | Checks that single theme registry loads and can be selected. |
-| `TestThemeRegistry.test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately` | Checks that local theme overlay updates base theme and is not listed separately. |
+| `TestThemeRegistry.test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately` | Checks that a nested theme overlay from a separate operator root updates its shipped theme, is not listed separately, and logs safe provenance when malformed. |
 | `TestThemeRegistry.test_light_theme_uses_light_defaults_for_missing_keys` | Checks that light theme uses light defaults for missing keys. |
 | `TestThemeRegistry.test_missing_color_scheme_still_falls_back_to_dark_defaults` | Checks that missing color scheme still falls back to dark defaults. |
 | `TestThemeRegistry.test_theme_example_files_match_generated_defaults` | Detects drift between `_THEME_DEFAULTS` in `app/config.py` and the checked-in `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` files. Fails with `theme_dark.yaml.example is out of sync` if the built-in defaults changed without regenerating the example files. Fix by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing the updated files. |
@@ -886,8 +891,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_empty_yaml_returns_empty` | Checks that empty YAML returns empty. |
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
 | `TestThemeRegistry.test_load_all_faq_normalizes_entry_categories` | Verifies that built-in and custom FAQ entries carry known section categories and fall back to Other for unknown categories. |
-| `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
-| `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
+| `TestThemeRegistry.test_load_all_faq_uses_project_source_in_builtin_answer` | Checks that the built-in FAQ links to the release source and README. |
+| `TestThemeRegistry.test_load_all_faq_uses_config_project_source_by_default` | Checks that the built-in FAQ uses the configured release source by default. |
 | `TestThemeRegistry.test_load_all_faq_promotes_workspace_builtin_entry_when_enabled` | Verifies that the built-in Files FAQ appears near the top of the FAQ when session Files are enabled. |
 | `TestThemeRegistry.test_load_all_faq_hides_workspace_builtin_entry_when_disabled` | Verifies that the built-in Files FAQ is hidden when session Files are disabled. |
 | `TestThemeRegistry.test_load_all_faq_clarifies_snapshot_vs_run_permalink` | Checks that the built-in FAQ explains the difference between share snapshots and run permalinks. |
@@ -997,7 +1002,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeLoading.test_entry_missing_cmd_filtered_out` | Checks that entry missing command filtered out. |
 | `TestWelcomeLoading.test_out_trailing_whitespace_stripped_but_leading_preserved` | Checks that out trailing whitespace stripped but leading preserved. |
 | `TestWelcomeLoading.test_non_list_yaml_returns_empty` | Checks that non list YAML returns empty. |
-| `TestWelcomeLoading.test_local_overlay_appends_entries` | Checks that local overlay appends entries. |
+| `TestWelcomeLoading.test_local_overlay_appends_entries` | Checks that a welcome overlay from a separate operator root appends entries. |
 | `TestTourLoading.test_missing_file_returns_empty_tour` | Verifies that a missing tour file returns an empty disabled tour. |
 | `TestTourLoading.test_valid_chapters_load_with_version` | Verifies that valid tour chapters load with the configured schema version. |
 | `TestTourLoading.test_tour_disabled_returns_no_visible_chapters` | Verifies that `tour_enabled: false` hides all tour chapters. |
@@ -1010,9 +1015,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeAssetLoading.test_ascii_art_trims_only_trailing_whitespace` | Checks that ascii art trims only trailing whitespace. |
 | `TestWelcomeAssetLoading.test_missing_mobile_ascii_file_returns_empty_string` | Checks that missing mobile ascii file returns empty string. |
 | `TestWelcomeAssetLoading.test_mobile_ascii_art_trims_only_trailing_whitespace` | Checks that mobile ascii art trims only trailing whitespace. |
-| `TestWelcomeAssetLoading.test_ascii_art_local_overlay_replaces_base` | Checks that ascii art local overlay replaces base. |
+| `TestWelcomeAssetLoading.test_ascii_art_local_overlay_replaces_base` | Checks that external local ASCII art replaces the shipped desktop banner. |
 | `TestWelcomeAssetLoading.test_mobile_ascii_art_local_overlay_replaces_base` | Checks that mobile ascii art local overlay replaces base. |
-| `TestWelcomeAssetLoading.test_local_hints_overlay_appends_entries` | Checks that local hints overlay appends entries. |
+| `TestWelcomeAssetLoading.test_local_hints_overlay_appends_entries` | Checks that external local hints append to shipped desktop hints. |
 | `TestWelcomeAssetLoading.test_mobile_hints_overlay_appends_entries` | Checks that mobile hints overlay appends entries. |
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
@@ -1082,7 +1087,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWordlistCatalog.test_load_wordlist_catalog_filters_and_sorts_curated_matches` | Verifies that the wordlist catalog applies configured globs, ignores non-wordlist docs, and returns deterministic curated ordering. |
 | `TestWordlistCatalog.test_wordlist_catalog_search_path_and_all_scan` | Verifies curated wordlist search, path lookup, and the opt-in full SecLists scan while excluding archive files. |
 | `TestWordlistCatalog.test_wordlist_catalog_missing_root_returns_empty_items` | Verifies that a missing SecLists root returns an empty catalog without losing configured category metadata. |
-| `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
+| `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies declared workflow input metadata is preserved and a separate operator workflow overlay appends to the shipped catalog. |
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
 | `TestWorkflowInputLoading.test_load_workflows_rejects_an_invalid_v2_entry_as_one_playbook` | Verifies invalid v2 entries, unsupported explicit versions, and malformed workflow YAML are rejected with bounded warnings instead of loading valid-looking fragments. |
 | `TestWorkflowInputLoading.test_load_all_workflows_filters_workspace_required_workflows` | Verifies that Files-backed workflow chains are hidden when workspaces are disabled and retain their workspace feature gate when enabled. |
@@ -1228,8 +1233,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 | Test | Description |
 | --- | --- |
-| `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, and excludes live SQLite files from the copied data directory. |
+| `test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir` | Verifies the operator backup script maps Compose `/data` to the host bind mount, snapshots SQLite through the database backup path, excludes live SQLite files from the copied data directory, and emits exactly one absolute path in machine-result mode. |
 | `test_extra_and_env_files_are_included_without_logging_secret_values` | Verifies env files and repeatable extra files are included while secret-bearing values stay out of the manifest. |
+| `test_repository_free_backup_uses_operator_restore_layout` | Verifies managed deployments package `.env`, local config, data and vault-key continuity, Compose and release metadata into the stable restore layout. |
 | `test_missing_extra_file_fails_unless_operator_allows_it` | Verifies explicit extra files fail loudly when missing unless the operator opts into ignoring missing paths. |
 | `test_dry_run_rejects_missing_requested_inputs_before_writing` | Verifies dry runs reject missing primary env, extra env, and extra-file inputs before creating output state while honoring the missing-extra-file opt-out. |
 | `test_unreadable_data_dir_reports_root_guidance_and_cleans_lock` | Verifies unreadable host data directories return root/bind-mount guidance and still clean up the backup lock. |
@@ -1261,7 +1267,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_post_run_reads_batched_output_for_stop_text` | Verifies the smoke stream parser treats output batches as visible command output when checking stop text. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
 | `test_force_smoke_image_build_reads_wrapper_env` | Verifies that the smoke fixture only forces a cache-image rebuild when the wrapper sets `RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD=1`. |
-| `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, Python requirements, and entrypoint changes refresh the stable smoke cache image. |
+| `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, bundled app, requirements, and entrypoint changes refresh the stable smoke cache image. |
 | `test_smoke_image_cache_status_requires_matching_label` | Verifies that the smoke fixture reuses only cache images with the expected build-input label. |
 | `test_smoke_image_cache_status_rebuilds_when_image_is_missing` | Verifies that a missing stable smoke cache image triggers a rebuild. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
@@ -1636,6 +1642,33 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_postgres_db_init_applies_retention_pruning` | Verifies Postgres `db_init()` applies retention pruning after migrations and removes expired run, snapshot, artifact, and body-store metadata/files. |
 | `test_migration_helper_copies_fixture_into_isolated_postgres_schema` | Builds a SQLite fixture with runs, artifacts, body-store pointers, secrets metadata, JSON columns, and search text, migrates it into an isolated Postgres schema, then verifies row counts, JSON values, file pointers, and search parity. |
 
+#### `test_production_install.py`
+
+| Test | Description |
+| --- | --- |
+| `test_production_compose_uses_pinned_public_image_and_no_source_mount` | Verifies production Compose pins the Docker Hub release, keeps source out of the mount set, persists operator paths, binds loopback, and retains optional profiles and scanner settings. |
+| `test_runtime_image_includes_app_and_excludes_local_overlays` | Verifies the Dockerfile adds the app and lifecycle helpers after scanner layers, excludes operator-owned local overlays, and wires validated recursive private overlay staging, Docker/Podman architecture-aware runtime checks, real config/data/workspace bind mounts, durable restart writes, an unprivileged SYN probe, bundled-tool probes, trap-safe cleanup, and external-content smoke coverage into the image path. |
+| `test_container_license_inventory_matches_dockerfile_and_release` | Verifies project package metadata uses `AGPL-3.0-only`; Nmap and Masscan have explicit reviewed records; and every top-level apt, pip, Git, versioned, and RubyGem container dependency remains covered by the release-specific inventory and notices. |
+| `test_license_checkers_fail_closed_and_preserve_excluded_files` | Mutates temporary source and container-license fixtures to prove missing, conflicting, duplicate, stale, or changed license data fails closed, including hash-pinned Nmap and WPScan terms; the complete AGPLv3 text is required, notice insertion preserves shebang and doctype placement, generated or upstream files aren't relabeled, and local Python lint owns the checker. |
+| `test_cli_distributions_include_complete_agpl_license` | Builds the CLI source archive and wheel, then verifies both publish `License-Expression: AGPL-3.0-only` and contain the complete project license. |
+| `test_release_payload_is_exact_versioned_neutral_and_checksummed` | Verifies repeated generation produces an identical deterministic final or release-candidate deployment archive with a clean operator/managed boundary, the project license, valid checksums, release-correct config links, public image references, digest-pinned GitLab CLI release creation, the release-blocking bundled-Postgres/default-process backup-and-restore smoke, always-retained allowlisted publication diagnostics, direct manifest-copy promotion, CI runtime ownership and job prerequisites, documented runner and release-administration contracts, candidate discovery paths, no private deployment hostname, and no volatile pull timing. |
+| `test_release_evidence_is_deterministic_bound_and_tamper_evident` | Verifies deterministic final and release-candidate CycloneDX/Grype normalization, pinned base and build-input accounting, the release-creation tool image and CI configuration hash, SLSA source/dependency binding, exact Sigstore identity metadata, checksum inclusion, and rejection of floating tools or tampered evidence before payload creation. |
+| `test_release_image_publication_handles_publish_retry_and_conflict_branches` | Runs final and release-candidate GitLab and Docker Hub image publication entry points with local command doubles, covering first publication, identical retry, immutable-tag conflict, failed publish, and missing or malformed digests without leaking registry secrets. |
+| `test_release_payload_publication_handles_upload_retry_and_conflict_branches` | Runs installer-payload publication with local package-registry and Cosign doubles, covering first upload/signing, identical payload and signature-bundle reuse, conflicting immutable content, upload failure, and checksum/signature conflict rejection without exposing the job token. |
+| `test_release_payload_rejects_invalid_provenance_before_writing` | Verifies malformed, mismatched, or injection-shaped image digests and invalid size metrics are rejected before a payload directory is written, while valid measured values reach the installed release manifest. |
+| `test_release_version_gate_covers_runtime_and_distribution_files` | Verifies the explicit and ordinary-pipeline offline release gates accept final and `-rc.N` versions, require matching runtime/distribution versions, and report every stale version source. |
+| `test_installer_creates_private_operator_files_without_starting` | Runs the generated installer against local release fixtures and verifies private settings and overlay starters, generated Postgres credentials, stable release metadata, the Compose minimum and validation, pulled-image digest checks, internal-install help, and no automatic startup. |
+| `test_installer_accepts_its_verified_bootstrap_files_in_current_directory` | Verifies an operator can download the installer and checksum files into a new directory, inspect them, and install in that same directory. |
+| `test_installer_rejects_checksum_mismatch_before_creating_target` | Verifies a changed payload fails checksum validation before the target directory is created. |
+| `test_installer_rejects_non_https_payload_sources` | Verifies public installer downloads reject non-HTTPS sources and identify a failed payload by basename and release without exposing URL credentials or generated secrets. |
+| `test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_target` | Syntax-checks the generated POSIX installer, exercises its `shasum` fallback, and verifies missing tools, old Compose, unavailable Docker, invalid Compose, and secret-generation failures leave no managed target or staging directory behind. |
+| `test_installer_rejects_unsafe_targets` | Verifies the installer refuses non-empty unmanaged directories and directory symlinks. |
+| `test_restore_preserves_target_postgres_credentials_and_host_ownership` | Restores a Postgres backup from a deployment with different credentials, verifies the target connection settings stay local, requires a single Postgres transaction, and checks restored paths use the invoking host UID/GID. |
+| `test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction` | Forces `pg_restore` to fail and verifies the original `.env`, config, data, and workspace files remain active with no staging debris. |
+| `test_restore_wrapper_leaves_app_stopped_after_helper_failure` | Verifies a failed managed restore doesn't restart the app and reports the verified safety-backup recovery command after passing host ownership to the helper. |
+| `test_online_upgrade_verifies_signed_manifest_before_downloading_archive` | Verifies online upgrades fail closed on an invalid publisher signature, use the digest-pinned Cosign image and exact GitLab tag identity, and can upgrade without trusting the archive's separately hosted checksum file. |
+| `test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state` | Installs generated final and release-candidate bundles, orders `rc.1`, `rc.2`, and final upgrades correctly, proves corrupt and unsafe archives, managed-file conflicts, partial rollback reporting, and downgrades fail closed, verifies the machine-readable pre-upgrade backup result and stopped Postgres lifecycle, advances only release-owned files and the image reference, reports newly available environment keys without values or `.env` changes, preserves operator state, exercises safe SQLite/Postgres restore handling and migration help, and leaves operator paths behind on removal. |
+
 #### `test_request_kill_and_commands.py`
 
 | Test | Description |
@@ -1870,7 +1903,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestConfigRoute.test_all_new_keys_are_ints` | Checks that all new keys are ints. |
 | `TestConfigRoute.test_command_timeout_reflects_cfg` | Checks that command timeout reflects CFG. |
 | `TestConfigRoute.test_prompt_identity_reflects_cfg` | Checks that prompt username and domain reflect CFG. |
-| `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
+| `TestConfigRoute.test_project_source_is_constant` | Checks that the browser config exposes the release source link. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
 | `TestConfigRoute.test_tour_metadata_reflects_cfg_and_visible_chapters` | Verifies that `/config` exposes tour availability, version, and chapter count from the tour configuration. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |

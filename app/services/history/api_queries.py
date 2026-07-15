@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """API-facing history and run query helpers owned by the history service."""
 
 from __future__ import annotations
@@ -328,7 +331,7 @@ def history_rows(
                 total = len(matching_runs)
                 runs = matching_runs[offset:offset + limit]
             else:
-                total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
+                total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec
                 total = int(total_row["count"] or 0) if total_row else 0
                 rows = conn.execute(
                     "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
@@ -340,7 +343,7 @@ def history_rows(
                 ).fetchall()
                 runs = [dict(row) for row in rows]
         else:
-            total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
+            total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec
             total = int(total_row["count"] or 0) if total_row else 0
             rows = conn.execute(
                 "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec

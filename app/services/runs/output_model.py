@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Typed run-output line events.
 
 The helpers here define the compatibility contract used by the run-output

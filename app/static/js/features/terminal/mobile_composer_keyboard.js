@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { mobileRunBtn as importedMobileRunBtn } from '../../core/dom.js';
 import { getActiveTab as importedGetActiveTab, setComposerState as importedSetComposerState } from '../../core/state.js';
 import { _refreshFollowingOutputsAfterLayout as importedRefreshFollowingOutputsAfterLayout } from '../../output.js';

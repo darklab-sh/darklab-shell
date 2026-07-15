@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Optional production Docker Compose override.
 # Use with the root compose file, for example:
 #   docker compose -f docker-compose.yml \
