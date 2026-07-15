@@ -36,7 +36,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 #### Delivery milestones
 
-Each milestone is independently releasable and has its own exit criteria. Milestones 2 through 4 improve the initial install path, but they do not block Milestone 1 unless a task is explicitly marked as a first-public-image gate.
+Each remaining milestone is independently releasable and has its own exit criteria. Milestones 3 and 4 improve the initial install path, but they do not block Milestone 1 unless a task is explicitly marked as a first-public-image gate.
 
 ##### Milestone 1: Repository-free install
 
@@ -45,14 +45,6 @@ Each milestone is independently releasable and has its own exit criteria. Milest
 - [ ] Record the pipeline's compressed transfer size, unpacked image size, layer composition, and representative cold-pull time. Add those measured expectations to the operator docs and decide whether SecLists or another tool group justifies a later slim image.
 
 **Milestone 1 exit:** A clean Docker host can verify the installer, create a deployment directory, pull the exact public Docker Hub image tag, confirm it matches the canonical GitLab image digest, and reach a healthy app without Git, Python, Node, a local build, or a source checkout. The existing development stack and sibling `config.local.yaml` behavior still work.
-
-##### Milestone 2: Complete external overlay model
-
-- [ ] Introduce the shared shipped/local config-path resolver and move every supported YAML and text overlay consumer to it without changing that surface's merge, replace, reload, validation, or fallback semantics.
-- [ ] Add the remaining safe, comment-only `*.local.yaml` placeholders and update diagnostics, cache signatures, logging, docs, and regression coverage for the complete overlay inventory.
-- [ ] Decide and document how themes, text replacements, package presets, report templates, tour content, and wordlists participate instead of implying unsupported filenames work.
-
-**Milestone 2 exit:** Every documented local override can live under mounted `./conf`, edits invalidate the correct caches and reload as documented, and an empty local directory leaves all image-bundled defaults visible.
 
 ##### Milestone 3: Managed deployment lifecycle
 
@@ -71,15 +63,6 @@ Each milestone is independently releasable and has its own exit criteria. Milest
 **Milestone 4 exit:** Published artifacts are traceable and independently verifiable, every advertised architecture/runtime has automated coverage, and image-size tradeoffs are documented with measured data.
 
 #### Remaining implementation detail
-
-##### Milestone 2: external overlays
-
-- [ ] Add one resolver for immutable image defaults and mounted operator overrides, including theme subdirectories and safe filename handling.
-- [ ] Move the command registry, FAQ, welcome content, workflows, banners, hints, and themes to the resolver without changing their merge, replace, reload, validation, or fallback behavior.
-- [ ] Make cache invalidation include every base and local file that can change a loader's result, especially `commands.yaml` and `commands.local.yaml`.
-- [ ] Inventory the rest of `app/conf/` and decide explicitly how package presets, report templates, tour content, text replacements, and wordlists participate.
-- [ ] Add harmless comment-only placeholders only for supported overlays. Preserve operator files and use non-active examples where an empty file would replace shipped content.
-- [ ] Expand startup diagnostics, logs, documentation, and regression coverage to the complete supported overlay inventory without exposing values or secrets.
 
 ##### Milestone 3: managed lifecycle
 
@@ -101,7 +84,6 @@ Each milestone is independently releasable and has its own exit criteria. Milest
 
 #### End-state acceptance criteria
 
-- [ ] All documented local overlays work from mounted `./conf`, preserve shipped defaults, invalidate the right caches, and reload as documented.
 - [ ] Install, upgrade, backup, restore, migration, rollback guidance, and removal work without a repository checkout and distinguish managed files from operator-owned content.
 - [ ] GitLab images, Docker Hub mirrors, packages, checksums, SBOM/provenance, signatures, and release links are anonymously accessible and independently verifiable as documented.
 - [ ] Every advertised architecture and container runtime has automated compatibility coverage.

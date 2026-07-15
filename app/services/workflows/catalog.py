@@ -52,10 +52,10 @@ def _load_yaml_list(path: str) -> list:
     return loaded
 
 
-def _load_yaml_list_with_local(path: str) -> list:
+def _load_yaml_list_with_local(path: str, *, local_path: str | None = None) -> list:
     merged = []
     merged.extend(_load_yaml_list(path))
-    merged.extend(_load_yaml_list(_local_overlay_path(path)))
+    merged.extend(_load_yaml_list(local_path or _local_overlay_path(path)))
     return merged
 
 
@@ -220,9 +220,9 @@ def normalize_workflow_entry(entry):
     return normalized
 
 
-def load_workflows(path: str) -> list[dict[str, object]]:
+def load_workflows(path: str, *, local_path: str | None = None) -> list[dict[str, object]]:
     """Read workflows.yaml and return a list of normalized workflow dicts."""
-    data = _load_yaml_list_with_local(path)
+    data = _load_yaml_list_with_local(path, local_path=local_path)
     if not data:
         return []
     result = []

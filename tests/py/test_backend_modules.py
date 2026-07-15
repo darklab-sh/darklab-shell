@@ -62,6 +62,7 @@ import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
 import config as app_config
+import config_paths
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.registry_loader as registry_loader_module
 import services.commands.builtins as builtin_commands
@@ -2617,6 +2618,12 @@ class TestLoadConfig:
             str(local_path / "config.local.yaml"),
         ]
         assert str(local_path / "commands.local.yaml") not in overlay_sources
+        assert app_config.get_config_load_summary()["present_local_overlays"] == [
+            "config.local.yaml",
+            "commands.local.yaml",
+        ]
+        with pytest.raises(ValueError, match="safe relative path"):
+            config_paths.config_asset_paths("../commands.yaml")
 
     def test_app_local_conf_dir_selects_external_main_overlay(self):
         with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
@@ -3123,6 +3130,7 @@ class TestLoadConfig:
         app_config.CONFIG_LOAD_WARNINGS[:] = [{"key": "unknown_key", "source": "/tmp/config.yaml"}]
         try:
             with mock.patch.object(runtime_bootstrap.log, "warning") as warning, \
+                 mock.patch.object(runtime_bootstrap.log, "debug") as debug, \
                  mock.patch.object(runtime_bootstrap.log, "info") as info:
                 runtime_bootstrap.log_loaded_config(build_test_config({"workspace_enabled": True}))
         finally:
@@ -3134,7 +3142,14 @@ class TestLoadConfig:
         assert "conf_dir" in info.call_args.kwargs["extra"]
         assert "local_conf_dir" in info.call_args.kwargs["extra"]
         assert "local_overlay" in info.call_args.kwargs["extra"]
+        assert "supported_local_overlays" in info.call_args.kwargs["extra"]
+        assert "present_local_overlays" not in info.call_args.kwargs["extra"]
         assert "overlays" in info.call_args.kwargs["extra"]
+        inventory_call = next(
+            call for call in debug.call_args_list
+            if call.args == ("CONFIG_OVERLAY_INVENTORY",)
+        )
+        assert "present_local_overlays" in inventory_call.kwargs["extra"]
         assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_configured"] is False
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_state"] == "disabled"
@@ -3414,6 +3429,13 @@ class TestPackagePresetCatalog:
         assert [preset["id"] for preset in catalog.presets] == ["evidence", "summary", "full", "redacted"]
         missing_warning.assert_called_once()
         assert missing_warning.call_args.kwargs["extra"]["path"] == str(Path(tmp) / "package_presets.yaml")
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            with mock.patch.object(package_presets._config, "APP_CONF_DIR", shipped_tmp), \
+                    mock.patch.object(package_presets._config, "APP_LOCAL_CONF_DIR", local_tmp):
+                local_catalog = package_presets.configured_package_presets_path({
+                    "package_presets_file": "package_presets.local.yaml",
+                })
+        assert local_catalog == Path(local_tmp) / "package_presets.local.yaml"
 
     def test_package_preset_loader_caps_display_lengths_and_default_labels(self):
         long_label = "l" * (package_presets.PACKAGE_PRESET_LABEL_MAX_LEN + 10)
@@ -5711,6 +5733,13 @@ class TestReportTemplateCatalog:
         warning.assert_called_once()
         assert warning.call_args.args == ("REPORT_TEMPLATES_OVERRIDE_INVALID",)
         assert warning.call_args.kwargs["extra"]["path"] == str(path)
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            with mock.patch.object(report_templates._config, "APP_CONF_DIR", shipped_tmp), \
+                    mock.patch.object(report_templates._config, "APP_LOCAL_CONF_DIR", local_tmp):
+                local_catalog = report_templates.configured_report_templates_path({
+                    "report_templates_file": "report_templates.local.yaml",
+                })
+        assert local_catalog == Path(local_tmp) / "report_templates.local.yaml"
 
     def test_report_draft_storage_handles_scope_and_conflicts(self, tmp_path):
         db_path = str(tmp_path / "reports.db")
@@ -15654,6 +15683,9 @@ class TestEntrypointWorkspaceRepair:
         assert "app:app" not in server_helper
         assert "from core.database import db_init; db_init()" in server_helper
         assert '"$PYTHON_BIN" -c "import app"' not in server_helper
+        assert 'export APP_CONF_DIR="$SHIPPED_CONF_DIR"' in server_helper
+        assert 'export APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR"' in server_helper
+        assert 'cp "$APP_DIR/conf/config.yaml"' not in server_helper
 
 
 class TestAIRuntimeWiring:
@@ -16076,8 +16108,12 @@ class TestDerivedCommandRegistry:
 
     def test_commands_registry_local_overlay_appends_policy_and_context(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = Path(tmp) / "commands.yaml"
-            local_path = Path(tmp) / "commands.local.yaml"
+            shipped_dir = Path(tmp) / "shipped"
+            local_dir = Path(tmp) / "local"
+            shipped_dir.mkdir()
+            local_dir.mkdir()
+            base_path = shipped_dir / "commands.yaml"
+            local_path = local_dir / "commands.local.yaml"
             base_path.write_text(textwrap.dedent("""
             version: 1
             commands:
@@ -16159,8 +16195,15 @@ class TestDerivedCommandRegistry:
                     - value: -i
                       description: Ignore case
             """))
-            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base_path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base_path)), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", str(shipped_dir)), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", str(local_dir)):
                 registry = load_commands_registry()
+                local_path.write_text(
+                    local_path.read_text().replace("Network Diagnostics", "Updated Network", 1)
+                )
+                commands.clear_commands_registry_cache()
+                updated_registry = load_commands_registry()
 
         by_root = {entry["root"]: entry for entry in registry["commands"]}
         assert [entry["root"] for entry in registry["commands"]] == ["ping", "curl"]
@@ -16186,6 +16229,7 @@ class TestDerivedCommandRegistry:
         assert by_root["ping"]["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
         assert by_root["ping"]["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
         assert by_root["curl"]["policy"]["deny"] == ["curl -O"]
+        assert updated_registry["commands"][0]["category"] == "Updated Network"
         grep = registry["pipe_helpers"][0]
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["flags"][0]["value"] == "-i"
@@ -17849,13 +17893,19 @@ class TestLoadFaq:
 
     def test_local_overlay_appends_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "faq.yaml")
-            local_path = os.path.join(tmp, "faq.local.yaml")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "faq.yaml")
+            local_path = os.path.join(local_dir, "faq.local.yaml")
             with open(base_path, "w") as f:
                 f.write("- question: Base?\n  answer: Base answer.\n")
             with open(local_path, "w") as f:
                 f.write("- question: Local?\n  answer: Local answer.\n")
-            with mock.patch("services.commands.registry.FAQ_FILE", base_path):
+            with mock.patch("services.commands.registry.FAQ_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 result = load_faq()
         assert [item["question"] for item in result] == ["Base?", "Local?"]
 
@@ -18038,19 +18088,24 @@ class TestThemeRegistry:
             surface: "#1a1a1a"
             """,
         )
-        (theme_dir / "base_theme.local.yaml").write_text(textwrap.dedent(
+        local_theme_dir = tmp_path / "local" / "themes"
+        local_theme_dir.mkdir(parents=True)
+        (local_theme_dir / "base_theme.local.yaml").write_text(textwrap.dedent(
             """
             label: "Base Theme Local"
             bg: "#202020"
             """
         ))
+        monkeypatch.setattr(app_config, "_THEME_CONF_DIR", theme_dir.parent)
         monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+        monkeypatch.setattr(app_config, "APP_LOCAL_CONF_DIR", str(tmp_path / "local"))
 
         themes = app_config.load_theme_registry()
         assert [theme["name"] for theme in themes] == ["base_theme"]
         assert themes[0]["label"] == "Base Theme Local"
         assert app_config.load_theme("base_theme")["bg"] == "#202020"
         assert app_config.load_theme("base_theme")["surface"] == "#1a1a1a"
+        assert app_config._theme_file_candidates("../base_theme") == ()
 
     def test_light_theme_uses_light_defaults_for_missing_keys(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -20455,13 +20510,19 @@ class TestWelcomeLoading:
 
     def test_local_overlay_appends_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "welcome.yaml")
-            local_path = os.path.join(tmp, "welcome.local.yaml")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "welcome.yaml")
+            local_path = os.path.join(local_dir, "welcome.local.yaml")
             with open(base_path, "w") as f:
                 f.write("- cmd: ping\n  out: base\n")
             with open(local_path, "w") as f:
                 f.write("- cmd: curl\n  out: local\n")
-            with mock.patch("services.commands.registry.WELCOME_FILE", base_path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 result = load_welcome()
         assert [item["cmd"] for item in result] == ["ping", "curl"]
 
@@ -20688,13 +20749,19 @@ class TestWelcomeAssetLoading:
 
     def test_ascii_art_local_overlay_replaces_base(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "ascii.txt")
-            local_path = os.path.join(tmp, "ascii.local.txt")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "ascii.txt")
+            local_path = os.path.join(local_dir, "ascii.local.txt")
             with open(base_path, "w") as f:
                 f.write("base art")
             with open(local_path, "w") as f:
                 f.write("local art")
-            with mock.patch("services.commands.registry.ASCII_FILE", base_path):
+            with mock.patch("services.commands.registry.ASCII_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 assert load_ascii_art() == "local art"
 
     def test_mobile_ascii_art_local_overlay_replaces_base(self):
@@ -20710,13 +20777,19 @@ class TestWelcomeAssetLoading:
 
     def test_local_hints_overlay_appends_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "app_hints.txt")
-            local_path = os.path.join(tmp, "app_hints.local.txt")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "app_hints.txt")
+            local_path = os.path.join(local_dir, "app_hints.local.txt")
             with open(base_path, "w") as f:
                 f.write("Use the history panel.\n")
             with open(local_path, "w") as f:
                 f.write("Press Enter to run.\n")
-            with mock.patch("services.commands.registry.APP_HINTS_FILE", base_path):
+            with mock.patch("services.commands.registry.APP_HINTS_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
 
     def test_mobile_hints_overlay_appends_entries(self):
@@ -23072,13 +23145,25 @@ class TestWorkflowInputLoading:
             """
         )
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflows.yaml"
+            shipped_dir = Path(tmp) / "shipped"
+            local_dir = Path(tmp) / "local"
+            shipped_dir.mkdir()
+            local_dir.mkdir()
+            path = shipped_dir / "workflows.yaml"
             path.write_text(payload)
-            with mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)):
+            (local_dir / "workflows.local.yaml").write_text(textwrap.dedent(
+                """
+                - title: "Local workflow"
+                  steps:
+                    - cmd: "whois darklab.sh"
+                """
+            ))
+            with mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", str(shipped_dir)), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", str(local_dir)):
                 result = load_workflows()
 
-        assert result == [
-            {
+        assert result[0] == {
                 "title": "DNS Workflow",
                 "description": "Custom workflow",
                 "inputs": [
@@ -23096,7 +23181,12 @@ class TestWorkflowInputLoading:
                     {"cmd": "dig {{domain}} A", "note": "Check the answer section."},
                 ],
             }
-        ]
+        assert result[1] == {
+            "title": "Local workflow",
+            "description": "",
+            "inputs": [],
+            "steps": [{"cmd": "whois darklab.sh", "note": ""}],
+        }
 
     def test_load_workflows_drops_steps_with_undeclared_tokens(self):
         payload = textwrap.dedent(

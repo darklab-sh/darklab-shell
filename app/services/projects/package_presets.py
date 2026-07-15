@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 import config as _config
+import config_paths
 from services.projects.contracts import (
     MAX_ENTITY_NOTE_BODY_LEN,
     MAX_LABEL_LEN,
@@ -53,10 +54,6 @@ _CATALOG_CACHE: dict[str, object] = {
 }
 
 
-def _conf_dir() -> Path:
-    return Path(_config.APP_CONF_DIR) if _config.APP_CONF_DIR else Path(__file__).resolve().parents[2] / "conf"
-
-
 def _bundled_conf_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "conf"
 
@@ -68,8 +65,11 @@ def default_package_presets_path() -> Path:
 def configured_package_presets_path(cfg: Mapping[str, Any] | None = None) -> Path:
     active_cfg = cfg or _config.CFG
     raw_path = str(active_cfg.get("package_presets_file") or "package_presets.yaml").strip()
-    path = Path(raw_path or "package_presets.yaml")
-    return path if path.is_absolute() else _conf_dir() / path
+    return config_paths.configured_catalog_path(
+        raw_path or "package_presets.yaml",
+        shipped_conf_dir=_config.APP_CONF_DIR or None,
+        local_conf_dir=_config.APP_LOCAL_CONF_DIR or None,
+    )
 
 
 def _catalog_signature(path: Path) -> tuple[str, int | None, int | None]:

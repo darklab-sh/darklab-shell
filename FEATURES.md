@@ -1417,15 +1417,15 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 **Behavior:**
 
-- The release installer creates a small deployment directory with production Compose, an environment file, a local config placeholder, persistent data folders, checksums, the project license, third-party notices, a release manifest, and a verifier that confirms the pulled image matches both recorded registry digests before startup.
+- The release installer creates a small deployment directory with production Compose, an environment file, local configuration starters, persistent data folders, checksums, the project license, third-party notices, a release manifest, and a verifier that confirms the pulled image matches both recorded registry digests before startup.
 - The app is licensed under GNU AGPLv3. Its FAQ provides the default source link for each official release. Modified network versions must prominently offer every remote user their complete corresponding source at no charge through a standard or customary copying method; the full license controls. Project-owned source files keep short SPDX notices when they're copied separately, while generated and third-party files retain their own notices.
 - Production pulls an exact `docker.io/darklabsh/darklab-shell` release tag. The same image is available from the GitLab Container Registry, and the manifest records both matching digests plus measured image sizes for verification and support. The installed verifier also rejects an image selection that has drifted from that reviewed manifest.
 - The app binds to host loopback by default. Operators can review `.env`, local settings, raw-packet scanning, optional Postgres, optional local AI, and reverse-proxy exposure before starting it.
-- Shipped commands, workflows, themes, and other catalogs stay in the image, so an upgrade can refresh them without replacing the operator's `conf/config.local.yaml`.
-- Private host permissions stay intact: container startup stages `conf/config.local.yaml` into an app-owned runtime copy before the web and worker processes start.
+- Shipped commands, workflows, themes, and other catalogs stay in the image. Matching operator files under `conf/` add to or override those defaults without hiding newer image content.
+- Private host permissions stay intact: container startup validates and stages the complete `conf/` overlay tree into an app-owned runtime copy before the web and worker processes start.
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
 
-**Limits:** Docker Compose 2.20.0 or newer on Linux is the supported runtime. Only the main `config.local.yaml` is read from the production `conf/` directory; the other content overlays require the source-mounted deployment. Upgrades and repository-free backups are manual, and upgrades can apply forward-only database migrations, so a verified backup comes first.
+**Limits:** Docker Compose 2.20.0 or newer on Linux is the supported runtime. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Upgrades and repository-free backups are manual, and upgrades can apply forward-only database migrations, so a verified backup comes first.
 
 **Configuration:** see the [Quick Start](README.md#quick-start) and [Docker Compose Files](CONFIGURATION.md#docker-compose-files).
 

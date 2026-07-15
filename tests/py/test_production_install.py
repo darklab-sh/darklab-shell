@@ -392,10 +392,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays():
     assert "org.opencontainers.image.licenses=\"AGPL-3.0-only\"" in dockerfile
     assert "COPY LICENSE /usr/share/doc/darklab-shell/LICENSE" in dockerfile
     assert "wpscan-ruby-gems.json" in dockerfile
-    assert "stage_local_config_overlay" in entrypoint
+    assert "stage_local_config_overlays" in entrypoint
+    assert 'cp -R "${source_dir%/}/."' in entrypoint
+    assert "-type l" in entrypoint
     assert "/tmp/darklab-runtime-conf" in entrypoint
     assert "release-overlay-smoke" in image_smoke
     assert "--installed-image" in image_smoke
+    assert "shellcheck disable=SC2317,SC2329" in image_smoke
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     assert "deploy/setup.sh.in" in package["scripts"]["lint:shell"]
 
@@ -443,6 +446,11 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    package_scripts = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]
+    assert package_scripts["lint:licenses"] == "python scripts/check_source_licenses.py"
+    assert "python scripts/check_source_licenses.py" in package_scripts["lint:py"]
+    assert "npm run lint:licenses" not in package_scripts["lint"]
+
     source_checker = _load_script_module("check_source_licenses")
     source_root = tmp_path / "source-license"
     (source_root / "app" / "static" / "js" / "vendor").mkdir(parents=True)
@@ -677,6 +685,14 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "restart shell" in ci_config
     assert "release-compose-restart-marker" in ci_config
     parsed_ci = yaml.safe_load(ci_config)
+    pytest_setup = "\n".join(parsed_ci["test-py-pytest"]["before_script"])
+    assert re.search(r"\bapt-get install\b[^\n]*\bcurl\b", pytest_setup)
+    assert re.search(r"\bapt-get install\b[^\n]*\bjq\b", pytest_setup)
+    lint_py_setup = "\n".join(parsed_ci["lint-py"]["before_script"])
+    assert re.search(r"\bapt-get install\b[^\n]*\bgit\b", lint_py_setup)
+    assert "pip install -q -r app/requirements.txt -r requirements-dev.txt" in lint_py_setup
+    assert "python scripts/check_source_licenses.py" in parsed_ci["lint-py"]["script"]
+    assert "npm run lint:licenses" not in parsed_ci["lint-js"]["script"]
     assert parsed_ci["release-image-gitlab"]["artifacts"]["when"] == "always"
     assert parsed_ci["release-image-dockerhub"]["artifacts"]["when"] == "always"
     assert "release-image-status.txt" in parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
@@ -884,6 +900,25 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert not re.search(r"^SECRETS_MASTER_KEY=.+$", env_text, re.MULTILINE)
     assert stat.S_IMODE((target / ".env").stat().st_mode) == 0o600
     assert stat.S_IMODE((target / "conf" / "config.local.yaml").stat().st_mode) == 0o600
+    expected_overlays = {
+        "commands.local.yaml",
+        "faq.local.yaml",
+        "welcome.local.yaml",
+        "workflows.local.yaml",
+        "app_hints.local.txt",
+        "app_hints_mobile.local.txt",
+        "ascii.local.txt.example",
+        "ascii_mobile.local.txt.example",
+        "package_presets.local.yaml.example",
+        "report_templates.local.yaml.example",
+    }
+    assert expected_overlays.issubset({path.name for path in (target / "conf").iterdir()})
+    assert (target / "conf" / "themes" / "darklab_obsidian.local.yaml").is_file()
+    assert all(
+        stat.S_IMODE(path.stat().st_mode) == 0o600
+        for path in (target / "conf").rglob("*")
+        if path.is_file()
+    )
     assert stat.S_IMODE((target / "verify-release-image.sh").stat().st_mode) == 0o755
     assert stat.S_IMODE(target.stat().st_mode) == 0o700
     assert (target / "data").is_dir()
@@ -909,6 +944,11 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert "docker compose pull" in result.stdout
     assert "./verify-release-image.sh" in result.stdout
     assert "docker compose logs -f shell" in result.stdout
+    image_smoke = (ROOT / "scripts" / "verify_repository_free_image.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "faq.local.yaml" in image_smoke
+    assert "faq_local_overlay" in image_smoke
 
     verifier_env = os.environ.copy()
     verifier_env.update({

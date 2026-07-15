@@ -20,7 +20,11 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 overlay_dir=$(mktemp -d "${TMPDIR:-/tmp}/darklab-release-overlay.XXXXXX")
 chmod 700 "$overlay_dir"
 printf 'app_name: release-overlay-smoke\n' > "$overlay_dir/config.local.yaml"
-chmod 600 "$overlay_dir/config.local.yaml"
+cat > "$overlay_dir/faq.local.yaml" <<'EOF'
+- question: Release overlay smoke
+  answer: External content overlay loaded.
+EOF
+chmod 600 "$overlay_dir/config.local.yaml" "$overlay_dir/faq.local.yaml"
 
 verification_failed() {
     stage=$1
@@ -40,7 +44,8 @@ require_nonempty() {
     [ -n "$3" ] || verification_failed "$1" "$2" nonempty empty
 }
 
-# shellcheck disable=SC2329
+# cleanup is invoked indirectly by trap.
+# shellcheck disable=SC2317,SC2329
 cleanup() {
     docker rm -f "$shell" "$redis" >/dev/null 2>&1 || true
     docker network rm "$network" >/dev/null 2>&1 || true
@@ -154,6 +159,10 @@ while [ "$attempt" -lt 90 ]; do
         require_nonempty runtime_config config_response "$runtime_config"
         printf '%s' "$runtime_config" | grep -q '"app_name":"release-overlay-smoke"' \
             || verification_failed runtime_config app_name release-overlay-smoke mismatch
+        runtime_faq=$(docker exec "$shell" curl -fsS http://127.0.0.1:8888/faq) \
+            || verification_failed runtime_config faq_endpoint reachable failed
+        printf '%s' "$runtime_faq" | grep -q 'Release overlay smoke' \
+            || verification_failed runtime_config faq_local_overlay loaded missing
         exit 0
     fi
     if [ "$(docker inspect --format '{{.State.Running}}' "$shell" 2>/dev/null || true)" != "true" ]; then

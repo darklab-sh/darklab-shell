@@ -23,7 +23,6 @@ from services.commands.registry_adaptations import (
 log = logging.getLogger("shell")
 SECRET_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
-
 # ── Knowledge field schema ─────────────────────────────────────────────────────
 # Phase 0 locked decisions — these constants are the contract that Phase 1
 # normalization, merge, and catalog projection must implement.
@@ -737,8 +736,11 @@ def load_commands_registry(
     normalize_autocomplete: Callable[[str, object], dict],
     empty_autocomplete_entry: Callable[[], dict],
     merge_autocomplete_context: Callable[[dict, dict], dict],
+    *, local_path: str | None = None,
 ) -> dict:
     base = load_commands_registry_file(path, normalize_autocomplete)
-    root, ext = os.path.splitext(path)
-    local = load_commands_registry_file(f"{root}.local{ext}", normalize_autocomplete)
+    if local_path is None:
+        root, ext = os.path.splitext(path)
+        local_path = f"{root}.local{ext}"
+    local = load_commands_registry_file(local_path, normalize_autocomplete)
     return merge_commands_registry(base, local, empty_autocomplete_entry, merge_autocomplete_context)

@@ -50,9 +50,9 @@ No image rebuild is needed for normal config changes.
 
 ## Local Override Files
 
-Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibling `*.local.*` overlays. These local files are intentionally useful for private deployment changes that should not be committed.
+Most operator-owned files under `app/conf/` and `app/conf/themes/` support `*.local.*` overlays. Source deployments keep those files beside the shipped files. Repository-free production keeps the same relative names under host `./conf`, mounted at `/config`, while immutable defaults remain under `/app/conf`.
 
-The repository-free production stack is deliberately narrower: it mounts host `./conf` at `/config` and sets `APP_LOCAL_CONF_DIR=/config`, which moves only the main `config.local.yaml` lookup. The installer keeps that host directory at `0700` and the file at `0600`; container startup stages the file into a private `appuser`-owned runtime directory before dropping privileges. Shipped defaults and catalogs remain under `/app/conf`. Files such as `/config/commands.local.yaml`, `/config/workflows.local.yaml`, and `/config/themes/*.local.yaml` are not loaded; use the source-mounted layout when those content overlays are required. Startup INFO logs list only config files that contributed recognized settings. Missing and comment-only optional overlays are normal DEBUG-level checks, not applied overlays or warnings. An unknown-only file also stays out of the applied list, while its existing unknown-key warning still points out the setting that was ignored.
+The installer keeps the host overlay tree at `0700` with files at `0600`. Container startup rejects symlinks and special files, then stages the tree into a private `appuser`-owned runtime directory before dropping privileges. Restart the shell container after editing a production host overlay so it stages a fresh snapshot. `CONFIG_LOADED` reports the shipped and local roots, while DEBUG diagnostics can list safe relative names for present supported overlays; neither log includes file contents. Missing and comment-only optional overlays are normal and don't produce warnings.
 
 | Base file | Local overlay | Behavior |
 |-----------|---------------|----------|
@@ -67,9 +67,15 @@ The repository-free production stack is deliberately narrower: it mounts host `.
 | `app/conf/app_hints_mobile.txt` | `app/conf/app_hints_mobile.local.txt` | Appends mobile hints |
 | `app/conf/themes/<theme>.yaml` | `app/conf/themes/<theme>.local.yaml` | Overlays one named theme |
 
+In a repository-free deployment, drop the leading `app/` from the local column: for example, use `conf/commands.local.yaml` or `conf/themes/darklab_obsidian.local.yaml`. A theme overlay can change a shipped theme but doesn't create a new theme-selector entry.
+
+Package presets and report templates are complete replacement catalogs rather than merge overlays. Select `package_presets.local.yaml` or `report_templates.local.yaml` in `config.local.yaml`; relative filenames containing `.local.` resolve from the operator root. `tour.yaml` and `wordlists.yaml` are image-owned catalogs and don't have local overlay filenames.
+
 ---
 
 ## Config File Reload Behavior
+
+The table describes loader behavior when the app process can read an edited file directly, including source-mounted development. Repository-free production reads a private startup snapshot, so any host-side `conf/` change needs `docker compose restart shell` first.
 
 | File | When changes take effect |
 |------|--------------------------|
@@ -82,7 +88,7 @@ The repository-free production stack is deliberately narrower: it mounts host `.
 | `conf/tour.yaml` | Immediately for tour renderers |
 | `conf/wordlists.yaml` | Immediately for the `wordlist` command and autocomplete requests |
 | `conf/workflows.yaml` | Immediately for Workflows panel, command registry, and smoke-corpus helpers |
-| `conf/themes/*.yaml` | On next page load, permalink load, diagnostics load, or HTML export |
+| `conf/themes/*.yaml` | After the app process restarts |
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
 | `conf/config.local.yaml` | After `docker compose restart` |
@@ -318,8 +324,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
-| `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped presets |
-| `report_templates_file` | `report_templates.yaml` | Engagement report template catalog. Relative paths are resolved from `app/conf`, and the catalog reloads when the file changes. If an operator override is missing or invalid, the server logs a warning and falls back to the shipped templates |
+| `package_presets_file` | `package_presets.yaml` | Evidence package preset catalog. Normal relative paths use the shipped root; relative `.local.` filenames use the operator root. The catalog reloads when its readable file changes and falls back to shipped presets after an invalid override |
+| `report_templates_file` | `report_templates.yaml` | Engagement report template catalog. Normal relative paths use the shipped root; relative `.local.` filenames use the operator root. The catalog reloads when its readable file changes and falls back to shipped templates after an invalid override |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior. See [docs/notifications.md](docs/notifications.md) for channel setup |
@@ -817,7 +823,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `127.0.0.1`; widening it exposes the app beyond the local host |
 | `DARKLAB_IMAGE` | Repository-free production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
-| `APP_LOCAL_CONF_DIR` | Flask app | Optional directory for the main `config.local.yaml` overlay. Production sets `/config`; when unset, the loader keeps using the sibling file beside `config.yaml` |
+| `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
@@ -966,7 +972,7 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls the Linux AMD64 image `docker.io/darklabsh/darklab-shell:2.6.0` and doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on `127.0.0.1` by default, and omits fixed container names so separate Compose project directories don't collide.
 
-Only `conf/config.local.yaml` is active under the production `/config` mount. The entrypoint copies it into a private runtime path on each container start, so restart after changing it:
+Every supported local overlay in `conf/` is active under the production `/config` mount. The entrypoint validates and copies the complete tree into a private runtime path on each container start, so restart after changing any overlay:
 
 ```bash
 docker compose restart shell
@@ -1352,7 +1358,7 @@ Evidence package presets live in `app/conf/package_presets.yaml` by default. Set
 package_presets_file: package_presets.local.yaml
 ```
 
-Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
+Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so the example works as `app/conf/package_presets.local.yaml` in source deployments and `conf/package_presets.local.yaml` in repository-free deployments. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
 
 A preset controls the wizard defaults only. Users can still adjust the package before creating it, and package size limits, redaction rules, artifact safety checks, and project link validation still apply.
 
@@ -1399,16 +1405,20 @@ Engagement report templates live in `app/conf/report_templates.yaml` by default.
 report_templates_file: report_templates.local.yaml
 ```
 
-Relative paths are resolved from `app/conf`. The app reloads the catalog when the YAML file changes. If an override is missing or invalid, the shipped templates stay available and the server logs `REPORT_TEMPLATES_OVERRIDE_INVALID`.
+Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so the example works in both deployment layouts. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped templates stay available and the server logs `REPORT_TEMPLATES_OVERRIDE_INVALID`.
 
-### Customize FAQ, Welcome, Commands, Workflows, and Package Presets
+### Customize FAQ, Welcome, Commands, Workflows, and Catalogs
 
-- Add FAQ entries in `app/conf/faq.local.yaml`.
-- Add welcome samples in `app/conf/welcome.local.yaml`.
-- Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
-- Add deployment-specific legacy or v2 workflows in `app/conf/workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
-- Add deployment-specific evidence package presets in `app/conf/package_presets.local.yaml` and point `package_presets_file` at that file.
-- Add deployment-specific report templates in `app/conf/report_templates.local.yaml` and point `report_templates_file` at that file.
+- Add FAQ entries in `faq.local.yaml`.
+- Add welcome samples in `welcome.local.yaml`.
+- Add deployment-specific command registry entries in `commands.local.yaml`.
+- Add deployment-specific legacy or v2 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
+- Add desktop or mobile hints in `app_hints.local.txt` or `app_hints_mobile.local.txt`.
+- Replace banner art with `ascii.local.txt` or `ascii_mobile.local.txt`. These files replace the shipped text, so the installer provides non-active `.example` files instead of empty active placeholders.
+- Add deployment-specific evidence package presets in `package_presets.local.yaml` and point `package_presets_file` at that file.
+- Add deployment-specific report templates in `report_templates.local.yaml` and point `report_templates_file` at that file.
+
+Use these names under `app/conf/` for source deployments or installed `conf/` for repository-free deployments.
 
 ---
 

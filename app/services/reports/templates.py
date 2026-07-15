@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 import config as _config
+import config_paths
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.utils import trim_text as _trim_text
 
@@ -42,10 +43,6 @@ _CATALOG_CACHE: dict[str, object] = {
 }
 
 
-def _conf_dir() -> Path:
-    return Path(_config.APP_CONF_DIR) if _config.APP_CONF_DIR else Path(__file__).resolve().parents[2] / "conf"
-
-
 def _bundled_conf_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "conf"
 
@@ -57,8 +54,11 @@ def default_report_templates_path() -> Path:
 def configured_report_templates_path(cfg: Mapping[str, Any] | None = None) -> Path:
     active_cfg = cfg or _config.CFG
     raw_path = str(active_cfg.get("report_templates_file") or "report_templates.yaml").strip()
-    path = Path(raw_path or "report_templates.yaml")
-    return path if path.is_absolute() else _conf_dir() / path
+    return config_paths.configured_catalog_path(
+        raw_path or "report_templates.yaml",
+        shipped_conf_dir=_config.APP_CONF_DIR or None,
+        local_conf_dir=_config.APP_LOCAL_CONF_DIR or None,
+    )
 
 
 def _catalog_signature(path: Path) -> tuple[str, int | None, int | None]:

@@ -205,7 +205,7 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Released images keep their shipped settings under `/app/conf`. Repository-free installs put operator overrides in `./conf`, mounted at `/config`; `conf/config.local.yaml` overrides the main app settings without hiding newer defaults when the image changes. Source-mounted development keeps the existing sibling `app/conf/config.local.yaml` path. Other local content overlays, including `commands.local.yaml` and theme overlays, remain available only through the source-mounted layout.
+Released images keep shipped settings and catalogs under `/app/conf`. Repository-free installs put operator overrides in `./conf`, mounted at `/config`, so image upgrades can refresh defaults without hiding them behind an old host directory. Source-mounted development uses the same `*.local.*` names beside the files in `app/conf`. The production installer includes safe starters for commands, FAQ, welcome content, workflows, hints, and the default theme, plus non-active examples for full replacement catalogs and banner art.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, including:
 
@@ -337,7 +337,7 @@ When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `
 
 ## Production Deployment
 
-The release installer creates a small operator-owned directory with `compose.yaml`, `.env`, `conf/config.local.yaml`, `data/`, `workspaces/`, `backups/`, the project license, third-party notices, a release manifest, and the pulled-image verifier. Production Compose pulls the exact `docker.io/darklabsh/darklab-shell:2.6.0` tag and never mounts the repository or `/app` from the host. The host config directory stays private at `0700` with its overlay at `0600`; on startup, the root entrypoint copies that file into a private `appuser` runtime directory before it drops privileges.
+The release installer creates a small operator-owned directory with `compose.yaml`, `.env`, safe local-overlay starters under `conf/`, `data/`, `workspaces/`, `backups/`, the project license, third-party notices, a release manifest, and the pulled-image verifier. Production Compose pulls the exact `docker.io/darklabsh/darklab-shell:2.6.0` tag and never mounts the repository or `/app` from the host. The host config directory stays private at `0700` with files at `0600`; on startup, the root entrypoint validates and copies that tree into a private `appuser` runtime directory before it drops privileges.
 
 `/data` is durable and contains SQLite, saved output artifacts, and the app-managed vault key. Redis deliberately disables RDB and AOF because it holds coordination, rate-limit, broker, and cache state; a Redis restart can drop in-flight work but doesn't replace the durable app database. Files workspaces use tmpfs by default and disappear when the shell container restarts. To keep Files data, set `WORKSPACE_ROOT=/workspaces` in `.env`, then set `workspace_enabled: true` and `workspace_backend: volume` in `conf/config.local.yaml`; the production stack already mounts the host `./workspaces` directory there.
 
@@ -604,6 +604,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── wordlists.yaml          # Curated SecLists catalog categories used by the wordlist command and autocomplete
 │   │   └── workflows.yaml          # Guided workflows panel definitions (multi-step diagnostic command sequences)
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
+│   ├── config_paths.py         # Shared shipped-config and operator-overlay path resolver
 │   ├── core/
 │   │   ├── __init__.py         # Core helper package marker
 │   │   ├── database.py         # DB connection, schema init, retention pruning

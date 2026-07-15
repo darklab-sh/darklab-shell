@@ -167,7 +167,7 @@ Before merging a version branch back to `main`:
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
-**Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root, while `APP_LOCAL_CONF_DIR` selects only the directory for the main `config.local.yaml`. Other loaders still use their sibling `*.local.*` files. When adding or changing an overlay-capable surface, keep its merge/reload/cache behavior explicit and document whether the repository-free `/config` mount supports it; don't make a filename look active when the runtime doesn't resolve it.
+**Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root and `APP_LOCAL_CONF_DIR` selects the operator overlay root for every supported `*.local.*` file. Source deployments default both roots to `app/conf`, preserving sibling behavior. When adding or changing an overlay-capable surface, use `app/config_paths.py`, keep its merge/reload/cache behavior explicit, and update the repository-free starter files and docs; don't make a filename look active when the runtime doesn't resolve it.
 
 **Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
 
@@ -271,7 +271,7 @@ The checks and their scope:
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
 | YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
-| Source license notices | project checker | project-owned source, excluding generated and third-party paths | `npm run lint:licenses` |
+| Source license notices | Python project checker | project-owned source, excluding generated and third-party paths | `npm run lint:licenses` or `npm run lint:py` |
 | Markdown | `markdownlint-cli2` | all tracked `.md` files | `npm run lint:md` |
 | Vendor JS | `build_vendor.mjs` + `git diff` | `app/static/js/vendor/` | `npm run vendor:check` |
 | Frontend bundles | `build_assets.mjs` + committed build output | `assets.config.json`, `app/static/build/`, bundled CSS | `npm run assets:check` |

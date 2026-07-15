@@ -80,7 +80,7 @@ test-py-pytest:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - apt-get update -q && apt-get install -y -q git
+    - apt-get update -q && apt-get install -y -q curl git jq
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
     - pytest tests/py/ -v
@@ -136,9 +136,13 @@ lint-py:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
-    - ruff check --config .tooling/ruff.toml app/ tests/py/
+    - ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/check_source_licenses.py
     - bandit -r app/ -ll -q
+    - python scripts/check_source_licenses.py
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
 lint-js:
@@ -166,7 +170,6 @@ lint-js:
     - npm run lint:docker
     - npm run lint:md
     - npm run lint:json
-    - npm run lint:licenses
     - npm run vendor:check
     - npm run assets:check
 

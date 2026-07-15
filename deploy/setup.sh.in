@@ -164,6 +164,8 @@ for directory in data conf workspaces backups; do
     mkdir "$install_dir/$directory"
     chmod 700 "$install_dir/$directory"
 done
+mkdir "$install_dir/conf/themes"
+chmod 700 "$install_dir/conf/themes"
 
 cp "$staging_dir/compose.yaml" "$install_dir/compose.yaml"
 cp "$staging_dir/.env.example" "$install_dir/.env.example"
@@ -173,7 +175,52 @@ cp "$staging_dir/verify-release-image.sh" "$install_dir/verify-release-image.sh"
 cp "$staging_dir/THIRD_PARTY_NOTICES.txt" "$install_dir/THIRD_PARTY_NOTICES.txt"
 cp "$staging_dir/container-licenses.json" "$install_dir/container-licenses.json"
 cp "$staging_dir/LICENSE" "$install_dir/LICENSE"
+
+cat > "$install_dir/conf/commands.local.yaml" <<'EOF'
+# Local command registry additions and same-root overrides.
+# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md#command-registry-and-autocomplete-configuration
+EOF
+cat > "$install_dir/conf/faq.local.yaml" <<'EOF'
+# Local FAQ entries. Keep each item compatible with app/conf/faq.yaml.
+# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md#local-override-files
+EOF
+cat > "$install_dir/conf/welcome.local.yaml" <<'EOF'
+# Local welcome-command entries. Keep each item compatible with app/conf/welcome.yaml.
+# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md#local-override-files
+EOF
+cat > "$install_dir/conf/workflows.local.yaml" <<'EOF'
+# Local guided workflows and v2 playbooks.
+# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/docs/workflows.md
+EOF
+cat > "$install_dir/conf/app_hints.local.txt" <<'EOF'
+# Add one desktop hint per line. Category headers such as [workspace] are supported.
+EOF
+cat > "$install_dir/conf/app_hints_mobile.local.txt" <<'EOF'
+# Add one mobile hint per line. Category headers such as [workspace] are supported.
+EOF
+cat > "$install_dir/conf/themes/darklab_obsidian.local.yaml" <<'EOF'
+# Override only the darklab_obsidian theme keys you want to change.
+# Use <theme-name>.local.yaml to target another shipped theme.
+# See https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/THEME.md
+EOF
+cat > "$install_dir/conf/ascii.local.txt.example" <<'EOF'
+Rename this file to ascii.local.txt and replace all of its contents with desktop banner art.
+An active ascii.local.txt replaces the shipped banner instead of extending it.
+EOF
+cat > "$install_dir/conf/ascii_mobile.local.txt.example" <<'EOF'
+Rename this file to ascii_mobile.local.txt and replace all of its contents with mobile banner art.
+An active ascii_mobile.local.txt replaces the shipped banner instead of extending it.
+EOF
+cat > "$install_dir/conf/package_presets.local.yaml.example" <<'EOF'
+# Copy the complete package preset catalog here, remove .example, then set:
+# package_presets_file: package_presets.local.yaml
+EOF
+cat > "$install_dir/conf/report_templates.local.yaml.example" <<'EOF'
+# Copy the complete report template catalog here, remove .example, then set:
+# report_templates_file: report_templates.local.yaml
+EOF
 chmod 600 "$install_dir/.env" "$install_dir/conf/config.local.yaml"
+find "$install_dir/conf" -type f -exec chmod 600 {} \;
 chmod 755 "$install_dir/verify-release-image.sh"
 chmod 644 "$install_dir/compose.yaml" "$install_dir/.env.example" \
     "$install_dir/LICENSE" "$install_dir/THIRD_PARTY_NOTICES.txt" \
@@ -216,7 +263,10 @@ if grep -E '@[A-Z0-9_]+@' \
     "$install_dir/compose.yaml" \
     "$install_dir/.env.example" \
     "$install_dir/.env" \
-    "$install_dir/conf/config.local.yaml" \
+    "$install_dir/conf/"*.local.yaml \
+    "$install_dir/conf/"*.local.txt \
+    "$install_dir/conf/"*.example \
+    "$install_dir/conf/themes/"*.local.yaml \
     "$install_dir/verify-release-image.sh" \
     "$install_dir/release-manifest.json" >/dev/null 2>&1; then
     fail "release payload contains an unresolved template value"
@@ -241,7 +291,7 @@ darklab_shell ${RELEASE_VERSION} is ready in ${TARGET_DIR}.
 
 Review these files before starting:
   ${TARGET_DIR}/.env
-  ${TARGET_DIR}/conf/config.local.yaml
+  ${TARGET_DIR}/conf/
   ${TARGET_DIR}/compose.yaml
 
 Then run:

@@ -57,6 +57,16 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
         raw_packet_state = "partial"
     else:
         raw_packet_state = "unavailable"
+    log.debug(
+        "CONFIG_OVERLAY_INVENTORY",
+        extra={
+            "supported_local_overlays": int(load_summary.get("supported_local_overlays") or 0),
+            "present_local_overlays": ",".join(
+                _bounded_config_log_field(value)
+                for value in load_summary.get("present_local_overlays") or []
+            ),
+        },
+    )
     raw_packet_fields = {
         f"raw_packet_{tool}_{field}": (
             bool(status[field]) if field == "active" else str(status[field])
@@ -70,6 +80,7 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             "conf_dir": _bounded_config_log_field(load_summary.get("conf_dir")),
             "local_conf_dir": _bounded_config_log_field(load_summary.get("local_conf_dir")),
             "local_overlay": bool(load_summary.get("local_overlay", False)),
+            "supported_local_overlays": int(load_summary.get("supported_local_overlays") or 0),
             "overlays": ",".join(
                 _bounded_config_log_field(item.get("source"))
                 for item in load_summary.get("overlays") or []

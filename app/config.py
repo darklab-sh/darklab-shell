@@ -13,10 +13,10 @@ import ipaddress
 import re
 from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
-from pathlib import Path
 from typing import Any, cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, create_model
+import config_paths
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
 log = logging.getLogger("shell")
@@ -1202,19 +1202,17 @@ def load_config(conf_dir=None, local_conf_dir=None):
     allowed_paths.add("full_output_max_bytes")
     provenance: dict[str, str] = {}
     _record_default_provenance(defaults, provenance)
-    if conf_dir is not None:
-        conf_path = Path(conf_dir)
-    elif APP_CONF_DIR:
-        conf_path = Path(APP_CONF_DIR)
-    else:
-        conf_path = Path(__file__).resolve().parent / "conf"
-    if local_conf_dir is not None:
-        local_conf_path = Path(local_conf_dir)
-    elif APP_LOCAL_CONF_DIR:
-        local_conf_path = Path(APP_LOCAL_CONF_DIR)
-    else:
-        local_conf_path = conf_path
-    local_overlay_path = local_conf_path / "config.local.yaml"
+    roots = config_paths.config_roots(
+        conf_dir if conf_dir is not None else APP_CONF_DIR or None,
+        local_conf_dir if local_conf_dir is not None else APP_LOCAL_CONF_DIR or None,
+    )
+    conf_path = roots.shipped
+    local_conf_path = roots.local
+    local_overlay_path = config_paths.config_asset_paths(
+        "config.yaml",
+        shipped_conf_dir=conf_path,
+        local_conf_dir=local_conf_path,
+    ).local
     conf_log_path = _config_log_path(conf_path)
     local_conf_log_path = _config_log_path(local_conf_path)
     base_overlay_path = conf_path / "config.yaml"
@@ -1233,6 +1231,13 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "conf_dir": conf_log_path,
         "local_conf_dir": local_conf_log_path,
         "local_overlay": local_overlay_present,
+        "supported_local_overlays": len(
+            config_paths.supported_overlay_assets(shipped_conf_dir=conf_path)
+        ),
+        "present_local_overlays": list(config_paths.present_local_overlays(
+            shipped_conf_dir=conf_path,
+            local_conf_dir=local_conf_path,
+        )),
         "overlays": [],
         "env_keys": [],
     })
@@ -1670,7 +1675,7 @@ _THEME_DEFAULTS = {
     },
 }
 
-_THEME_CONF_DIR = Path(__file__).resolve().parent / "conf"
+_THEME_CONF_DIR = config_paths.config_roots(APP_CONF_DIR or None, APP_LOCAL_CONF_DIR or None).shipped
 _THEME_VARIANT_DIR = _THEME_CONF_DIR / "themes"
 _THEME_BASE_CSS_KEYS = (
     "bg",
@@ -1897,6 +1902,8 @@ def _theme_default_family(theme_data: dict) -> str:
 
 def _theme_file_candidates(name):
     stem = _theme_name_stem(name)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", stem):
+        return ()
     return (_THEME_VARIANT_DIR / f"{stem}.yaml",)
 
 
@@ -1914,7 +1921,11 @@ def _load_theme_yaml(name):
             loaded = {}
         if isinstance(loaded, dict):
             theme_data.update(loaded)
-        local_overlay = theme_path.with_name(f"{theme_path.stem}.local{theme_path.suffix}")
+        local_overlay = config_paths.local_overlay_path_for(
+            theme_path,
+            shipped_conf_dir=_THEME_CONF_DIR,
+            local_conf_dir=APP_LOCAL_CONF_DIR or None,
+        )
         if local_overlay.exists():
             try:
                 with open(local_overlay) as f:
