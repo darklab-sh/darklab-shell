@@ -15,6 +15,9 @@ variables:
   SYFT_IMAGE: "anchore/syft:v1.42.3@sha256:5999d209a342e55e9edf70bf8930fb5b86d8f2a783fa401178372c50e21b1d36"
   GRYPE_VERSION: "0.112.0"
   GRYPE_IMAGE: "anchore/grype:v0.112.0@sha256:391bfda62888fb4e98ff5c4c81598f7431a3c1eac3f8519d69d1ff00df247c1d"
+  RELEASE_ARM64_COMPATIBILITY_ENABLED: "0"
+  RELEASE_SELINUX_COMPATIBILITY_ENABLED: "0"
+  RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED: "0"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -332,6 +335,11 @@ docker-build-botis:
 
 .protected-release-tag:
   rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+
+.protected-final-release-tag:
+  rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true"'
     - when: never
 
@@ -374,6 +382,121 @@ release-image-smoke:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
     - sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE" amd64
+
+release-image-arm64-smoke:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  services:
+    - name: "${CI_DOCKER_IMAGE}-dind"
+      alias: docker
+      command:
+        - "--mtu=1400"
+  tags:
+    - saas-linux-small-arm64
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ARM64_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - |
+      [ "$(uname -m)" = "aarch64" ] || {
+        printf 'ARM64 compatibility requires a native aarch64 runner; found %s\n' "$(uname -m)" >&2
+        exit 1
+      }
+      release_version=${CI_COMMIT_TAG#v}
+      candidate_image="darklab-shell-arm64-candidate:${CI_COMMIT_SHA}"
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      docker buildx imagetools inspect --raw "$python_base_image" > arm64-python-base-index.json
+      python_base_digest=$(jq -r '
+        [.manifests[]
+          | select(.platform.os == "linux" and .platform.architecture == "arm64")
+          | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+        ][0].digest // empty
+      ' arm64-python-base-index.json)
+      printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || {
+        echo "ARM64 Python base manifest digest is missing or malformed" >&2
+        exit 1
+      }
+      docker build --pull --platform linux/arm64 \
+        --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+        --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --build-arg "APP_VERSION=${release_version}" \
+        --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
+        --build-arg "BUILD_DATE=${CI_PIPELINE_CREATED_AT}" \
+        --tag "$candidate_image" .
+      docker image inspect "$candidate_image" > arm64-image-inspect.json
+      sh scripts/verify_repository_free_image.sh \
+        "$candidate_image" "$release_version" "$CI_COMMIT_SHA" "$python_base_digest" arm64
+      sh scripts/verify_bundled_tools.sh "$candidate_image" arm64
+  artifacts:
+    when: always
+    paths:
+      - arm64-python-base-index.json
+      - arm64-image-inspect.json
+    expire_in: 1 week
+
+release-image-selinux-smoke:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  tags:
+    - selinux
+    - self-managed
+    - baku
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_SELINUX_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+  before_script: []
+  script:
+    - getenforce | tee selinux-enforcement.txt
+    - grep -qx Enforcing selinux-enforcement.txt
+    - docker info --format '{{json .SecurityOptions}}' | tee selinux-docker-security.json
+    - grep -qi selinux selinux-docker-security.json
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - CONTAINER_VOLUME_LABEL=Z sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
+  artifacts:
+    when: always
+    paths:
+      - selinux-enforcement.txt
+      - selinux-docker-security.json
+    expire_in: 1 week
+
+release-image-rootless-podman-smoke:
+  stage: verify
+  tags:
+    - podman
+    - self-managed
+    - baal
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+  before_script: []
+  script:
+    - test "$(id -u)" -ne 0
+    - podman info --format '{{.Host.Security.Rootless}}' | tee podman-rootless.txt
+    - grep -qx true podman-rootless.txt
+    - echo "$CI_REGISTRY_PASSWORD" | podman login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - podman pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - CONTAINER_RUNTIME=podman CONTAINER_VOLUME_LABEL=Z sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
+  after_script:
+    - podman logout "$CI_REGISTRY" >/dev/null 2>&1 || true
+  artifacts:
+    when: always
+    paths:
+      - podman-rootless.txt
+    expire_in: 1 week
 
 release-image-dockerhub:
   stage: promote
@@ -383,6 +506,12 @@ release-image-dockerhub:
     - job: release-image-gitlab
       artifacts: true
     - job: release-image-smoke
+    - job: release-image-arm64-smoke
+      optional: true
+    - job: release-image-selinux-smoke
+      optional: true
+    - job: release-image-rootless-podman-smoke
+      optional: true
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
@@ -516,7 +645,7 @@ release-payload-upload:
 release-create:
   stage: release
   image: registry.gitlab.com/gitlab-org/cli:latest
-  extends: .protected-release-tag
+  extends: .protected-final-release-tag
   needs:
     - job: release-image-gitlab
       artifacts: true
@@ -566,7 +695,9 @@ release-public-smoke:
       artifacts: true
     - job: release-image-dockerhub
       artifacts: true
+    - job: release-payload-upload
     - job: release-create
+      optional: true
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
@@ -583,6 +714,12 @@ release-public-smoke:
       require_equal() {
         [ "$4" = "$3" ] || release_check_failed "$1" "$2" "$3" "$4"
       }
+      require_contains() {
+        case "$4" in
+          *"$3"*) ;;
+          *) release_check_failed "$1" "$2" "$3" "$4" ;;
+        esac
+      }
       docker logout "$CI_REGISTRY" >/dev/null 2>&1 || true
       docker logout docker.io >/dev/null 2>&1 || true
       docker manifest inspect -v "$GITLAB_IMAGE" > anonymous-gitlab-image.json
@@ -591,6 +728,15 @@ release-public-smoke:
       docker manifest inspect -v "$DOCKERHUB_RELEASE_IMAGE" > anonymous-dockerhub-image.json
       anonymous_dockerhub_digest=$(jq -r '.Descriptor.digest // empty' anonymous-dockerhub-image.json)
       require_equal public_dockerhub_image digest "$DOCKERHUB_DIGEST" "$anonymous_dockerhub_digest"
+      curl -fsS \
+        "https://hub.docker.com/v2/namespaces/darklabsh/repositories/darklab-shell" \
+        > dockerhub-repository.json
+      dockerhub_overview=$(jq -r '.full_description // empty' dockerhub-repository.json)
+      require_contains dockerhub_overview oidc_issuer \
+        'https://gitlab.com' "$dockerhub_overview"
+      require_contains dockerhub_overview signing_identity_regexp \
+        '^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+        "$dockerhub_overview"
     - docker pull "$DOCKERHUB_RELEASE_IMAGE"
     - sh scripts/verify_repository_free_image.sh "$DOCKERHUB_RELEASE_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
     - |
@@ -745,6 +891,7 @@ release-public-smoke:
     paths:
       - anonymous-gitlab-image.json
       - anonymous-dockerhub-image.json
+      - dockerhub-repository.json
       - release-install/release-manifest.json
       - release-compose.log
     expire_in: 1 week

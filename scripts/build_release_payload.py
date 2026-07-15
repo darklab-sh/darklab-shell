@@ -22,7 +22,7 @@ DEFAULT_DOCKERHUB_IMAGE = "docker.io/darklabsh/darklab-shell"
 DEFAULT_GITLAB_IMAGE = "registry.gitlab.com/darklab.sh/darklab_shell"
 PACKAGE_NAME = "darklab-shell-deploy"
 PROJECT_PACKAGE_API = "https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic"
-VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 EVIDENCE_FILES = (
     "darklab-shell.cdx.json",
@@ -188,7 +188,10 @@ def build_payload(
     evidence_dir: Path | None = None,
 ) -> None:
     if not VERSION_RE.fullmatch(version):
-        raise ValueError(f"Release version must be MAJOR.MINOR.PATCH: {version!r}")
+        raise ValueError(
+            "Release version must be MAJOR.MINOR.PATCH or "
+            f"MAJOR.MINOR.PATCH-rc.NUMBER: {version!r}"
+        )
     for name, digest in (("GitLab", gitlab_digest), ("Docker Hub", dockerhub_digest)):
         if not DIGEST_RE.fullmatch(digest):
             raise ValueError(f"{name} image digest must be sha256:<64 lowercase hex characters>")

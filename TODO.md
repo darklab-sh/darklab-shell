@@ -48,8 +48,8 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 ##### Milestone 4: Supply-chain and compatibility hardening
 
-- [ ] Publish the expected signing identity somewhere independent of the GitLab release/package origin, such as the Docker Hub repository overview or the project website.
-- [ ] Add a native Linux ARM64 build and bundled-tool smoke lane before publishing a multi-architecture image, and add an explicit Podman/rootless/SELinux test lane before claiming those runtimes as supported.
+- [ ] Copy the reviewed `deploy/dockerhub-overview.txt` into the public Docker Hub repository overview, then confirm the anonymous release check reads the expected issuer and signing-identity pattern.
+- [ ] Enable the three protected compatibility variables and pass the hosted Linux ARM64 build/tool, SELinux-enforcing Docker, and rootless Podman release gates before broadening the published support matrix.
 - [ ] Revisit image composition using the measured pull-size data. Add a slim or separately packaged wordlist/tool variant only when its maintenance and UX costs are justified.
 
 **Milestone 4 exit:** Published artifacts are traceable and independently verifiable, every advertised architecture/runtime has automated coverage, and image-size tradeoffs are documented with measured data.
@@ -58,7 +58,7 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 ##### Milestone 4: supply chain and compatibility
 
-- [ ] Add SELinux-enforcing Docker and rootless Podman compatibility lanes before advertising those host models as supported.
+- [ ] Set `RELEASE_ARM64_COMPATIBILITY_ENABLED=1`, `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`, and `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1` as protected project variables, then pass all three compatibility jobs on a protected release tag.
 - [ ] Use measured image-size and pull-time data to decide whether a slim or separately packaged wordlist/tool image is worth maintaining.
 - [ ] Update verification docs and the changelog when the hardening work ships, then remove the completed Milestone 4 tasks and this plan.
 

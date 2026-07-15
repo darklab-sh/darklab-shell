@@ -37,9 +37,12 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _deployment_archive_files(payload: Path) -> dict[str, bytes]:
-    prefix = f"darklab-shell-deploy-{RELEASE_VERSION}/"
-    with tarfile.open(payload / DEPLOYMENT_ARCHIVE, "r:gz") as archive:
+def _deployment_archive_files(
+    payload: Path,
+    version: str = RELEASE_VERSION,
+) -> dict[str, bytes]:
+    prefix = f"darklab-shell-deploy-{version}/"
+    with tarfile.open(payload / f"darklab-shell-deploy-{version}.tar.gz", "r:gz") as archive:
         files: dict[str, bytes] = {}
         for member in archive.getmembers():
             if not member.isfile():
@@ -105,6 +108,14 @@ def _build_payload_for_version(tmp_path: Path, version: str) -> Path:
         destination = source_root / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    env_example_path = source_root / ".env.example"
+    env_example_path.write_text(
+        env_example_path.read_text(encoding="utf-8").replace(
+            f"darklab-shell:{RELEASE_VERSION}",
+            f"darklab-shell:{version}",
+        ),
+        encoding="utf-8",
+    )
     compose = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
     (source_root / "deploy" / "compose.yaml").write_text(
         compose.replace(f"darklab-shell:{RELEASE_VERSION}", f"darklab-shell:{version}"),
@@ -200,6 +211,52 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     docker_path.chmod(0o755)
+    return bin_dir, log_path
+
+
+def _fake_image_runtime(tmp_path: Path) -> tuple[Path, Path]:
+    bin_dir = tmp_path / "image-runtime-bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "image-runtime.log"
+    runtime_path = bin_dir / "podman"
+    runtime_path.write_text(
+        """#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_IMAGE_RUNTIME_LOG"
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+    case "$*" in
+        *Architecture*) printf 'arm64\n' ;;
+        *sh.darklab.image.architecture*) printf 'arm64\n' ;;
+        *org.opencontainers.image.licenses*) printf 'AGPL-3.0-only\n' ;;
+        *sh.darklab.python.base.digest*) printf 'sha256:%064d\n' 0 ;;
+        *sh.darklab.app.version*) printf '2.6.0\n' ;;
+        *sh.darklab.git.revision*|*org.opencontainers.image.revision*) printf 'revision-a\n' ;;
+    esac
+    exit 0
+fi
+if [ "$1" = "inspect" ]; then
+    case "$*" in
+        *Mounts*) printf '[]\n' ;;
+        *State.Running*) printf 'true\n' ;;
+    esac
+    exit 0
+fi
+if [ "$1" = "exec" ]; then
+    case "$*" in
+        */health*) exit 0 ;;
+        */config*) printf '{"app_name":"release-overlay-smoke"}\n' ;;
+        */faq*) printf '[{"question":"Release overlay smoke"}]\n' ;;
+    esac
+    exit 0
+fi
+if [ "$1" = "run" ]; then
+    case " $* " in *" -d "*) printf 'container-id\n' ;; esac
+    exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    runtime_path.chmod(0o755)
     return bin_dir, log_path
 
 
@@ -567,11 +624,14 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "./app:/app:ro" in development_compose["services"]["shell"]["volumes"]
 
 
-def test_runtime_image_includes_app_and_excludes_local_overlays():
+def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     entrypoint = (ROOT / "entrypoint.sh").read_text(encoding="utf-8")
     image_smoke = (ROOT / "scripts" / "verify_repository_free_image.sh").read_text(
+        encoding="utf-8"
+    )
+    bundled_tool_smoke = (ROOT / "scripts" / "verify_bundled_tools.sh").read_text(
         encoding="utf-8"
     )
 
@@ -602,10 +662,74 @@ def test_runtime_image_includes_app_and_excludes_local_overlays():
     assert "release-overlay-smoke" in image_smoke
     assert "--installed-image" in image_smoke
     assert "python_base_digest" in image_smoke
+    assert "expected_architecture=${5:-amd64}" in image_smoke
+    assert "container_runtime=${CONTAINER_RUNTIME:-docker}" in image_smoke
+    assert 'docker|podman)' in image_smoke
+    assert 'overlay_mount="${overlay_mount},${volume_label}"' in image_smoke
     assert "/app/tools/backup_system.py" in image_smoke
     assert "/app/tools/restore_system.py" in image_smoke
     assert "command -v pg_restore" in image_smoke
     assert "shellcheck disable=SC2317,SC2329" in image_smoke
+    assert "--user scanner:appuser" in bundled_tool_smoke
+    assert "expected_architecture=${2:-amd64}" in bundled_tool_smoke
+    assert "exec format error" in bundled_tool_smoke
+    for tool in ("rustscan", "nuclei", "massdns", "pg_restore", "openssl"):
+        assert f"probe {tool} " in bundled_tool_smoke
+
+    bin_dir, runtime_log = _fake_image_runtime(tmp_path)
+    env = os.environ.copy()
+    env.update({
+        "CI_JOB_ID": "1234",
+        "CONTAINER_RUNTIME": "podman",
+        "CONTAINER_VOLUME_LABEL": "Z",
+        "FAKE_IMAGE_RUNTIME_LOG": str(runtime_log),
+        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+    })
+    digest = "sha256:" + "0" * 64
+    runtime_result = subprocess.run(
+        [
+            "sh",
+            str(ROOT / "scripts" / "verify_repository_free_image.sh"),
+            "registry.example.test/darklab:2.6.0",
+            "2.6.0",
+            "revision-a",
+            digest,
+            "arm64",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert runtime_result.returncode == 0, runtime_result.stderr
+    runtime_calls = runtime_log.read_text(encoding="utf-8")
+    assert ":/config:ro,Z" in runtime_calls
+    assert "sh.darklab.image.architecture" in runtime_calls
+    bundled_result = subprocess.run(
+        [
+            "sh",
+            str(ROOT / "scripts" / "verify_bundled_tools.sh"),
+            "registry.example.test/darklab:2.6.0",
+            "arm64",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert bundled_result.returncode == 0, bundled_result.stderr
+    invalid_runtime = subprocess.run(
+        ["sh", str(ROOT / "scripts" / "verify_repository_free_image.sh"), "image"],
+        cwd=ROOT,
+        env={**env, "CONTAINER_RUNTIME": "unsupported"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert invalid_runtime.returncode == 2
+    assert "unsupported container runtime" in invalid_runtime.stderr
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     assert "deploy/setup.sh.in" in package["scripts"]["lint:shell"]
     assert "deploy/darklab-deploy.sh.in" in package["scripts"]["lint:shell"]
@@ -879,6 +1003,17 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     for name, expected in managed_checksums.items():
         assert hashlib.sha256(archive_files[name]).hexdigest() == expected
     assert "representative_ci_pull_seconds" not in all_text
+    rc_version = "2.6.0-rc.1"
+    rc_payload = _build_payload_for_version(tmp_path, rc_version)
+    rc_archive_files = _deployment_archive_files(rc_payload, rc_version)
+    rc_manifest = json.loads(rc_archive_files["release-manifest.json"])
+    assert rc_manifest["version"] == rc_version
+    assert rc_manifest["dockerhub_image"] == (
+        f"docker.io/darklabsh/darklab-shell:{rc_version}"
+    )
+    assert f"docker.io/darklabsh/darklab-shell:{rc_version}" in rc_archive_files[
+        "compose.yaml"
+    ].decode("utf-8")
     ci_config = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
     publisher = RELEASE_PUBLISHER.read_text(encoding="utf-8")
     assert "pull_seconds=" in publisher
@@ -897,6 +1032,23 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "release-compose-restart-marker" in ci_config
     assert 'release-install/darklab-deploy" status' in ci_config
     parsed_ci = yaml.safe_load(ci_config)
+    release_rule = parsed_ci[".protected-release-tag"]["rules"][0]["if"]
+    final_release_rule = parsed_ci[".protected-final-release-tag"]["rules"][0]["if"]
+    assert "(-rc\\.[0-9]+)?" in release_rule
+    assert "-rc" not in final_release_rule
+    assert parsed_ci["release-create"]["extends"] == ".protected-final-release-tag"
+    for job_name in (
+        "release-image-gitlab",
+        "release-image-smoke",
+        "release-image-dockerhub",
+        "release-supply-chain",
+        "release-payload-upload",
+        "release-public-smoke",
+    ):
+        assert parsed_ci[job_name]["extends"] == ".protected-release-tag"
+    assert parsed_ci["variables"]["RELEASE_ARM64_COMPATIBILITY_ENABLED"] == "0"
+    assert parsed_ci["variables"]["RELEASE_SELINUX_COMPATIBILITY_ENABLED"] == "0"
+    assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
     pytest_setup = "\n".join(parsed_ci["test-py-pytest"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bcurl\b", pytest_setup)
     assert re.search(r"\bapt-get install\b[^\n]*\bjq\b", pytest_setup)
@@ -912,6 +1064,57 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
     )
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
+    amd64_smoke_script = "\n".join(parsed_ci["release-image-smoke"]["script"])
+    assert "verify_repository_free_image.sh" in amd64_smoke_script
+    assert 'verify_bundled_tools.sh "$GITLAB_IMAGE" amd64' in amd64_smoke_script
+    arm64_job = parsed_ci["release-image-arm64-smoke"]
+    assert arm64_job["stage"] == "verify"
+    assert arm64_job["tags"] == ["saas-linux-small-arm64"]
+    assert arm64_job["services"] == [
+        {
+            "name": "${CI_DOCKER_IMAGE}-dind",
+            "alias": "docker",
+            "command": ["--mtu=1400"],
+        }
+    ]
+    assert arm64_job["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
+    assert arm64_job["variables"]["DOCKER_TLS_CERTDIR"] == ""
+    assert arm64_job["rules"][-1] == {"when": "never"}
+    assert "RELEASE_ARM64_COMPATIBILITY_ENABLED == \"1\"" in arm64_job["rules"][0]["if"]
+    assert "(-rc\\.[0-9]+)?" in arm64_job["rules"][0]["if"]
+    arm64_script = "\n".join(arm64_job["script"])
+    assert '"$(uname -m)" = "aarch64"' in arm64_script
+    assert "--platform linux/arm64" in arm64_script
+    assert "verify_repository_free_image.sh" in arm64_script
+    assert "verify_bundled_tools.sh" in arm64_script
+    selinux_job = parsed_ci["release-image-selinux-smoke"]
+    assert selinux_job["tags"] == ["selinux", "self-managed", "baku"]
+    assert "RELEASE_SELINUX_COMPATIBILITY_ENABLED == \"1\"" in (
+        selinux_job["rules"][0]["if"]
+    )
+    assert "(-rc\\.[0-9]+)?" in selinux_job["rules"][0]["if"]
+    selinux_script = "\n".join(selinux_job["script"])
+    assert "getenforce" in selinux_script
+    assert "CONTAINER_VOLUME_LABEL=Z" in selinux_script
+    podman_job = parsed_ci["release-image-rootless-podman-smoke"]
+    assert podman_job["tags"] == ["podman", "self-managed", "baal"]
+    assert "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == \"1\"" in (
+        podman_job["rules"][0]["if"]
+    )
+    assert "(-rc\\.[0-9]+)?" in podman_job["rules"][0]["if"]
+    podman_script = "\n".join(podman_job["script"])
+    assert 'test "$(id -u)" -ne 0' in podman_script
+    assert "CONTAINER_RUNTIME=podman" in podman_script
+    promotion_needs = {
+        need["job"]: need
+        for need in parsed_ci["release-image-dockerhub"]["needs"]
+    }
+    for compatibility_job in (
+        "release-image-arm64-smoke",
+        "release-image-selinux-smoke",
+        "release-image-rootless-podman-smoke",
+    ):
+        assert promotion_needs[compatibility_job]["optional"] is True
     supply_chain_job = parsed_ci["release-supply-chain"]
     assert supply_chain_job["stage"] == "attest"
     assert supply_chain_job["artifacts"]["when"] == "always"
@@ -939,6 +1142,23 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "cosign verify-blob" in publisher
     public_smoke_script = "\n".join(parsed_ci["release-public-smoke"]["script"])
     assert "release-build-inputs.json" in public_smoke_script
+    assert "dockerhub-repository.json" in public_smoke_script
+    assert "signing_identity_regexp" in public_smoke_script
+    public_smoke_needs = {
+        need["job"]: need for need in parsed_ci["release-public-smoke"]["needs"]
+    }
+    assert "release-payload-upload" in public_smoke_needs
+    assert public_smoke_needs["release-create"]["optional"] is True
+    dockerhub_overview = (ROOT / "deploy" / "dockerhub-overview.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "README.md#quick-start" in dockerhub_overview
+    assert "docker.io/darklabsh/darklab-shell" in dockerhub_overview
+    assert "https://gitlab.com" in dockerhub_overview
+    assert (
+        r"^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml"
+        r"@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$"
+    ) in dockerhub_overview
     release_links = parsed_ci["release-create"]["release"]["assets"]["links"]
     release_link_names = {link["name"] for link in release_links}
     assert release_link_names == {
@@ -1064,6 +1284,22 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "digest": {"sha256": "c" * 64},
     }
 
+    rc_version = "2.6.0-rc.1"
+    rc_evidence_args = {
+        **evidence_args,
+        "version": rc_version,
+        "gitlab_image": f"registry.gitlab.com/darklab.sh/darklab_shell:{rc_version}",
+        "dockerhub_image": f"docker.io/darklabsh/darklab-shell:{rc_version}",
+        "commit_tag": f"v{rc_version}",
+    }
+    rc_evidence = tmp_path / "evidence-rc"
+    evidence_builder.build_evidence(output_dir=rc_evidence, **rc_evidence_args)
+    rc_evidence_index = json.loads((rc_evidence / "release-evidence.json").read_text())
+    assert rc_evidence_index["version"] == rc_version
+    assert rc_evidence_index["signing"]["certificate_identity"].endswith(
+        f"@refs/tags/v{rc_version}"
+    )
+
     payload = tmp_path / "evidenced-payload"
     payload_builder.build_payload(
         version=RELEASE_VERSION,
@@ -1143,6 +1379,20 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert gitlab_conflict.returncode != 0
     assert "check=version expected=2.6.0 actual=9.9.9" in gitlab_conflict.stderr
 
+    rc_version = "2.6.0-rc.1"
+    gitlab_rc_dir = tmp_path / "gitlab-rc"
+    gitlab_rc = _run_release_publisher(
+        gitlab_rc_dir,
+        "gitlab-image",
+        CI_COMMIT_TAG=f"v{rc_version}",
+        RELEASE_VERSION=rc_version,
+        GITLAB_IMAGE=f"registry.example.test/darklab/shell:{rc_version}",
+    )
+    assert gitlab_rc.returncode == 0, gitlab_rc.stderr
+    assert f"GITLAB_IMAGE=registry.example.test/darklab/shell:{rc_version}" in (
+        gitlab_rc_dir / "release-image.env"
+    ).read_text(encoding="utf-8")
+
     for case_name, overrides in (
         ("gitlab-invalid-base-digest", {"FAKE_PYTHON_BASE_DIGEST": "sha256:bad"}),
         ("gitlab-build-failure", {"FAKE_BUILD_EXIT": "17"}),
@@ -1181,6 +1431,18 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     )
     assert dockerhub_conflict.returncode != 0
     assert "check=canonical_digest" in dockerhub_conflict.stderr
+
+    dockerhub_rc_dir = tmp_path / "dockerhub-rc"
+    dockerhub_rc = _run_release_publisher(
+        dockerhub_rc_dir,
+        "dockerhub-image",
+        RELEASE_VERSION=rc_version,
+        GITLAB_IMAGE=f"registry.example.test/darklab/shell:{rc_version}",
+    )
+    assert dockerhub_rc.returncode == 0, dockerhub_rc.stderr
+    assert f"DOCKERHUB_RELEASE_IMAGE=docker.io/darklabsh/darklab-shell:{rc_version}" in (
+        dockerhub_rc_dir / "dockerhub-image.env"
+    ).read_text(encoding="utf-8")
 
     for case_name, overrides in (
         ("dockerhub-copy-failure", {"FAKE_PROMOTE_EXIT": "19"}),
@@ -1325,6 +1587,24 @@ def test_release_version_gate_covers_runtime_and_distribution_files():
     assert automatic.returncode == 0, automatic.stderr
     assert mismatched.returncode == 1
     assert "app/config.py: 2.6.0" in mismatched.stderr
+    assert "deploy/container-licenses.json: 2.6.0" in mismatched.stderr
+    assert "tests/py/test_production_install.py: 2.6.0" in mismatched.stderr
+
+    rc_drift = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_versions.sh",
+            "--release-version",
+            "2.6.0-rc.1",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert rc_drift.returncode == 1
+    assert "Release version drift; expected 2.6.0-rc.1" in rc_drift.stderr
+    assert "Invalid release version" not in rc_drift.stderr
 
 
 def test_installer_creates_private_operator_files_without_starting(tmp_path: Path):
@@ -1821,6 +2101,59 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     )
     assert downgrade.returncode != 0
     assert "refusing downgrade from 2.6.1 to 2.6.0" in downgrade.stderr
+
+    rc_one_version = "2.6.0-rc.1"
+    rc_two_version = "2.6.0-rc.2"
+    rc_one_payload = _build_payload_for_version(tmp_path, rc_one_version)
+    rc_two_payload = _build_payload_for_version(tmp_path, rc_two_version)
+    rc_install_dir = tmp_path / "release-candidate-deployment"
+    rc_setup_dir = tmp_path / "release-candidate-setup"
+    rc_installed = _run_setup(rc_one_payload, rc_install_dir, rc_setup_dir)
+    assert rc_installed.returncode == 0, rc_installed.stderr
+    for requested_version, requested_payload in (
+        (rc_two_version, rc_two_payload),
+        (RELEASE_VERSION, current_payload),
+    ):
+        requested_archive = (
+            requested_payload / f"darklab-shell-deploy-{requested_version}.tar.gz"
+        )
+        rc_upgraded = subprocess.run(
+            [
+                str(rc_install_dir / "darklab-deploy"),
+                "upgrade",
+                requested_version,
+                "--archive",
+                str(requested_archive),
+                "--backup",
+                str(backup),
+            ],
+            cwd=rc_install_dir,
+            env=lifecycle_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert rc_upgraded.returncode == 0, rc_upgraded.stderr
+    rc_manifest = json.loads((rc_install_dir / "release-manifest.json").read_text())
+    assert rc_manifest["version"] == RELEASE_VERSION
+    final_to_rc = subprocess.run(
+        [
+            str(rc_install_dir / "darklab-deploy"),
+            "upgrade",
+            rc_two_version,
+            "--archive",
+            str(rc_two_payload / f"darklab-shell-deploy-{rc_two_version}.tar.gz"),
+            "--backup",
+            str(backup),
+        ],
+        cwd=rc_install_dir,
+        env=lifecycle_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert final_to_rc.returncode != 0
+    assert "refusing downgrade from 2.6.0 to 2.6.0-rc.2" in final_to_rc.stderr
 
     restore_helper = _load_script_module("restore_system")
     restore_target = tmp_path / "restore-target"

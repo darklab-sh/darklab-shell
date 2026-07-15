@@ -224,15 +224,23 @@ managed_status() {
 version_is_newer() {
     old_version=$1
     new_version=$2
-    old_major=${old_version%%.*}; old_rest=${old_version#*.}
+    old_core=${old_version%%-rc.*}
+    new_core=${new_version%%-rc.*}
+    case "$old_version" in *-rc.*) old_rc=${old_version##*-rc.} ;; *) old_rc= ;; esac
+    case "$new_version" in *-rc.*) new_rc=${new_version##*-rc.} ;; *) new_rc= ;; esac
+    old_major=${old_core%%.*}; old_rest=${old_core#*.}
     old_minor=${old_rest%%.*}; old_patch=${old_rest#*.}
-    new_major=${new_version%%.*}; new_rest=${new_version#*.}
+    new_major=${new_core%%.*}; new_rest=${new_core#*.}
     new_minor=${new_rest%%.*}; new_patch=${new_rest#*.}
     [ "$new_major" -gt "$old_major" ] && return 0
     [ "$new_major" -lt "$old_major" ] && return 1
     [ "$new_minor" -gt "$old_minor" ] && return 0
     [ "$new_minor" -lt "$old_minor" ] && return 1
-    [ "$new_patch" -gt "$old_patch" ]
+    [ "$new_patch" -gt "$old_patch" ] && return 0
+    [ "$new_patch" -lt "$old_patch" ] && return 1
+    [ -n "$old_rc" ] && [ -z "$new_rc" ] && return 0
+    [ -z "$old_rc" ] && return 1
+    [ -n "$new_rc" ] && [ "$new_rc" -gt "$old_rc" ]
 }
 
 download_release_archive() {
@@ -373,11 +381,13 @@ restore_command() {
 }
 
 upgrade_release() {
-    [ "$#" -ge 1 ] || fail "upgrade requires an exact MAJOR.MINOR.PATCH version"
+    [ "$#" -ge 1 ] \
+        || fail "upgrade requires an exact MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.NUMBER version"
     requested_version=$1
     shift
-    printf '%s\n' "$requested_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
-        || fail "upgrade version must be MAJOR.MINOR.PATCH"
+    printf '%s\n' "$requested_version" \
+        | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+        || fail "upgrade version must be MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.NUMBER"
     archive=""
     backup=""
     base_url="$PACKAGE_ROOT_URL"

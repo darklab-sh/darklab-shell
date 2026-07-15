@@ -4,8 +4,8 @@
 
 set -eu
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 4 ]; then
-    echo "usage: verify_repository_free_image.sh IMAGE [EXPECTED_VERSION] [EXPECTED_REVISION] [EXPECTED_BASE_DIGEST]" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 5 ]; then
+    echo "usage: verify_repository_free_image.sh IMAGE [EXPECTED_VERSION] [EXPECTED_REVISION] [EXPECTED_BASE_DIGEST] [EXPECTED_ARCHITECTURE]" >&2
     exit 2
 fi
 
@@ -13,6 +13,21 @@ image=$1
 expected_version=${2:-}
 expected_revision=${3:-}
 expected_base_digest=${4:-}
+expected_architecture=${5:-amd64}
+container_runtime=${CONTAINER_RUNTIME:-docker}
+volume_label=${CONTAINER_VOLUME_LABEL:-}
+case "$container_runtime" in
+    docker|podman) ;;
+    *) echo "unsupported container runtime: $container_runtime" >&2; exit 2 ;;
+esac
+case "$expected_architecture" in
+    amd64|arm64) ;;
+    *) echo "unsupported expected architecture: $expected_architecture" >&2; exit 2 ;;
+esac
+case "$volume_label" in
+    ""|z|Z) ;;
+    *) echo "unsupported container volume label: $volume_label" >&2; exit 2 ;;
+esac
 suffix=$(printf '%s' "${CI_JOB_ID:-$$}" | tr -cd '0-9A-Za-z' | tail -c 20)
 network="darklab-release-smoke-${suffix}"
 redis="darklab-release-redis-${suffix}"
@@ -26,6 +41,14 @@ cat > "$overlay_dir/faq.local.yaml" <<'EOF'
   answer: External content overlay loaded.
 EOF
 chmod 600 "$overlay_dir/config.local.yaml" "$overlay_dir/faq.local.yaml"
+overlay_mount="$overlay_dir:/config:ro"
+if [ -n "$volume_label" ]; then
+    overlay_mount="${overlay_mount},${volume_label}"
+fi
+
+container() {
+    "$container_runtime" "$@"
+}
 
 verification_failed() {
     stage=$1
@@ -48,48 +71,49 @@ require_nonempty() {
 # cleanup is invoked indirectly by trap.
 # shellcheck disable=SC2317,SC2329
 cleanup() {
-    docker rm -f "$shell" "$redis" >/dev/null 2>&1 || true
-    docker network rm "$network" >/dev/null 2>&1 || true
+    container rm -f "$shell" "$redis" >/dev/null 2>&1 || true
+    container network rm "$network" >/dev/null 2>&1 || true
     rm -rf "$overlay_dir"
 }
 trap cleanup EXIT HUP INT TERM
 
-docker image inspect "$image" >/dev/null \
+container image inspect "$image" >/dev/null \
     || verification_failed image_metadata image_exists present missing
-image_architecture=$(docker image inspect --format '{{.Architecture}}' "$image") \
-    || verification_failed image_metadata architecture amd64 unavailable
-architecture_label=$(docker image inspect \
+image_architecture=$(container image inspect --format '{{.Architecture}}' "$image") \
+    || verification_failed image_metadata architecture "$expected_architecture" unavailable
+architecture_label=$(container image inspect \
     --format '{{index .Config.Labels "sh.darklab.image.architecture"}}' "$image") \
-    || verification_failed image_metadata architecture_label amd64 unavailable
-license_label=$(docker image inspect \
+    || verification_failed image_metadata architecture_label "$expected_architecture" unavailable
+license_label=$(container image inspect \
     --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}' "$image") \
     || verification_failed image_metadata license_label AGPL-3.0-only unavailable
-require_equal image_metadata architecture amd64 "$image_architecture"
-require_equal image_metadata architecture_label amd64 "$architecture_label"
+require_equal image_metadata architecture "$expected_architecture" "$image_architecture"
+require_equal image_metadata architecture_label "$expected_architecture" "$architecture_label"
 require_equal image_metadata license_label AGPL-3.0-only "$license_label"
 if [ -n "$expected_base_digest" ]; then
-    base_digest_label=$(docker image inspect \
+    base_digest_label=$(container image inspect \
         --format '{{index .Config.Labels "sh.darklab.python.base.digest"}}' "$image") \
         || verification_failed image_metadata python_base_digest "$expected_base_digest" unavailable
     require_equal image_metadata python_base_digest "$expected_base_digest" "$base_digest_label"
 fi
 if [ -n "$expected_version" ]; then
-    image_version=$(docker image inspect \
+    image_version=$(container image inspect \
         --format '{{index .Config.Labels "sh.darklab.app.version"}}' "$image") \
         || verification_failed image_metadata version "$expected_version" unavailable
     require_equal image_metadata version "$expected_version" "$image_version"
 fi
 if [ -n "$expected_revision" ]; then
-    darklab_revision=$(docker image inspect \
+    darklab_revision=$(container image inspect \
         --format '{{index .Config.Labels "sh.darklab.git.revision"}}' "$image") \
         || verification_failed image_metadata darklab_revision "$expected_revision" unavailable
-    oci_revision=$(docker image inspect \
+    oci_revision=$(container image inspect \
         --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image") \
         || verification_failed image_metadata oci_revision "$expected_revision" unavailable
     require_equal image_metadata darklab_revision "$expected_revision" "$darklab_revision"
     require_equal image_metadata oci_revision "$expected_revision" "$oci_revision"
 fi
-docker run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$image" -c '
+# shellcheck disable=SC2016  # The single-quoted program expands inside the container.
+container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$image" -c '
     image_check_failed() {
         printf "release verification failed stage=image_filesystem check=%s expected=%s actual=%s\n" \
             "$1" "$2" "$3" >&2
@@ -132,11 +156,11 @@ docker run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$image"
             || image_check_failed license_inventory_version "$EXPECTED_VERSION" mismatch
     fi
 '
-docker run --rm -i --entrypoint python "$image" - --installed-image \
+container run --rm -i --entrypoint python "$image" - --installed-image \
     < "$script_dir/check_container_licenses.py"
 
-docker network create "$network" >/dev/null
-docker run -d \
+container network create "$network" >/dev/null
+container run -d \
     --name "$redis" \
     --network "$network" \
     --read-only \
@@ -144,7 +168,7 @@ docker run -d \
     redis:8-alpine \
     redis-server --save '' --appendonly no >/dev/null
 
-docker run -d \
+container run -d \
     --name "$shell" \
     --network "$network" \
     --read-only \
@@ -152,7 +176,7 @@ docker run -d \
     --tmpfs /data \
     --cap-add NET_RAW \
     --cap-add NET_ADMIN \
-    -v "$overlay_dir:/config:ro" \
+    -v "$overlay_mount" \
     -e REDIS_URL="redis://${redis}:6379/0" \
     -e APP_LOCAL_CONF_DIR=/config \
     -e WEB_CONCURRENCY=1 \
@@ -161,31 +185,31 @@ docker run -d \
 
 attempt=0
 while [ "$attempt" -lt 90 ]; do
-    if docker exec "$shell" curl -fsS http://127.0.0.1:8888/health >/dev/null 2>&1; then
-        mounts=$(docker inspect --format '{{json .Mounts}}' "$shell") \
+    if container exec "$shell" curl -fsS http://127.0.0.1:8888/health >/dev/null 2>&1; then
+        mounts=$(container inspect --format '{{json .Mounts}}' "$shell") \
             || verification_failed runtime_mounts inspect successful failed
         if printf '%s' "$mounts" | grep -q '"Destination":"/app"'; then
             verification_failed runtime_mounts app_source_mount absent present
         fi
-        runtime_config=$(docker exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
+        runtime_config=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
             || verification_failed runtime_config config_endpoint reachable failed
         require_nonempty runtime_config config_response "$runtime_config"
         printf '%s' "$runtime_config" | grep -q '"app_name":"release-overlay-smoke"' \
             || verification_failed runtime_config app_name release-overlay-smoke mismatch
-        runtime_faq=$(docker exec "$shell" curl -fsS http://127.0.0.1:8888/faq) \
+        runtime_faq=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/faq) \
             || verification_failed runtime_config faq_endpoint reachable failed
         printf '%s' "$runtime_faq" | grep -q 'Release overlay smoke' \
             || verification_failed runtime_config faq_local_overlay loaded missing
         exit 0
     fi
-    if [ "$(docker inspect --format '{{.State.Running}}' "$shell" 2>/dev/null || true)" != "true" ]; then
-        docker logs "$shell" >&2 || true
+    if [ "$(container inspect --format '{{.State.Running}}' "$shell" 2>/dev/null || true)" != "true" ]; then
+        container logs "$shell" >&2 || true
         exit 1
     fi
     attempt=$((attempt + 1))
     sleep 2
 done
 
-docker logs "$shell" >&2 || true
+container logs "$shell" >&2 || true
 echo "repository-free image did not become healthy" >&2
 exit 1

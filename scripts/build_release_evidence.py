@@ -15,7 +15,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$")
 DIGEST_RE = re.compile(r"^sha256:([0-9a-f]{64})$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
 BASE_IMAGE_RE = re.compile(r"^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$")
@@ -212,7 +212,10 @@ def build_evidence(
     output_dir: Path,
 ) -> None:
     if not VERSION_RE.fullmatch(version):
-        raise ValueError(f"Release version must be MAJOR.MINOR.PATCH: {version!r}")
+        raise ValueError(
+            "Release version must be MAJOR.MINOR.PATCH or "
+            f"MAJOR.MINOR.PATCH-rc.NUMBER: {version!r}"
+        )
     digest_match = DIGEST_RE.fullmatch(digest)
     if digest_match is None:
         raise ValueError("Image digest must be sha256:<64 lowercase hex characters>")

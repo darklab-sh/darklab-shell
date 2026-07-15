@@ -36,6 +36,8 @@ DEV_COMPOSE = ROOT / "docker-compose.yml"
 PROD_COMPOSE = ROOT / "deploy" / "compose.yaml"
 ENV_EXAMPLE = ROOT / ".env.example"
 OPENAPI_SNAPSHOT = ROOT / "docs" / "api-v1-openapi.json"
+CONTAINER_LICENSE_INVENTORY = ROOT / "deploy" / "container-licenses.json"
+PRODUCTION_INSTALL_TEST = ROOT / "tests" / "py" / "test_production_install.py"
 PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==(.+)$")
 IMAGE_PATTERN = re.compile(r"^([A-Za-z0-9./_-]+?)(?::([^@\s]+))?(?:@.+)?$")
 NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
@@ -264,6 +266,7 @@ def _release_version_values() -> dict[str, str]:
     package = _load_json(PACKAGE_JSON)
     package_lock = _load_json(PACKAGE_LOCK)
     openapi = _load_json(OPENAPI_SNAPSHOT)
+    container_licenses = _load_json(CONTAINER_LICENSE_INVENTORY)
     lock_root = package_lock.get("packages", {}).get("", {}) if isinstance(package_lock, dict) else {}
 
     def _match(path: pathlib.Path, pattern: str) -> str:
@@ -282,18 +285,26 @@ def _release_version_values() -> dict[str, str]:
         ),
         "deploy/compose.yaml": _match(
             PROD_COMPOSE,
-            r"docker\.io/darklabsh/darklab-shell:([0-9]+\.[0-9]+\.[0-9]+)",
+            r"docker\.io/darklabsh/darklab-shell:"
+            r"([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)",
         ),
         ".env.example": _match(
             ENV_EXAMPLE,
             r"^DARKLAB_IMAGE=docker\.io/darklabsh/darklab-shell:([^\s]+)",
         ),
+        "deploy/container-licenses.json": str(
+            container_licenses.get("reviewed_for_release", "missing")
+        ),
         "docs/api-v1-openapi.json": str(openapi.get("info", {}).get("version", "missing")),
+        "tests/py/test_production_install.py": _match(
+            PRODUCTION_INSTALL_TEST,
+            r'^RELEASE_VERSION\s*=\s*["\']([^"\']+)["\']',
+        ),
     }
 
 
 def _check_release_version(expected: str) -> int:
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", expected):
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", expected):
         print(f"Invalid release version: {expected}", file=sys.stderr)
         return 2
     mismatches = {
@@ -654,7 +665,10 @@ def main() -> int:
     release_group = parser.add_mutually_exclusive_group()
     release_group.add_argument(
         "--release-version",
-        help="Offline check that runtime and release files match this MAJOR.MINOR.PATCH version",
+        help=(
+            "Offline check that runtime and release files match this MAJOR.MINOR.PATCH "
+            "or MAJOR.MINOR.PATCH-rc.NUMBER version"
+        ),
     )
     release_group.add_argument(
         "--check-release-version",
