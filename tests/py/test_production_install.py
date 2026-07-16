@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.5"
+RELEASE_VERSION = "2.6.0-rc.6"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.6"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.7"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -260,9 +260,7 @@ def _fake_image_runtime(tmp_path: Path) -> tuple[Path, Path]:
     bin_dir = tmp_path / "image-runtime-bin"
     bin_dir.mkdir()
     log_path = tmp_path / "image-runtime.log"
-    runtime_path = bin_dir / "podman"
-    runtime_path.write_text(
-        """#!/bin/sh
+    runtime_source = """#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_IMAGE_RUNTIME_LOG"
 if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
     case "$*" in
@@ -277,6 +275,7 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
 fi
 if [ "$1" = "inspect" ]; then
     case "$*" in
+        *.Source*) printf '%s|%s\n' "$FAKE_CONTAINER_MOUNT_DESTINATION" "$FAKE_CONTAINER_MOUNT_SOURCE" ;;
         *Mounts*) printf '[{"Destination":"/config"},{"Destination":"/data"},{"Destination":"/workspaces"}]\n' ;;
         *State.Running*) printf 'true\n' ;;
     esac
@@ -296,10 +295,11 @@ if [ "$1" = "run" ]; then
     exit 0
 fi
 exit 0
-""".replace("__RELEASE_VERSION__", RELEASE_VERSION),
-        encoding="utf-8",
-    )
-    runtime_path.chmod(0o755)
+""".replace("__RELEASE_VERSION__", RELEASE_VERSION)
+    for runtime_name in ("docker", "podman"):
+        runtime_path = bin_dir / runtime_name
+        runtime_path.write_text(runtime_source, encoding="utf-8")
+        runtime_path.chmod(0o755)
     return bin_dir, log_path
 
 
@@ -735,11 +735,15 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "-e WORKSPACE_ROOT=/workspaces" in image_smoke
     assert "NMAP_PRIVILEGED=1" in image_smoke
     assert 'container restart "$shell"' in image_smoke
+    assert "daemon_visible_path" in image_smoke
+    assert 'chmod -R a+rwX /data /workspaces' in image_smoke
     assert "/app/tools/backup_system.py" in image_smoke
     assert "/app/tools/restore_system.py" in image_smoke
     assert "command -v pg_restore" in image_smoke
     assert "shellcheck disable=SC2317,SC2329" in image_smoke
     assert "--user scanner:appuser" in bundled_tool_smoke
+    assert "--cap-add NET_RAW" in bundled_tool_smoke
+    assert "--cap-add NET_ADMIN" in bundled_tool_smoke
     assert "expected_architecture=${2:-amd64}" in bundled_tool_smoke
     assert "exec format error" in bundled_tool_smoke
     for tool in ("rustscan", "nuclei", "massdns", "pg_restore", "openssl"):
@@ -749,8 +753,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     env = os.environ.copy()
     env.update({
         "CI_JOB_ID": "1234",
+        "CI_PROJECT_DIR": str(tmp_path),
         "CONTAINER_RUNTIME": "podman",
         "CONTAINER_VOLUME_LABEL": "Z",
+        "FAKE_CONTAINER_MOUNT_DESTINATION": str(tmp_path),
+        "FAKE_CONTAINER_MOUNT_SOURCE": "/daemon/builds/project",
         "FAKE_IMAGE_RUNTIME_LOG": str(runtime_log),
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
     })
@@ -779,7 +786,32 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "NMAP_PRIVILEGED=1" in runtime_calls
     assert "nmap -sS -Pn -p 1 127.0.0.1" in runtime_calls
     assert "restart darklab-release-shell-1234" in runtime_calls
+    assert "chmod -R a+rwX /data /workspaces" in runtime_calls
     assert "sh.darklab.image.architecture" in runtime_calls
+    docker_env = {
+        **env,
+        "CONTAINER_RUNTIME": "docker",
+        "HOSTNAME": "fake-job-container",
+    }
+    docker_result = subprocess.run(
+        [
+            "sh",
+            str(ROOT / "scripts" / "verify_repository_free_image.sh"),
+            f"registry.example.test/darklab:{RELEASE_VERSION}",
+            RELEASE_VERSION,
+            "revision-a",
+            digest,
+            "arm64",
+        ],
+        cwd=ROOT,
+        env=docker_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert docker_result.returncode == 0, docker_result.stderr
+    runtime_calls = runtime_log.read_text(encoding="utf-8")
+    assert "/daemon/builds/project/.darklab-release-deployment." in runtime_calls
     bundled_result = subprocess.run(
         [
             "sh",

@@ -35,6 +35,8 @@ fi
 # shellcheck disable=SC2016  # The single-quoted program expands inside the container.
 container run --rm \
     --user scanner:appuser \
+    --cap-add NET_RAW \
+    --cap-add NET_ADMIN \
     --entrypoint sh \
     "$image" -c '
 set -eu

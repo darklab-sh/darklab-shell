@@ -58,14 +58,9 @@ fi
 # npm audit — JS dependency CVEs (fail on high/critical only)
 run_check "npm audit" npm --prefix "$REPO_ROOT" run audit:js
 
-# Shell script static analysis (skips non-shell .sh files)
-shell_scripts=$(find "$REPO_ROOT" -name '*.sh' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f | while read -r f; do
-    head -1 "$f" | grep -qE '#!/.*(bash|sh)' && printf '%s ' "$f"
-done)
-if [ -n "$shell_scripts" ]; then
-    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
-    run_check "shellcheck" shellcheck $shell_scripts
-fi
+# Shell script static analysis — use the package script so the hook and CI
+# cover the same shebang-selected .sh files and deployment templates.
+run_check "shellcheck" npm --prefix "$REPO_ROOT" run lint:shell
 
 # hadolint — Dockerfile linting
 if [ -f "$REPO_ROOT/Dockerfile" ]; then

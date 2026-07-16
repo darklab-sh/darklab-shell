@@ -57,6 +57,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Pre-commit shell checks match the full repository lint scope** — The hook now uses the same ShellCheck command as CI, including deployment shell templates, and the release smoke helper avoids an ambiguous conditional that ShellCheck correctly rejected.
+
+- **Release image smoke checks use paths and privileges that match their runners** — Docker-socket jobs translate build paths to the host daemon's view, native rootless and SELinux jobs restore temporary bind-mount access before cleanup, and bundled-tool verification grants the raw-network capabilities required to execute Naabu on ARM64.
+
 - **Python dependency audits cover development tooling consistently** — The npm audit command now checks both runtime and development requirements, and the development-only setuptools pin moves to the release that fixes its reported advisory while the image keeps the older Shodan-compatible runtime pin.
 
 - **Release image verification uses portable runtime inputs** — The shared Docker and Podman smoke test uses a fully qualified Redis image, valid SELinux relabeling syntax for writable mounts, and an overlay marker that fits the app-name limit.

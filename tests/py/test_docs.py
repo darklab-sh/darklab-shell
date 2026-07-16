@@ -735,6 +735,15 @@ class TestRelatedDocsNavigation:
 
 
 class TestDocumentationDurability:
+    def test_pre_commit_uses_canonical_shell_lint_scope(self):
+        pre_commit = (_REPO_ROOT / "scripts" / "hooks" / "pre-commit").read_text(
+            encoding="utf-8"
+        )
+        assert (
+            'run_check "shellcheck" npm --prefix "$REPO_ROOT" run lint:shell'
+            in pre_commit
+        )
+
     def test_python_dependency_audits_cover_runtime_and_development_requirements(self):
         package_scripts = json.loads(
             (_REPO_ROOT / "package.json").read_text(encoding="utf-8")
