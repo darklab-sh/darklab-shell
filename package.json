@@ -1,6 +1,6 @@
 {
   "name": "darklab_shell",
-  "version": "2.6.0-rc.4",
+  "version": "2.6.0-rc.5",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -25,7 +25,7 @@
     "lint:licenses": "python scripts/check_source_licenses.py",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "audit": "npm run audit:py && npm run audit:js",
-    "audit:py": "pip-audit -r app/requirements.txt",
+    "audit:py": "python -m pip_audit -r app/requirements.txt -r requirements-dev.txt",
     "audit:js": "npm audit --audit-level=high",
     "vendor:sync": "node scripts/build_vendor.mjs",
     "vendor:check": "tmp=$(mktemp -d) && node scripts/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/",

@@ -735,6 +735,30 @@ class TestRelatedDocsNavigation:
 
 
 class TestDocumentationDurability:
+    def test_python_dependency_audits_cover_runtime_and_development_requirements(self):
+        package_scripts = json.loads(
+            (_REPO_ROOT / "package.json").read_text(encoding="utf-8")
+        )["scripts"]
+        audit_commands = {
+            "package.json audit:py": package_scripts["audit:py"],
+            "pre-commit pip-audit": (
+                _REPO_ROOT / "scripts" / "hooks" / "pre-commit"
+            ).read_text(encoding="utf-8"),
+            "CONTRIBUTING.md Python dep CVEs": _CONTRIBUTING.read_text(
+                encoding="utf-8"
+            ),
+        }
+        expected_inputs = ("-r app/requirements.txt", "-r requirements-dev.txt")
+        missing = {
+            source: [item for item in expected_inputs if item not in command]
+            for source, command in audit_commands.items()
+            if any(item not in command for item in expected_inputs)
+        }
+        assert not missing, (
+            "Every Python dependency audit path must cover runtime and development "
+            f"requirements: {missing}"
+        )
+
     def test_testing_handbook_keeps_live_listing_commands(self):
         text = _TESTS_README.read_text()
         missing = [command for command in _LIVE_TEST_LISTING_COMMANDS if command not in text]

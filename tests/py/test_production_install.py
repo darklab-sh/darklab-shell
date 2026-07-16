@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.4"
+RELEASE_VERSION = "2.6.0-rc.5"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.5"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.6"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -285,7 +285,7 @@ fi
 if [ "$1" = "exec" ]; then
     case "$*" in
         */health*) exit 0 ;;
-        */config*) printf '{"app_name":"release-overlay-smoke"}\n' ;;
+        */config*) printf '{"app_name":"release-smoke"}\n' ;;
         */faq*) printf '[{"question":"Release overlay smoke"}]\n' ;;
         *nmap*-sS*) printf 'Nmap done: 1 IP address (1 host up) scanned\n' ;;
     esac
@@ -719,15 +719,17 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'cp -R "${source_dir%/}/."' in entrypoint
     assert "-type l" in entrypoint
     assert "/tmp/darklab-runtime-conf" in entrypoint
-    assert "release-overlay-smoke" in image_smoke
+    assert "release-smoke" in image_smoke
+    assert "release-overlay-smoke" not in image_smoke
+    assert "docker.io/library/redis:8-alpine" in image_smoke
     assert "--installed-image" in image_smoke
     assert "python_base_digest" in image_smoke
     assert "expected_architecture=${5:-amd64}" in image_smoke
     assert "container_runtime=${CONTAINER_RUNTIME:-docker}" in image_smoke
     assert 'docker|podman)' in image_smoke
     assert 'overlay_mount="${overlay_mount},${volume_label}"' in image_smoke
-    assert 'data_mount="${data_mount},${volume_label}"' in image_smoke
-    assert 'workspace_mount="${workspace_mount},${volume_label}"' in image_smoke
+    assert 'data_mount="${data_mount}:${volume_label}"' in image_smoke
+    assert 'workspace_mount="${workspace_mount}:${volume_label}"' in image_smoke
     assert '-v "$data_mount"' in image_smoke
     assert '-v "$workspace_mount"' in image_smoke
     assert "-e WORKSPACE_ROOT=/workspaces" in image_smoke
@@ -772,8 +774,8 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert runtime_result.returncode == 0, runtime_result.stderr
     runtime_calls = runtime_log.read_text(encoding="utf-8")
     assert ":/config:ro,Z" in runtime_calls
-    assert ":/data,Z" in runtime_calls
-    assert ":/workspaces,Z" in runtime_calls
+    assert ":/data:Z" in runtime_calls
+    assert ":/workspaces:Z" in runtime_calls
     assert "NMAP_PRIVILEGED=1" in runtime_calls
     assert "nmap -sS -Pn -p 1 127.0.0.1" in runtime_calls
     assert "restart darklab-release-shell-1234" in runtime_calls

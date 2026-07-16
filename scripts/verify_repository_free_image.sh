@@ -41,7 +41,7 @@ workspace_dir="$deployment_dir/workspaces"
 mkdir "$overlay_dir" "$data_dir" "$workspace_dir"
 chmod 700 "$overlay_dir"
 chmod 755 "$data_dir" "$workspace_dir"
-printf 'app_name: release-overlay-smoke\n' > "$overlay_dir/config.local.yaml"
+printf 'app_name: release-smoke\n' > "$overlay_dir/config.local.yaml"
 cat > "$overlay_dir/faq.local.yaml" <<'EOF'
 - question: Release overlay smoke
   answer: External content overlay loaded.
@@ -52,8 +52,8 @@ data_mount="$data_dir:/data"
 workspace_mount="$workspace_dir:/workspaces"
 if [ -n "$volume_label" ]; then
     overlay_mount="${overlay_mount},${volume_label}"
-    data_mount="${data_mount},${volume_label}"
-    workspace_mount="${workspace_mount},${volume_label}"
+    data_mount="${data_mount}:${volume_label}"
+    workspace_mount="${workspace_mount}:${volume_label}"
 fi
 
 container() {
@@ -175,7 +175,7 @@ container run -d \
     --network "$network" \
     --read-only \
     --tmpfs /tmp \
-    redis:8-alpine \
+    docker.io/library/redis:8-alpine \
     redis-server --save '' --appendonly no >/dev/null
 
 container run -d \
@@ -229,8 +229,8 @@ done
 runtime_config=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
     || verification_failed runtime_config config_endpoint reachable failed
 require_nonempty runtime_config config_response "$runtime_config"
-printf '%s' "$runtime_config" | grep -q '"app_name":"release-overlay-smoke"' \
-    || verification_failed runtime_config app_name release-overlay-smoke mismatch
+printf '%s' "$runtime_config" | grep -q '"app_name":"release-smoke"' \
+    || verification_failed runtime_config app_name release-smoke "$runtime_config"
 runtime_faq=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/faq) \
     || verification_failed runtime_config faq_endpoint reachable failed
 printf '%s' "$runtime_faq" | grep -q 'Release overlay smoke' \

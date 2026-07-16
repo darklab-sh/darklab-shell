@@ -57,6 +57,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Python dependency audits cover development tooling consistently** — The npm audit command now checks both runtime and development requirements, and the development-only setuptools pin moves to the release that fixes its reported advisory while the image keeps the older Shodan-compatible runtime pin.
+
+- **Release image verification uses portable runtime inputs** — The shared Docker and Podman smoke test uses a fully qualified Redis image, valid SELinux relabeling syntax for writable mounts, and an overlay marker that fits the app-name limit.
+
 - **Installed RubyGem inventories stay valid across image builders** — The generated WPScan dependency manifest contains one JSON document without a builder-sensitive escape suffix, forcing the canonical image layer to rebuild so Docker, rootless Podman, and SELinux verification parse it consistently.
 
 - **ARM64 release builds recover promptly from stalled asset downloads** — The hosted Docker-in-Docker network uses a conservative MTU, and RustScan downloads retry within bounded time instead of waiting for a 15-minute idle timeout.
