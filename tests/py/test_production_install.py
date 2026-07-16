@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.2"
+RELEASE_VERSION = "2.6.0-rc.3"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.3"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.4"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -678,7 +678,16 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
 
     app_copy = dockerfile.index("COPY app/ /app/")
     scanner_install = dockerfile.index("setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap")
+    release_labels = dockerfile.index(
+        'LABEL org.opencontainers.image.title="darklab_shell"'
+    )
     assert app_copy > scanner_install
+    assert release_labels > app_copy
+    assert release_labels > dockerfile.index("COPY deploy/third-party-licenses/")
+    assert release_labels > dockerfile.index('ENTRYPOINT ["/entrypoint.sh"]')
+    assert dockerfile.rstrip().endswith(
+        'sh.darklab.image.architecture="${TARGETARCH}"'
+    )
     assert "*.local.*" in dockerignore.splitlines()
     assert "deploy/THIRD_PARTY_NOTICES.txt" in dockerfile
     assert "deploy/third-party-licenses/" in dockerfile
@@ -694,7 +703,12 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
     assert 'case "${TARGETARCH}" in' in dockerfile
-    assert 'wget -O rustscan.zip' in dockerfile
+    assert "curl --fail --location" in dockerfile
+    assert "--connect-timeout 15" in dockerfile
+    assert "--max-time 90" in dockerfile
+    assert "--retry 4" in dockerfile
+    assert "--retry-all-errors" in dockerfile
+    assert "--output rustscan.zip" in dockerfile
     assert 'sha256sum -c rustscan.zip.sha256' in dockerfile
     assert "stage_local_config_overlays" in entrypoint
     assert 'cp -R "${source_dir%/}/."' in entrypoint
@@ -831,6 +845,21 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     assert nmap_component["notice_location"].endswith("/Nmap-7.95-NPSL-0.95.txt")
     assert "redistribution_review" not in nmap_component
     assert "runs the bundled Nmap executable as an external command" in nmap_component["usage_note"]
+    durable_go_notices = {
+        "VirusTotal CLI": "VirusTotal-vt-cli.txt",
+        "IPinfo CLI": "IPinfo-cli.txt",
+        "urlscan CLI": "urlscan-cli.txt",
+    }
+    for component_name, notice_name in durable_go_notices.items():
+        component = next(
+            item for item in inventory["components"] if item["name"] == component_name
+        )
+        assert component["notice_location"] == (
+            f"/usr/share/doc/darklab-shell/licenses/{notice_name}"
+        )
+        assert f"/usr/share/doc/darklab-shell/licenses/{notice_name}" in (
+            ROOT / "Dockerfile"
+        ).read_text(encoding="utf-8")
     publisher = (ROOT / "scripts" / "publish_release_artifacts.sh").read_text(
         encoding="utf-8"
     )
@@ -1148,6 +1177,13 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_ARM64_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_SELINUX_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
+    docker_build_rules = parsed_ci["docker-build"]["rules"]
+    tag_skip_rule = {"if": "$CI_COMMIT_TAG", "when": "never"}
+    tag_skip_index = docker_build_rules.index(tag_skip_rule)
+    changes_index = next(
+        index for index, rule in enumerate(docker_build_rules) if "changes" in rule
+    )
+    assert tag_skip_index < changes_index
     pytest_setup = "\n".join(parsed_ci["test-py-pytest"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bcurl\b", pytest_setup)
     assert re.search(r"\bapt-get install\b[^\n]*\bjq\b", pytest_setup)
@@ -1169,13 +1205,13 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert f"verify_repository_free_image.sh {digest_pinned_gitlab_image}" in amd64_smoke_script
     assert f"verify_bundled_tools.sh {digest_pinned_gitlab_image} amd64" in amd64_smoke_script
     arm64_job = parsed_ci["release-image-arm64-smoke"]
-    assert arm64_job["stage"] == "verify"
+    assert arm64_job["stage"] == "publish"
     assert arm64_job["tags"] == ["saas-linux-small-arm64"]
     assert arm64_job["services"] == [
         {
             "name": "${CI_DOCKER_IMAGE}-dind",
             "alias": "docker",
-            "command": ["--mtu=1400"],
+            "command": ["--mtu=1360"],
         }
     ]
     assert arm64_job["variables"]["DOCKER_HOST"] == "tcp://docker:2375"

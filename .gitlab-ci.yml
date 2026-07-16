@@ -287,6 +287,9 @@ docker-build:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
       when: never
+    # Tags skip this branch-only image; protected release tags build the canonical image below.
+    - if: $CI_COMMIT_TAG
+      when: never
     # Always build on the main branch so there is always a verified image
     - if: $CI_COMMIT_BRANCH == "main"
     # Always build for merge requests targeting main so the merge gate sees a build
@@ -386,13 +389,13 @@ release-image-smoke:
     - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" amd64
 
 release-image-arm64-smoke:
-  stage: verify
+  stage: publish
   image: $CI_DOCKER_IMAGE
   services:
     - name: "${CI_DOCKER_IMAGE}-dind"
       alias: docker
       command:
-        - "--mtu=1400"
+        - "--mtu=1360"
   tags:
     - saas-linux-small-arm64
   rules:

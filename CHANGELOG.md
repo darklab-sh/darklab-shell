@@ -53,7 +53,13 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Release history:** the root changelog keeps the active release plus the two newest dated releases, with older entries preserved intact in major-version archives.
   - **Validation:** offline link and heading checks, table-of-contents checks, published-release integrity hashes, support-matrix executable-contract checks, and focused durability guards protect the new structure.
 
+- **Protected release builds reach compatibility verification sooner** — Tag pipelines skip the redundant branch image build, volatile image labels are applied last, and native ARM64 validation builds beside the canonical AMD64 image while the ordinary test, lint, and audit jobs remain unchanged.
+
 ### Fixed
+
+- **ARM64 release builds recover promptly from stalled asset downloads** — The hosted Docker-in-Docker network uses a conservative MTU, and RustScan downloads retry within bounded time instead of waiting for a 15-minute idle timeout.
+
+- **Published images keep durable notices for the external-intelligence CLIs** — VirusTotal, IPinfo, and urlscan license files are copied out of Go's temporary module cache into the image documentation directory, so repository-free verification checks the same notices that remain available at runtime.
 
 - **Protected release smoke tests verify the exact image they pull** — The normal AMD64 lane keeps the GitLab registry digest attached through repository-free and bundled-tool checks instead of relying on a tag alias that a digest-qualified pull doesn't create locally.
 

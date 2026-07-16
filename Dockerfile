@@ -43,26 +43,10 @@ ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.2
+ARG APP_VERSION=2.6.0-rc.3
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
-
-LABEL org.opencontainers.image.title="darklab_shell" \
-      org.opencontainers.image.description="Self-hosted browser shell for network diagnostics and security recon" \
-      org.opencontainers.image.source="https://gitlab.com/darklab.sh/darklab_shell" \
-      org.opencontainers.image.url="https://shell.darklab.sh/" \
-      org.opencontainers.image.vendor="darklab.sh" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.version="${APP_VERSION}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      sh.darklab.app.name="darklab_shell" \
-      sh.darklab.app.version="${APP_VERSION}" \
-      sh.darklab.git.revision="${VCS_REF}" \
-      sh.darklab.python.version="${PYTHON_VERSION}" \
-      sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}" \
-      sh.darklab.image.architecture="${TARGETARCH}"
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -203,7 +187,13 @@ RUN case "${TARGETARCH}" in \
         arm64) rustscan_asset="${RUSTSCAN_LINUX_ARM64_ASSET}"; rustscan_sha256="${RUSTSCAN_LINUX_ARM64_SHA256}" ;; \
         *) echo "unsupported RustScan target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
-    wget -O rustscan.zip \
+    curl --fail --location \
+        --connect-timeout 15 \
+        --max-time 90 \
+        --retry 4 \
+        --retry-delay 3 \
+        --retry-all-errors \
+        --output rustscan.zip \
         "https://github.com/bee-san/RustScan/releases/download/${RUSTSCAN_VERSION}/${rustscan_asset}" && \
     printf "%s  rustscan.zip\n" "${rustscan_sha256}" > rustscan.zip.sha256 && \
     sha256sum -c rustscan.zip.sha256 && \
@@ -239,9 +229,18 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Install external-intel CLIs. These are launched through the same command
 # allowlist and vault-backed environment injection path as other scanner tools.
 RUN pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise
-RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}
-RUN go install -v github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION}
-RUN go install -v github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION}
+RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION} && \
+    vt_license="$(find "$(go env GOMODCACHE)/github.com/!virus!total" -path '*/vt-cli@*/LICENSE*' -type f -print -quit)" && \
+    test -n "$vt_license" && \
+    install -m 0644 "$vt_license" /usr/share/doc/darklab-shell/licenses/VirusTotal-vt-cli.txt
+RUN go install -v github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION} && \
+    ipinfo_license="$(find "$(go env GOMODCACHE)/github.com/ipinfo" -iname 'LICENSE*' -type f -print -quit)" && \
+    test -n "$ipinfo_license" && \
+    install -m 0644 "$ipinfo_license" /usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt
+RUN go install -v github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION} && \
+    urlscan_license="$(find "$(go env GOMODCACHE)/github.com/urlscan" -iname 'LICENSE*' -type f -print -quit)" && \
+    test -n "$urlscan_license" && \
+    install -m 0644 "$urlscan_license" /usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
 RUN go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}
 
 
@@ -296,3 +295,21 @@ ARG APP_PORT=8888
 EXPOSE ${APP_PORT}
 
 ENTRYPOINT ["/entrypoint.sh"]
+
+# Keep volatile release metadata last so changing version, revision, or build date
+# doesn't invalidate any filesystem or runtime-configuration layer above it.
+LABEL org.opencontainers.image.title="darklab_shell" \
+      org.opencontainers.image.description="Self-hosted browser shell for network diagnostics and security recon" \
+      org.opencontainers.image.source="https://gitlab.com/darklab.sh/darklab_shell" \
+      org.opencontainers.image.url="https://shell.darklab.sh/" \
+      org.opencontainers.image.vendor="darklab.sh" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      sh.darklab.app.name="darklab_shell" \
+      sh.darklab.app.version="${APP_VERSION}" \
+      sh.darklab.git.revision="${VCS_REF}" \
+      sh.darklab.python.version="${PYTHON_VERSION}" \
+      sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}" \
+      sh.darklab.image.architecture="${TARGETARCH}"

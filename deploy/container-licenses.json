@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.6.0-rc.2",
+  "reviewed_for_release": "2.6.0-rc.3",
   "reviewed_on": "2026-07-15",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
@@ -232,21 +232,21 @@
       "version_arg": "VT_CLI_VERSION",
       "source": "https://github.com/VirusTotal/vt-cli",
       "license": "Apache-2.0",
-      "notice_location": "/root/go/pkg/mod/github.com/!virus!total"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/VirusTotal-vt-cli.txt"
     },
     {
       "name": "IPinfo CLI",
       "version_arg": "IPINFO_CLI_VERSION",
       "source": "https://github.com/ipinfo/cli",
       "license": "Apache-2.0",
-      "notice_location": "/root/go/pkg/mod/github.com/ipinfo"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt"
     },
     {
       "name": "urlscan CLI",
       "version_arg": "URLSCAN_CLI_VERSION",
       "source": "https://github.com/urlscan/urlscan-cli",
       "license": "Apache-2.0",
-      "notice_location": "/root/go/pkg/mod/github.com/urlscan"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt"
     },
     {
       "name": "Python application and intelligence dependencies",
