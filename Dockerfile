@@ -43,7 +43,7 @@ ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.3
+ARG APP_VERSION=2.6.0-rc.4
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -217,7 +217,7 @@ RUN gem install wpscan -v ${WPSCAN_VERSION} && \
       missing = specs.select { |spec| spec["licenses"].empty? }; \
       raise "RubyGems missing license metadata: #{missing.map { |spec| spec["name"] }.join(", ")}" unless missing.empty?; \
       payload = { "schema_version" => 1, "gems" => specs }; \
-      File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", JSON.pretty_generate(payload) + "\\n")'
+      File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", JSON.pretty_generate(payload))'
 
 # Install required Python dependencies from requirements.txt
 WORKDIR /app

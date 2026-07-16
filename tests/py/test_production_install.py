@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.3"
+RELEASE_VERSION = "2.6.0-rc.4"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.4"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.5"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -698,6 +698,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "!scripts/backup_system.py" in dockerignore
     assert "!scripts/restore_system.py" in dockerignore
     assert "wpscan-ruby-gems.json" in dockerfile
+    assert (
+        'File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", '
+        "JSON.pretty_generate(payload))"
+    ) in dockerfile
+    assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
     assert "ARG PYTHON_BASE_IMAGE=python:3.14.6-slim" in dockerfile
     assert 'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"' in dockerfile
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile

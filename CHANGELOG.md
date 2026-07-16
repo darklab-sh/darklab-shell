@@ -57,6 +57,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Installed RubyGem inventories stay valid across image builders** — The generated WPScan dependency manifest contains one JSON document without a builder-sensitive escape suffix, forcing the canonical image layer to rebuild so Docker, rootless Podman, and SELinux verification parse it consistently.
+
 - **ARM64 release builds recover promptly from stalled asset downloads** — The hosted Docker-in-Docker network uses a conservative MTU, and RustScan downloads retry within bounded time instead of waiting for a 15-minute idle timeout.
 
 - **Published images keep durable notices for the external-intelligence CLIs** — VirusTotal, IPinfo, and urlscan license files are copied out of Go's temporary module cache into the image documentation directory, so repository-free verification checks the same notices that remain available at runtime.
