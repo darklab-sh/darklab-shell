@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.6"
+RELEASE_VERSION = "2.6.0-rc.7"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.7"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.8"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -275,7 +275,6 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
 fi
 if [ "$1" = "inspect" ]; then
     case "$*" in
-        *.Source*) printf '%s|%s\n' "$FAKE_CONTAINER_MOUNT_DESTINATION" "$FAKE_CONTAINER_MOUNT_SOURCE" ;;
         *Mounts*) printf '[{"Destination":"/config"},{"Destination":"/data"},{"Destination":"/workspaces"}]\n' ;;
         *State.Running*) printf 'true\n' ;;
     esac
@@ -726,6 +725,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "python_base_digest" in image_smoke
     assert "expected_architecture=${5:-amd64}" in image_smoke
     assert "container_runtime=${CONTAINER_RUNTIME:-docker}" in image_smoke
+    assert "mount_mode=${CONTAINER_MOUNT_MODE:-bind}" in image_smoke
     assert 'docker|podman)' in image_smoke
     assert 'overlay_mount="${overlay_mount},${volume_label}"' in image_smoke
     assert 'data_mount="${data_mount}:${volume_label}"' in image_smoke
@@ -735,7 +735,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "-e WORKSPACE_ROOT=/workspaces" in image_smoke
     assert "NMAP_PRIVILEGED=1" in image_smoke
     assert 'container restart "$shell"' in image_smoke
-    assert "daemon_visible_path" in image_smoke
+    assert 'deployment_parent=${TMPDIR:-/tmp}' in image_smoke
+    assert 'container volume create "$overlay_volume"' in image_smoke
+    assert 'container volume rm "$overlay_volume" "$data_volume"' in image_smoke
     assert 'chmod -R a+rwX /data /workspaces' in image_smoke
     assert "/app/tools/backup_system.py" in image_smoke
     assert "/app/tools/restore_system.py" in image_smoke
@@ -756,10 +758,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         "CI_PROJECT_DIR": str(tmp_path),
         "CONTAINER_RUNTIME": "podman",
         "CONTAINER_VOLUME_LABEL": "Z",
-        "FAKE_CONTAINER_MOUNT_DESTINATION": str(tmp_path),
-        "FAKE_CONTAINER_MOUNT_SOURCE": "/daemon/builds/project",
         "FAKE_IMAGE_RUNTIME_LOG": str(runtime_log),
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+        "TMPDIR": str(tmp_path),
     })
     digest = "sha256:" + "0" * 64
     runtime_result = subprocess.run(
@@ -791,7 +792,8 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     docker_env = {
         **env,
         "CONTAINER_RUNTIME": "docker",
-        "HOSTNAME": "fake-job-container",
+        "CONTAINER_MOUNT_MODE": "volume",
+        "CONTAINER_VOLUME_LABEL": "",
     }
     docker_result = subprocess.run(
         [
@@ -811,7 +813,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     )
     assert docker_result.returncode == 0, docker_result.stderr
     runtime_calls = runtime_log.read_text(encoding="utf-8")
-    assert "/daemon/builds/project/.darklab-release-deployment." in runtime_calls
+    assert "volume create darklab-release-conf-1234" in runtime_calls
+    assert "darklab-release-conf-1234:/config:ro" in runtime_calls
+    assert "volume rm darklab-release-conf-1234 darklab-release-data-1234" in runtime_calls
     bundled_result = subprocess.run(
         [
             "sh",
@@ -1242,6 +1246,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     digest_pinned_gitlab_image = '"$GITLAB_IMAGE@$GITLAB_DIGEST"'
     assert f"docker pull {digest_pinned_gitlab_image}" in amd64_smoke_script
     assert f"verify_repository_free_image.sh {digest_pinned_gitlab_image}" in amd64_smoke_script
+    assert "CONTAINER_MOUNT_MODE=volume" in amd64_smoke_script
     assert f"verify_bundled_tools.sh {digest_pinned_gitlab_image} amd64" in amd64_smoke_script
     arm64_job = parsed_ci["release-image-arm64-smoke"]
     assert arm64_job["stage"] == "publish"
@@ -1272,6 +1277,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     selinux_script = "\n".join(selinux_job["script"])
     assert "getenforce" in selinux_script
     assert "CONTAINER_VOLUME_LABEL=Z" in selinux_script
+    selinux_pre_get_sources = "\n".join(
+        selinux_job["hooks"]["pre_get_sources_script"]
+    )
+    assert ".darklab-release-deployment.*" in selinux_pre_get_sources
+    assert '"$stale_dir:/cleanup:Z"' in selinux_pre_get_sources
     podman_job = parsed_ci["release-image-rootless-podman-smoke"]
     assert podman_job["tags"] == ["podman", "self-managed", "baal"]
     assert "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == \"1\"" in (
@@ -1281,6 +1291,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     podman_script = "\n".join(podman_job["script"])
     assert 'test "$(id -u)" -ne 0' in podman_script
     assert "CONTAINER_RUNTIME=podman" in podman_script
+    podman_pre_get_sources = "\n".join(
+        podman_job["hooks"]["pre_get_sources_script"]
+    )
+    assert ".darklab-release-deployment.*" in podman_pre_get_sources
+    assert 'podman unshare rm -rf "$stale_dir"' in podman_pre_get_sources
     promotion_needs = {
         need["job"]: need
         for need in parsed_ci["release-image-dockerhub"]["needs"]

@@ -385,7 +385,7 @@ release-image-smoke:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
-    - sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
     - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" amd64
 
 release-image-arm64-smoke:
@@ -458,6 +458,16 @@ release-image-selinux-smoke:
   needs:
     - job: release-image-gitlab
       artifacts: true
+  hooks:
+    pre_get_sources_script:
+      - |
+        for stale_dir in "$CI_PROJECT_DIR"/.darklab-release-deployment.*; do
+          [ -d "$stale_dir" ] || continue
+          docker run --rm --entrypoint sh \
+            -v "$stale_dir:/cleanup:Z" "$CI_DOCKER_IMAGE" \
+            -c 'rm -rf /cleanup/* /cleanup/.[!.]* /cleanup/..?* 2>/dev/null || true; chmod 0777 /cleanup'
+          rmdir "$stale_dir"
+        done
   before_script: []
   script:
     - getenforce | tee selinux-enforcement.txt
@@ -486,6 +496,13 @@ release-image-rootless-podman-smoke:
   needs:
     - job: release-image-gitlab
       artifacts: true
+  hooks:
+    pre_get_sources_script:
+      - |
+        for stale_dir in "$CI_PROJECT_DIR"/.darklab-release-deployment.*; do
+          [ -d "$stale_dir" ] || continue
+          podman unshare rm -rf "$stale_dir"
+        done
   before_script: []
   script:
     - test "$(id -u)" -ne 0

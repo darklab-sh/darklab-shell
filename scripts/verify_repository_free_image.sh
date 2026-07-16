@@ -16,9 +16,14 @@ expected_base_digest=${4:-}
 expected_architecture=${5:-amd64}
 container_runtime=${CONTAINER_RUNTIME:-docker}
 volume_label=${CONTAINER_VOLUME_LABEL:-}
+mount_mode=${CONTAINER_MOUNT_MODE:-bind}
 case "$container_runtime" in
     docker|podman) ;;
     *) echo "unsupported container runtime: $container_runtime" >&2; exit 2 ;;
+esac
+case "$mount_mode" in
+    bind|volume) ;;
+    *) echo "unsupported container mount mode: $mount_mode" >&2; exit 2 ;;
 esac
 case "$expected_architecture" in
     amd64|arm64) ;;
@@ -28,67 +33,31 @@ case "$volume_label" in
     ""|z|Z) ;;
     *) echo "unsupported container volume label: $volume_label" >&2; exit 2 ;;
 esac
+if [ "$mount_mode" = "volume" ] && [ -n "$volume_label" ]; then
+    echo "container volume labels require bind mount mode" >&2
+    exit 2
+fi
 
 container() {
     "$container_runtime" "$@"
-}
-
-# Docker socket jobs run inside a container while creating sibling containers
-# through the host daemon. Translate a path under the current job container's
-# mounts so the daemon binds the same files the job created. Native shell jobs
-# and DinD jobs either do not need translation or cannot inspect the job
-# container, so they keep the original path.
-daemon_visible_path() {
-    requested_path=$1
-    if [ "$container_runtime" != "docker" ] || [ -z "${HOSTNAME:-}" ]; then
-        printf '%s\n' "$requested_path"
-        return
-    fi
-    job_mounts=$(container inspect --format \
-        '{{range .Mounts}}{{printf "%s|%s\n" .Destination .Source}}{{end}}' \
-        "$HOSTNAME" 2>/dev/null) || {
-        printf '%s\n' "$requested_path"
-        return
-    }
-    best_destination=
-    best_source=
-    while IFS='|' read -r destination source; do
-        if [ -z "$destination" ] || [ -z "$source" ]; then
-            continue
-        fi
-        case "$requested_path" in
-            "$destination"|"$destination"/*)
-                if [ "${#destination}" -gt "${#best_destination}" ]; then
-                    best_destination=$destination
-                    best_source=$source
-                fi
-                ;;
-        esac
-    done <<EOF
-$job_mounts
-EOF
-    if [ -z "$best_destination" ]; then
-        printf '%s\n' "$requested_path"
-        return
-    fi
-    relative_path=${requested_path#"$best_destination"}
-    printf '%s%s\n' "$best_source" "$relative_path"
 }
 
 suffix=$(printf '%s' "${CI_JOB_ID:-$$}" | tr -cd '0-9A-Za-z' | tail -c 20)
 network="darklab-release-smoke-${suffix}"
 redis="darklab-release-redis-${suffix}"
 shell="darklab-release-shell-${suffix}"
+overlay_volume="darklab-release-conf-${suffix}"
+data_volume="darklab-release-data-${suffix}"
+workspace_volume="darklab-release-workspaces-${suffix}"
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-deployment_parent=${CI_PROJECT_DIR:-${TMPDIR:-/tmp}}
+deployment_parent=${TMPDIR:-/tmp}
+case "${container_runtime}:${DOCKER_HOST:-}" in
+    docker:tcp://*) deployment_parent=${CI_PROJECT_DIR:-$deployment_parent} ;;
+esac
 deployment_dir=$(mktemp -d "$deployment_parent/.darklab-release-deployment.XXXXXX")
-daemon_deployment_dir=$(daemon_visible_path "$deployment_dir")
 overlay_dir="$deployment_dir/conf"
 data_dir="$deployment_dir/data"
 workspace_dir="$deployment_dir/workspaces"
-daemon_overlay_dir="$daemon_deployment_dir/conf"
-daemon_data_dir="$daemon_deployment_dir/data"
-daemon_workspace_dir="$daemon_deployment_dir/workspaces"
 mkdir "$overlay_dir" "$data_dir" "$workspace_dir"
 chmod 700 "$overlay_dir"
 chmod 755 "$data_dir" "$workspace_dir"
@@ -98,13 +67,19 @@ cat > "$overlay_dir/faq.local.yaml" <<'EOF'
   answer: External content overlay loaded.
 EOF
 chmod 600 "$overlay_dir/config.local.yaml" "$overlay_dir/faq.local.yaml"
-overlay_mount="$daemon_overlay_dir:/config:ro"
-data_mount="$daemon_data_dir:/data"
-workspace_mount="$daemon_workspace_dir:/workspaces"
-if [ -n "$volume_label" ]; then
-    overlay_mount="${overlay_mount},${volume_label}"
-    data_mount="${data_mount}:${volume_label}"
-    workspace_mount="${workspace_mount}:${volume_label}"
+if [ "$mount_mode" = "volume" ]; then
+    overlay_mount="$overlay_volume:/config:ro"
+    data_mount="$data_volume:/data"
+    workspace_mount="$workspace_volume:/workspaces"
+else
+    overlay_mount="$overlay_dir:/config:ro"
+    data_mount="$data_dir:/data"
+    workspace_mount="$workspace_dir:/workspaces"
+    if [ -n "$volume_label" ]; then
+        overlay_mount="${overlay_mount},${volume_label}"
+        data_mount="${data_mount}:${volume_label}"
+        workspace_mount="${workspace_mount}:${volume_label}"
+    fi
 fi
 
 verification_failed() {
@@ -131,6 +106,10 @@ cleanup() {
     container exec "$shell" sh -c \
         'chmod -R a+rwX /data /workspaces' >/dev/null 2>&1 || true
     container rm -f "$shell" "$redis" >/dev/null 2>&1 || true
+    if [ "$mount_mode" = "volume" ]; then
+        container volume rm "$overlay_volume" "$data_volume" \
+            "$workspace_volume" >/dev/null 2>&1 || true
+    fi
     container network rm "$network" >/dev/null 2>&1 || true
     rm -rf "$deployment_dir"
 }
@@ -217,6 +196,15 @@ container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$ima
 '
 container run --rm -i --entrypoint python "$image" - --installed-image \
     < "$script_dir/check_container_licenses.py"
+
+if [ "$mount_mode" = "volume" ]; then
+    container volume create "$overlay_volume" >/dev/null
+    container volume create "$data_volume" >/dev/null
+    container volume create "$workspace_volume" >/dev/null
+    tar -C "$overlay_dir" -cf - . \
+        | container run --rm -i --entrypoint sh \
+            -v "$overlay_volume:/config" "$image" -c 'tar -xf - -C /config'
+fi
 
 container network create "$network" >/dev/null
 container run -d \
