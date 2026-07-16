@@ -15,6 +15,8 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Adding External Commands](#adding-external-commands)
 - [Changing the Database Schema](#changing-the-database-schema)
 - [Running Tests](#running-tests)
+- [Vendor JS Workflow](#vendor-js-workflow)
+- [GitLab Runner Setup](#gitlab-runner-setup)
 - [Linting and Security Scanning](#linting-and-security-scanning)
 - [Dependency Version Tracking](#dependency-version-tracking)
 - [Contribution License](#contribution-license)
@@ -104,7 +106,7 @@ Recommended extensions:
 
 Practical recommendations:
 
-- select [`.venv`](.venv) as the workspace Python interpreter
+- select `.venv` as the workspace Python interpreter
 - let Pylance use [pyrightconfig.json](pyrightconfig.json), which already adds `app/` to the analysis path
 - keep the repo opened at the project root so Playwright, Vitest, and relative config paths resolve correctly
 
@@ -146,6 +148,7 @@ Before merging a version branch back to `main`:
 - Ensure the version-derived `PROJECT_SOURCE` link in [app/config.py](app/config.py) resolves to the exact public release tag and opens its repository README.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
 - Before a final tag, ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`. Keep it `Unreleased` for a release-candidate rehearsal.
+- After the normal branch workflow seeds the next active `Unreleased` section, keep only that section and the two newest dated releases in the root changelog. Move the oldest retained release intact into its major-version archive, then update the archive-integrity baseline. Never rotate published history during a release-candidate rehearsal.
 - Ensure all project docs are up to date with the released version section from [CHANGELOG.md](CHANGELOG.md), including README, FEATURES, ARCHITECTURE, CONTRIBUTING, tests docs, external-command notes, any decision docs touched by the release, and the merge request and release notes under `docs/release-drafts/` when they exist. Candidate branches may use their exact `X.Y.Z-rc.N` installer, image, and signing examples so those instructions can be rehearsed; `main` and final release docs must use the final stable tag.
 - Search tracked files for the previous version and review every remaining match. Update stale installer URLs, signing identities, image examples, release-specific test fixtures, and current release prose, while leaving historical changelog entries and intentionally fixed compatibility fixtures alone.
 - Ensure generated screenshots, demo media, smoke fixtures, vendor files, and docs inventories are refreshed when the release changed those surfaces.
@@ -171,7 +174,7 @@ Before merging a version branch back to `main`:
 
 **Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root and `APP_LOCAL_CONF_DIR` selects the operator overlay root for every supported `*.local.*` file. Source deployments default both roots to `app/conf`, preserving sibling behavior. When adding or changing an overlay-capable surface, use `app/config_paths.py`, keep its merge/reload/cache behavior explicit, and update the repository-free starter files and docs; don't make a filename look active when the runtime doesn't resolve it.
 
-**Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
+**Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Front End Design](ARCHITECTURE.md#front-end-design). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
 
 ---
 
@@ -223,9 +226,6 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
-Current totals: **2435 pytest + 1499 Vitest + 278 Playwright = 4,212 tests**.
-That total includes 4,149 behavior tests plus 63 docs/inventory meta-tests.
-
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
 integration tests against isolated test schemas. The helper uses
@@ -244,7 +244,7 @@ Playwright notes:
 
 Relevant references:
 
-- [tests/README.md](tests/README.md) — full suite appendix, focused test commands, browser-test notes, and smoke-test workflow
+- [tests/README.md](tests/README.md) — suite purposes, live inventory commands, focused test commands, browser-test notes, and smoke-test workflow
 - [ARCHITECTURE.md](ARCHITECTURE.md) — where the test layers fit in the overall system
 - [DECISIONS.md](DECISIONS.md) — why the suite is split into `pytest`, `Vitest`, and `Playwright`
 
@@ -361,7 +361,7 @@ Complete this setup before creating a final or release-candidate tag:
 
 Ordinary branches and merge requests build verification-only images. A protected tag matching `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` starts the public artifact path:
 
-1. validate the reviewed container-license inventory, require its Nmap NPSL 0.95 redistribution status to record an upstream waiver or OEM license, resolve the Python base tag to its exact Linux AMD64 manifest, then build the self-contained image once with that pinned base and a registry-backed BuildKit cache before pushing the exact tag to the GitLab Container Registry
+1. validate the reviewed container-license inventory, including Nmap's NPSL 0.95 record and hash-pinned license text, resolve the Python base tag to its exact Linux AMD64 manifest, then build the self-contained image once with that pinned base and a registry-backed BuildKit cache before pushing the exact tag to the GitLab Container Registry
 2. start that image without an `/app` mount and verify its version, architecture, bundled static assets, read-only runtime, private host-config staging, health endpoint, every declared notice path, and the complete installed RubyGem manifest
 3. copy the canonical manifest directly between registries with Buildx imagetools, publish it at `docker.io/darklabsh/darklab-shell`, and require the Docker Hub digest to match
 4. generate a CycloneDX SBOM, full Grype report, and deterministic build-input inventory from the pulled canonical image and checked-out source; record the digest-pinned GitLab CLI image used for final release creation; fail on fixed Critical findings; bind the base manifest, tag, commit, pipeline, registry names, and shared digest into SLSA provenance; then keylessly sign both immutable image references with the protected pipeline's GitLab OIDC identity
@@ -520,26 +520,8 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](FEATURES.md) - full per-feature reference
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation ownership, style, and templates
+- [tests/README.md](tests/README.md) - testing handbook and live suite listings
+- [ARCHITECTURE.md](ARCHITECTURE.md) - code boundaries and front-end design contracts
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external tool integration contracts
+- [Default.md](.gitlab/merge_request_templates/Default.md) - merge request template

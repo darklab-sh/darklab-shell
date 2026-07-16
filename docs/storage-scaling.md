@@ -4,7 +4,9 @@ darklab_shell keeps SQLite as the default backend because it works well for loca
 
 ## Baseline
 
-The current baseline comes from one heavy single-user pre-release database after about six weeks of use. It is not a perfect production sample, but it is useful because it includes real scanner runs, saved output previews, FTS search data, snapshots, project records, Atlas entities, and output artifacts.
+This baseline was captured on 2026-05-16 from a pre-release darklab_shell 2.0 SQLite database after about six weeks of use by one heavy user. It is not a perfect production sample, but it is useful because it includes real scanner runs, saved output previews, FTS search data, snapshots, project records, Atlas entities, and output artifacts. The projections assume the same roughly 292-run-per-day workload, one logical user per workload unit, the recorded SQLite plus artifact storage shape, and no pruning before the stated retention window.
+
+Future measured baselines must identify the app version, capture date, database backend, user/activity assumptions, retention assumptions, and which database and filesystem storage is included. Empirical values without that context should not be used for capacity recommendations.
 
 | Measure | Value |
 | ------- | ----- |
@@ -148,25 +150,7 @@ If SQLite grows quickly, first check whether retention is set correctly. Then ch
 
 ## Related Docs
 
-- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](../FEATURES.md) - full per-feature reference
-- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
-- [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-- [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [docs/workflows.md](workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [../CONFIGURATION.md](../CONFIGURATION.md) - storage and database settings
+- [postgres-migration.md](postgres-migration.md) - SQLite-to-Postgres migration
+- [../ARCHITECTURE.md](../ARCHITECTURE.md#state-and-persistence) - persistence contracts
+- [../DECISIONS.md](../DECISIONS.md) - storage design rationale

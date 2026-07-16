@@ -10,6 +10,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Repository-free production installation](#repository-free-production-installation)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
+  - [Reduce pytest feedback time without weakening release coverage](#reduce-pytest-feedback-time-without-weakening-release-coverage)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -19,8 +20,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
+  - [Native ticketing integrations](#native-ticketing-integrations)
+  - [Operator-extensible signal and parser rules](#operator-extensible-signal-and-parser-rules)
 - [Architecture](#architecture)
-  - [Right-size project documentation](#right-size-project-documentation)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Lightweight Jinja base template](#lightweight-jinja-base-template)
@@ -40,7 +42,6 @@ Each remaining milestone is independently releasable and has its own exit criter
 
 ##### Milestone 1: Repository-free install
 
-- [ ] Before publishing any public image, obtain a written Nmap NPSL 0.95 waiver or an OEM redistribution license for bundling Nmap with darklab_shell, or get qualified legal approval for the exact distribution. Keep the evidence outside the public repository, then update the reviewed inventory status. The bundled license text and notices don't grant that approval.
 - [ ] Run the protected `v2.6.0` tag pipeline on a native Linux AMD64 runner. Confirm the repository-free image smoke test, exact-tag immutability/retry behavior, license gate, installer payload, and Docker Hub promotion all complete.
 - [ ] Confirm anonymous access to the GitLab image, Docker Hub mirror, setup files, checksums, and notices. Verify both registries report the same digest and a clean Docker host reaches a healthy app from the installed directory.
 - [ ] Record the pipeline's compressed transfer size, unpacked image size, layer composition, and representative cold-pull time. Add those measured expectations to the operator docs and decide whether SecLists or another tool group justifies a later slim image.
@@ -68,8 +69,6 @@ Each remaining milestone is independently releasable and has its own exit criter
 - [ ] GitLab images, Docker Hub mirrors, packages, checksums, SBOM/provenance, signatures, and release links are anonymously accessible and independently verifiable as documented.
 - [ ] Every advertised architecture and container runtime has automated compatibility coverage.
 
----
-
 ## Known Issues
 
 No open Known Issues are currently tracked.
@@ -78,7 +77,21 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-No open Technical Debt items are currently tracked.
+### Reduce pytest feedback time without weakening release coverage
+
+The backend suite now takes about 150 seconds even though collecting its roughly 2,400 cases takes only about a second. A July 2026 profiling pass found three costs worth addressing:
+
+- Ordinary route tests build a fresh Flask app for nearly every test client. `create_app()` takes about 59 ms under the test configuration, and the suite has roughly 770 direct or helper-mediated app construction sites.
+- `TestProjectStructureCoverage.test_asset_build_output_does_not_depend_on_cwd` runs the complete ESM asset build twice and takes about 25 seconds. Each build also creates the production Brotli and gzip sidecars.
+- `test_production_install.py` takes about 23 seconds because it exercises archive, signing, publication, installer, upgrade, and restore flows through subprocesses.
+
+- [ ] Reuse a module- or session-scoped Flask app for ordinary route tests, with deliberate cleanup of mutable config, extension, database, and request state between cases. Keep focused factory tests that build independent apps and verify application-factory isolation.
+- [ ] Make the asset working-directory determinism check exercise the generated asset graph without paying for production precompression twice. A no-precompression build mode plus focused Brotli/gzip coverage is the preferred starting point; the full committed-asset check must remain in CI.
+- [ ] Give the production installer and release-publication scenarios an explicit integration/slow marker and a dedicated full-suite lane. Keep a fast developer pytest command for routine feedback while CI and release validation continue to run the complete coverage.
+- [ ] Publish a pytest duration report in CI so new slow tests and file-level runtime changes are visible before they accumulate.
+- [ ] Reconsider parallel pytest execution only after mutable application config, SQLite state, logging globals, and extension state are isolated well enough to avoid order-dependent failures.
+
+**Done when:** the documented fast pytest path is materially quicker, the complete suite still covers fresh application factories, production asset output, and release installation, and CI makes future runtime regressions easy to spot.
 
 ---
 
@@ -190,13 +203,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Right-size project documentation
-- Problem: several docs are treated as append-only logs and have grown past the point of being read or kept accurate — `CHANGELOG.md` (~792K), `README.md` (~127K), `ARCHITECTURE.md` (~280K), `FEATURES.md` (~188K). Documentation this large drifts from reality and buries the parts newcomers actually need.
-- Approach:
-  - Keep the README navigational and short; let it point into deeper docs rather than duplicating them.
-  - Make `ARCHITECTURE.md` and `FEATURES.md` describe current state concisely, and confine chronological history to `CHANGELOG.md`.
-  - Align with the existing documentation standards work so state docs stay free of migration/phase narrative that belongs in the changelog.
 
 ### Unified terminal built-in lifecycle
 - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.

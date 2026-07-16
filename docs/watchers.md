@@ -210,26 +210,8 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 
 ## Related Docs
 
-- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](../FEATURES.md) - full per-feature reference
-- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-- [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/workflows.md](workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [schedules.md](schedules.md) - scheduler cadence and worker behavior
+- [notifications.md](notifications.md) - watcher notification delivery
+- [../CONFIGURATION.md](../CONFIGURATION.md) - watcher and worker settings
+- [../FEATURES.md](../FEATURES.md) - user-facing watcher behavior
+- [api.md](api.md) - watcher API and CLI usage

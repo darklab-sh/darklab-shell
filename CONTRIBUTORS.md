@@ -15,9 +15,9 @@ Key references for contributors:
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, branch workflow, code style, linting, and MR process
 - [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence model, and security design
 - [DECISIONS.md](DECISIONS.md) — design reasoning, known gotchas, and implementation history
-- [tests/README.md](tests/README.md) — test suite handbook and full appendix
+- [tests/README.md](tests/README.md) — test suite handbook and live inventory commands
 
-When adding app-owned shell behavior, keep the browser, backend, autocomplete, and docs in sync. Workspace file commands are a good example: user-visible paths must go through the workspace helpers, browser-side conveniences should have matching backend fallbacks when stale clients are possible, and new terminal grammar should be reflected in `app/services/commands/builtin_autocomplete.yaml`, feature docs, and the test inventory.
+When adding app-owned shell behavior, keep the browser, backend, autocomplete, and docs in sync. Workspace file commands are a good example: user-visible paths must go through the workspace helpers, browser-side conveniences should have matching backend fallbacks when stale clients are possible, and new terminal grammar should be reflected in `app/services/commands/builtin_autocomplete.yaml`, feature docs, and the appropriate test layer.
 
 ---
 

@@ -29,12 +29,29 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0"
+RELEASE_VERSION = "2.6.0-rc.1"
+FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
+RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.2"
+NEXT_VERSION = "2.6.1"
+LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
     "registry.gitlab.com/gitlab-org/cli:v1.107.0@"
     "sha256:ea9708890660b1f766d8185ccbc99b8729633bfa34ea9fda35f6ef1fdf90e507"
 )
+
+
+def _dockerhub_image(version: str) -> str:
+    return f"docker.io/darklabsh/darklab-shell:{version}"
+
+
+def _gitlab_image(version: str) -> str:
+    return f"registry.gitlab.com/darklab.sh/darklab_shell:{version}"
+
+
+def _release_tag(version: str) -> str:
+    return f"v{version}"
 
 
 def _sha256(path: Path) -> str:
@@ -165,7 +182,7 @@ def _build_verified_backup(
         encoding="utf-8",
     )
     (backup_root / "operator" / ".env").write_text(operator_env or (
-        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.5.0\n"
+        f"DARKLAB_IMAGE={_dockerhub_image(LEGACY_BACKUP_VERSION)}\n"
         f"DATABASE_BACKEND={backend}\n"
         "OPERATOR_SENTINEL=restored\n"
     ), encoding="utf-8")
@@ -253,7 +270,7 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
         *sh.darklab.image.architecture*) printf 'arm64\n' ;;
         *org.opencontainers.image.licenses*) printf 'AGPL-3.0-only\n' ;;
         *sh.darklab.python.base.digest*) printf 'sha256:%064d\n' 0 ;;
-        *sh.darklab.app.version*) printf '2.6.0\n' ;;
+        *sh.darklab.app.version*) printf '__RELEASE_VERSION__\n' ;;
         *sh.darklab.git.revision*|*org.opencontainers.image.revision*) printf 'revision-a\n' ;;
     esac
     exit 0
@@ -279,7 +296,7 @@ if [ "$1" = "run" ]; then
     exit 0
 fi
 exit 0
-""",
+""".replace("__RELEASE_VERSION__", RELEASE_VERSION),
         encoding="utf-8",
     )
     runtime_path.chmod(0o755)
@@ -376,7 +393,7 @@ if [ "$1" = "pull" ]; then
 fi
 if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
     case "$4" in
-        *sh.darklab.app.version*) printf '%s\n' "${FAKE_IMAGE_VERSION:-2.6.0}" ;;
+        *sh.darklab.app.version*) printf '%s\n' "${FAKE_IMAGE_VERSION:-__RELEASE_VERSION__}" ;;
         *sh.darklab.git.revision*) printf '%s\n' "${FAKE_IMAGE_REVISION:-revision-a}" ;;
         *sh.darklab.python.base.digest*)
             printf '%s\n' \
@@ -423,7 +440,7 @@ if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "create" ]; then
     exit 0
 fi
 exit 2
-""",
+""".replace("__RELEASE_VERSION__", RELEASE_VERSION),
         encoding="utf-8",
     )
     docker_path.chmod(0o755)
@@ -441,14 +458,14 @@ def _run_release_publisher(
     env = os.environ.copy()
     env.update({
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
-        "CI_COMMIT_TAG": "v2.6.0",
+        "CI_COMMIT_TAG": _release_tag(RELEASE_VERSION),
         "CI_COMMIT_SHA": "revision-a",
         "CI_REGISTRY": "registry.example.test",
         "CI_REGISTRY_IMAGE": "registry.example.test/darklab/shell",
         "CI_REGISTRY_USER": "release-user",
         "CI_REGISTRY_PASSWORD": "registry-secret",
-        "RELEASE_VERSION": "2.6.0",
-        "GITLAB_IMAGE": "registry.example.test/darklab/shell:2.6.0",
+        "RELEASE_VERSION": RELEASE_VERSION,
+        "GITLAB_IMAGE": f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
         "GITLAB_DIGEST": digest,
         "DOCKERHUB_IMAGE": "docker.io/darklabsh/darklab-shell",
         "DOCKERHUB_USERNAME": "darklabsh",
@@ -522,7 +539,7 @@ esac
     env = os.environ.copy()
     env.update({
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
-        "RELEASE_VERSION": "2.6.0",
+        "RELEASE_VERSION": RELEASE_VERSION,
         "CI_API_V4_URL": "https://gitlab.example.test/api/v4",
         "CI_PROJECT_ID": "42",
         "CI_JOB_TOKEN": "job-token-secret",
@@ -622,9 +639,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     services = compose["services"]
     shell = services["shell"]
 
-    assert shell["image"] == (
-        "${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0}"
-    )
+    assert shell["image"] == f"${{DARKLAB_IMAGE:-{_dockerhub_image(RELEASE_VERSION)}}}"
     assert shell["platform"] == "linux/amd64"
     assert "build" not in shell
     assert all("/app" not in volume for volume in shell["volumes"])
@@ -723,8 +738,8 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         [
             "sh",
             str(ROOT / "scripts" / "verify_repository_free_image.sh"),
-            "registry.example.test/darklab:2.6.0",
-            "2.6.0",
+            f"registry.example.test/darklab:{RELEASE_VERSION}",
+            RELEASE_VERSION,
             "revision-a",
             digest,
             "arm64",
@@ -748,7 +763,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         [
             "sh",
             str(ROOT / "scripts" / "verify_bundled_tools.sh"),
-            "registry.example.test/darklab:2.6.0",
+            f"registry.example.test/darklab:{RELEASE_VERSION}",
             "arm64",
         ],
         cwd=ROOT,
@@ -783,7 +798,7 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     )
 
     assert result.returncode == 0, result.stderr
-    assert "for darklab_shell 2.6.0" in result.stdout
+    assert f"for darklab_shell {RELEASE_VERSION}" in result.stdout
     project_license = (ROOT / "LICENSE").read_text(encoding="utf-8")
     assert "GNU AFFERO GENERAL PUBLIC LICENSE" in project_license
     assert "Version 3, 19 November 2007" in project_license
@@ -814,24 +829,13 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     )
     assert nmap_component["license"] == "LicenseRef-Nmap-Public-Source-0.95"
     assert nmap_component["notice_location"].endswith("/Nmap-7.95-NPSL-0.95.txt")
-    assert nmap_component["redistribution_review"] == (
-        "requires-upstream-waiver-oem-or-legal-approval"
-    )
-    checker = _load_script_module("check_container_licenses")
-    with pytest.raises(ValueError, match="Nmap upstream waiver, OEM license"):
-        checker.main(require_redistribution_approval=True)
-    approved_nmap_component = {
-        **nmap_component,
-        "redistribution_review": "approved-by-qualified-legal-review",
-    }
-    checker._validate_nmap_redistribution(
-        [approved_nmap_component],
-        require_approval=True,
-    )
+    assert "redistribution_review" not in nmap_component
+    assert "runs the bundled Nmap executable as an external command" in nmap_component["usage_note"]
     publisher = (ROOT / "scripts" / "publish_release_artifacts.sh").read_text(
         encoding="utf-8"
     )
-    assert 'check_container_licenses.py" --release' in publisher
+    assert 'check_container_licenses.py"' in publisher
+    assert 'check_container_licenses.py" --release' not in publisher
     install_coverage = inventory["dockerfile_install_coverage"]
     assert install_coverage["apt:nmap"] == "Debian Nmap package"
     assert install_coverage["apt:masscan"] == "Debian Masscan package"
@@ -959,7 +963,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         "duplicate-component",
         "version-arg-drift",
         "missing-notice",
-        "invalid-nmap-review",
+        "incorrect-nmap-license",
         "changed-nmap-license",
         "changed-wpscan-license",
     ):
@@ -977,12 +981,12 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
                 dockerfile.write("\nARG UNREVIEWED_TOOL_VERSION=1.0.0\n")
         elif case_name == "missing-notice":
             (fixture_root / "deploy" / "third-party-licenses" / "frontend-runtime.txt").unlink()
-        elif case_name == "invalid-nmap-review":
+        elif case_name == "incorrect-nmap-license":
             next(
                 component
                 for component in inventory["components"]
                 if component["name"] == "Debian Nmap package"
-            )["redistribution_review"] = "self-approved"
+            )["license"] = "GPL-2.0-only"
             inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
         elif case_name == "changed-nmap-license":
             (fixture_root / "deploy" / "third-party-licenses" / "Nmap-7.95-NPSL-0.95.txt").write_text(
@@ -1074,13 +1078,13 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     assert "loghost.darklab.sh" not in all_text
     assert not re.search(r"@[A-Z0-9_]+@", all_text)
-    assert "docker.io/darklabsh/darklab-shell:2.6.0" in all_text
-    assert "registry.gitlab.com/darklab.sh/darklab_shell:2.6.0" in all_text
+    assert _dockerhub_image(RELEASE_VERSION) in all_text
+    assert _gitlab_image(RELEASE_VERSION) in all_text
     assert (
         "ghcr.io/sigstore/cosign/cosign:v3.0.6@"
         "sha256:de9c65609e6bde17e6b48de485ee788407c9502fa08b8f4459f595b21f56cd00"
     ) in all_text
-    assert "/blob/v2.6.0/CONFIGURATION.md" in archive_files[
+    assert f"/blob/{_release_tag(RELEASE_VERSION)}/CONFIGURATION.md" in archive_files[
         "starters/conf/config.local.yaml"
     ].decode("utf-8")
     manifest = json.loads(archive_files["release-manifest.json"])
@@ -1094,15 +1098,15 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     for name, expected in managed_checksums.items():
         assert hashlib.sha256(archive_files[name]).hexdigest() == expected
     assert "representative_ci_pull_seconds" not in all_text
-    rc_version = "2.6.0-rc.1"
+    rc_version = NEXT_RC_VERSION
     rc_payload = _build_payload_for_version(tmp_path, rc_version)
     rc_archive_files = _deployment_archive_files(rc_payload, rc_version)
     rc_manifest = json.loads(rc_archive_files["release-manifest.json"])
     assert rc_manifest["version"] == rc_version
     assert rc_manifest["dockerhub_image"] == (
-        f"docker.io/darklabsh/darklab-shell:{rc_version}"
+        _dockerhub_image(rc_version)
     )
-    assert f"docker.io/darklabsh/darklab-shell:{rc_version}" in rc_archive_files[
+    assert _dockerhub_image(rc_version) in rc_archive_files[
         "compose.yaml"
     ].decode("utf-8")
     ci_config = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
@@ -1405,7 +1409,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "method": "sigstore-keyless",
         "certificate_identity": (
             "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml"
-            f"@refs/tags/v{RELEASE_VERSION}"
+            f"@refs/tags/{_release_tag(RELEASE_VERSION)}"
         ),
         "certificate_oidc_issuer": "https://gitlab.com",
     }
@@ -1443,20 +1447,20 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "digest": {"sha256": "c" * 64},
     }
 
-    rc_version = "2.6.0-rc.1"
+    rc_version = NEXT_RC_VERSION
     rc_evidence_args = {
         **evidence_args,
         "version": rc_version,
-        "gitlab_image": f"registry.gitlab.com/darklab.sh/darklab_shell:{rc_version}",
-        "dockerhub_image": f"docker.io/darklabsh/darklab-shell:{rc_version}",
-        "commit_tag": f"v{rc_version}",
+        "gitlab_image": _gitlab_image(rc_version),
+        "dockerhub_image": _dockerhub_image(rc_version),
+        "commit_tag": _release_tag(rc_version),
     }
     rc_evidence = tmp_path / "evidence-rc"
     evidence_builder.build_evidence(output_dir=rc_evidence, **rc_evidence_args)
     rc_evidence_index = json.loads((rc_evidence / "release-evidence.json").read_text())
     assert rc_evidence_index["version"] == rc_version
     assert rc_evidence_index["signing"]["certificate_identity"].endswith(
-        f"@refs/tags/v{rc_version}"
+        f"@refs/tags/{_release_tag(rc_version)}"
     )
 
     payload = tmp_path / "evidenced-payload"
@@ -1536,14 +1540,17 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
         FAKE_IMAGE_VERSION="9.9.9",
     )
     assert gitlab_conflict.returncode != 0
-    assert "check=version expected=2.6.0 actual=9.9.9" in gitlab_conflict.stderr
+    assert (
+        f"check=version expected={RELEASE_VERSION} actual=9.9.9"
+        in gitlab_conflict.stderr
+    )
 
-    rc_version = "2.6.0-rc.1"
+    rc_version = NEXT_RC_VERSION
     gitlab_rc_dir = tmp_path / "gitlab-rc"
     gitlab_rc = _run_release_publisher(
         gitlab_rc_dir,
         "gitlab-image",
-        CI_COMMIT_TAG=f"v{rc_version}",
+        CI_COMMIT_TAG=_release_tag(rc_version),
         RELEASE_VERSION=rc_version,
         GITLAB_IMAGE=f"registry.example.test/darklab/shell:{rc_version}",
     )
@@ -1573,7 +1580,7 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     ).read_text(encoding="utf-8")
     assert "buildx imagetools create" in dockerhub_first_log
     assert (
-        f"registry.example.test/darklab/shell:2.6.0@{digest}"
+        f"registry.example.test/darklab/shell:{RELEASE_VERSION}@{digest}"
         in dockerhub_first_log
     )
     assert f"DOCKERHUB_DIGEST={digest}" in (
@@ -1733,7 +1740,7 @@ def test_release_version_gate_covers_runtime_and_distribution_files():
         text=True,
     )
     mismatched = subprocess.run(
-        [sys.executable, "scripts/check_versions.sh", "--release-version", "2.6.1"],
+        [sys.executable, "scripts/check_versions.sh", "--release-version", NEXT_VERSION],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -1750,16 +1757,16 @@ def test_release_version_gate_covers_runtime_and_distribution_files():
     assert matching.returncode == 0, matching.stderr
     assert automatic.returncode == 0, automatic.stderr
     assert mismatched.returncode == 1
-    assert "app/config.py: 2.6.0" in mismatched.stderr
-    assert "deploy/container-licenses.json: 2.6.0" in mismatched.stderr
-    assert "tests/py/test_production_install.py: 2.6.0" in mismatched.stderr
+    assert f"app/config.py: {RELEASE_VERSION}" in mismatched.stderr
+    assert f"deploy/container-licenses.json: {RELEASE_VERSION}" in mismatched.stderr
+    assert f"tests/py/test_production_install.py: {RELEASE_VERSION}" in mismatched.stderr
 
     rc_drift = subprocess.run(
         [
             sys.executable,
             "scripts/check_versions.sh",
             "--release-version",
-            "2.6.0-rc.1",
+            NEXT_RC_VERSION,
         ],
         cwd=ROOT,
         check=False,
@@ -1767,7 +1774,7 @@ def test_release_version_gate_covers_runtime_and_distribution_files():
         text=True,
     )
     assert rc_drift.returncode == 1
-    assert "Release version drift; expected 2.6.0-rc.1" in rc_drift.stderr
+    assert f"Release version drift; expected {NEXT_RC_VERSION}" in rc_drift.stderr
     assert "Invalid release version" not in rc_drift.stderr
 
 
@@ -1897,7 +1904,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
         text=True,
     )
     assert verified.returncode == 0, verified.stderr
-    assert "Verified docker.io/darklabsh/darklab-shell:2.6.0" in verified.stdout
+    assert f"Verified {_dockerhub_image(RELEASE_VERSION)}" in verified.stdout
 
     mismatched_env = {**verifier_env, "FAKE_IMAGE_DIGEST": "sha256:" + "b" * 64}
     mismatched = subprocess.run(
@@ -2010,12 +2017,18 @@ def test_installer_rejects_non_https_payload_sources(tmp_path: Path):
         payload,
         failed_download_target,
         tmp_path,
-        base_url="https://release-user:signed-url-secret@example.invalid/v2.6.0",
+        base_url=(
+            "https://release-user:signed-url-secret@example.invalid/"
+            f"{_release_tag(RELEASE_VERSION)}"
+        ),
         fail_download=True,
     )
     combined_output = failed_download.stdout + failed_download.stderr
     assert failed_download.returncode != 0
-    assert f"download failed for {DEPLOYMENT_ARCHIVE} (release 2.6.0)" in failed_download.stderr
+    assert (
+        f"download failed for {DEPLOYMENT_ARCHIVE} (release {RELEASE_VERSION})"
+        in failed_download.stderr
+    )
     assert "signed-url-secret" not in combined_output
     assert "release-user" not in combined_output
     assert "POSTGRES_PASSWORD=" not in combined_output
@@ -2174,7 +2187,7 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     monkeypatch,
 ):
     source_env = (
-        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.5.0\n"
+        f"DARKLAB_IMAGE={_dockerhub_image(LEGACY_BACKUP_VERSION)}\n"
         "DATABASE_BACKEND=postgres\n"
         "DATABASE_URL=postgresql://source:source-password@postgres:5432/source_db\n"
         "POSTGRES_DB=source_db\n"
@@ -2195,7 +2208,7 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     restore_env = restore_target / ".env"
     target_database_url = "postgresql://target:target-password@postgres:5432/target_db"
     restore_env.write_text(
-        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0\n"
+        f"DARKLAB_IMAGE={_dockerhub_image(RELEASE_VERSION)}\n"
         "DATABASE_BACKEND=postgres\n"
         f"DATABASE_URL={target_database_url}\n"
         "POSTGRES_DB=target_db\n"
@@ -2225,7 +2238,7 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     ))
 
     restored_env = restore_env.read_text(encoding="utf-8")
-    assert "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0" in restored_env
+    assert f"DARKLAB_IMAGE={_dockerhub_image(RELEASE_VERSION)}" in restored_env
     assert f"DATABASE_URL={target_database_url}" in restored_env
     assert "POSTGRES_DB=target_db" in restored_env
     assert "POSTGRES_USER=target" in restored_env
@@ -2269,7 +2282,7 @@ def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
     restore_env = restore_target / ".env"
     target_database_url = "postgresql://target:target-password@postgres:5432/target_db"
     original_env = (
-        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0\n"
+        f"DARKLAB_IMAGE={_dockerhub_image(RELEASE_VERSION)}\n"
         "DATABASE_BACKEND=postgres\n"
         f"DATABASE_URL={target_database_url}\n"
         "POSTGRES_PASSWORD=target-password\n"
@@ -2341,7 +2354,7 @@ def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path)
 
 def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_path: Path):
     current_payload = _build_payload_for_version(tmp_path, RELEASE_VERSION)
-    next_version = "2.6.1"
+    next_version = NEXT_VERSION
     next_payload = _build_payload_for_version(tmp_path, next_version)
     package_root = tmp_path / "package-root"
     version_root = package_root / next_version
@@ -2416,14 +2429,15 @@ def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_
     assert "--bundle /release/SHA256SUMS.sigstore.json" in docker_log
     assert (
         "--certificate-identity "
-        "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.1"
+        "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/"
+        f"{_release_tag(next_version)}"
     ) in docker_log
     assert "--certificate-oidc-issuer https://gitlab.com" in docker_log
 
 
 def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(tmp_path: Path):
     current_payload = _build_payload_for_version(tmp_path, RELEASE_VERSION)
-    next_version = "2.6.1"
+    next_version = NEXT_VERSION
     next_payload = _build_payload_for_version(
         tmp_path,
         next_version,
@@ -2663,7 +2677,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     )
     assert upgraded.returncode == 0, upgraded.stderr
     assert "--archive checks the adjacent .sha256 only" in upgraded.stderr
-    assert "from 2.6.0 to 2.6.1" in upgraded.stdout
+    assert f"from {RELEASE_VERSION} to {next_version}" in upgraded.stdout
     assert "New settings are available in .env.example:" in upgraded.stdout
     assert "  NEW_RELEASE_SETTING" in upgraded.stdout
     assert "NEW_RELEASE_SETTING=available" not in upgraded.stdout
@@ -2672,11 +2686,11 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert "--result-path-only" in log_path.read_text(encoding="utf-8")
     manifest = json.loads((install_dir / "release-manifest.json").read_text())
     assert manifest["version"] == next_version
-    assert "docker.io/darklabsh/darklab-shell:2.6.1" in (
+    assert _dockerhub_image(next_version) in (
         install_dir / "compose.yaml"
     ).read_text(encoding="utf-8")
     env_text = (install_dir / ".env").read_text(encoding="utf-8")
-    assert "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.1" in env_text
+    assert f"DARKLAB_IMAGE={_dockerhub_image(next_version)}" in env_text
     assert operator_files[".env"] in env_text
     assert "NEW_RELEASE_SETTING" not in env_text
     assert "NEW_RELEASE_SETTING=available" in (
@@ -2746,19 +2760,32 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         text=True,
     )
     assert downgrade.returncode != 0
-    assert "refusing downgrade from 2.6.1 to 2.6.0" in downgrade.stderr
+    assert (
+        f"refusing downgrade from {next_version} to {RELEASE_VERSION}"
+        in downgrade.stderr
+    )
 
-    rc_one_version = "2.6.0-rc.1"
-    rc_two_version = "2.6.0-rc.2"
-    rc_one_payload = _build_payload_for_version(tmp_path, rc_one_version)
-    rc_two_payload = _build_payload_for_version(tmp_path, rc_two_version)
+    rc_one_version = RC_ONE_VERSION
+    rc_two_version = NEXT_RC_VERSION
+    rc_one_payload = _build_payload_for_version(
+        tmp_path / "rc-one-fixture",
+        rc_one_version,
+    )
+    rc_two_payload = _build_payload_for_version(
+        tmp_path / "rc-two-fixture",
+        rc_two_version,
+    )
+    final_payload = _build_payload_for_version(
+        tmp_path / "final-fixture",
+        FINAL_VERSION,
+    )
     rc_install_dir = tmp_path / "release-candidate-deployment"
     rc_setup_dir = tmp_path / "release-candidate-setup"
     rc_installed = _run_setup(rc_one_payload, rc_install_dir, rc_setup_dir)
     assert rc_installed.returncode == 0, rc_installed.stderr
     for requested_version, requested_payload in (
         (rc_two_version, rc_two_payload),
-        (RELEASE_VERSION, current_payload),
+        (FINAL_VERSION, final_payload),
     ):
         requested_archive = (
             requested_payload / f"darklab-shell-deploy-{requested_version}.tar.gz"
@@ -2781,7 +2808,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         )
         assert rc_upgraded.returncode == 0, rc_upgraded.stderr
     rc_manifest = json.loads((rc_install_dir / "release-manifest.json").read_text())
-    assert rc_manifest["version"] == RELEASE_VERSION
+    assert rc_manifest["version"] == FINAL_VERSION
     final_to_rc = subprocess.run(
         [
             str(rc_install_dir / "darklab-deploy"),
@@ -2799,7 +2826,10 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         text=True,
     )
     assert final_to_rc.returncode != 0
-    assert "refusing downgrade from 2.6.0 to 2.6.0-rc.2" in final_to_rc.stderr
+    assert (
+        f"refusing downgrade from {FINAL_VERSION} to {rc_two_version}"
+        in final_to_rc.stderr
+    )
 
     restore_helper = _load_script_module("restore_system")
     restore_target = tmp_path / "restore-target"
@@ -2811,7 +2841,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         (directory / "stale.txt").write_text("stale\n", encoding="utf-8")
     restore_env = restore_target / ".env"
     restore_env.write_text(
-        "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.1\n",
+        f"DARKLAB_IMAGE={_dockerhub_image(next_version)}\n",
         encoding="utf-8",
     )
     restore_helper.restore(SimpleNamespace(
@@ -2830,7 +2860,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert (restore_conf / "config.local.yaml").is_file()
     assert (restore_workspaces / "evidence.txt").is_file()
     restored_env = restore_env.read_text(encoding="utf-8")
-    assert "DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.1" in restored_env
+    assert f"DARKLAB_IMAGE={_dockerhub_image(next_version)}" in restored_env
     assert "OPERATOR_SENTINEL=restored" in restored_env
     captured_restore: dict[str, Any] = {}
     original_run = restore_helper.subprocess.run

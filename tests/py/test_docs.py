@@ -1,62 +1,17 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""
-Meta-tests: verify that documentation stays in sync with the test suite.
-
-Part 1 — per-file appendix drift (pytest, Vitest, Playwright):
-  The appendix in tests/README.md has one section per test file and one row
-  per unique test function. Parameterised pytest variants (e.g. test_foo[a],
-  test_foo[b]) are collapsed to a single entry by convention, so pytest
-  comparisons use de-parameterised counts. Vitest and Playwright compare on
-  unique test-function names (last ` > ` / ` › ` segment of the listing).
-  Any test file not covered by an appendix section is also reported. Section
-  order and row order must match collection/listing order.
-
-Part 2 — documented totals:
-  - pytest   total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
-  - vitest   total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
-  - playwright total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
-  - combined total (pytest+vitest+playwright) must match each doc's grand total
-
-Part 3 — README.md project structure tree drift:
-  The "## Project Structure" tree in README.md must list every git-tracked
-  file, with two narrow forms of allowed omission: explicit per-file
-  exclusions (self-referential README, empty boilerplate) and opaque
-  directories whose individual contents are summarised by a parent entry
-  (theme files, vendored fonts, binary test fixtures). Listed paths must
-  also stay in the same order as `git ls-files --cached`, with parent
-  directories inserted before their children.
-
-Part 4 — ARCHITECTURE.md HTTP route inventory:
-  The "## HTTP Route Inventory" tables in ARCHITECTURE.md must list the same
-  method/route pairs that Flask has registered. The docs are intentionally
-  grouped by feature rather than app registration order, so this check enforces
-  coverage only, not ordering.
-
-Part 5 — operator configuration docs:
-  Operator-facing defaults from app/config.py's load_config() defaults must
-  be represented in the checked-in app/conf/config.yaml reference and the
-  CONFIGURATION.md "## Application Settings" table.
-
-Part 6 — team-mode scope predicates:
-  Team-visible run queries must use the shared owner-scope predicates instead
-  of directly combining a caller's session token with a team id.
-
-Part 7 — related-doc navigation:
-  Every "## Related Docs" section must link to every tracked project Markdown
-  file except itself. README.md's "## Documentation Map" follows the same
-  inventory.
-"""
+"""Documentation navigation, reference, and executable-contract safeguards."""
 
 import ast
+import html
 import hashlib
 import json
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -66,320 +21,59 @@ _REPO_ROOT = _HERE.parent.parent
 _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
 _CONFIGURATION = _REPO_ROOT / "CONFIGURATION.md"
-_DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
 _FEATURES = _REPO_ROOT / "FEATURES.md"
 _README = _REPO_ROOT / "README.md"
-_THEME = _REPO_ROOT / "THEME.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
+_COMMAND_REGISTRY_YAML = _REPO_ROOT / "app" / "conf" / "commands.yaml"
 _ASSET_MANIFEST = _REPO_ROOT / "app" / "static" / "build" / "manifest.json"
-
-_DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
-    r"\b(?:runs|r)\.session_id\s*=\s*\?.{0,240}\b(?:runs|r)\.team_id\s*=\s*\?"
-    r"|\b(?:runs|r)\.team_id\s*=\s*\?.{0,240}\b(?:runs|r)\.session_id\s*=\s*\?",
-    re.IGNORECASE | re.DOTALL,
+_UI_CAPTURE_GUIDE = _REPO_ROOT / "tests" / "ui-capture-scenes.md"
+_UI_CAPTURE_DESKTOP = _REPO_ROOT / "tests" / "js" / "e2e" / "ui-capture.desktop.capture.js"
+_UI_CAPTURE_MOBILE = _REPO_ROOT / "tests" / "js" / "e2e" / "ui-capture.mobile.capture.js"
+_PRODUCTION_COMPOSE = _REPO_ROOT / "deploy" / "compose.yaml"
+_PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
+_GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
+_CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
+_LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
+_LOG_EVENT_INVENTORY_HASH = "4adc27411e224036d12a01e869a7b3301272f72e9b23b2181bbdf09d49c7afbc"
+_CHANGELOG_ARCHIVES = (
+    _REPO_ROOT / "docs" / "changelog" / "2.x.md",
+    _REPO_ROOT / "docs" / "changelog" / "1.x.md",
 )
-_UNQUALIFIED_TEAM_RUN_PREDICATE_RE = re.compile(
-    r"\bsession_id\s*=\s*\?.{0,240}\bteam_id\s*=\s*\?"
-    r"|\bteam_id\s*=\s*\?.{0,240}\bsession_id\s*=\s*\?",
-    re.IGNORECASE | re.DOTALL,
+
+_PUBLISHED_CHANGELOG_HASHES = {
+    "2.5.0": "57551c73e61a89420ac3bbc93427f260b177327f03b788c2f1658a362c29a7a8",
+    "2.4": "6276e66a1f7dad33ec7e1f1334ced162ccaee30e4fc9d499c34e71d199e6e347",
+    "2.3.1": "648441ffa4384a9117e89c42a7cb3b4d4c0c261bbc72f8046c0db46d5aa68231",
+    "2.3": "99a990faa2246b6b6ac116102350dc3e75414554f3e90b34fdafa088e7cb3157",
+    "2.2": "a7ccea324eac40e12ece94c6cb5fe4c5d7250a027f710ed31e2078752d4366e2",
+    "2.1": "74d20197c7b3c94ffaf487b18878adf419f790aa938a69a58db1edd1c26a0f11",
+    "2.0": "386ced5db19ad000056af0a70be8f3d7d479739e6fc69244476b28aef8b19d11",
+    "1.7": "c3d002edf8440e82a3cf0d9cd1f39c784609e10075df464491effae59354ab92",
+    "1.6": "c1b073dc97dcab4c65da05ee1850aab8fbbd09d96a2e6e7993a262a02d0ce0ae",
+    "1.5": "4fc73c61fc5cba399570021354e8141cb1942e21f4929ccea0d59257c539f0e9",
+    "1.4": "81bd89ecdfae6559fefaf44ba49a7d4aa4e76187e7b8f77a412396dde3af8f23",
+    "1.3": "0dd2a5d1fb2fa21b65cf33670a090c9857d84babdf6436bf9ae71746977b01e5",
+    "1.2": "2a62f820dea1579ed5fc88abeaefc0f418b0357a4956845c43e38d105ae27024",
+    "1.1": "0de878944fff2e15eb357da291110d473d3f4db000104936202ae6771f68731d",
+    "1.0": "602ff73346015b8e2b259f9dff77ce62a38c84d09cf610df2de87fcbe6c63114",
+}
+
+_LIVE_TEST_LISTING_COMMANDS = (
+    "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. --collect-only -q",
+    "npx vitest list --config .tooling/vitest.config.js",
+    "npx playwright test --config .tooling/playwright.parallel.config.js --list",
+    "npx playwright test --config .tooling/playwright.demo.config.js --list",
+    "npx playwright test --config .tooling/playwright.demo.mobile.config.js --list",
+    "npx playwright test --config .tooling/playwright.capture.desktop.config.js --list",
+    "npx playwright test --config .tooling/playwright.capture.mobile.config.js --list",
 )
-_RUN_SQL_RE = re.compile(r"\b(?:FROM|JOIN)\s+runs\b|\bruns\.", re.IGNORECASE)
-
-# This file lives in tests/py/ but has no appendix section of its own;
-# it is explicitly excluded from the "missing appendix" check below.
-_THIS_FILE = Path(__file__).name
-
-# Appendix row pattern. Test names containing backticks use double-backtick
-# escaping (e.g. ``converts `code` to <code>``); all others use single
-# backticks. Both forms must be counted.
-_ROW_RE = re.compile(r"^\|\s+(``[^`]*(?:`[^`]+)*[^`]*``|`[^`]+`)\s+\|")
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _append_unique(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
-
-
-def _stringish_source(node: ast.AST) -> str:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.JoinedStr):
-        parts = []
-        for part in node.values:
-            if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                parts.append(part.value)
-            else:
-                parts.append("{}")
-        return "".join(parts)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _stringish_source(node.left) + _stringish_source(node.right)
-    return ""
-
-
-def _assignment_name(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
-def _team_scope_sql_fragments(path: Path) -> list[tuple[int, str]]:
-    tree = ast.parse(path.read_text(), filename=str(path))
-    fragments: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            target_names = {_assignment_name(target) for target in node.targets}
-            if any(name.endswith(("_sql", "_query", "_clause")) or name in {"sql", "query"} for name in target_names):
-                source = _stringish_source(node.value)
-                if source:
-                    fragments.append((node.lineno, source))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr in {"execute", "executemany"} and node.args:
-                source = _stringish_source(node.args[0])
-                if source:
-                    fragments.append((node.lineno, source))
-    return fragments
-
-
-def _run_pytest_collect() -> tuple[int, dict[str, list[str]]]:
-    """Return (total_count, {filename: ordered_unique_function_names}).
-
-    total_count is the raw pytest collected count including all parameterised
-    variants.  The list per file collapses test_foo[a]/test_foo[b] into one
-    entry so it can be compared against the single-row appendix convention.
-    """
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(_HERE), "--collect-only", "-q"],
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-    )
-    total = 0
-    by_file: dict[str, list[str]] = {}
-    for raw_line in result.stdout.splitlines():
-        line = raw_line.strip()
-        m = re.match(r"^([^:]+\.py)::([A-Z]\w+)::(\w+)", line)
-        if m:
-            filename = Path(m.group(1)).name
-            _append_unique(by_file.setdefault(filename, []), f"{m.group(2)}.{m.group(3)}")
-            continue
-        m = re.match(r"^([^:]+\.py)::(\w+)", line)
-        if m:
-            filename = Path(m.group(1)).name
-            _append_unique(by_file.setdefault(filename, []), m.group(2))
-            continue
-        m = re.search(r"(\d+)\s+tests?\s+collected", line)
-        if m:
-            total = int(m.group(1))
-    return total, by_file
-
-
-def _run_vitest_list() -> tuple[int, dict[str, list[str]]]:
-    """Return (total_count, {filename: ordered_unique_test_names}).
-
-    Runs `npx vitest list --config .tooling/vitest.config.js`. Each line is
-    "tests/js/unit/<file>.test.js > describe > ... > test name". The last
-    ` > ` separated segment is the test name. ``total`` is the raw listed
-    count (one entry per `it(...)` call), which matches the documented
-    pytest-style total. ``by_file`` deduplicates to unique names so it can
-    be compared against the single-row appendix convention.
-    """
-    result = subprocess.run(
-        ["npx", "vitest", "--config", ".tooling/vitest.config.js", "list"],
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-    )
-    by_file: dict[str, list[str]] = {}
-    total = 0
-    for line in result.stdout.splitlines():
-        m = re.match(r"^tests/js/unit/([^\s>]+\.test\.js)\s+>\s+(.+)$", line)
-        if m:
-            name = m.group(2).split(" > ")[-1].strip()
-            _append_unique(by_file.setdefault(m.group(1), []), name)
-            total += 1
-    return total, by_file
-
-
-def _run_playwright_list_for_config(config_path: str) -> tuple[int, dict[str, list[str]]]:
-    """Return (total_count, {filename: ordered_unique_test_names}) for one config."""
-    result = subprocess.run(
-        ["npx", "playwright", "test", "--config", config_path, "--list"],
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-    )
-    by_file: dict[str, list[str]] = {}
-    total = 0
-    for line in result.stdout.splitlines():
-        m = re.match(
-            r"^\s*\[[^\]]+\]\s+›\s+([^:]+\.(?:spec|capture)\.js):\d+:\d+\s+›\s+(.+)$",
-            line,
-        )
-        if m:
-            name = m.group(2).split(" › ")[-1].strip()
-            _append_unique(by_file.setdefault(m.group(1), []), name)
-            continue
-        m = re.match(r"^Total:\s+(\d+)\s+test", line)
-        if m:
-            total = int(m.group(1))
-    return total, by_file
-
-
-def _run_playwright_parallel_list() -> tuple[int, dict[str, list[str]]]:
-    """Return the normal Playwright suite listing used for documented totals."""
-    return _run_playwright_list_for_config(".tooling/playwright.parallel.config.js")
-
-
-def _run_playwright_appendix_list() -> tuple[int, dict[str, list[str]]]:
-    """Return the combined listing used for appendix drift checks.
-
-    This includes the normal Playwright suite plus the standalone demo and
-    screenshot-capture configs that do not run in normal test passes.
-    """
-    configs = (
-        ".tooling/playwright.parallel.config.js",
-        ".tooling/playwright.demo.config.js",
-        ".tooling/playwright.demo.mobile.config.js",
-        ".tooling/playwright.capture.desktop.config.js",
-        ".tooling/playwright.capture.mobile.config.js",
-    )
-    combined_total = 0
-    combined_by_file: dict[str, list[str]] = {}
-    for config_path in configs:
-        total, by_file = _run_playwright_list_for_config(config_path)
-        combined_total += total
-        for filename, names in by_file.items():
-            combined_names = combined_by_file.setdefault(filename, [])
-            for name in names:
-                _append_unique(combined_names, name)
-    return combined_total, combined_by_file
-
-
-def _appendix_row_name(line: str) -> str | None:
-    match = _ROW_RE.match(line)
-    if not match:
-        return None
-    value = match.group(1).strip()
-    if value.startswith("``") and value.endswith("``"):
-        return value[2:-2]
-    if value.startswith("`") and value.endswith("`"):
-        return value[1:-1]
-    return value
-
-
-def _parse_appendix(suffixes: tuple[str, ...]) -> dict[str, int]:
-    """Return {filename: row_count} from per-file tables in tests/README.md.
-
-    Only files whose name ends in one of ``suffixes`` are included so a
-    single README can carry pytest, Vitest, and Playwright sections without
-    cross-contamination.
-    """
-    counts: dict[str, int] = {}
-    current: str | None = None
-    for line in _TESTS_README.read_text().splitlines():
-        m = re.match(r"^####\s+`(\S+?)`", line)
-        if m:
-            key = m.group(1)
-            if key.endswith(suffixes):
-                current = key
-                counts.setdefault(key, 0)
-            else:
-                current = None
-            continue
-        if re.match(r"^#{1,6}\s", line):
-            current = None
-            continue
-        if current is not None and _ROW_RE.match(line):
-            counts[current] += 1
-    return counts
-
-
-def _parse_appendix_rows(suffixes: tuple[str, ...]) -> dict[str, list[str]]:
-    """Return {filename: ordered_row_names} from tests/README.md appendix tables."""
-    rows: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in _TESTS_README.read_text().splitlines():
-        m = re.match(r"^####\s+`(\S+?)`", line)
-        if m:
-            key = m.group(1)
-            if key.endswith(suffixes):
-                current = key
-                rows.setdefault(key, [])
-            else:
-                current = None
-            continue
-        if re.match(r"^#{1,6}\s", line):
-            current = None
-            continue
-        if current is not None:
-            row_name = _appendix_row_name(line)
-            if row_name is not None:
-                rows[current].append(row_name)
-    return rows
-
-
-def _ordered_test_files_from_git(actual_by_file: dict[str, list[str]], directory: str) -> list[str]:
-    actual = set(actual_by_file)
-    tracked_files = [
-        Path(path).name
-        for path in _git_tracked_files()
-        if path.startswith(directory + "/") and Path(path).name in actual
-    ]
-    if len(tracked_files) == len(actual):
-        return tracked_files
-    return sorted(set(tracked_files) | (actual - set(tracked_files)))
-
-
-def _extract_pytest_total(text: str) -> int | None:
-    for pattern in (r"-\s+`pytest`:\s*(\d+)", r"\*\*(\d+)\s+pytest\b"):
-        m = re.search(pattern, text)
-        if m:
-            return int(m.group(1))
-    return None
-
-
-def _extract_vitest_total(text: str) -> int | None:
-    for pattern in (r"-\s+`vitest`:\s*(\d+)", r"\+\s*(\d+)\s+Vitest\b"):
-        m = re.search(pattern, text)
-        if m:
-            return int(m.group(1))
-    return None
-
-
-def _extract_playwright_total(text: str) -> int | None:
-    for pattern in (r"-\s+`playwright`:\s*(\d+)", r"\+\s*(\d+)\s+Playwright\b"):
-        m = re.search(pattern, text)
-        if m:
-            return int(m.group(1))
-    return None
-
-
-def _extract_combined_total(text: str) -> int | None:
-    for pattern in (r"-\s+total:\s*([\d,]+)", r"=\s*([\d,]+)\s+tests\b"):
-        m = re.search(pattern, text)
-        if m:
-            return int(m.group(1).replace(",", ""))
-    return None
-
-
-def _extract_behavior_meta_totals(text: str) -> tuple[int, int] | None:
-    patterns = (
-        r"behavior tests:\s*([\d,]+).*?docs/inventory meta-tests:\s*([\d,]+)",
-        r"includes\s+([\d,]+)\s+behavior tests plus\s+([\d,]+)\s+docs/inventory meta-tests",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            return (
-                int(match.group(1).replace(",", "")),
-                int(match.group(2).replace(",", "")),
-            )
-    return None
 
 
 def _config_default_keys() -> list[str]:
@@ -426,9 +120,9 @@ def _configuration_reference_table_keys() -> set[str]:
     return set(re.findall(r"^\|\s+`([^`]+)`\s+\|", match.group("body"), re.M))
 
 
-def _tracked_markdown_docs() -> list[str]:
+def _project_markdown_docs() -> list[str]:
     return [
-        path for path in _git_tracked_files()
+        path for path in sorted(set(_git_tracked_files()) | set(_git_untracked_files()))
         if path.endswith(".md")
         and not _is_release_draft_path(path)
     ]
@@ -459,9 +153,10 @@ def _markdown_links_in_body(source_path: Path, body: str) -> list[str]:
 
 
 def _related_docs_links(source_path: Path) -> list[str] | None:
+    text = _markdown_without_fenced_code(source_path.read_text())
     match = re.search(
         r"^## Related Docs\n\n(?P<body>.*?)(?:\n^## |\Z)",
-        source_path.read_text(),
+        text,
         re.M | re.S,
     )
     if not match:
@@ -479,424 +174,142 @@ def _documentation_map_links(source_path: Path) -> list[str]:
     return _markdown_links_in_body(source_path, match.group("body"))
 
 
-# ── Shared fixtures ───────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="module")
-def pytest_collected() -> tuple[int, dict[str, list[str]]]:
-    return _run_pytest_collect()
-
-
-@pytest.fixture(scope="module")
-def vitest_collected() -> tuple[int, dict[str, list[str]]]:
-    if shutil.which("npx") is None:
-        pytest.skip("npx is not available")
-    return _run_vitest_list()
+def _markdown_validation_paths() -> list[Path]:
+    paths = set(_git_tracked_files()) | set(_git_untracked_files())
+    return [
+        _REPO_ROOT / path
+        for path in sorted(paths)
+        if path.endswith(".md")
+    ]
 
 
-@pytest.fixture(scope="module")
-def playwright_parallel_collected() -> tuple[int, dict[str, list[str]]]:
-    if shutil.which("npx") is None:
-        pytest.skip("npx is not available")
-    return _run_playwright_parallel_list()
+def _markdown_without_fenced_code(text: str) -> str:
+    lines = []
+    fence = None
+    for line in text.splitlines():
+        match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)[0]
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            lines.append("")
+            continue
+        lines.append("" if fence else line)
+    return "\n".join(lines)
 
 
-@pytest.fixture(scope="module")
-def playwright_appendix_collected() -> tuple[int, dict[str, list[str]]]:
-    if shutil.which("npx") is None:
-        pytest.skip("npx is not available")
-    return _run_playwright_appendix_list()
+def _markdown_link_targets(text: str) -> list[tuple[int, str]]:
+    targets: list[tuple[int, str]] = []
+    clean = _markdown_without_fenced_code(text)
+    inline_re = re.compile(r"!?\[[^\]]*\]\((?P<href><[^>]+>|[^\s)]+)")
+    reference_re = re.compile(r"^\s*\[[^\]]+\]:\s*(?P<href><[^>]+>|\S+)")
+    for lineno, line in enumerate(clean.splitlines(), start=1):
+        line = re.sub(r"`[^`]*`", "", line)
+        for match in inline_re.finditer(line):
+            targets.append((lineno, match.group("href").strip("<>")))
+        match = reference_re.match(line)
+        if match:
+            targets.append((lineno, match.group("href").strip("<>")))
+    return targets
 
 
-# ── Part 1: per-file appendix drift ──────────────────────────────────────────
-
-class TestPytestAppendixDrift:
-
-    def test_documented_files_match_actual(self, pytest_collected):
-        _, actual_by_file = pytest_collected
-        appendix = _parse_appendix((".py",))
-        issues = []
-        for filename, doc_count in appendix.items():
-            actual_set = actual_by_file.get(filename, set())
-            actual_count = len(actual_set)
-            if doc_count != actual_count:
-                suffix = " (file not collected by pytest)" if not actual_set else ""
-                issues.append(
-                    f"  {filename}: appendix={doc_count}, actual={actual_count}{suffix}"
-                )
-        assert not issues, (
-            "Per-file pytest appendix drift in tests/README.md:\n"
-            + "\n".join(issues)
-        )
-
-    def test_all_test_files_have_appendix_sections(self, pytest_collected):
-        _, actual_by_file = pytest_collected
-        appendix = _parse_appendix((".py",))
-        missing = [
-            f"  {f}: {len(actual_by_file[f])} unique test functions, no appendix section"
-            for f in sorted(actual_by_file)
-            if f not in appendix and f != _THIS_FILE
-        ]
-        assert not missing, (
-            "Pytest files with no appendix section in tests/README.md:\n"
-            + "\n".join(missing)
-        )
-
-    def test_appendix_order_matches_collection_order(self, pytest_collected):
-        _, actual_by_file = pytest_collected
-        appendix_rows = _parse_appendix_rows((".py",))
-        expected_files = _ordered_test_files_from_git(actual_by_file, "tests/py")
-        actual_files = [filename for filename in appendix_rows if filename in actual_by_file]
-        section_issues = [
-            f"  position {index + 1}: appendix={actual!r}, expected={expected!r}"
-            for index, (actual, expected) in enumerate(zip(actual_files, expected_files))
-            if actual != expected
-        ]
-        if len(actual_files) != len(expected_files):
-            section_issues.append(
-                f"  section count mismatch: appendix={len(actual_files)}, expected={len(expected_files)}"
-            )
-        row_issues = []
-        for filename in expected_files:
-            expected_rows = actual_by_file[filename]
-            actual_rows = appendix_rows.get(filename, [])
-            for index, (actual, expected) in enumerate(zip(actual_rows, expected_rows)):
-                if actual != expected:
-                    row_issues.append(
-                        f"  {filename} row {index + 1}: appendix={actual!r}, expected={expected!r}"
-                    )
-                    break
-            if len(actual_rows) != len(expected_rows):
-                row_issues.append(
-                    f"  {filename}: row count mismatch appendix={len(actual_rows)}, "
-                    f"expected={len(expected_rows)}"
-                )
-        assert not section_issues and not row_issues, (
-            "Pytest appendix order drift in tests/README.md:\n"
-            + "\n".join(section_issues + row_issues)
-        )
+def _github_heading_slug(title: str) -> str:
+    title = html.unescape(title)
+    title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)
+    title = re.sub(r"<[^>]+>", "", title)
+    title = re.sub(r"[`*_~]", "", title).strip().lower()
+    title = re.sub(r"[^\w\- ]", "", title)
+    return re.sub(r"\s", "-", title)
 
 
-class TestVitestAppendixDrift:
-
-    def test_documented_files_match_actual(self, vitest_collected):
-        _, actual_by_file = vitest_collected
-        appendix = _parse_appendix((".test.js",))
-        issues = []
-        for filename, doc_count in appendix.items():
-            actual_set = actual_by_file.get(filename, set())
-            actual_count = len(actual_set)
-            if doc_count != actual_count:
-                suffix = " (file not collected by vitest)" if not actual_set else ""
-                issues.append(
-                    f"  {filename}: appendix={doc_count}, actual={actual_count}{suffix}"
-                )
-        assert not issues, (
-            "Per-file Vitest appendix drift in tests/README.md:\n"
-            + "\n".join(issues)
-        )
-
-    def test_all_test_files_have_appendix_sections(self, vitest_collected):
-        _, actual_by_file = vitest_collected
-        appendix = _parse_appendix((".test.js",))
-        missing = [
-            f"  {f}: {len(actual_by_file[f])} unique test functions, no appendix section"
-            for f in sorted(actual_by_file)
-            if f not in appendix
-        ]
-        assert not missing, (
-            "Vitest files with no appendix section in tests/README.md:\n"
-            + "\n".join(missing)
-        )
-
-    def test_appendix_order_matches_listing_order(self, vitest_collected):
-        _, actual_by_file = vitest_collected
-        appendix_rows = _parse_appendix_rows((".test.js",))
-        expected_files = _ordered_test_files_from_git(actual_by_file, "tests/js/unit")
-        actual_files = [filename for filename in appendix_rows if filename in actual_by_file]
-        section_issues = [
-            f"  position {index + 1}: appendix={actual!r}, expected={expected!r}"
-            for index, (actual, expected) in enumerate(zip(actual_files, expected_files))
-            if actual != expected
-        ]
-        if len(actual_files) != len(expected_files):
-            section_issues.append(
-                f"  section count mismatch: appendix={len(actual_files)}, expected={len(expected_files)}"
-            )
-        row_issues = []
-        for filename in expected_files:
-            expected_rows = actual_by_file[filename]
-            actual_rows = appendix_rows.get(filename, [])
-            for index, (actual, expected) in enumerate(zip(actual_rows, expected_rows)):
-                if actual != expected:
-                    row_issues.append(
-                        f"  {filename} row {index + 1}: appendix={actual!r}, expected={expected!r}"
-                    )
-                    break
-            if len(actual_rows) != len(expected_rows):
-                row_issues.append(
-                    f"  {filename}: row count mismatch appendix={len(actual_rows)}, "
-                    f"expected={len(expected_rows)}"
-                )
-        assert not section_issues and not row_issues, (
-            "Vitest appendix order drift in tests/README.md:\n"
-            + "\n".join(section_issues + row_issues)
-        )
+def _markdown_headings(text: str) -> list[tuple[int, str, str]]:
+    headings: list[tuple[int, str, str]] = []
+    slug_counts: dict[str, int] = {}
+    clean = _markdown_without_fenced_code(text)
+    for line in clean.splitlines():
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if not match:
+            continue
+        level = len(match.group(1))
+        title = match.group(2).strip()
+        base_slug = _github_heading_slug(title)
+        seen = slug_counts.get(base_slug, 0)
+        slug_counts[base_slug] = seen + 1
+        slug = base_slug if seen == 0 else f"{base_slug}-{seen}"
+        headings.append((level, title, slug))
+    return headings
 
 
-class TestPlaywrightAppendixDrift:
-
-    def test_documented_files_match_actual(self, playwright_appendix_collected):
-        _, actual_by_file = playwright_appendix_collected
-        appendix = _parse_appendix((".spec.js", ".capture.js"))
-        issues = []
-        for filename, doc_count in appendix.items():
-            actual_set = actual_by_file.get(filename, set())
-            actual_count = len(actual_set)
-            if doc_count != actual_count:
-                suffix = " (file not collected by playwright)" if not actual_set else ""
-                issues.append(
-                    f"  {filename}: appendix={doc_count}, actual={actual_count}{suffix}"
-                )
-        assert not issues, (
-            "Per-file Playwright appendix drift in tests/README.md:\n"
-            + "\n".join(issues)
-        )
-
-    def test_all_test_files_have_appendix_sections(self, playwright_appendix_collected):
-        _, actual_by_file = playwright_appendix_collected
-        appendix = _parse_appendix((".spec.js", ".capture.js"))
-        missing = [
-            f"  {f}: {len(actual_by_file[f])} unique test functions, no appendix section"
-            for f in sorted(actual_by_file)
-            if f not in appendix
-        ]
-        assert not missing, (
-            "Playwright files with no appendix section in tests/README.md:\n"
-            + "\n".join(missing)
-        )
-
-    def test_appendix_order_matches_listing_order(self, playwright_appendix_collected):
-        _, actual_by_file = playwright_appendix_collected
-        appendix_rows = _parse_appendix_rows((".spec.js", ".capture.js"))
-        expected_files = _ordered_test_files_from_git(actual_by_file, "tests/js/e2e")
-        actual_files = [filename for filename in appendix_rows if filename in actual_by_file]
-        section_issues = [
-            f"  position {index + 1}: appendix={actual!r}, expected={expected!r}"
-            for index, (actual, expected) in enumerate(zip(actual_files, expected_files))
-            if actual != expected
-        ]
-        if len(actual_files) != len(expected_files):
-            section_issues.append(
-                f"  section count mismatch: appendix={len(actual_files)}, expected={len(expected_files)}"
-            )
-        row_issues = []
-        for filename in expected_files:
-            expected_rows = actual_by_file[filename]
-            actual_rows = appendix_rows.get(filename, [])
-            for index, (actual, expected) in enumerate(zip(actual_rows, expected_rows)):
-                if actual != expected:
-                    row_issues.append(
-                        f"  {filename} row {index + 1}: appendix={actual!r}, expected={expected!r}"
-                    )
-                    break
-            if len(actual_rows) != len(expected_rows):
-                row_issues.append(
-                    f"  {filename}: row count mismatch appendix={len(actual_rows)}, "
-                    f"expected={len(expected_rows)}"
-                )
-        assert not section_issues and not row_issues, (
-            "Playwright appendix order drift in tests/README.md:\n"
-            + "\n".join(section_issues + row_issues)
-        )
+def _documented_capture_slugs(section_name: str) -> list[str]:
+    text = _UI_CAPTURE_GUIDE.read_text()
+    match = re.search(
+        rf"^## {re.escape(section_name)}\n(?P<body>.*?)(?=^## |\Z)",
+        text,
+        re.M | re.S,
+    )
+    assert match, f"Could not find {section_name!r} in tests/ui-capture-scenes.md"
+    return re.findall(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", match.group("body"), re.M)
 
 
-# ── Part 2: documented totals ─────────────────────────────────────────────────
-
-class TestDocumentedPytestTotals:
-
-    def test_tests_readme(self, pytest_collected):
-        total, _ = pytest_collected
-        documented = _extract_pytest_total(_TESTS_README.read_text())
-        assert documented is not None, "Could not parse pytest total from tests/README.md"
-        assert documented == total, (
-            f"tests/README.md records {documented} pytest tests; "
-            f"pytest --collect-only found {total}"
-        )
-
-    def test_contributing(self, pytest_collected):
-        total, _ = pytest_collected
-        documented = _extract_pytest_total(_CONTRIBUTING.read_text())
-        assert documented is not None, "Could not parse pytest total from CONTRIBUTING.md"
-        assert documented == total, (
-            f"CONTRIBUTING.md records {documented} pytest tests; "
-            f"pytest --collect-only found {total}"
-        )
-
-    def test_architecture(self, pytest_collected):
-        total, _ = pytest_collected
-        documented = _extract_pytest_total(_ARCHITECTURE.read_text())
-        assert documented is not None, "Could not parse pytest total from ARCHITECTURE.md"
-        assert documented == total, (
-            f"ARCHITECTURE.md records {documented} pytest tests; "
-            f"pytest --collect-only found {total}"
-        )
+def _capture_source_slugs(path: Path) -> list[str]:
+    text = path.read_text()
+    _, marker, scenes_text = text.partition("const scenes = [")
+    assert marker, f"Could not find scenes array in {path.relative_to(_REPO_ROOT)}"
+    return re.findall(r"^\s+slug:\s*'([^']+)'", scenes_text, re.M)
 
 
-class TestDocumentedVitestTotals:
-
-    def test_tests_readme(self, vitest_collected):
-        total, _ = vitest_collected
-        documented = _extract_vitest_total(_TESTS_README.read_text())
-        assert documented is not None, "Could not parse vitest total from tests/README.md"
-        assert documented == total, (
-            f"tests/README.md records {documented} vitest tests; "
-            f"vitest list found {total}"
-        )
-
-    def test_contributing(self, vitest_collected):
-        total, _ = vitest_collected
-        documented = _extract_vitest_total(_CONTRIBUTING.read_text())
-        assert documented is not None, "Could not parse vitest total from CONTRIBUTING.md"
-        assert documented == total, (
-            f"CONTRIBUTING.md records {documented} vitest tests; "
-            f"vitest list found {total}"
-        )
-
-    def test_architecture(self, vitest_collected):
-        total, _ = vitest_collected
-        documented = _extract_vitest_total(_ARCHITECTURE.read_text())
-        assert documented is not None, "Could not parse vitest total from ARCHITECTURE.md"
-        assert documented == total, (
-            f"ARCHITECTURE.md records {documented} vitest tests; "
-            f"vitest list found {total}"
-        )
+def _supported_runtime_rows() -> dict[str, str]:
+    text = _CONFIGURATION.read_text()
+    match = re.search(
+        r"^## Supported Runtimes\n(?P<body>.*?)(?=^---\n\n## |^## |\Z)",
+        text,
+        re.M | re.S,
+    )
+    assert match, "Could not find CONFIGURATION.md '## Supported Runtimes' section"
+    rows = {}
+    for name, value in re.findall(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$", match.group("body"), re.M):
+        if name.strip() in {"Runtime surface", "-----------------"}:
+            continue
+        rows[name.strip()] = value.strip()
+    return rows
 
 
-class TestDocumentedPlaywrightTotals:
-
-    def test_tests_readme(self, playwright_parallel_collected):
-        total, _ = playwright_parallel_collected
-        documented = _extract_playwright_total(_TESTS_README.read_text())
-        assert documented is not None, "Could not parse playwright total from tests/README.md"
-        assert documented == total, (
-            f"tests/README.md records {documented} playwright tests; "
-            f"playwright --list found {total}"
-        )
-
-    def test_contributing(self, playwright_parallel_collected):
-        total, _ = playwright_parallel_collected
-        documented = _extract_playwright_total(_CONTRIBUTING.read_text())
-        assert documented is not None, "Could not parse playwright total from CONTRIBUTING.md"
-        assert documented == total, (
-            f"CONTRIBUTING.md records {documented} playwright tests; "
-            f"playwright --list found {total}"
-        )
-
-    def test_architecture(self, playwright_parallel_collected):
-        total, _ = playwright_parallel_collected
-        documented = _extract_playwright_total(_ARCHITECTURE.read_text())
-        assert documented is not None, "Could not parse playwright total from ARCHITECTURE.md"
-        assert documented == total, (
-            f"ARCHITECTURE.md records {documented} playwright tests; "
-            f"playwright --list found {total}"
-        )
+def _changelog_sections(path: Path) -> list[dict[str, str]]:
+    pattern = re.compile(
+        r"^## \[(?P<version>[^\]]+)\] (?P<separator>-|—) "
+        r"(?P<label>Unreleased|initial release|\d{4}-\d{2}-\d{2})\n"
+        r".*?(?=^## \[|\Z)",
+        re.M | re.S,
+    )
+    sections = []
+    for match in pattern.finditer(path.read_text()):
+        body = re.sub(r"\n---\Z", "", match.group(0).rstrip()).rstrip()
+        sections.append({
+            "version": match.group("version"),
+            "label": match.group("label"),
+            "body": body,
+        })
+    return sections
 
 
-class TestDocumentedCombinedTotals:
-
-    @staticmethod
-    def _assert_breakdown(label: str, text: str, expected: int) -> None:
-        breakdown = _extract_behavior_meta_totals(text)
-        assert breakdown is not None, f"Could not parse behavior/meta test totals from {label}"
-        behavior_total, meta_total = breakdown
-        assert behavior_total + meta_total == expected, (
-            f"{label} records {behavior_total} behavior tests plus {meta_total} meta-tests; "
-            f"the documented runner totals sum to {expected}"
-        )
-
-    def _expected(self, pytest_collected, vitest_collected, playwright_parallel_collected):
-        py_total, _ = pytest_collected
-        vi_total, _ = vitest_collected
-        pw_total, _ = playwright_parallel_collected
-        return py_total + vi_total + pw_total
-
-    def test_tests_readme(
-        self, pytest_collected, vitest_collected, playwright_parallel_collected
-    ):
-        expected = self._expected(
-            pytest_collected, vitest_collected, playwright_parallel_collected
-        )
-        documented = _extract_combined_total(_TESTS_README.read_text())
-        assert documented is not None, "Could not parse combined total from tests/README.md"
-        assert documented == expected, (
-            f"tests/README.md records {documented} combined tests; "
-            f"pytest+vitest+playwright sum to {expected}"
-        )
-        self._assert_breakdown("tests/README.md", _TESTS_README.read_text(), expected)
-
-    def test_contributing(
-        self, pytest_collected, vitest_collected, playwright_parallel_collected
-    ):
-        expected = self._expected(
-            pytest_collected, vitest_collected, playwright_parallel_collected
-        )
-        documented = _extract_combined_total(_CONTRIBUTING.read_text())
-        assert documented is not None, "Could not parse combined total from CONTRIBUTING.md"
-        assert documented == expected, (
-            f"CONTRIBUTING.md records {documented} combined tests; "
-            f"pytest+vitest+playwright sum to {expected}"
-        )
-        self._assert_breakdown("CONTRIBUTING.md", _CONTRIBUTING.read_text(), expected)
-
-    def test_architecture(
-        self, pytest_collected, vitest_collected, playwright_parallel_collected
-    ):
-        expected = self._expected(
-            pytest_collected, vitest_collected, playwright_parallel_collected
-        )
-        documented = _extract_combined_total(_ARCHITECTURE.read_text())
-        assert documented is not None, "Could not parse combined total from ARCHITECTURE.md"
-        assert documented == expected, (
-            f"ARCHITECTURE.md records {documented} combined tests; "
-            f"pytest+vitest+playwright sum to {expected}"
-        )
-        self._assert_breakdown("ARCHITECTURE.md", _ARCHITECTURE.read_text(), expected)
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
 
 
-# ── Part 3: README.md project structure tree coverage ────────────────────────
+def _log_event_inventory_body() -> str:
+    match = re.search(
+        r"^## Log Event Inventory\n(?P<body>.*?)(?=^## Logging Shape Notes)",
+        _LOGGING_GUIDE.read_text(),
+        re.M | re.S,
+    )
+    assert match, "Could not find docs/logging.md event inventory"
+    return match.group("body")
 
-# Files that intentionally do not appear in the project structure tree.
-# Anything else tracked in git must be listed (or fall under an opaque
-# parent directory below).
-_PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
-    "app/blueprints/__init__.py",     # empty package marker
-    "app/static/js/__inventory_bridge_dispatch_check.fixture.js",  # transient Vitest fixture
-    "app/static/js/__inventory_check_consumer.fixture.js",  # transient Vitest fixture
-    "app/static/js/__inventory_check_provider.fixture.js",  # transient Vitest fixture
-    "app/static/js/__inventory_discovery_check.fixture.js",  # transient Vitest fixture
-    "app/static/js/__inventory_publisher_check.fixture.js",  # transient Vitest fixture
-    "app/static/js/__inventory_publisher_dynamic_check.fixture.js",  # transient Vitest fixture
-    "app/static/js/__inventory_resolver_check.fixture.js",  # transient Vitest fixture
-})
 
-# Directories whose individual files are intentionally collapsed into a
-# single parent entry in the tree (with a summarising description). The
-# parent directory itself must still appear in the tree; we only suppress
-# the per-file leaf check for everything beneath it.
-_PROJECT_STRUCTURE_OPAQUE_DIRS = frozenset({
-    "app/conf/themes",                # theme YAMLs — covered by themes/ entry
-    "app/static/build",               # generated hashed bundles/static assets
-    "app/static/fonts",               # vendored binary font files
-    "assets",                         # README demo videos
-    "tests/js/e2e/fixtures",          # binary screenshot fixtures
-})
+# ── Stable asset and repository-layout contracts ─────────────────────────────
 
-_PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE = re.compile(
-    r"^app/static/build/([a-z0-9-]+)\.([0-9a-f]{12}|<hash>)\.(css|js)$"
-)
-_PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE = re.compile(
-    r"^app/static/build/[a-z0-9-]+\.[0-9a-f]{12}\.(css|js)$"
-)
 _TEMPLATE_STATIC_URL_RE = re.compile(r"['\"](/(?:static|vendor)/[^'\"]+)['\"]")
 
 
@@ -945,119 +358,18 @@ def _git_untracked_files() -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def _all_ancestor_dirs(paths) -> set[str]:
-    """Return every intermediate directory path implied by the file list.
-
-    For ``a/b/c.py`` this yields ``a`` and ``a/b``. Used by the
-    listed-paths-exist check so the README can reference a parent
-    directory like ``.gitlab`` even though git only tracks files.
-    """
-    out: set[str] = set()
-    for p in paths:
-        parts = Path(p).parts
-        for i in range(1, len(parts)):
-            out.add("/".join(parts[:i]))
-    return out
-
-
-def _parse_project_structure_tree(text: str) -> list[str]:
-    """Return the ordered full paths (files and directories) listed in the
-    README.md ``## Project Structure`` tree.
-
-    The tree is a fenced ``text`` code block where each entry is prefixed
-    with tree-drawing characters (``├── ``, ``└── ``, ``│   ``, four-space
-    indents). Each indent level is exactly four columns regardless of
-    whether it uses ``│   `` or ``    `` (the latter follows a parent
-    rendered with ``└──``), so the depth of any entry is ``column // 4``.
-    Directory entries end with ``/`` and seed the parent stack for their
-    children; file entries are leaves.
-    """
-    in_section = False
-    in_block = False
-    parent_stack: list[str] = ["."]
-    paths: list[str] = []
-
-    entry_re = re.compile(r"[├└]── ")
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not in_section:
-            if stripped == "## Project Structure":
-                in_section = True
-            continue
-        if not in_block and stripped.startswith("## "):
-            break
-        if not in_block:
-            if stripped == "```text":
-                in_block = True
-            continue
-        if stripped == "```":
-            break
-
-        m = entry_re.search(line)
-        if not m:
-            continue
-        level = m.start() // 4
-        rest = line[m.end():]
-        name_match = re.match(r"(\S+)", rest)
-        if not name_match:
-            continue
-        raw_name = name_match.group(1)
-        is_dir = raw_name.endswith("/")
-        clean = raw_name.rstrip("/")
-
-        # Truncate the parent stack so the current entry's parent is at
-        # index ``level``. Levels deeper than the truncated length should
-        # never happen in a well-formed tree.
-        parent_stack = parent_stack[: level + 1]
-        parent = parent_stack[level]
-        full_path = clean if parent == "." else f"{parent}/{clean}"
-        paths.append(full_path)
-        if is_dir:
-            parent_stack.append(full_path)
-
-    return paths
-
-
-def _is_under_opaque_dir(path: str) -> bool:
-    return any(path == d or path.startswith(d + "/") for d in _PROJECT_STRUCTURE_OPAQUE_DIRS)
+def _repository_layout_paths() -> list[str]:
+    match = re.search(
+        r"^## Repository Layout\n(?P<body>.*?)(?=^## |\Z)",
+        _README.read_text(),
+        re.M | re.S,
+    )
+    assert match, "Could not find README.md '## Repository Layout' section"
+    return re.findall(r"^\|\s*`([^`]+/)`\s*\|", match.group("body"), re.M)
 
 
 def _is_release_draft_path(path: str) -> bool:
     return path.startswith("docs/release-drafts/")
-
-
-def _canonical_project_structure_path(path: str) -> str:
-    match = _PROJECT_STRUCTURE_HASHED_BUILD_ASSET_RE.match(path)
-    if match:
-        name, _hash_or_placeholder, extension = match.groups()
-        return f"app/static/build/{name}.<hash>.{extension}"
-    return path
-
-
-def _display_target_for_project_structure(path: str) -> str | None:
-    if path in _PROJECT_STRUCTURE_EXCLUSIONS or _is_release_draft_path(path):
-        return None
-    for opaque_dir in sorted(_PROJECT_STRUCTURE_OPAQUE_DIRS):
-        if path == opaque_dir or path.startswith(opaque_dir + "/"):
-            return opaque_dir
-    return _canonical_project_structure_path(path)
-
-
-def _expected_project_structure_order(tracked: list[str]) -> list[str]:
-    """Return the README tree order implied by git's tracked-file listing."""
-    expected: list[str] = []
-    seen: set[str] = set()
-    for path in tracked:
-        target = _display_target_for_project_structure(path)
-        if target is None:
-            continue
-        parts = target.split("/")
-        for index in range(1, len(parts) + 1):
-            candidate = "/".join(parts[:index])
-            if candidate not in seen:
-                seen.add(candidate)
-                expected.append(candidate)
-    return expected
 
 
 def _documented_architecture_routes() -> set[tuple[str, str]]:
@@ -1093,8 +405,7 @@ def _registered_flask_routes() -> set[tuple[str, str]]:
 
 
 class TestProjectStructureCoverage:
-    """The README's project-structure tree must list every git-tracked file
-    so contributors land on a complete navigation map."""
+    """Protect stable asset contracts and the compact repository layout."""
 
     def test_asset_manifest_source_hashes_match_current_sources(self):
         manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
@@ -1201,36 +512,8 @@ class TestProjectStructureCoverage:
         for field in ("bundle:", "entry,", "out_dir:", "check_only:", "message:"):
             assert field in script
 
-    def test_no_files_missing_from_structure(self):
-        listed = set(_parse_project_structure_tree(_README.read_text()))
-        tracked = _git_tracked_files()
-        missing = sorted(
-            path for path in tracked
-            if (target := _display_target_for_project_structure(path)) is not None
-            and target not in listed
-        )
-        assert not missing, (
-            "Files missing from README.md '## Project Structure' tree:\n"
-            + "\n".join(f"  {p}" for p in missing)
-            + "\n\nIf the omission is intentional, add the path to "
-            "_PROJECT_STRUCTURE_EXCLUSIONS or, for whole subtrees, "
-            "_PROJECT_STRUCTURE_OPAQUE_DIRS in tests/py/test_docs.py."
-        )
-
-    def test_opaque_dirs_appear_in_structure(self):
-        listed = set(_parse_project_structure_tree(_README.read_text()))
-        not_listed = sorted(d for d in _PROJECT_STRUCTURE_OPAQUE_DIRS if d not in listed)
-        assert not not_listed, (
-            "Opaque directories declared in _PROJECT_STRUCTURE_OPAQUE_DIRS "
-            "must still appear as a parent entry in the README tree:\n"
-            + "\n".join(f"  {d}/" for d in not_listed)
-        )
-
     def test_listed_paths_exist_in_git(self):
-        """Catch typos and stale entries: every leaf path written into the
-        README tree must correspond to a real git-tracked file or directory.
-        Subtree-internal paths beneath an opaque dir are exempt because the
-        README intentionally only names the parent."""
+        """Every named layout directory must contain a tracked file."""
         template_static_url_violations = _template_static_url_violations()
         assert not template_static_url_violations, (
             "Templates must resolve /static/ and /vendor/ URLs through "
@@ -1238,69 +521,15 @@ class TestProjectStructureCoverage:
             "have content-hashed or versioned URLs:\n"
             + "\n".join(f"  {violation}" for violation in template_static_url_violations)
         )
-        listed = _parse_project_structure_tree(_README.read_text())
-        listed_set = set(listed)
-        literal_hashed_build_assets = sorted(
-            p for p in listed_set
-            if _PROJECT_STRUCTURE_LITERAL_HASHED_BUILD_ASSET_RE.match(p)
-        )
-        assert not literal_hashed_build_assets, (
-            "README.md '## Project Structure' should use <hash> placeholders "
-            "for generated build assets instead of commit-specific filenames:\n"
-            + "\n".join(f"  {p}" for p in literal_hashed_build_assets)
-        )
-        tracked = set(_git_tracked_files())
-        untracked = set(_git_untracked_files())
-        # Allow any directory that contains tracked files, including every
-        # intermediate ancestor (so '.gitlab' resolves via
-        # '.gitlab/merge_request_templates/Default.md').
-        valid_files = {
-            _canonical_project_structure_path(p)
-            for p in tracked | untracked
-        }
-        valid = valid_files | _all_ancestor_dirs(valid_files) | {"."}
+        listed = _repository_layout_paths()
+        tracked = _git_tracked_files()
         unknown = sorted(
-            p for p in listed_set
-            if _canonical_project_structure_path(p) not in valid
-            and not _is_under_opaque_dir(p)
-            # Some entries describe files that don't ship in git but are
-            # created at runtime (data/history.db) or as user-created
-            # local overrides (app/conf/config.local.yaml). Allow paths
-            # that sit under a directory the README explicitly marks as
-            # writable/optional via its own listed entry.
-            and not p.startswith("data/")
-            and p != "data"
-            and p != "app/conf/config.local.yaml"
+            path for path in listed
+            if not any(candidate.startswith(path) for candidate in tracked)
         )
         assert not unknown, (
-            "README.md '## Project Structure' lists paths that aren't "
-            "tracked in git (typo or stale entry?):\n"
+            "README.md '## Repository Layout' lists directories without tracked files:\n"
             + "\n".join(f"  {p}" for p in unknown)
-        )
-
-    def test_structure_order_matches_git_file_listing(self):
-        listed = [
-            _canonical_project_structure_path(path)
-            for path in _parse_project_structure_tree(_README.read_text())
-        ]
-        tracked = _git_tracked_files()
-        expected = _expected_project_structure_order(tracked)
-        expected_set = set(expected)
-        listed_relevant = [path for path in listed if path in expected_set]
-        issues = [
-            f"  position {index + 1}: README={actual!r}, expected={expected_path!r}"
-            for index, (actual, expected_path) in enumerate(zip(listed_relevant, expected))
-            if actual != expected_path
-        ]
-        if len(listed_relevant) != len(expected):
-            issues.append(
-                f"  listed path count mismatch: README={len(listed_relevant)}, expected={len(expected)}"
-            )
-        assert not issues, (
-            "README.md '## Project Structure' order drift. Keep entries in "
-            "`git ls-files --cached` order, with parent directories inserted "
-            "before their children:\n"
-            + "\n".join(issues)
         )
 
 
@@ -1351,66 +580,298 @@ class TestOperatorConfigurationDocs:
         )
 
 
-# ── Part 6: team-mode scope predicates ───────────────────────────────────────
+class TestChangelogArchives:
+    def test_root_keeps_active_release_and_two_newest_published_releases(self):
+        sections = _changelog_sections(_CHANGELOG)
+        assert len(sections) == 3
+        assert sections[0]["label"] == "Unreleased"
+        assert all(section["label"] != "Unreleased" for section in sections[1:])
 
-class TestTeamModeScopePredicates:
-    def test_direct_team_run_predicates_use_owner_scope_helpers(self):
-        issues = []
-        for path in sorted((_REPO_ROOT / "app").rglob("*.py")):
-            relative = path.relative_to(_REPO_ROOT)
-            for line_number, source in _team_scope_sql_fragments(path):
-                qualified_match = _DIRECT_TEAM_RUN_PREDICATE_RE.search(source)
-                unqualified_match = _RUN_SQL_RE.search(source) and _UNQUALIFIED_TEAM_RUN_PREDICATE_RE.search(source)
-                if not (qualified_match or unqualified_match):
+    def test_archive_coverage_matches_major_release_ranges(self):
+        expected = {
+            "2.x.md": ("2.3.1", "2.3", "2.2", "2.1", "2.0"),
+            "1.x.md": ("1.7", "1.6", "1.5", "1.4", "1.3", "1.2", "1.1", "1.0"),
+        }
+        actual = {
+            path.name: tuple(section["version"] for section in _changelog_sections(path))
+            for path in _CHANGELOG_ARCHIVES
+        }
+        assert actual == expected
+
+    def test_release_versions_are_unique_and_newest_first(self):
+        seen = []
+        for path in (_CHANGELOG, *_CHANGELOG_ARCHIVES):
+            versions = [section["version"] for section in _changelog_sections(path)]
+            assert versions == sorted(versions, key=_version_key, reverse=True), path
+            seen.extend(versions)
+        assert len(seen) == len(set(seen)), "Release headings must appear exactly once"
+
+    def test_published_release_bodies_match_the_archival_baseline(self):
+        actual = {}
+        for path in (_CHANGELOG, *_CHANGELOG_ARCHIVES):
+            for section in _changelog_sections(path):
+                if section["label"] == "Unreleased":
                     continue
-                snippet = " ".join(source.split())[:180]
-                issues.append(f"  {relative}:{line_number}: {snippet}")
+                actual[section["version"]] = hashlib.sha256(
+                    section["body"].encode()
+                ).hexdigest()
+        assert actual == _PUBLISHED_CHANGELOG_HASHES
 
-        assert not issues, (
-            "Direct team run predicates can hide team-owned runs from other members. "
-            "Use owner_scope.predicate(), _run_owner_clause(), or another shared owner-scope helper "
-            "instead of combining session_id = ? with team_id = ? on runs:\n"
-            + "\n".join(issues)
+    def test_root_archive_index_and_documentation_map_cover_archives(self):
+        archive_links = {path.relative_to(_REPO_ROOT).as_posix() for path in _CHANGELOG_ARCHIVES}
+        root_links = set(_markdown_links_in_body(_CHANGELOG, _CHANGELOG.read_text()))
+        map_links = set(_documentation_map_links(_README))
+        assert archive_links <= root_links
+        assert archive_links <= map_links
+
+
+class TestLoggingReference:
+    def test_event_inventory_was_moved_without_dropping_contracts(self):
+        body = _log_event_inventory_body()
+        assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
+        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 236
+
+    def test_architecture_links_to_the_canonical_logging_reference(self):
+        assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()
+
+
+class TestCanonicalFeatureAndDesignReferences:
+    def test_feature_entries_keep_user_contracts_without_file_inventories(self):
+        text = _FEATURES.read_text()
+        assert "**Related files:**" not in text
+        assert not re.search(r"`(?:app/(?!conf/)|tests/)", text)
+        sections = re.findall(
+            r"^## (?P<title>[^\n]+)\n(?P<body>.*?)(?=^## |\Z)",
+            text,
+            re.M | re.S,
+        )
+        missing_purpose = [
+            title for title, body in sections
+            if title not in {"Contents", "Related Docs"}
+            and "**Purpose:**" not in body
+        ]
+        assert not missing_purpose
+
+    def test_front_end_design_has_one_stable_contributor_anchor(self):
+        text = _ARCHITECTURE.read_text()
+        assert text.count("## Front End Design\n") == 1
+        assert "### Design System Primitives\n" in text
+        assert "ARCHITECTURE.md#front-end-design" in _CONTRIBUTING.read_text()
+
+
+class TestReadmeStartPaths:
+    def test_quick_start_keeps_release_install_separate_from_verification_and_development(self):
+        text = _README.read_text()
+        quick_start = text.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
+        production = text.split("## Production Deployment\n", 1)[1].split("\n## ", 1)[0]
+        development = text.split("## Running in a Development Environment\n", 1)[1].split("\n## ", 1)[0]
+
+        assert text.index("## Quick Start\n") < text.index("## Features\n")
+        assert "curl -fsSL" in quick_start and "| sh -s --" in quick_start
+        assert "#review-and-verify-the-installer" in quick_start
+        assert "Option 1" not in text and "Option 2" not in text and "Option 3" not in text
+        assert "cosign verify-blob SHA256SUMS" in production
+        assert "sha256sum -c setup.sh.sha256" in production
+        assert "git clone https://gitlab.com/darklab.sh/darklab_shell.git" in development
+        assert "bash examples/run_local.sh" in development
+        assert "git clone" not in quick_start and "examples/run_local.sh" not in quick_start
+
+
+class TestReadmeInstalledTools:
+    def test_table_matches_external_command_registry(self):
+        registry_text = _COMMAND_REGISTRY_YAML.read_text()
+        commands_body = registry_text.split("commands:\n", 1)[1].split("\npipe_helpers:\n", 1)[0]
+        registry_roots = set(re.findall(r"^  - root:\s*(\S+)\s*$", commands_body, re.M))
+
+        readme_body = _README.read_text().split("## Installed Tools\n", 1)[1].split("\n## ", 1)[0]
+        tool_cells = re.findall(r"^\|\s*(?P<cell>[^|]+?)\s*\|", readme_body, re.M)
+        documented_roots = [
+            root
+            for cell in tool_cells
+            for root in re.findall(r"`([^`]+)`", cell)
+        ]
+
+        assert len(documented_roots) == len(set(documented_roots)), (
+            "README Installed Tools contains duplicate command names"
+        )
+        assert set(documented_roots) == registry_roots, (
+            "README Installed Tools must match the base external command registry. "
+            f"Missing: {sorted(registry_roots - set(documented_roots))}; "
+            f"extra: {sorted(set(documented_roots) - registry_roots)}"
         )
 
 
-# ── Part 7: related-doc navigation ───────────────────────────────────────────
+# ── Related-doc navigation ───────────────────────────────────────────────────
 
 class TestRelatedDocsNavigation:
-    def test_related_docs_sections_list_project_markdown_files(self):
-        markdown_docs = _tracked_markdown_docs()
+    def test_related_docs_sections_are_curated_and_valid(self):
+        markdown_docs = _project_markdown_docs()
+        markdown_doc_set = set(markdown_docs)
         issues = []
         for path in markdown_docs:
             source_path = _REPO_ROOT / path
             links = _related_docs_links(source_path)
             if links is None:
                 continue
-            expected = [candidate for candidate in markdown_docs if candidate != path]
-            if links != expected:
-                missing = [candidate for candidate in expected if candidate not in links]
-                extra = [candidate for candidate in links if candidate not in expected]
-                if missing:
-                    issues.append(
-                        f"{path} is missing Related Docs links:\n"
-                        + "\n".join(f"  {candidate}" for candidate in missing)
-                    )
-                if extra:
-                    issues.append(
-                        f"{path} has unexpected Related Docs links:\n"
-                        + "\n".join(f"  {candidate}" for candidate in extra)
-                    )
-                if not missing and not extra:
-                    issues.append(
-                        f"{path} Related Docs order drift. Keep links in git ls-files order, "
-                        "excluding the current file."
-                    )
+            if len(links) > 5:
+                issues.append(f"{path} links to {len(links)} documents; keep roughly five or fewer")
+            if path in links:
+                issues.append(f"{path} links to itself")
+            unknown = sorted(set(links) - markdown_doc_set)
+            if unknown:
+                issues.append(
+                    f"{path} links to non-project Markdown files:\n"
+                    + "\n".join(f"  {candidate}" for candidate in unknown)
+                )
         assert not issues, "\n\n".join(issues)
 
     def test_readme_documentation_map_lists_project_markdown_files(self):
-        markdown_docs = _tracked_markdown_docs()
-        expected = [path for path in markdown_docs if path != "README.md"]
-        links = _documentation_map_links(_README)
+        expected = set(_project_markdown_docs()) - {"README.md"}
+        links = set(_documentation_map_links(_README))
         assert links == expected, (
-            "README.md '## Documentation Map' drift. Keep links in git ls-files "
-            "order, excluding README.md itself."
+            "README.md '## Documentation Map' must list every project Markdown "
+            "document except README.md itself."
         )
+
+
+class TestDocumentationDurability:
+    def test_testing_handbook_keeps_live_listing_commands(self):
+        text = _TESTS_README.read_text()
+        missing = [command for command in _LIVE_TEST_LISTING_COMMANDS if command not in text]
+        assert not missing, (
+            "tests/README.md must retain lightweight live-suite listing commands:\n"
+            + "\n".join(f"  {command}" for command in missing)
+        )
+
+    def test_reader_docs_do_not_hardcode_test_totals(self):
+        total_re = re.compile(
+            r"current totals:"
+            r"|\b\d[\d,]*\s+(?:pytest|vitest|playwright)(?:\s+tests?)?\b"
+            r"|\b(?:pytest|vitest|playwright)\b[^\n]{0,40}\b\d[\d,]*\s+"
+            r"(?:tests?|behavior|meta)\b",
+            re.I,
+        )
+        issues = []
+        for path in _markdown_validation_paths():
+            relative = _markdown_path_for(path)
+            if (
+                relative in {"CHANGELOG.md", "TODO.md"}
+                or relative.startswith(("docs/changelog/", "docs/release-drafts/"))
+                or relative.endswith("_review.md")
+            ):
+                continue
+            for lineno, line in enumerate(
+                _markdown_without_fenced_code(path.read_text()).splitlines(),
+                start=1,
+            ):
+                if total_re.search(line):
+                    issues.append(f"{relative}:{lineno}: {line.strip()}")
+        assert not issues, (
+            "Reader-facing docs must use the live runners instead of hardcoded test totals:\n"
+            + "\n".join(issues)
+        )
+
+
+# ── Part 8: durable documentation navigation and focused contracts ──────────
+
+class TestMarkdownNavigationIntegrity:
+    def test_repository_relative_links_and_fragments_resolve(self):
+        issues = []
+        headings_by_path: dict[Path, set[str]] = {}
+        for source_path in _markdown_validation_paths():
+            for lineno, href in _markdown_link_targets(source_path.read_text()):
+                href = unquote(href)
+                if not href or href.startswith("/") or re.match(r"^[a-z][a-z0-9+.-]*:", href, re.I):
+                    continue
+                target_text, separator, fragment = href.partition("#")
+                target_text = target_text.split("?", 1)[0]
+                target_path = source_path if not target_text else (source_path.parent / target_text).resolve()
+                try:
+                    target_path.relative_to(_REPO_ROOT)
+                except ValueError:
+                    issues.append(
+                        f"{_markdown_path_for(source_path)}:{lineno} escapes the repository: {href}"
+                    )
+                    continue
+                if not target_path.exists():
+                    issues.append(
+                        f"{_markdown_path_for(source_path)}:{lineno} has a missing local target: {href}"
+                    )
+                    continue
+                if separator and fragment and target_path.suffix.lower() == ".md":
+                    if target_path not in headings_by_path:
+                        headings_by_path[target_path] = {
+                            slug for _, _, slug in _markdown_headings(target_path.read_text())
+                        }
+                    if fragment not in headings_by_path[target_path]:
+                        issues.append(
+                            f"{_markdown_path_for(source_path)}:{lineno} has a missing heading fragment: {href}"
+                        )
+        assert not issues, "\n".join(issues)
+
+    def test_full_tables_of_contents_cover_reader_h2_sections(self):
+        issues = []
+        for source_path in _markdown_validation_paths():
+            text = source_path.read_text()
+            clean = _markdown_without_fenced_code(text)
+            toc_match = re.search(r"^## (?:Table of Contents|Contents)\s*$", clean, re.M)
+            if not toc_match:
+                continue
+            next_h2 = re.search(r"^## (?!Table of Contents$|Contents$).+$", clean[toc_match.end():], re.M)
+            toc_end = toc_match.end() + next_h2.start() if next_h2 else len(clean)
+            toc_body = clean[toc_match.end():toc_end]
+            toc_fragments = {
+                unquote(href[1:])
+                for _, href in _markdown_link_targets(toc_body)
+                if href.startswith("#")
+            }
+            missing = [
+                (title, slug)
+                for level, title, slug in _markdown_headings(clean)
+                if level == 2
+                and title not in {"Table of Contents", "Contents"}
+                and slug not in toc_fragments
+            ]
+            if missing:
+                issues.append(
+                    f"{_markdown_path_for(source_path)} is missing TOC entries:\n"
+                    + "\n".join(f"  {title} (#{slug})" for title, slug in missing)
+                )
+        assert not issues, "\n\n".join(issues)
+
+
+class TestUiCaptureSceneGuide:
+    def test_desktop_scene_slugs_and_order_match(self):
+        assert _documented_capture_slugs("Desktop pack") == _capture_source_slugs(_UI_CAPTURE_DESKTOP)
+
+    def test_mobile_scene_slugs_and_order_match(self):
+        assert _documented_capture_slugs("Mobile pack") == _capture_source_slugs(_UI_CAPTURE_MOBILE)
+
+
+class TestSupportedRuntimeDocumentation:
+    def test_canonical_table_matches_executable_contracts(self):
+        rows = _supported_runtime_rows()
+
+        compose_match = re.search(r"^\s*platform:\s*([^\s#]+)", _PRODUCTION_COMPOSE.read_text(), re.M)
+        assert compose_match, "deploy/compose.yaml must declare the production platform"
+        assert compose_match.group(1) in rows["Production architecture"]
+
+        compose_versions = set(re.findall(
+            r"Docker Compose ([0-9]+(?:\.[0-9]+)+) or newer is required",
+            _PRODUCTION_SETUP.read_text(),
+        ))
+        assert len(compose_versions) == 1, "deploy/setup.sh.in must enforce one Compose minimum"
+        compose_version = next(iter(compose_versions))
+        assert f"Docker Compose {compose_version} or newer" in rows["Container orchestration"]
+
+        ci_text = _GITLAB_CI.read_text()
+        gate_rows = {
+            "Native ARM64": "RELEASE_ARM64_COMPATIBILITY_ENABLED",
+            "SELinux-enforcing Docker": "RELEASE_SELINUX_COMPATIBILITY_ENABLED",
+            "Rootless Podman": "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED",
+        }
+        for row_name, variable in gate_rows.items():
+            match = re.search(rf"^\s*{variable}:\s*\"([01])\"\s*$", ci_text, re.M)
+            assert match, f".gitlab-ci.yml must declare {variable}"
+            expected = "disabled by default" if match.group(1) == "0" else "enabled by default"
+            assert expected in rows[row_name].lower()

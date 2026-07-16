@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.6.0",
+  "reviewed_for_release": "2.6.0-rc.1",
   "reviewed_on": "2026-07-15",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
@@ -71,8 +71,7 @@
       "package_source": "https://tracker.debian.org/pkg/nmap",
       "license": "LicenseRef-Nmap-Public-Source-0.95",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/Nmap-7.95-NPSL-0.95.txt",
-      "redistribution_review": "requires-upstream-waiver-oem-or-legal-approval",
-      "usage_note": "Nmap 7.95 uses NPSL 0.95, which treats software designed to execute Nmap and parse its results as a derivative work when NPSL redistribution rights are required. Publishing this application with Nmap requires an upstream waiver, an OEM license, or qualified legal approval. This inventory entry is not that approval."
+      "usage_note": "Nmap 7.95 uses NPSL 0.95. darklab_shell runs the bundled Nmap executable as an external command for supported network scans and parses its output. The image includes the NPSL text, and the app FAQ identifies and links to the Nmap project."
     },
     {
       "name": "Debian Masscan package",

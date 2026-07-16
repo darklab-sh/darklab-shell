@@ -1301,18 +1301,27 @@ test.describe('project workspace modal', () => {
     const reportRoot = page.locator('.project-report-root', {
       has: page.locator('[data-project-report-action="save"]'),
     }).first()
-    await expect(reportRoot.locator('[data-project-report-metadata="engagement_name"]')).toBeVisible()
-    await reportRoot.locator('[data-project-report-metadata="engagement_name"]').fill('Browser engagement report')
+    const engagementName = reportRoot.locator('[data-project-report-metadata="engagement_name"]')
+    await expect(engagementName).toBeVisible()
+    await expect(reportRoot.locator('.project-report-selection-row')).toHaveCount(3, { timeout: 15_000 })
+    await expect(
+      reportRoot.getByText(/^Loading (runs|targets|findings|artifacts)\.\.\.$/),
+    ).toHaveCount(0, { timeout: 15_000 })
+    await engagementName.fill('Browser engagement report')
     await reportRoot.locator('[data-project-report-metadata="date_range"]').fill('2026-06-01 to 2026-06-05')
     await reportRoot.locator('[data-project-report-metadata="executive_summary"]').fill('Executive summary from Playwright.')
     await reportRoot.locator('[data-project-report-metadata="methodology"]').fill('Reviewed linked runs and artifacts.')
+    await expect(engagementName).toHaveValue('Browser engagement report')
 
     const saveResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return response.request().method() === 'POST' && url.pathname === `/projects/${projectId}/report`
     })
     await reportRoot.locator('[data-project-report-action="save"]').click()
-    expect((await saveResponse).ok()).toBe(true)
+    const savedReportResponse = await saveResponse
+    expect(savedReportResponse.ok()).toBe(true)
+    expect(JSON.parse(savedReportResponse.request().postData() || '{}').draft.metadata.engagement_name)
+      .toBe('Browser engagement report')
     await expect(reportRoot.locator('.project-report-message')).toContainText('Report draft saved.')
 
     await reportRoot.locator('[data-project-report-action="preview"]').click()

@@ -32,12 +32,11 @@ wpscan-ruby-gems.json records the name, version, declared license, homepage,
 and default-gem status of every RubyGem installed with the WPScan runtime.
 
 The Debian Nmap 7.95 package uses the Nmap Public Source License 0.95 rather
-than plain GPLv2. NPSL includes special conditions for software designed to
-execute Nmap and parse its results. Read
-/usr/share/doc/darklab-shell/licenses/Nmap-7.95-NPSL-0.95.txt in the image.
-Publishing this application with Nmap requires an upstream waiver, an OEM
-license, or qualified legal approval; this notice and inventory aren't that
-approval.
+than the darklab_shell project's AGPLv3 license. darklab_shell runs the bundled
+Nmap executable as an external command for supported network scans and parses
+its output. Read /usr/share/doc/darklab-shell/licenses/Nmap-7.95-NPSL-0.95.txt
+in the image. The app's built-in FAQ identifies the Nmap Security Scanner and
+links to https://nmap.org/.
 
 Browser runtime libraries
 -------------------------

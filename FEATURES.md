@@ -25,6 +25,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Run Comparison](#run-comparison)
 - [Guided Workflows](#guided-workflows)
 - [Scheduled Runs](#scheduled-runs)
+- [Watchers](#watchers)
 - [Permalinks](#permalinks)
 - [Share Redaction](#share-redaction)
 - [Mobile Shell](#mobile-shell)
@@ -76,8 +77,6 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 
 **Configuration:** none.
 
-**Related files:** `app/static/js/controller.js` (composer + keypress handling), `app/static/js/runner.js` (command echo and prompt hide/show around `/runs`).
-
 ---
 
 ## Recent Commands
@@ -95,8 +94,6 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 **Limits:** compact recents and Up/Down history use only the newest distinct commands. They stay hidden until history exists and are capped by `recent_commands_limit`. The full desktop and mobile History panel is paginated by `history_panel_limit`.
 
 **Configuration:** `recent_commands_limit` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
-
-**Related files:** `app/static/js/shell_chrome.js` (desktop rail), `app/static/js/mobile_chrome.js` (mobile peek + menu), `app/conf/config.yaml`.
 
 ---
 
@@ -123,9 +120,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 
 **Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the app's built-in autocomplete YAML. The app does not inspect the live shell and does not parse `--help` output. Output-derived grep suggestions read only the active tab's rendered lines, not other tabs or the host.
 
-**Configuration:** external-tool suggestions use `conf/commands.yaml` plus optional local overlays; see [CONFIGURATION.md#command-registry-autocomplete](CONFIGURATION.md#command-registry-autocomplete) and [docs/external-command-integrations.md](docs/external-command-integrations.md). App-owned built-ins use `app/services/commands/builtin_autocomplete.yaml`.
-
-**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/services/commands/builtin_autocomplete.yaml`, `app/conf/commands.yaml`, `app/blueprints/session.py`, `app/core/database.py`.
+**Configuration:** external-tool suggestions use `conf/commands.yaml` plus optional local overlays; see [CONFIGURATION.md#command-registry-autocomplete](CONFIGURATION.md#command-registry-autocomplete). App-owned built-in grammar isn't operator-configurable.
 
 **Keyboard controls:**
 
@@ -158,8 +153,6 @@ Autocomplete schema and authoring details live in [CONFIGURATION.md#command-regi
 
 **Configuration:** none — behavior is not user-tunable.
 
-**Related files:** `app/static/js/controller.js` (Ctrl+R keybinding + dropdown), `app/blueprints/history.py` (server-side history query).
-
 ---
 
 ## Keyboard Shortcuts
@@ -175,9 +168,7 @@ Autocomplete schema and authoring details live in [CONFIGURATION.md#command-regi
 
 **Limits:** browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are optional fallbacks only — browser interception is inconsistent across environments, especially on macOS.
 
-**Configuration:** none — the chord list is defined in `app/services/commands/builtins.py` and not user-tunable.
-
-**Related files:** `app/static/js/features/shortcuts/global_shortcuts.js` (shortcut matching and dispatch), `app/static/js/controller.js` (document keydown cascade), `app/services/commands/builtins_catalog.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
+**Configuration:** none; the chord list isn't user-tunable.
 
 Shipped app-safe shortcuts:
 
@@ -248,8 +239,6 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 When command outcome summaries are enabled, text, HTML, PDF, Run Details, and permalink/share exports include the same visible summary block. The saved raw transcript remains unchanged, so the summary is always a derived view of the captured output rather than a replacement for it.
 
-**Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run_broker.py` (server-side SSE routes), and `app/blueprints/run.py` (shared run blueprint and compatibility imports).
-
 ---
 
 ## Kill Running Processes
@@ -265,8 +254,6 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Limits:** kill dispatches from any Gunicorn worker — PID lookup goes through Redis so the request doesn't have to hit the worker that started the process. See [DECISIONS.md](DECISIONS.md) `Multi-worker Process Killing via Redis`.
 
 **Configuration:** none — the kill path is not user-tunable.
-
-**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run_kill.py` (`POST /kill`), `app/blueprints/run.py` (shared run blueprint and compatibility imports), and `app/core/process.py` (`pid_register` / `pid_pop`).
 
 ---
 
@@ -287,8 +274,6 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Limits:** `/status` always returns 200 even when a component is degraded (reports `"down"` for that component) so HUD polling never flaps the UI or triggers SSE reconnect logic; `/health` remains the load-balancer contract and still returns 503 on degradation.
 
 **Configuration:** the `CLOCK` pill mode is user-tunable from the Options modal (`UTC` or browser-local time). Local mode prefers the browser's short timezone label (for example `CDT`) and falls back to a GMT offset label when the browser cannot provide a stable abbreviation. Run notifications remain a separate Options-modal preference.
-
-**Related files:** `app/static/js/shell_chrome.js` (HUD build + polling), `app/blueprints/assets.py` (`GET /status`).
 
 **Pill reference:**
 
@@ -323,9 +308,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Limits:** only the seven helper stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`). The `jq` helper intentionally rejects arbitrary jq programs, shell escapes, joins, transforms, arithmetic, recursion, and file access. Malformed JSON produces a generic error without echoing the input line.
 
-**Configuration:** pipe helper metadata lives in `app/conf/commands.yaml`; parser and execution limits live in `app/services/commands/postfilters.py`, `app/blueprints/run.py`, and `app/static/js/core/runner_core.js`.
-
-**Related files:** `app/conf/commands.yaml`, `app/services/commands/postfilters.py`, `app/blueprints/run.py` (shared run helpers and command-prep compatibility imports), `app/blueprints/run_broker.py` (`/runs` route), and `app/static/js/core/runner_core.js`.
+**Configuration:** external command metadata lives in `conf/commands.yaml`; the built-in helper grammar and execution limits aren't operator-configurable.
 
 **Supported pipe forms:**
 
@@ -372,8 +355,6 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Limits:** search scope is the active tab's rendered transcript only — not history from other tabs, not the full server-side run history. Invalid regex patterns render `invalid regex` instead of throwing.
 
 **Configuration:** none — toggle state is not persisted across page reloads.
-
-**Related files:** `app/static/js/search.js`, `app/static/js/shell_chrome.js` (tabbar search toggle).
 
 **Toggle reference:**
 
@@ -425,8 +406,6 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 **Limits:** signal detection is server-classified, scoped to the active tab’s transcript, and intentionally favors the project’s supported toolset over arbitrary command output. Browser-side signal fallback is intentionally not used; older restored output without signal metadata is treated as signal-unavailable. A command with no matched findings, warnings, errors, or summary lines does not appear in the generated summary block.
 
 **Configuration:** `output_entity_extra_domain_suffixes` can opt generic bare-hostname extraction into internal suffixes such as `.local` or `.corp`. The current scopes, server matchers, and summary format are otherwise app-defined and not operator-configurable.
-
-**Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run_broker.py` (SSE metadata routes), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
 
 ---
 
@@ -507,8 +486,6 @@ Runnable Generic JSONL example:
 
 **Configuration:** Atlas uses existing history retention, intel cache, and provider-secret settings. Provider keys are managed through Options → Secrets or `secret set NAME`.
 
-**Related files:** `app/blueprints/atlas.py`, `app/services/atlas/`, `app/static/js/features/atlas/`, `app/static/css/features/atlas.css`, `app/static/css/features/atlas-mobile.css`, `app/core/output_signals.py`.
-
 ---
 
 ## Cleanup Confirmations
@@ -531,8 +508,6 @@ Optional cleanup checkboxes start unchecked. Confirmations show counts and reaso
 
 **Limits:** cleanup stays inside the active personal or team scope. Not-eligible rows can't be forced through these cleanup options; remove their other source or relationship first when that is appropriate.
 
-**Related files:** `app/services/atlas/cleanup.py`, `app/services/cleanup_reasons.py`, `app/static/js/ui/cleanup_reasons.js`, `app/static/js/features/history/history_mutations.js`, `app/static/js/features/history/history_project_actions.js`, `app/static/js/features/projects/project_workspace_actions.js`, `app/static/js/features/atlas/atlas_overlay.js`.
-
 ---
 
 ## Copy, Save, and Export
@@ -553,8 +528,6 @@ Optional cleanup checkboxes start unchecked. Confirmations show counts and reaso
 **Limits:** local text exports produce unredacted output. Local HTML/PDF exports also stay unredacted, except for raw-only app-native intel response bodies, which are replaced with an omission notice so provider data does not leave the browser as styled share/export content.
 
 **Configuration:** none — export formats and filename shape are not user-tunable.
-
-**Related files:** `app/static/js/tabs.js` (per-tab save menu), `app/static/js/shell_chrome.js` (HUD save menu), `app/static/js/features/history/history_run_details.js` (saved-run export menu), `app/static/js/export_html.js` (shared browser export model), `app/static/js/export_pdf.js` (jsPDF renderer consuming the shared model), `app/static/js/permalink.js` (permalink/share save actions), `app/static/css/terminal_export.css` (shared browser export chrome).
 
 ---
 
@@ -577,8 +550,6 @@ Optional cleanup checkboxes start unchecked. Confirmations show counts and reaso
 **Limits:** tab count capped by `max_tabs`; history surfaces paginate stored items rather than showing one unbounded list; brokered live replay is bounded by configured replay retention and `max_output_lines`, after which completed-run restore relies on persisted history/output artifacts. Snapshot search matches the snapshot label, not the full snapshot body content.
 
 **Configuration:** `max_tabs` in `config.yaml` (default 8; `0` for unlimited).
-
-**Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer, search UI, bulk actions, and selected-history export), `app/blueprints/history.py` (history API, search queries, and bulk export route), `app/core/database.py` (database schema, startup migration, and retention pruning).
 
 **Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, starred-only, and structured output selectors such as `signal:findings`, `kind:error`, `kind!=info`, `role:exit-fail`, `entity:darklab.sh`, and `entity_type:cve`. The drawer also exposes `signal`, `kind`, `entity`, and `entity_type` as visible controls, so common structured-output searches don't require memorizing query syntax. The search field placeholder reads "search history". Search is backend-aware: SQLite uses `runs_fts` with a `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by `pg_trgm` indexes. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract. Ctrl+R stays command-only so reverse history search keeps normal shell expectations.
 
@@ -607,8 +578,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `AI_ENABLED`, `AI_WORKER_ENABLED`, `AI_BASE_URL`, `AI_MODEL`, `AI_FEATURE_SUMMARY`, `AI_FEATURE_NEXT_COMMANDS`, and `AI_FEATURE_RUN_SUGGESTIONS` control the common setup. See [Configuration](CONFIGURATION.md#environment-variables-and-env) for the full operator list and [AI Privacy Posture](docs/ai-privacy.md) for provider, storage, and logging details.
 
-**Related files:** `app/services/ai/` (provider client, context, coordination, storage, worker orchestration, prompts, schemas, and suggestion validation), `app/blueprints/history.py` (browser AI routes), `app/blueprints/api_v1_runs.py` (headless run AI routes), `app/blueprints/api_v1.py` (shared API blueprint and route registration), `app/static/js/features/history/history_run_details.js` (Run Details AI cards), and `app/static/css/features/history.css` (Run Details AI card layout).
-
 ---
 
 ## Run Comparison
@@ -634,8 +603,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** compare view and compare context defaults are saved user options. Server-side compare limits are fixed application constants rather than operator-facing `config.yaml` settings.
 
-**Related files:** `app/services/runs/comparison.py`, `app/services/runs/comparison_findings.py`, and `app/services/runs/comparison_derived.py` (shared comparison, persisted-finding, and detected-change helpers), `app/services/history/comparison_queries.py` and `app/blueprints/history_compare_requests.py` (owner-scoped loading and request resolution), `app/services/projects/comparisons.py` (project pair resolution), `app/services/history/comparison_logging.py` (bounded comparison lifecycle summaries), `app/blueprints/history.py` (history compare routes), `app/static/js/features/run-comparison/` (compare launcher, controls, navigation, and renderer), and `app/static/css/features/run-comparison.css` (desktop/mobile compare layout).
-
 ---
 
 ## Guided Workflows
@@ -660,35 +627,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `conf/workflows.yaml` accepts legacy linear entries and explicit `version: 2` playbooks. User-created workflows store the same shape in the active personal or team scope. `workflow_active_execution_limit` and `workflow_execution_max_runtime_seconds` control the server-side execution bounds. See [Workflow Playbooks](docs/workflows.md) for the complete YAML, parameter, transition, capture, terminal, and recovery reference.
 
-```yaml
-- title: "My Custom Check"
-  description: "A brief description shown in the workflow panel."
-  inputs:
-    - id: domain
-      label: "Domain"
-      type: domain
-      required: true
-      placeholder: "example.com"
-      default: "darklab.sh"
-  steps:
-    - cmd: "ping -c 4 {{domain}}"
-      note: "Is the host reachable?"
-    - cmd: "nmap -F {{domain}}"
-      note: "What ports are open?"
-```
-
-- `title` — required; workflow heading.
-- `description` — optional; shown below the title.
-- `inputs` — optional list of template variables that can be referenced as `{{id}}` inside step commands and notes.
-- `id` — required per input; starts with a lowercase letter and then uses lowercase letters, numbers, and underscores.
-- `type` — optional per input; accepted values are `text`, `target`, `domain`, `host`, `url`, `port`, `port_set`, `workspace_path`, and `wordlist` (`path` remains a legacy alias).
-- `required`, `placeholder`, `default`, and `help` — optional per input; used by the Workflows panel, `workflow run` prompting, and runtime autocomplete.
-- `steps` — required list; each step needs at least a `cmd`.
-- `cmd` — required; loaded into the prompt when the step is clicked and rendered with workflow inputs when variables are present.
-- `note` — optional; helper text shown alongside the command.
-- `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
-
-**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/` (compiler, captures, execution state, and saved workflows), `app/static/js/features/workflows/` (workflow panel, catalog, parameters, execution view, editor, and CLI), `app/blueprints/workflows.py` (durable execution routes), and `docs/workflows.md` (operator guide).
+**Learn more:** [Workflow Playbooks](docs/workflows.md) covers authoring, parameters, transitions, captures, terminal use, persistence, recovery, and team behavior.
 
 ---
 
@@ -712,7 +651,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** scheduler settings live under `scheduler` in `config.yaml`, including `max_per_session`, `default_timezone`, `tick_seconds`, `max_catchup_window_seconds`, `missed_fire_policy`, and the SQLite `lock_path`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/schedules.md](docs/schedules.md).
 
-**Related files:** `app/blueprints/schedules.py` (browser schedule routes), `app/services/scheduler/` (cron, storage, dispatch, and worker helpers), `app/static/js/features/schedules/schedules_modal.js` (Schedules modal), `app/static/css/features/schedules.css` (modal layout), and `docs/schedules.md` (operator guide).
+**Learn more:** [Scheduled Runs](docs/schedules.md) covers cadence, timezones, worker behavior, audits, API/CLI use, and notifications.
 
 ---
 
@@ -738,7 +677,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. First-run watchers require a command because there is no completed run to inherit from yet. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
 
-**Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, finalization, and fire audit helpers), `app/services/diff/` (shared tool-aware diff classifiers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), `app/static/css/features/watchers.css` (modal layout), and `docs/watchers.md` (operator guide).
+**Learn more:** [Watchers](docs/watchers.md) covers baselines, schedules, diff behavior, projects, API/CLI use, worker recovery, and notifications.
 
 ---
 
@@ -755,8 +694,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Limits:** retained for `permalink_retention_days` only; the `./data` directory is the only writable path in an otherwise read-only container (created automatically on first run).
 
 **Configuration:** `permalink_retention_days` in `config.yaml` (default 365).
-
-**Related files:** `app/blueprints/history.py` (share + permalink routes), `app/services/history/permalinks.py` (ID generation + storage), `app/services/runs/output_store.py` (full-output artifact lookup), `app/templates/permalink.html` (rendered share/permalink page).
 
 ---
 
@@ -775,8 +712,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Limits:** local text exports from a tab are not redacted. Local HTML/PDF exports follow the same raw-only intel omission rule as share pages, but ordinary regex redaction is scoped exclusively to the share-permalink flow.
 
 **Configuration:** baseline rules are built in; custom regex rules extend them. The raw-vs-redacted default is stored in the Options modal.
-
-**Related files:** `app/core/redaction.py` (baseline + custom rule engine), `app/blueprints/history.py` (snapshot redaction entry point), `app/static/js/tabs.js` (share snapshot prompt + default handling).
 
 ---
 
@@ -797,8 +732,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
 
 **Configuration:** no mobile-specific config keys beyond `diagnostics_allowed_cidrs`; layout activates automatically on touch viewports.
-
-**Related files:** `app/static/js/mobile_chrome.js` (mobile shell bootstrap + composer + menu), `app/static/css/mobile.css` (mobile layout + composer + bottom-sheet styles), `app/static/css/mobile-chrome.css` (shared mobile sheet chrome), `app/templates/index.html` (mobile-shell mount points).
 
 ---
 
@@ -841,8 +774,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** none. Built-in commands are defined in application code, not in operator config.
 
-**Related files:** `app/services/commands/builtins.py` (built-in command registry + output rendering), `app/services/commands/registry.py` (dispatch, autocomplete loading, and man routing), `app/services/commands/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
-
 ---
 
 ## Headless API and CLI
@@ -864,7 +795,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** no server-side API-specific settings. CLI users can set `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, `DARKLAB_TIMEOUT`, or `~/.config/darklab/config.toml`; see [docs/api.md](docs/api.md).
 
-**Related files:** `app/blueprints/api_v1.py` (shared `/api/v1` blueprint, helpers, and route registration), `app/blueprints/api_v1_read.py`, `app/blueprints/api_v1_runs.py`, `app/blueprints/api_v1_schedules.py`, `app/blueprints/api_v1_teams.py`, `app/blueprints/api_v1_watchers.py`, and `app/blueprints/api_v1_notifications.py` (resource routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
+**Learn more:** [Headless API and CLI](docs/api.md) covers authentication, commands, streaming, pagination, errors, and the checked-in OpenAPI contract.
 
 ---
 
@@ -890,7 +821,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP/test timeouts, private webhook destination allowlisting, SMTP transport, sent-event retention, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
 
-**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/services/commands/builtins_notify.py` (terminal `notify` built-in), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1_notifications.py` (API channel and audit routes), `app/blueprints/api_v1.py` (shared API blueprint and route registration), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
+**Learn more:** [Outbound Notifications](docs/notifications.md) covers channel setup, payloads, delivery retries, privacy, and troubleshooting.
 
 ---
 
@@ -909,8 +840,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Variables are session-scoped and migrate with session-token identity changes.
 
 **Limits:** variables are intended for targets, ports, and paths, not secrets. Values are not redacted and are visible in `var list`, autocomplete descriptions, and the expansion notice.
-
-**Related files:** `app/services/session/variables.py`, `app/services/commands/builtins.py`, `app/blueprints/run.py` (shared run helpers and compatibility imports), `app/blueprints/run_broker.py` (`/runs` route), `app/static/js/app.js`.
 
 ---
 
@@ -935,8 +864,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** operators provide the vault master key with `SECRETS_MASTER_KEY` or let the app create an app-owned key file under the data directory. Tool bindings live in `app/conf/commands.yaml` through `requires_secrets`.
 
-**Related files:** `app/blueprints/secrets.py`, `app/services/secrets/`, `app/services/commands/builtins_secrets.py`, `app/static/js/features/preferences/secrets_panel.js`, `app/conf/commands.yaml`.
-
 ---
 
 ## External Intel
@@ -957,8 +884,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, FOFA, and ZoomEye require user-provided provider keys. FOFA also requires the account email as `FOFA_EMAIL`, accepts `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN` for the API key, and needs an F-point balance for search calls. ZoomEye uses `ZOOMEYE_API_KEY` with the regional `api.zoomeye.ai` API and needs available resource credits. SecurityTrails currently requires a paid account. Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
 **Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, optional `IPINFO_TOKEN`, `URLHAUS_AUTH_KEY`, `THREATFOX_AUTH_KEY`, `VULNERS_API_KEY`, `URLSCAN_API_KEY`, `SECURITYTRAILS_API_KEY`, `FOFA_KEY` or a FOFA alias, `FOFA_EMAIL`, `ZOOMEYE_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
-
-**Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 
 ---
 
@@ -989,8 +914,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
 **Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
-
-**Related files:** `app/services/workspace/files.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` and `app/static/js/workspace_bridge.js` (Files panel and first-use browser bridge), `app/services/commands/builtins.py` (`file` built-in), `app/services/commands/registry.py` (workspace flag validation and rewrite).
 
 ---
 
@@ -1064,8 +987,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** project, metadata, auto-promote, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/services/projects/overview.py` (Project Overview target rollups), `app/services/projects/auto_promote.py` (Project Atlas auto-promote rules), `app/services/projects/monitoring.py` (Project Monitoring payloads and triage updates), `app/services/diff/rollups.py` (Monitoring severity and top-signal rollups), `app/services/reports/` (Project report draft, template, composition, rendering, and export helpers), `app/services/audit/` (scoped activity rows and safe details), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/blueprints/projects_core.py`, `app/blueprints/projects_packages.py`, `app/blueprints/projects_monitoring.py`, `app/blueprints/projects_links.py`, and `app/blueprints/projects_metadata.py` (project route groups), `app/static/js/features/projects/project_overview.js` (Overview tab rollups and target actions), `app/static/js/features/projects/project_report.js` (Report tab editor, preview, export, and print/PDF helpers), `app/static/js/features/projects/project_activity.js` (Activity tab filters, rows, and paging), `app/static/js/features/projects/project_monitoring.js` (Monitoring tab cards, timeline, run actions, and triage controls), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
-
 ---
 
 ## Evidence Packages
@@ -1083,8 +1004,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Limits:** package manifests are draft records, and the archive is built at download time from still-available project data and workspace artifacts. Redacted packages never include raw artifact files; binary or unknown artifact types are skipped unless they're exported in a raw package.
 
 **Configuration:** evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
-
-**Related files:** `app/services/projects/workspace.py` (manifest and archive builder), `app/blueprints/projects_packages.py` (package routes), `app/blueprints/projects.py` (shared project blueprint and route registration), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
 
 ---
 
@@ -1132,8 +1051,6 @@ commands:
 - `autocomplete.*.value_type` — declares target-like values for autocomplete and optional restricted-input checks.
 - `knowledge` — optional descriptive guidance (`notes`, `gotchas`, `safe_defaults`, `common_flags`, `artifact_behavior`) shown in discovery surfaces; never policy-bearing. See [CONFIGURATION.md](CONFIGURATION.md#command-knowledge).
 
-**Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (shared run helpers and compatibility imports), `app/blueprints/run_broker.py` (policy gate at the `/runs` entry point).
-
 ### Deny Prefixes
 
 Deny matching has a few extra rules worth calling out:
@@ -1166,8 +1083,6 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/services/pty/transcript.py` (saved transcript shaping), `app/blueprints/run_pty.py` (PTY routes), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
-
 ---
 
 ## Wordlists
@@ -1192,8 +1107,6 @@ wget -q -O /dev/null --server-response https://example.com
 **Limits:** wordlists are read-only inside the container. Normal command output and autocomplete use the curated catalog instead of exposing every file under SecLists; use `wordlist --all` for the full scanned tree. The corpus is not updated between builds — rebuild the image to pick up a new SecLists release.
 
 **Configuration:** `app/conf/wordlists.yaml` defines curated category globs under the fixed install path. External command value slots opt into installed-wordlist autocomplete through `value_type: wordlist` and `wordlist_category` in `app/conf/commands.yaml`.
-
-**Related files:** `Dockerfile` (SecLists install step), `app/conf/wordlists.yaml` (curated catalog), `app/services/commands/wordlists.py` (catalog loader), `app/conf/commands.yaml` (typed wordlist slots), `app/static/js/autocomplete.js` (slot-aware suggestions).
 
 **Layout reference:**
 
@@ -1263,8 +1176,6 @@ wget -q -O /dev/null --server-response https://example.com
 - `app/conf/ascii.txt` / `ascii_mobile.txt` — desktop/mobile banner text.
 - `app/conf/app_hints.txt` / `app_hints_mobile.txt` — rotating footer hint lines.
 
-**Related files:** `app/blueprints/content.py` (welcome/banner/hint endpoints), `app/static/js/shell_chrome.js` + `app/static/js/mobile_chrome.js` (sequence rendering), `app/conf/welcome.yaml`, `app/conf/ascii.txt`, `app/conf/ascii_mobile.txt`, `app/conf/app_hints.txt`, `app/conf/app_hints_mobile.txt`.
-
 ---
 
 ## Onboarding Tour
@@ -1279,9 +1190,7 @@ wget -q -O /dev/null --server-response https://example.com
 - The desktop visual tour uses a carousel with app-shaped previews. `Try this` actions close the carousel and open the matching app surface when one exists, such as History, Workflows, Projects, Teams, Files, Options, or FAQ.
 - Feature-gated chapters are hidden when their feature is unavailable. Interactive Tools stays hidden on mobile because interactive PTY sessions are desktop-only.
 
-**Configuration:** `app/conf/tour.yaml` stores chapter text, sample commands, and visual illustration keys. See [CONFIGURATION.md](CONFIGURATION.md#tour-configuration) for the file format.
-
-**Related files:** `app/conf/tour.yaml`, `app/static/js/app.js` (`tour` built-in), `app/static/js/tour_modal.js` (visual carousel), `app/static/css/welcome.css` (tour visuals), `app/blueprints/content.py` (tour content loader).
+**Configuration:** `app/conf/tour.yaml` stores chapter text, sample commands, and visual illustration keys. See [CONFIGURATION.md](CONFIGURATION.md#onboarding-tour) for the file format.
 
 ---
 
@@ -1314,8 +1223,6 @@ wget -q -O /dev/null --server-response https://example.com
   answer: "Outbound traffic is limited to 1 Gbps sustained."
 ```
 
-**Related files:** `app/conf/faq.yaml` (custom entries), `app/blueprints/content.py` (`/faq` endpoint + markup rendering), `app/static/js/features/command-registry/command_registry.js` (FAQ grouping + chip click wiring).
-
 ---
 
 ## Theme Selector
@@ -1332,8 +1239,6 @@ wget -q -O /dev/null --server-response https://example.com
 **Limits:** anonymous UUID sessions keep their own browser-local theme choice, while named session tokens restore the saved theme across browsers and devices. Clearing browser storage removes the local cache but does not erase a named session token's saved theme on the server.
 
 **Configuration:** theme variants live under `app/conf/themes/`; see [THEME.md](THEME.md) for authoring details (variable names, fallbacks, and how a new variant is registered).
-
-**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/app.js` (selector modal, terminal command, and preference persistence), `app/static/css/core/base.css` (runtime theme variable surface), `app/templates/theme_vars_style.html` and `app/templates/theme_vars_script.html` (server-rendered theme metadata), `THEME.md` (authoring guide).
 
 ---
 
@@ -1375,8 +1280,6 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `command-outcome-summaries`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
 
-**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/static/js/features/preferences/teams_panel.js` (team list/detail, members, invites, recovery, and scope actions), `app/services/commands/builtins_notify.py` (server-owned terminal `notify` command), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
-
 ---
 
 ## Persistence & Retention
@@ -1395,8 +1298,6 @@ wget -q -O /dev/null --server-response https://example.com
 **Limits:** `./data` is the only writable path in an otherwise read-only container. Setting `permalink_retention_days: 0` disables pruning entirely (unlimited retention). On SQLite deployments, never write to `./data/history.db` from the host — host/container SQLite version mismatches can corrupt the FTS5 btree.
 
 **Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning). `runs_search_text_inline_max_bytes`, `snapshots_inline_max_bytes`, and `intel_payload_inline_max_bytes` default to `0`, which keeps those bodies inline.
-
-**Related files:** `app/core/database.py` (schema, migrations, backend selection, and startup pruning), `app/services/runs/output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
 
 **Useful direct checks:**
 
@@ -1428,7 +1329,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
 - `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, explains clone-to-managed migration, and removes managed files without deleting operator state. Offline archives remain an explicit operator-verified path.
 
-**Limits:** Docker Compose 2.20.0 or newer on Linux is the supported runtime. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
+**Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
 
 **Configuration:** see the [Quick Start](README.md#quick-start) and [Docker Compose Files](CONFIGURATION.md#docker-compose-files).
 
@@ -1454,8 +1355,6 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 **Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
 
 **Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for cron examples and Docker/Compose flags.
-
-**Related files:** `scripts/backup_system.py`, `scripts/restore_system.py`, `deploy/darklab-deploy.sh.in`, `app/config.py`, `docker-compose.yml`.
 
 ---
 
@@ -1500,8 +1399,6 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, completed personal workflow executions, project workspace records, recent targets, active-project context, saved user options, and app-managed workspace files when Files are enabled.
 
-**Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/core/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
-
 ---
 
 ## Team-Mode
@@ -1524,8 +1421,6 @@ If a session has run history, workspace files, project workspace records, user w
 **Limits:** Team-Mode is for trusted operators on the same self-hosted instance. It is not SSO, billing, per-project ACLs, or a full multi-tenant product. Destructive Atlas cleanup/delete actions require a triage-capable team role and stay inside the active personal or team scope.
 
 **Configuration:** no global config switch. Team-Mode requires durable session tokens because anonymous browser sessions cannot safely identify team members across devices.
-
-**Related files:** `app/blueprints/teams.py` (browser team routes), `app/services/teams/` (team roles, storage, and request scope), `app/static/js/features/preferences/teams_panel.js` (Options Teams tab), `app/static/js/features/team_scope.js` (scope menu and selector), `app/services/commands/builtins_team.py` (terminal `team` built-in), and `tools/darklab_cli/src/darklab_cli/` (CLI team commands).
 
 ---
 
@@ -1572,8 +1467,6 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 - `raw_packet_scanning_enabled` in `config.yaml` or `RAW_PACKET_SCANNING_ENABLED` in Compose — capability-backed raw scanning opt-in.
 
-**Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run_broker.py` (subprocess run start), `app/blueprints/run_kill.py` (`/kill` route), `app/blueprints/run.py` (shared run blueprint and compatibility imports), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
-
 ---
 
 ## Structured Logging
@@ -1594,7 +1487,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 **Configuration:** `log_format` and `log_level` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/core/startup_logging.py` (config-load buffering and fatal fallback), `app/core/logging_setup.py` (format + level wiring), `app/blueprints/run_broker.py`, `app/blueprints/run_kill.py`, and `app/blueprints/run_pty.py` (run lifecycle route events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets_diag.py` and `app/blueprints/assets_audit.py` (diagnostics events).
+**Learn more:** [Logging Reference](docs/logging.md) lists levels, output formats, event names, fields, redaction expectations, and troubleshooting steps.
 
 ---
 
@@ -1617,8 +1510,6 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 **Limits:** `/diag/audit` is an operator-wide view. Anyone allowed through `diagnostics_allowed_cidrs` can see personal and team activity, actor labels, target ids, request metadata, and safe details visible to the audit table. Do not expose it broadly in multi-tenant deployments until you have a narrower owner-scoped audit surface in front of it. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
 
 **Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
-
-**Related files:** `app/blueprints/assets_audit.py` (`/diag/audit` HTML/JSON responses and exports), `app/blueprints/assets.py` (shared assets blueprint and route registration), `app/blueprints/projects_core.py` (Project Activity route), `app/blueprints/projects.py` (shared project blueprint and route registration), `app/blueprints/teams.py` (Team Activity route), `app/templates/diag_audit.html` (viewer markup), `app/services/audit/` (event registry, recorder, scoped queries, and retention), `app/static/css/diag.css` (diagnostics and audit-viewer styling), `app/static/js/features/projects/project_activity.js` (Project Activity tab), `app/static/js/features/preferences/teams_panel.js` (Team Activity subtab), `tests/py/test_routes.py`, `tests/js/unit/diag_audit.test.js`, `tests/js/unit/project_activity.test.js`, and `tests/js/unit/teams_panel.test.js` (viewer/export and scoped activity coverage).
 
 ---
 
@@ -1658,7 +1549,7 @@ diagnostics_allowed_cidrs:
 | **Database** | Connection status (`online` / `error`), active backend, total run and snapshot counts, SQLite file/WAL size or Postgres relation sizes, reclaimable space where available, table row counts, and backend-specific search-index checks |
 | **Storage breakdown** | Table/index or relation storage grouped by runs, snapshots, Atlas/findings, projects, session data, and secrets. Shows allocated bytes when SQLite has `dbstat`, Postgres relation sizes through catalog functions, logical payload estimates, search-index rollups, and the largest saved runs. |
 | **Redis** | Whether Redis is configured, and connection status when it is |
-| **Vendor Assets** | Whether `ansi_up.js`, `jspdf.umd.min.js`, and the font files are present (`loaded`) or missing (`missing`) from `app/static/` |
+| **Vendor Assets** | Whether the bundled browser libraries and font files are present (`loaded`) or missing (`missing`) |
 | **Raw-packet Scanning** | Whether the operator opt-in is disabled, ready, or unavailable, plus per-tool capability status and the failed prerequisite category |
 | **Config** | All operational config values: rate limits, timeouts, output caps, retention, proxy CIDRs, log settings |
 | **Classifier Inspector** | One-line output classifier check for kind, role, signals, entities, command root, target, and ANSI-stripped text; the Inspect action updates this section without reloading the full page |
@@ -1689,32 +1580,12 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets_diag.py` (`/diag` HTML/JSON responses and `/metrics`), `app/blueprints/assets_audit.py` (`/diag/audit`), `app/blueprints/assets.py` (shared assets blueprint and route registration), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` and `app/templates/diag_audit.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics, audit, and logging runtime details).
-
 ---
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [README.md](README.md#quick-start) - quick start and project overview
+- [CONFIGURATION.md](CONFIGURATION.md) - operator settings and supported runtimes
+- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime and security contracts
+- [THEME.md](THEME.md) - themes and semantic color tokens
+- [docs/tools.md](docs/tools.md) - bundled tool discovery and user guidance

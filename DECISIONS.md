@@ -348,6 +348,8 @@ The license does not prohibit commercial use. Companies can run, host, support, 
 
 Official releases expose their matching source tag through the built-in **What is this?** FAQ entry, record `AGPL-3.0-only` in package and OCI metadata, and carry the complete license in the image and installer payload. That FAQ entry is the official build's default source link, not a declaration that one placement satisfies every modified service. Modified deployments must replace the official link and remain responsible for making their offer prominent to all remote users and providing their complete corresponding source at no charge. Bundled tools, libraries, fonts, and wordlists are not relicensed; their separate terms stay in `THIRD_PARTY_NOTICES.txt` and `container-licenses.json`.
 
+The bundled Debian Nmap package remains under NPSL 0.95. darklab_shell runs its executable as an external command and parses the resulting output; releases include the hash-pinned NPSL text, list Nmap in the third-party inventory and notices, and identify and link to the Nmap Security Scanner in the built-in FAQ. The project owner reviewed those terms and chose to distribute Nmap with this open-source application without making an upstream waiver, OEM license, or separate legal-approval record a release prerequisite. CI verifies the declared license, notice, and bundled text, but it does not enforce a separate redistribution-approval status. This packaging decision does not relicense Nmap or change the NPSL terms.
+
 Project-owned source uses short, machine-readable `SPDX-FileCopyrightText` and `SPDX-License-Identifier` notices instead of repeating the full multi-paragraph AGPL boilerplate in every file. This keeps the license attached when a file is copied without burying the source under legal text. Generated bundles and third-party material are explicitly excluded from the project header, and the lint guard fails when new project-owned source has no notice. The root `LICENSE` is the single full-text copy; a second `LICENSES/AGPL-3.0-only.txt` copy and a formal REUSE-compliance claim were deliberately left out.
 
 ### One Image, Two Compose Modes, and Dual Registry Publishing
@@ -360,7 +362,7 @@ The Dockerfile now copies `/app` after the expensive scanner layers. Development
 
 Shipped configuration and operator configuration are separate on purpose. The image owns `/app/conf`, while production mounts `./conf` at `/config`. A shared resolver maps supported `*.local.*` files to the operator root and preserves sibling behavior when no separate root is configured. The installer can therefore keep the host tree private while the root entrypoint validates and stages an `appuser`-readable runtime copy before dropping privileges. Mounting a whole host directory over `/app/conf` was rejected because an old deployment directory could hide new commands, themes, workflows, and defaults after an image upgrade.
 
-GitLab is the canonical registry because the source and release pipeline already live there. CI checks the release-specific redistribution inventory, builds once from a protected final or `-rc.N` semantic-version tag with a registry-backed layer cache, verifies that canonical image, then performs a registry-to-registry carbon copy of the manifest to Docker Hub for the shorter public pull path used by production Compose. Pulling, retagging, and pushing through a daemon was rejected because an image store can translate OCI and Docker manifest media types and change the digest even when the layers are identical. Publishing a second build was rejected because build timestamps and moving upstream inputs could produce different bytes under one release version. Both registries use exact tags, and the publisher treats each candidate number as immutable even though candidate artifacts can be removed after validation. Digest equality is the release boundary. Measured transfer and unpacked sizes travel with the release manifest instead of becoming a stale number in Compose; cold-pull timing stays in a CI artifact because it varies by runner and retry.
+GitLab is the canonical registry because the source and release pipeline already live there. CI checks the release-specific third-party license inventory, builds once from a protected final or `-rc.N` semantic-version tag with a registry-backed layer cache, verifies that canonical image, then performs a registry-to-registry carbon copy of the manifest to Docker Hub for the shorter public pull path used by production Compose. Pulling, retagging, and pushing through a daemon was rejected because an image store can translate OCI and Docker manifest media types and change the digest even when the layers are identical. Publishing a second build was rejected because build timestamps and moving upstream inputs could produce different bytes under one release version. Both registries use exact tags, and the publisher treats each candidate number as immutable even though candidate artifacts can be removed after validation. Digest equality is the release boundary. Measured transfer and unpacked sizes travel with the release manifest instead of becoming a stale number in Compose; cold-pull timing stays in a CI artifact because it varies by runner and retry.
 
 The installer is small and deliberately non-magical. A release-specific POSIX script downloads one deterministic exact-version archive, verifies its checksum and safe paths, validates the managed-file manifest and Compose, creates private operator paths, and prints the pull/start commands. It does not install Docker, use `sudo`, change firewall rules, generate the vault master key, or start services. Security-first docs put download, checksum, and inspection before execution; the pipe-to-shell form is only a convenience path with the trust tradeoff stated plainly.
 
@@ -457,7 +459,7 @@ The `shell` logger is configured with `propagate = False` so records don't doubl
 
 Both formatters use a shared `_extra_fields(record)` helper that extracts caller-supplied fields from the LogRecord (anything not in `_STDLIB_ATTRS` and not underscore-prefixed).
 
-The concrete event inventory and the operator-facing description of the `text` and `gelf` output formats live in [ARCHITECTURE.md](ARCHITECTURE.md), since those are current-system details rather than decision history.
+The concrete event inventory, output formats, field contracts, redaction rules, and troubleshooting guidance live in [docs/logging.md](docs/logging.md). The formatter and bootstrap boundaries stay in [ARCHITECTURE.md](ARCHITECTURE.md#logging), since those are current-system details rather than decision history.
 
 **Timing note:** `client_ip` is captured once at the top of `run_command()` as a local variable before the `generate()` closure is defined. This avoids a hidden dependency on Flask's request context being active when the generator body runs during streaming. The same `client_ip` local is closed over in `generate()`.
 
@@ -642,26 +644,8 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](FEATURES.md) - full per-feature reference
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [ARCHITECTURE.md](ARCHITECTURE.md) - current runtime and design contracts
+- [CONFIGURATION.md](CONFIGURATION.md) - current operator settings
+- [FEATURES.md](FEATURES.md) - current user-facing behavior
+- [CONTRIBUTING.md](CONTRIBUTING.md) - contributor workflow
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation ownership and maintenance

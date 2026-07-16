@@ -1,6 +1,6 @@
 # External Command Integrations
 
-This document explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and personal/team Files workspace model.
+This contributor guide explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and personal/team Files workspace model. Users looking for command discovery, run modes, Files, Secrets, or provider setup should start with [Bundled Tools](tools.md).
 
 The goal is not to document every flag a tool supports. The goal is to make app-owned behavior visible: command rewrites, environment overrides, workspace file handling, permission assumptions, and validation rules.
 
@@ -453,3 +453,10 @@ Also check the command-specific surfaces that sit outside the registry:
 - AI follow-ups: update `app/services/ai/next_commands.py`, `app/services/ai/prompts.py`, and `app/services/ai/suggestions.py` when the tool should appear in next-command suggestions or needs special validation for targets, ports, scripts, wordlists, known-bad flags, duplicate-source commands, or packaged file paths.
 - Durable surfaces: confirm Project Findings, Atlas entities, History search, exports, and evidence packages still show the intended output shape when the command creates reusable findings or entities.
 - Tests: add focused output-signal tests for transcript parsing, registry/autocomplete/policy tests for command metadata, smoke coverage for visible examples, and AI validation/context tests when the tool can be suggested or rejected by AI.
+
+## Related Docs
+
+- [tools.md](tools.md) - user and operator guidance for bundled tools
+- [../CONTRIBUTING.md](../CONTRIBUTING.md#adding-external-commands) - contributor workflow for adding commands
+- [../ARCHITECTURE.md](../ARCHITECTURE.md#security-model) - command trust and process boundaries
+- [../tests/README.md](../tests/README.md) - test commands and layer guidance

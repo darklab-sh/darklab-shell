@@ -17,102 +17,27 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 ---
 
 ## Table of Contents
-- [Features](#features)
 - [Quick Start](#quick-start)
+- [Features](#features)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Configuration](#configuration)
 - [Installed Tools](#installed-tools)
 - [Raw-Packet Scanning](#raw-packet-scanning)
 - [Production Deployment](#production-deployment)
+- [Running in a Development Environment](#running-in-a-development-environment)
 - [Security & Process Isolation](#security--process-isolation)
 - [License](#license)
 - [Documentation Map](#documentation-map)
-- [Project Structure](#project-structure)
-
----
-
-## Features
-
-- **Terminal workflow** — live output streaming with structured row metadata, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep`, `tail`, and the safe JSON/JSONL selector `jq`, keyboard shortcuts, quiet-stream warnings, and same-tab recovery when an active stream detaches or starts moving again
-- **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
-- **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, a desktop-aligned mobile menu with compact context hints, and a mobile History panel with collapsible search, filter, and bulk-action tools
-- **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, deterministic outcome summaries for supported noisy tools, quieter handling for known progress/status chatter, jump-to-live / jump-to-bottom controls, and exports/permalinks that include the same visible summaries while keeping raw transcripts unchanged
-- **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, cleaner saved search text that skips known scanner noise without deleting raw output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, selected-history exports as text or JSONL, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
-- **Run comparison** — compare completed runs from History, Run Details, Projects, the active-tab HUD, the mobile menu, or a tab's Findings signal. App-launched comparisons keep the older baseline on the left and current run on the right, then combine responsive transcript diffs with changed finding severities, order-insensitive finding/artifact changes, detected nmap/web/host/TLS changes, workflow step context, folded scanner chatter, lazy unchanged-line expansion, change navigation, copyable summaries, and restore actions
-- **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
-- **Encrypted secrets** — personal or team API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup in the active scope, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
-- **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Shodan InternetDB, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, RouteViews, FOFA, and ZoomEye, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
-- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, ports, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, imported report sources, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Port entities are app-captured evidence from scanner output, so they stay separate from provider-backed intel lookups while still linking back to their host; URL entities also keep a host link so URL evidence can roll up through the matching domain or IP. Run Details shows the source run's Atlas entity count and paged entity tabs before you leave the modal. Large entity details page through older source runs and findings, search matches entity values plus labels and notes, Atlas can scope every tab to one searched or selected source run or project, and active team scope shows deduplicated Atlas rows produced by that team's source runs without mixing in the operator's personal Atlas rows. The Atlas toolbar imports Nuclei JSONL, Nessus XML, OWASP ZAP JSON/XML, Burp Suite XML, Generic CSV, and Generic JSONL with a preview before anything is written; applying an import records a high-level audit row with safe source, option, project, and count details. The generic CSV/JSONL field contract is documented in [FEATURES.md](FEATURES.md#session-entity-atlas). Saved views restore repeat filter sets and can be cleared back to defaults, source runs and project scopes can be cleared from visible chips, source runs can be cleaned from Atlas without deleting their transcripts, and cleanup confirmations explain which rows are disposable, kept by default, or not eligible for that cleanup with compact examples when useful. Reviewed, labeled, noted, or Project-linked single-source rows are kept by default; imported rows and rows still seen elsewhere are not eligible for that cleanup. The Findings tab acts as the cross-run triage queue with project, review-state, and suppression filters plus remediation/verification badges, bulk updates, visible-page suppression, visible-page delete actions, and a desktop board view for lane-based triage
-- **Session files** — optional personal/team Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write the active personal or team Files workspace without opening shell navigation or redirection. File writes, folder creation, moves, and deletes create audit-log rows with path/count/size metadata but not file contents. Team Files use a separate shared workspace, keep personal files private, reload the Files panel when scope changes, let viewers read/download, and make archived teams read-only
-- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, packages, and reports without copying the source records.
-  - Active projects can auto-link completed runs and the Atlas entities those runs produce. URL targets discovered from command arguments create Atlas URL rows and host links alongside the target, so commands such as `curl https://ip.darklab.sh` can be reviewed from both the URL and host context. Project Entities rules can preview, save, apply once, or automatically apply recurring matches for owned domains, IP ranges, URLs, CVEs, and hashes.
-  - Team-owned projects can be shared with other team members when team scope is active, including linked-run artifacts, artifact previews/downloads, evidence packages, and readable report exports.
-  - The Overview tab rolls up each target's app-captured ports and services, cached-provider ports, services, certificate status, provider highlights, app-captured scan coverage, coverage gaps, finding review and verification progress, operational tempo, deliverables status, high-risk target status, recent project activity, and recent-change state, with actions that jump into the existing workspace tabs using the target and high-signal filters that best match the selected row. App-captured port evidence is shown first when available; very long port lists are summarized so the Overview stays readable, provider-backed rows are labeled as cached data with freshness details, and a worklist filter can hide unscanned targets that have no findings when you need a tighter triage view.
-  - Project views hide suppressed Atlas noise by default and expose paged finding review in list or board form, artifact review, cached entity intel context, metadata editing, project-scoped Atlas exports, and target/finding provenance context. Finding rows open the matching Atlas finding first, while **See in run** keeps the raw output line highlight close at hand.
-  - The Monitoring tab shows project-linked watcher checks with status totals, grouped monitor cards, severity and top-signal summaries, filters, current triage state, Run Details and Compare links, safe missing-run states when older baseline or current runs have been deleted, digest notification settings, and a **New monitor** action that opens the watcher form already linked to the project.
-  - Evidence packages preserve selected project evidence through operator-configured presets, provenance-aware manifests, import hints, raw transcript pages, cleaner manifest line indexes, polled archive builds, safe audit correlation, raw artifacts, or redacted text/JSON artifact derivatives.
-  - The Activity tab shows safe project audit rows with filters, paging, collapsed details, and mobile rows, so project users can review what changed without opening operator diagnostics. Metadata edit sheets also show a small Recent activity panel for the item you're editing, with a jump into the filtered Activity tab.
-  - The Report tab turns selected project material into a narrative engagement report with explicit draft saves, section ordering, paged included-evidence controls for large projects, HTML preview, markdown/HTML archive export, safe audit correlation for job-backed exports, and browser Print/PDF.
-- **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, team-scope sharing for live PTY sessions, and completed transcripts saved back into normal history
-- **Session tokens and teams** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows and completed personal workflow executions, recent target autocomplete, saved options, and team memberships across browsers and devices. Migration or rotation waits until workflow executions started by the current identity are no longer active.
-  - A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor.
-  - The Options **Teams** tab and `/api/v1/teams` cover team creation, invites, member edits, recovery codes, archive/reactivate, shared scope management, a Recent activity preview for owners/admins, and an owner/admin Activity subtab for safe team-governance audit rows. `darklab team ...` covers script-friendly team creation, invites, joins, member edits, recovery codes, and saved CLI scope; the terminal `team` built-in covers common in-shell actions such as create, list, join, invite, leave, and recovery-code rotation.
-  - Team scopes share team-owned runs while they're still running, plus History, Run Details, Files, Projects, project targets, finding review, labels, notes, cached Atlas intel, linked-run artifacts, evidence packages, shared workflows, schedules, watchers, notification delivery history, completed-run AI assists, and explicit team secrets while keeping personal work separate.
-  - Archived teams stay visible for review and reactivation, and Files stays readable, but archived teams cannot be used for active team work, invites, membership edits, invite revocation, recovery-code rotation, or file changes until reactivated. Reactivating an archived team restores access, but schedules and watchers paused by archival stay paused until someone resumes them.
-  - Team roles keep viewers read-only while operators, admins, and owners handle the write actions their roles allow; view-only team scope disables destructive/write, suppression, finding-review, history metadata edit and delete, share snapshot, and write-only select-mode controls where possible and explains role denials when a stale action is rejected.
-  - `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
-- **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; app-native intel response bodies are omitted from share/styled export surfaces, while local text exports remain raw
-- **Run notifications** — optional browser desktop notifications fire on run completion, using command-root-only titles and exit/elapsed summaries without sending anything outside the browser
-- **Outbound notifications** — durable `tok_` sessions and active teams can send queued external-run completion notifications, Project digest notifications, and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, terminal `notify` management, retries, delivery audit rows, and audit-log entries for channel config changes that do not store secret values
-- **Scheduled runs** — durable `tok_` sessions can save recurring commands in the active personal or team scope with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
-- **Watchers** — durable `tok_` sessions can turn a command or completed run in the active personal or team scope into a recurring change monitor, capture the first successful run as the baseline when needed, link checks to Projects from the Watchers modal or `darklab watch`, review latest diffs and fire timelines from the Watchers modal or Project Monitoring tab, tune noise with per-watcher policies, triage expected or resolved fires without changing the baseline, pause/resume checks, and accept the latest run as the new baseline when a change is expected
-- **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior, command outcome summaries, and default share-snapshot redaction that now follow the active session token instead of staying browser-local
-- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `notify`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from first-run or completed-run baselines; `notify` manages outbound notification channels and delivery audits without accepting secret values in terminal command text; `commands info <tool>` (with `--json` for a machine-readable entry), `commands search <term>`, and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, subcommands, and per-tool knowledge guidance (notes, gotchas, safe defaults, and artifact behavior) from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
-- **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, manage team scope, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, install shell completion, and link or unlink completed runs from active projects without driving the browser
-- **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. The Workflows workspace is available from **Browse all workflows** in the desktop rail, the mobile menu, or `Alt+G`; its searchable catalog keeps definitions and their inputs together, while a separate Executions tab shows progress and linked runs. Users can save personal or team-scoped v2 playbooks with named typed parameters, masked sensitive fields, stable steps, success/failure or exact-exit-code routes, and bounded output captures for later steps. Sensitive inputs stay redacted in run summaries, History command text, and shared execution status responses. Playbooks keep running after the workspace closes
-- **Opt-in raw-packet scanning** — Linux Docker deployments can unlock Nmap SYN and other raw modes, Naabu SYN scans, and Masscan without running the container in privileged mode. Each tool activates only after its own capability checks pass, connect-capable tools keep safe fallbacks, and `/diag` explains why a requested mode isn't available. See [Raw-Packet Scanning](#raw-packet-scanning)
-- **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting for commands, APIs, and dynamic app routes, shared PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, an IP-gated `/diag/audit` viewer for filtered audit rows and capped CSV/JSON downloads, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
-- **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
-- **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
-- **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite by default, Postgres for larger deployments, optional large-body offload under `data_dir/body-store`, and configurable retention pruning via `permalink_retention_days`
-
-See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
+- [Repository Layout](#repository-layout)
 
 ---
 
 ## Quick Start
 
-### Option 1: Install a Release With Docker Compose
-
-This is the recommended path for a normal self-hosted deployment. It needs Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool on a Linux AMD64 host. It doesn't need Git, a source checkout, Python, Node, or a local image build.
-
-Download the exact release installer and checksum into a temporary review directory:
+On a Linux AMD64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, install the current release with:
 
 ```bash
-mkdir darklab-shell-download
-cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh.sha256
-sha256sum -c setup.sh.sha256
-less setup.sh
-```
-
-The checksum above catches download corruption. To verify that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity before running the installer:
-
-```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/SHA256SUMS.sigstore.json
-cosign verify-blob SHA256SUMS \
-  --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0" \
-  --certificate-oidc-issuer "https://gitlab.com"
-grep '  setup.sh$' SHA256SUMS | sha256sum -c -
-```
-
-After you've reviewed it, create the deployment directory and start the pinned Docker Hub image:
-
-```bash
-sh setup.sh --dir "$HOME/darklab-shell"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.1/setup.sh | sh -s -- --dir "$HOME/darklab-shell"
 cd "$HOME/darklab-shell"
 docker compose pull
 ./verify-release-image.sh
@@ -122,72 +47,26 @@ docker compose ps
 
 Open [http://127.0.0.1:8888](http://127.0.0.1:8888). The loopback-only default keeps the app off the wider network until you deliberately change `HOST_BIND_ADDRESS` or put it behind a trusted reverse proxy.
 
-The canonical image is published in the [GitLab Container Registry](https://gitlab.com/darklab.sh/darklab_shell/container_registry), then the same manifest is copied to [`docker.io/darklabsh/darklab-shell`](https://hub.docker.com/r/darklabsh/darklab-shell) for the Compose pull path. The protected tag pipeline keylessly signs both immutable image references and `SHA256SUMS` with its GitLab OIDC identity. The Docker Hub overview publishes the stable issuer and certificate-identity pattern independently of the GitLab release assets, and the public release check requires that trust information to be present. The release also publishes a CycloneDX SBOM, SLSA provenance, the Grype vulnerability report, a build-input inventory, and a small evidence index tying them to the tag, commit, pipeline, shared image digest, and exact Python base manifest. The release gate fails on Critical findings that have an available fix; all reported matches remain in the downloadable report.
+Want to inspect the installer, confirm its checksum, or verify the release's GitLab identity before running it? Follow [Review and Verify the Installer](#review-and-verify-the-installer) instead of streaming it. You don't need Git, a source checkout, Python, Node, or a local image build for either release-install path.
 
-The installed `release-manifest.json` records both image references, matching digests, and compressed and unpacked image sizes. After the pull, `verify-release-image.sh` requires those registry digests to agree, checks that `.env` still selects the reviewed image, and confirms the local image has the recorded digest before startup. CI keeps cold-pull timing as separate run metadata so retrying a release can't change an already published payload. `LICENSE` contains darklab_shell's GNU AGPLv3 terms; `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` list the bundled tools' separate terms, including WPScan's commercial-use note and Nmap's NPSL 0.95 redistribution conditions.
+---
 
-For convenience, the same installer can be streamed directly. This skips the review step above, so use it only when you accept that tradeoff:
+## Features
 
-```bash
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh | sh -s -- --dir "$HOME/darklab-shell"
-```
+| Feature | What it gives you |
+| --- | --- |
+| [Browser shell](FEATURES.md#output-streaming-and-display) | Live, searchable output across desktop and mobile tabs. |
+| [History and sharing](FEATURES.md#tabs--run-history) | Saved runs, comparisons, exports, permalinks, and redaction. |
+| [Projects and Atlas](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, and entities. |
+| [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
+| [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
+| [Files, variables, and secrets](FEATURES.md#session-files) | Managed inputs, outputs, reusable values, and encrypted tool credentials. |
+| [Teams](FEATURES.md#team-mode) | Shared runs, projects, files, automation, and secrets with role controls. |
+| [Interactive tools](FEATURES.md#interactive-pty-mode) | Guarded PTY sessions for approved tools that need a real terminal. |
+| [AI assists](FEATURES.md#ai-assists) | Optional summaries and next-command drafts with privacy controls. |
+| [Themes and onboarding](FEATURES.md#theme-selector) | Customizable appearance, welcome guidance, shortcuts, and a guided tour. |
 
-### Option 2: Run the Source-Mounted Development Stack
-
-Clone the repository when you're changing the app or want the source tree mounted into the container:
-
-```bash
-git clone https://gitlab.com/darklab.sh/darklab_shell.git
-cd darklab_shell
-docker compose up --build
-```
-
-This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop.
-
-### Option 3: Run Locally Without Docker
-
-This is useful when you want a lighter local development loop and do not need the container runtime.
-
-Before you begin, make sure you have:
-
-- Python 3.14+
-- pip3
-- Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- Redis 8 in the bundled Compose stack, or Redis 6.2+ for custom deployments with `GETDEL` support. Redis is required when `WEB_CONCURRENCY` is greater than `1`; single-worker local development can run without Redis and use in-process state.
-
-Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter, redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
-
-The easiest path is to run:
-
-```bash
-bash examples/run_local.sh
-```
-
-That script:
-
-1. checks for `python3`
-2. checks for `pip3`
-3. verifies that `app/requirements.txt` exists
-4. installs the Python dependencies from that file
-5. starts the app from `app/`
-
-If you prefer to do it manually:
-
-```bash
-python3 -m pip install -r app/requirements.txt
-cd app
-python3 app.py
-```
-
-Then open [http://localhost:8888](http://localhost:8888).
-
-Tradeoffs of the non-Docker path:
-
-- no container filesystem restrictions
-- no `scanner` user separation
-- no Docker-provided networking/capability model
-- no Redis sidecar unless you provide one yourself
-- useful for quick frontend/backend iteration, but not a full production-like environment
+See [FEATURES.md](FEATURES.md) for the full feature reference.
 
 ---
 
@@ -221,313 +100,187 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Released images keep shipped settings and catalogs under `/app/conf`. Repository-free installs put operator overrides in `./conf`, mounted at `/config`, so image upgrades can refresh defaults without hiding them behind an old host directory. Source-mounted development uses the same `*.local.*` names beside the files in `app/conf`. The production installer includes safe starters for commands, FAQ, welcome content, workflows, hints, and the default theme, plus non-active examples for full replacement catalogs and banner art.
+Released images keep shipped defaults under `/app/conf`; repository-free installs keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
 
-Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, including:
-
-- every `config.yaml` key and default value
-- `*.local.*` overlay behavior
-- config reload behavior
-- `.env` variables such as `APP_PORT`, `WORKSPACE_ROOT`, `WEB_CONCURRENCY`, `WEB_THREADS`, `DATABASE_BACKEND`, `DATABASE_URL`, and `DOCKER_GELF_ADDRESS`
-- switching between SQLite and Postgres, including Compose profiles, `DATABASE_URL`, and `.env` versus `config.local.yaml` precedence
-- repository-free `compose.yaml`, the source-mounted `docker-compose.yml`, and optional deployment overlays
-- Files/workspace storage recipes
-- production host tuning notes
-
-SQLite is the default backend for local and single-user installs. Postgres is supported for larger deployments; with Compose, set both the `.env` values that start the `postgres` service and the app database settings described in [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection). If you're moving an existing install to Postgres, use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow after you've backed up the SQLite data directory. Existing Compose-managed Postgres volumes from older major versions should use the same guide's export/import upgrade path before starting the newer Postgres service.
-
-Theme authoring details stay in [THEME.md](THEME.md), and command registry integration details stay in [docs/external-command-integrations.md](docs/external-command-integrations.md).
+Use [CONFIGURATION.md](CONFIGURATION.md) for settings, precedence, supported runtimes, deployment choices, Files storage, raw scanning, database selection, and production tuning. Back up the current data before a database migration, then follow [Postgres Migration](docs/postgres-migration.md) for SQLite-to-Postgres moves or Postgres major-version upgrades. Theme authors can use [THEME.md](THEME.md).
 
 ---
 
 ## Installed Tools
 
-The following tools are installed in the Docker image and available for use:
+The Docker image includes these user-facing external commands. The table mirrors the base command registry; app-native built-ins and pipe helpers are documented in [FEATURES.md](FEATURES.md#built-in-pipe-support). Run `commands info <tool>` in the shell for examples, supported flags, and app-specific guidance.
 
 SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordlist` command lists curated categories, searches installed entries, and prints copy-friendly paths; autocomplete only suggests installed wordlists in command slots explicitly marked with `value_type: wordlist`.
 
 | Tool | Purpose |
 |------|---------|
 | `ping` | ICMP reachability |
-| `curl` / `wget` | HTTP/HTTPS requests |
+| `curl` / `wget` | HTTP/HTTPS requests and downloads |
 | `httping` | HTTP/HTTPS reachability and request timing |
 | `dig` / `nslookup` / `host` | DNS lookups |
 | `whois` | Domain & IP registration info |
 | `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
 | `nc` / `telnet` | TCP connection testing, simple banner checks, and interactive socket troubleshooting |
-| `mtr` | Combined ping + traceroute (auto-rewritten to report mode unless run through Interactive PTY, see Tool Notes) |
+| `mtr` | Combined ping and traceroute |
 | `nmap` | Port scanning and service detection |
 | `openssl` | TLS client diagnostics and cipher inspection |
-| `testssl` / `testssl.sh` | TLS/SSL vulnerability scanning |
+| `testssl` | TLS protocol, cipher, certificate, and vulnerability checks |
 | `dnsrecon` | DNS enumeration and zone transfer testing |
 | `nikto` | Web server vulnerability scanning |
 | `wpscan` | WordPress vulnerability scanning |
-| `nuclei` | Fast CVE/misconfiguration scanner using community templates |
+| `nuclei` | Template-based exposure, misconfiguration, and vulnerability checks |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
-| `amass` | OWASP subdomain enumeration, asset discovery, tracking, and visualization |
+| `amass` | OWASP subdomain enumeration and attack-surface asset discovery |
 | `httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery) |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
 | `tlsx` | TLS certificate, protocol, cipher, and DNS metadata collection (ProjectDiscovery) |
 | `cdncheck` | CDN, cloud, and WAF provider classification for hosts and IPs (ProjectDiscovery) |
-| `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
-| `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
+| `gobuster` | Directory, file, DNS, and vhost discovery |
+| `fping` | Fast parallel ICMP reachability checks |
 | `tcping` | TCP reachability and latency checks for service ports when ICMP is blocked |
-| `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
-| `masscan` | High-speed raw-packet TCP scanner; available when the operator enables raw-packet scanning and readiness passes |
-| `assetfinder` | Fast passive domain and IP discovery using public sources |
+| `masscan` | High-speed raw-packet TCP scanning |
+| `assetfinder` | Fast passive domain and subdomain discovery using public sources |
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
-| `ffuf` | Fast web fuzzer for directory, file, and vhost discovery. Wordlists at `/usr/share/wordlists/seclists/` |
+| `ffuf` | Fast directory, file, and vhost fuzzing |
 | `trufflehog` | Secret scanning for session folders and HTTPS Git repositories |
-| `puredns` | massdns-backed DNS brute forcing with resolver and wildcard output files |
-| `naabu` | Fast port scanner with service discovery (ProjectDiscovery) |
+| `puredns` | DNS brute forcing with resolver and wildcard output |
+| `naabu` | Fast port discovery across hosts and target lists (ProjectDiscovery) |
 | `katana` | JavaScript-aware web crawler for attack surface mapping (ProjectDiscovery) |
 | `wafw00f` | WAF detection — identifies web application firewalls from HTTP fingerprints |
 | `sslscan` | TLS/SSL cipher and certificate scanner — reports supported ciphers, protocol versions, and cert details |
-| `sslyze` | Fast TLS configuration analyser — Heartbleed, ROBOT, CRIME, renegotiation, and certificate chain checks |
+| `sslyze` | Fast TLS configuration analysis and common SSL/TLS weakness checks |
 | `rustscan` | High-speed port discovery; optionally pipes results into nmap for service detection |
-| `shodan` | Shodan host, domain, query, download, scan, account, and honeyscore tools; requires `SHODAN_API_KEY` in the encrypted secrets vault |
-| `vt` | VirusTotal IP, domain, URL, and file-hash reputation; accepts either `VT_API_KEY` or the native `VTCLI_APIKEY` secret name |
-| `greynoise` | GreyNoise IP classification and context; requires `GREYNOISE_API_KEY` in the encrypted secrets vault |
-| `ipinfo` | IP geolocation, ASN, and ownership context; uses `IPINFO_TOKEN` from the encrypted secrets vault when available |
-| `urlscan-cli` | urlscan.io URL submission, result lookup, and search; requires `URLSCAN_API_KEY` in the encrypted secrets vault |
-| `chaos` | ProjectDiscovery Chaos subdomain lookups; requires `PDCP_API_KEY` in the encrypted secrets vault |
+| `shodan` | Shodan host, domain, and search tools |
+| `vt` | VirusTotal reputation lookups |
+| `greynoise` | GreyNoise IP classification and context |
+| `ipinfo` | IP geolocation, ASN, and ownership context |
+| `urlscan-cli` | urlscan.io submission, lookup, and search |
+| `chaos` | ProjectDiscovery subdomain lookups |
 
-The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Shodan InternetDB, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, FOFA, ZoomEye, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, live TLS certificate data, crt.sh, URLhaus, ThreatFox, urlscan.io, SecurityTrails, FOFA, and ZoomEye; `intel url <url>` checks URLhaus, ThreatFox, urlscan.io, FOFA, and ZoomEye; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, paid-only SecurityTrails, FOFA, and ZoomEye use encrypted secrets from the active personal or team scope; FOFA requires `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and search calls require an F-point balance; ZoomEye uses `ZOOMEYE_API_KEY` against the regional `api.zoomeye.ai` API and requires available resource credits; IPinfo can run with public basics and uses `IPINFO_TOKEN` when stored; Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys. Live TLS rows show the certificate currently served on port 443, while crt.sh rows include certificate-transparency history when the public service responds; temporary crt.sh timeouts or 5xx responses are shown as provider outages instead of implying the domain has no certificate data.
-
-### Tool Notes
-
-The notes below cover operator-visible behavior. For the developer-facing integration contracts behind command rewrites, environment overrides, and workspace file handling, see [`docs/external-command-integrations.md`](docs/external-command-integrations.md).
-
-#### mtr
-
-`mtr` normally runs as a live, full-screen interactive display that continuously redraws in place. Normal shell runs are line-oriented, so the app rewrites plain `mtr` commands into report mode for readable saved output.
-
-When Interactive PTY is enabled, use `mtr --interactive <host>` to open the live terminal view instead. Without `--interactive`, the app automatically rewrites any `mtr` command to use `--report-wide` mode when no report flag is already present:
-
-| You type | What runs |
-|----------|-----------|
-| `mtr google.com` | `mtr --report-wide google.com` |
-| `mtr -c 20 google.com` | `mtr --report-wide -c 20 google.com` |
-| `mtr --report google.com` | unchanged — already in report mode |
-
-#### nmap
-
-nmap runs as the unprivileged `scanner` user and defaults to TCP connect scanning when raw readiness is inactive. The [raw-packet scanning](#raw-packet-scanning) opt-in can expose SYN, UDP, OS detection, traceroute, and raw host-discovery modes on supported Linux Docker deployments. An explicit `-sT` always remains a connect scan, and spoofing or link-layer bypass options stay blocked.
-
-#### naabu
-
-naabu uses connect mode while [raw-packet scanning](#raw-packet-scanning) is disabled or unavailable. When its readiness check passes, the app can select SYN mode; restricted-CIDR deployments keep Naabu in connect mode.
-
-#### masscan
-
-masscan has no connect-mode fallback, so live scans require the [raw-packet scanning](#raw-packet-scanning) opt-in and passing readiness checks. When it isn't available, use RustScan or `nmap -sT` instead.
-
-#### wget
-
-When Files are enabled, `wget` downloads go to the active Files folder by default. Use `-P downloads` or `--directory-prefix=downloads` when you want a specific session subfolder.
-
-#### nuclei
-
-`nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so generic scratch writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds. Saved output metadata records whether a Nuclei finding came from that managed cache, an actual workspace template path, a pinned-looking template clone, or an operator-updated template set; normal relative selectors such as `http/` still count as managed-cache templates.
-
-When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active personal/team workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/tlsx`, `/tools/cdncheck`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, `tlsx` and `cdncheck` result files, and `naabu` auxiliary input files.
-
-#### wpscan
-
-`wpscan` runs normally without an API token. Save `WPSCAN_API_TOKEN` in the encrypted secrets vault when you want API-backed vulnerability data; the app passes it to the WPScan process without putting it in the command or transcript. Inline `--api-token` values are blocked so the token can't be saved in history, snapshots, or logs.
-
-#### trufflehog
-
-`trufflehog` is available for secret scanning against managed inputs. Use `trufflehog filesystem --directory <folder> --json` for a folder in Files, or `trufflehog git https://... --json` for an HTTPS Git repository. Local Git paths, SSH Git URLs, custom clone directories, and no-cleanup/trust-local-config modes are blocked so scans stay in the app's managed runtime boundary.
-
-#### puredns
-
-`puredns` is available for DNS brute forcing with the packaged SecLists DNS wordlist. `bruteforce` requires `--resolvers <file>` with a resolver list from Files, and `--write`, `--write-massdns`, and `--write-wildcards` save outputs back to Files.
+For command discovery, app-visible tool adaptations, raw versus fallback modes, Files and Secrets use, intel-provider setup, and tool-specific notes, see [Bundled Tools](docs/tools.md).
 
 ---
 
 ## Raw-Packet Scanning
 
-Raw-packet scanning lets supported Linux Docker deployments use scanner modes that need packet sockets while keeping commands under the unprivileged `scanner` user.
+Supported Linux Docker deployments can opt into packet-socket modes for Nmap, Naabu, and Masscan without running the container as root or in privileged mode. Nmap and Naabu keep connect-mode fallbacks; Masscan requires raw readiness. Spoofing and link-layer bypass flags stay blocked.
 
-### What It Unlocks
-
-- **Nmap:** its normal SYN default plus explicit SYN, UDP, OS detection, traceroute, and raw host-discovery modes.
-- **Naabu:** SYN scanning when the command doesn't explicitly request connect mode.
-- **Masscan:** live and interactive scans; its help output remains available when raw scanning is inactive.
-
-Autocomplete and the Command Registry show raw-only examples and flags only when the matching tool is ready, so the visible choices match what the deployment can run.
-
-### Safety Boundaries
-
-The feature uses the container's existing `NET_RAW` capability and scanner file capabilities. It doesn't enable Docker privileged mode, run scans as root, use host networking, or require Macvlan/IPvlan. User-supplied Nmap `--privileged`, source/decoy/MAC spoofing, and link-layer `--send-eth` remain blocked.
-
-The scanner firewall blocks the app port only when the destination is local to the container. An authorized remote target using the same port remains scannable.
-
-### Fallbacks and Restricted Networks
-
-Nmap and Naabu continue in connect mode when raw scanning is off or a readiness check fails. Masscan has no connect fallback and points users to RustScan or `nmap -sT` instead.
-
-When `RESTRICTED_COMMAND_INPUT_CIDRS` is set, raw Nmap also requires the protected firewall marker to match the effective CIDR list and uses the IP path enforced by that boundary. Packet-socket Naabu and Masscan stay inactive because their traffic doesn't cross the scanner-user OUTPUT rules. Separate host or bridge firewall rules don't override that restriction.
-
-### Enable and Verify
-
-Set `RAW_PACKET_SCANNING_ENABLED=true` in the production `.env`, then restart the shell container. `/diag` reports configured, available, and active state for each scanner and names the failed prerequisite when a tool can't activate. Common blockers include rootless runtimes, `no-new-privileges`, a stripped capability bounding set, or a scanner binary that has lost its file capability.
-
-See [CONFIGURATION.md](CONFIGURATION.md#raw-packet-scanning) for the full readiness, firewall, and diagnostics reference.
+Raw scanning is off by default and may not work under rootless runtimes or restricted CIDR policies. Enable it only after reviewing the platform, firewall, and readiness checks in [CONFIGURATION.md](CONFIGURATION.md#raw-packet-scanning); `/diag` shows whether each scanner is configured, available, and active. [Bundled Tools](docs/tools.md#choose-the-right-run-mode) explains the user-visible fallbacks.
 
 ---
 
 ## Production Deployment
 
-### Installation Layout
+The release installer creates an operator-owned directory with pinned Compose and image settings, private local overrides, lifecycle helpers, the project license, third-party notices, and release-verification material. Production runs the released image without mounting the repository or host source into `/app`. See the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table before installing on a new platform.
 
-The release installer creates a small operator-owned directory with `compose.yaml`, `.env`, safe local-overlay starters under `conf/`, `data/`, `workspaces/`, `backups/`, the project license, third-party notices, a release manifest, managed-file checksums, the pulled-image verifier, and the `darklab-deploy` lifecycle command. Production Compose pulls the exact `docker.io/darklabsh/darklab-shell:2.6.0` tag and never mounts the repository or `/app` from the host. The host config directory stays private at `0700` with files at `0600`; on startup, the root entrypoint validates and copies that tree into a private `appuser` runtime directory before it drops privileges.
+### Review and Verify the Installer
 
-### Release Verification
+If you prefer to inspect the exact release installer before it runs, download it and its checksum into a temporary review directory:
 
-Release-page assets include the deterministic deployment archive, its checksums, the signed `SHA256SUMS` bundle, CycloneDX SBOM, SLSA provenance, build-input inventory, evidence index, and full vulnerability report. The build-input inventory records the exact Python base manifest, source and build-file hashes, effective Docker build arguments, and every Dockerfile step that reaches a package registry or source host. The deployment archive is byte-stable; the full scanner image isn't claimed to be byte-reproducible because Debian packages and several transitive tool dependencies resolve when it builds. The signed image digest and SBOM identify the result that was actually released. Cosign verification uses `https://gitlab.com` as the issuer and the exact tag identity `https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/vX.Y.Z`; release-candidate validation uses the matching `vX.Y.Z-rc.N` identity. The independent Docker Hub overview publishes both patterns, and signatures for both registry references are stored alongside their images.
+```bash
+mkdir darklab-shell-download
+cd darklab-shell-download
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.1/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.1/setup.sh.sha256
+sha256sum -c setup.sh.sha256
+less setup.sh
+```
 
-### State and Optional Services
+The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
-`/data` is durable and contains SQLite, saved output artifacts, and the app-managed vault key. Redis deliberately disables RDB and AOF because it holds coordination, rate-limit, broker, and cache state; a Redis restart can drop in-flight work but doesn't replace the durable app database. Files workspaces use tmpfs by default and disappear when the shell container restarts. To keep Files data, set `WORKSPACE_ROOT=/workspaces` in `.env`, then set `workspace_enabled: true` and `workspace_backend: volume` in `conf/config.local.yaml`; the production stack already mounts the host `./workspaces` directory there.
+```bash
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.1/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.1/SHA256SUMS.sigstore.json
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.1" \
+  --certificate-oidc-issuer "https://gitlab.com"
+grep '  setup.sh$' SHA256SUMS | sha256sum -c -
+```
 
-The default stack uses SQLite and Redis. Set `COMPOSE_PROFILES=postgres` plus `DATABASE_BACKEND=postgres` to use the generated Postgres credentials, or `COMPOSE_PROFILES=llama` to start the optional local model. Raw-packet scanning stays off unless `RAW_PACKET_SCANNING_ENABLED=true`; use the readiness and firewall guidance in [CONFIGURATION.md](CONFIGURATION.md#raw-packet-scanning) before enabling it.
+After reviewing and verifying the installer, create and start the deployment:
 
-### Supported Runtimes
+```bash
+sh setup.sh --dir "$HOME/darklab-shell"
+cd "$HOME/darklab-shell"
+docker compose pull
+./verify-release-image.sh
+docker compose up -d
+docker compose ps
+```
 
-On SELinux-enforcing hosts, label the private bind mounts for container use, for example `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z` in a local Compose override. Rootless Docker and Podman may not be able to grant the `NET_RAW` and `NET_ADMIN` capabilities used by scanner tools. Docker Compose 2.20.0 or newer on Linux AMD64 is the supported production runtime; Podman remains best effort. Dedicated release gates exercise native ARM64, SELinux-enforcing Docker, and rootless Podman when their matching runners are enabled, but those lanes don't broaden the supported production matrix until they pass.
+The canonical image is published in the [GitLab Container Registry](https://gitlab.com/darklab.sh/darklab_shell/container_registry), then the same manifest is copied to [`docker.io/darklabsh/darklab-shell`](https://hub.docker.com/r/darklabsh/darklab-shell) for the Compose pull path. The protected tag pipeline keylessly signs both immutable image references and `SHA256SUMS` with its GitLab OIDC identity. The Docker Hub overview publishes the stable issuer and certificate-identity pattern independently of the GitLab release assets, and the public release check requires that trust information to be present. The release also publishes a CycloneDX SBOM, SLSA provenance, the Grype vulnerability report, a build-input inventory, and a small evidence index tying them to the tag, commit, pipeline, shared image digest, and exact Python base manifest. The release gate fails on Critical findings that have an available fix; all reported matches remain in the downloadable report.
 
-### Backup and Restore
+The installed `release-manifest.json` records both image references, matching digests, and compressed and unpacked image sizes. After the pull, `verify-release-image.sh` requires those registry digests to agree, checks that `.env` still selects the reviewed image, and confirms the local image has the recorded digest before startup. CI keeps cold-pull timing as separate run metadata so retrying a release can't change an already published payload. `LICENSE` contains darklab_shell's GNU AGPLv3 terms; `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` list the bundled tools' separate terms, including WPScan's commercial-use note and Nmap's NPSL 0.95 terms. The built-in FAQ identifies the Nmap Security Scanner and links to the Nmap project.
 
-Use `./darklab-deploy status` to check the installed version, image selection, and release-owned files. `./darklab-deploy backup --keep-days 14` creates and verifies a private archive under `backups/`; SQLite uses the online backup API and Postgres uses `pg_dump` inside a one-off release-image container, so the host needs Docker and Compose but not Python or Postgres client tools. If the bundled Postgres service is stopped, the command starts it for the dump and returns it to the stopped state afterward. Durable Files workspaces are included when `WORKSPACE_ROOT=/workspaces`. Each archive carries `.env`, local config, `/data` including the app-owned vault key, enabled durable workspaces, a redacted manifest, restore notes, and checksums.
+### Storage and Lifecycle
 
-Restore a managed backup with `./darklab-deploy restore backups/<archive>.tar.gz`. Restore takes another safety backup first, stops the app, verifies and stages the selected archive, then restores SQLite or Postgres in one transaction before it commits operator files and durable workspaces. It keeps the installed image and target deployment's Postgres credentials, returns restored host files to the invoking operator, and restarts only after everything succeeds. A failure leaves the app stopped and prints the exact safety-backup recovery command instead of starting against partial state.
+`/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
-### Upgrade, Migration, and Removal
+Use `./darklab-deploy status`, `backup`, `restore`, `upgrade`, `migration-help`, and `remove` for release-managed lifecycle work. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
-Upgrade to an exact newer version with `./darklab-deploy upgrade X.Y.Z`. The command rejects changed release-owned files and downgrades, verifies the release's signed checksum manifest through a digest-pinned Cosign container, checks the exact deployment archive against that manifest, creates and verifies a pre-upgrade backup, validates the new Compose file, then advances the managed files and `DARKLAB_IMAGE` while leaving `.env` settings, `conf/`, `data/`, `workspaces/`, and existing backups in place. When the release adds environment settings, the upgrade lists their names and points to the new `.env.example` without changing the operator's `.env` or printing values. It prints the pull, image-verification, and restart commands instead of starting the new release for you. `--archive /path/to/archive` is the offline path: it checks the adjacent `.sha256` file but expects you to verify the publisher's `SHA256SUMS.sigstore.json` before running the command. Startup can apply forward-only database changes; changing an image tag back doesn't reverse a migration.
+---
 
-`./darklab-deploy migration-help` explains how to move a clone-backed deployment without copying source-owned files. `./darklab-deploy remove --yes` stops the stack and removes only release-owned files; `.env`, `conf/`, `data/`, `workspaces/`, and `backups/` remain for deliberate cleanup.
+## Running in a Development Environment
 
-### Source-Backed Alternatives
+Use a repository checkout when you're changing darklab_shell or want a faster edit-and-restart loop. These paths are for development rather than normal self-hosted installation.
 
-The repository-backed [docker-compose.yml](docker-compose.yml) remains the development and custom-deployment stack. [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is still available for operators who need its GELF, reverse-proxy, external-network, and host-tuning choices; it isn't part of the neutral downloadable production stack.
+### Source-Mounted Docker Stack
 
-### Inventory and Monitoring
+Clone the repository and start the development Compose stack:
 
-Docker images and Compose containers also carry static inventory labels for the app version, git revision, Python version, configured database backend, and metrics path. Label-aware tools such as CheckMK can show those facts from Docker metadata, while `/metrics` remains the live health and sizing surface.
+```bash
+git clone https://gitlab.com/darklab.sh/darklab_shell.git
+cd darklab_shell
+docker compose up --build
+```
 
-Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
+This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop.
+
+### Local Python Environment
+
+This is useful when you want a lighter local loop and don't need the container runtime. It requires Python 3.14+, `pip3`, and Linux or macOS. Redis 6.2 or newer is optional for single-worker development and required when `WEB_CONCURRENCY` is greater than `1`.
+
+The helper checks the local requirements, installs the Python dependencies, and starts the app from `app/`:
+
+```bash
+bash examples/run_local.sh
+```
+
+To run those steps manually:
+
+```bash
+python3 -m pip install -r app/requirements.txt
+cd app
+python3 app.py
+```
+
+Then open [http://localhost:8888](http://localhost:8888).
+
+The local Python path doesn't provide the container filesystem restrictions, separate `scanner` user, Docker networking/capability model, or Redis sidecar. It's useful for frontend and backend iteration, but it isn't a production-like environment.
 
 ---
 
 ## Security & Process Isolation
 
-darklab_shell uses layered controls rather than trusting the browser alone:
+darklab_shell uses layered controls instead of trusting the browser alone:
 
-- Gunicorn runs as unprivileged `appuser`
-- user-submitted commands run as separate unprivileged `scanner` processes
-- `/data` stays writable only for the app runtime
-- loopback targets like `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked
-- shell chaining operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution are blocked when the allowlist is active
-- container startup also adds an OS-level guard so `scanner` cannot connect back to the app port
-- optional `RESTRICTED_COMMAND_INPUT_CIDRS` values reject obvious blocked targets in command validation and add scanner-user egress deny rules in the container
+- Gunicorn runs as unprivileged `appuser`; external commands run as separate unprivileged `scanner` processes.
+- The allow and deny policy blocks shell chaining, unsafe paths, loopback targets, and unsupported command forms before launch.
+- The read-only container gives the app a private durable `/data` mount and tools a temporary `/tmp`; scanner commands cannot read app-owned data.
+- Optional CIDR restrictions combine command validation with scanner-user egress rules so DNS and tool-managed inputs stay inside the same boundary.
+- Files exposes only validated paths under the active personal or team workspace. Temporary Files storage is wiped on restart; persistent workspaces need the configured volume backend and correct host ownership.
 
-This section is intentionally operator-focused. For the developer-facing details behind cross-user signalling, Redis-backed multi-worker kill, and the `nmap` capability model, use [ARCHITECTURE.md](ARCHITECTURE.md).
-
-`RESTRICTED_COMMAND_INPUT_CIDRS` is the recommended Compose setting when the app runs behind a NAT, VPN, or firewall that can reach internal networks. The app layer catches literal IPs, CIDRs, literal-IP URLs, host:port values, and declared target files before a command starts; the container rule is the backstop for DNS names, CNAMEs, and tool-managed resolver inputs. The rule is scoped to the `scanner` user so app-owned Redis, Postgres, AI, metrics, and notification traffic can keep using Docker-internal networks.
-
-### Read-only filesystem
-
-The container filesystem is read-only (`read_only: true`) in both Compose modes. Development overlays the repository source as `./app:/app:ro`; production runs the `/app` bundled into the image and doesn't mount source from the host. There are two intentional writable exceptions:
-
-- **`/data`** — a writable bind mount for the default SQLite database, run-output artifacts, body-store files, and app-owned secret key file, owned by `appuser` with `chmod 700`. Postgres deployments still use this path for filesystem-backed artifacts and app-owned files. Only Gunicorn can write here; the `scanner` user that runs commands has no access. If `data_dir` is unset and `/data` is not writable, the app falls back to `/tmp` for local/dev runs
-- **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, cache files, and optional Files workspaces. Workspace owner directories are app-managed, sticky, setgid, and group-scoped so `appuser` and `scanner` can share validated files without making them world-readable
-
-### Session Files Storage
-
-Files/workspace storage has two coordinated settings:
-
-- `WORKSPACE_ROOT` in Compose is the path the Docker entrypoint prepares before dropping privileges. The app also treats it as the runtime `workspace_root` override, so Compose deployments only need this setting.
-- `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
-
-Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
-
-Team Files use the same root as personal Files. Personal directories are named `sess_*`; team directories are named `team_*`. Use `workspace_backend: volume` with a persistent shared mount when team Files need to survive restarts. With `tmpfs`, team Files are useful scratch space inside one running container, but they are wiped on restart.
-
-For short-lived tmpfs storage, keep the default model:
-
-```yaml
-# app/conf/config.local.yaml
-workspace_enabled: true
-workspace_backend: tmpfs
-```
-
-```yaml
-# docker-compose.yml or an override
-services:
-  shell:
-    environment:
-      - WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
-```
-
-For persistent storage with a host bind mount, the production Compose override uses `./workspaces:/workspaces` plus `WORKSPACE_ROOT=/workspaces`. Pair that with the volume backend in app config:
-
-```yaml
-# app/conf/config.local.yaml
-workspace_enabled: true
-workspace_backend: volume
-```
-
-Prepare the host bind-mount directory with the numeric UID/GID used by `appuser` inside the built image, not a host username. The current image creates `appuser` as `995:995` and `scanner` as `994:994`; scanner commands are launched with the shared `appuser` run group when they access validated workspace files:
-
-```bash
-mkdir -p ./workspaces
-chown 995:995 ./workspaces
-chmod 730 ./workspaces
-```
-
-Existing `sess_*` directories should be owned by `995:995` with mode `3730`; existing app-created files should be `0640`, while command-created output files may be `0660` so the `scanner` user can update them through the shared `appuser` run group.
-
-For persistent storage with a Docker named volume, mount the named volume at the same path used by both settings:
-
-```yaml
-services:
-  shell:
-    environment:
-      - WORKSPACE_ROOT=/workspaces
-    volumes:
-      - darklab_shell_workspaces:/workspaces
-
-volumes:
-  darklab_shell_workspaces:
-```
-
-Then use the same app config as the bind-mount example:
-
-```yaml
-workspace_enabled: true
-workspace_backend: volume
-workspace_root: /workspaces
-```
-
-Named volumes usually do not need host-side `chown`; the root entrypoint will attempt to normalize ownership and modes on startup. Bind mounts should still be prepared on the host because stricter host policies, rootless Docker, and NFS-like mounts may prevent container-side ownership repair.
-
-To prevent commands from writing to either path directly, the app blocks any command that references `/data` or `/tmp` as a filesystem argument (using a negative lookbehind so URLs containing `/data` or `/tmp` as path segments are still permitted).
+Use [ARCHITECTURE.md](ARCHITECTURE.md#security-model) for trust boundaries, subprocess isolation, signalling, and runtime contracts. Use [CONFIGURATION.md](CONFIGURATION.md) for CIDR policy, Files permissions, diagnostics allowlists, secrets, proxy trust, and production settings.
 
 ---
 
 ## License
 
-Copyright (C) 2026 darklab_shell contributors.
+Copyright (C) 2026 darklab_shell contributors. Original source and documentation are licensed under [GNU AGPL v3](LICENSE), using the SPDX expression `AGPL-3.0-only`. The full license text controls.
 
-darklab_shell's original source code and documentation are licensed under the [GNU Affero General Public License version 3](LICENSE), using the SPDX expression `AGPL-3.0-only`. You can use, study, modify, distribute, and offer the app as a service under those terms. If you modify darklab_shell and let users interact with it remotely over a network, Section 13 requires the modified version to prominently offer every remote user an opportunity to receive that version's complete Corresponding Source at no charge, through a standard or customary way of copying software. The full [license text](LICENSE) controls.
-
-Project-owned source files carry short SPDX copyright and license notices near the top, so their terms stay clear when a file is copied on its own. Generated bundles and third-party code keep their upstream notices instead of receiving the darklab_shell header. The root `LICENSE` remains the complete license text.
-
-The rail footer, mobile menu footer, and **What is this?** FAQ entry link to the exact GitLab source tag for each official release, with the repository page opened at its README. Operators of modified network deployments remain responsible for pointing that link at their version's complete corresponding source, making the offer prominent to all remote users, and providing the source at no charge. The official placement isn't a blanket guarantee that a modified service meets Section 13.
+If you modify darklab_shell and let users interact with it over a network, AGPL Section 13 requires a prominent, no-charge way for those users to receive that version of the complete Corresponding Source. Operators of modified deployments are responsible for pointing the in-app source link at their version and meeting those terms.
 
 Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Released images and installer payloads include `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` so those terms remain separate from the project license.
 
@@ -549,1006 +302,30 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
+- [docs/changelog/1.x.md](docs/changelog/1.x.md) - Published 1.x release history
+- [docs/changelog/2.x.md](docs/changelog/2.x.md) - Published 2.0 through 2.3.1 release history
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - Contributor contracts for command registry metadata, rewrites, environment, Files, and validation
+- [docs/logging.md](docs/logging.md) - Log levels, formats, event names, fields, redaction rules, and troubleshooting
 - [docs/notifications.md](docs/notifications.md) - Outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
 - [docs/schedules.md](docs/schedules.md) - Scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/tools.md](docs/tools.md) - Bundled tool discovery, run modes, Files, Secrets, provider setup, and app-visible adaptations
 - [docs/watchers.md](docs/watchers.md) - Change-detection watcher baseline, diff, scheduler, and notification behavior
 - [docs/workflows.md](docs/workflows.md) - Workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/README.md](tests/README.md) - Testing handbook, live suite inventory commands, smoke-test coverage, and focused runs
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
 
 ---
 
-## Project Structure
+## Repository Layout
 
-Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTURE.md). The architecture and testing docs carry the deeper explanations.
-
-```text
-.
-├── .dockerignore               # Docker build-context exclusion list — keeps node_modules, tests, .git out of the image
-├── .env.example                # Shared development/production environment template, copied to a private .env by the release installer
-├── .gitignore                  # Git ignore patterns
-├── .gitlab-ci.yml              # GitLab CI pipeline — tests, lint, audit, image verification, dual-registry release, and installer publishing
-├── .gitlab/
-│   └── merge_request_templates/
-│       └── Default.md          # Default GitLab merge request template used by contributors
-├── .mailmap                    # Canonical contributor identity mapping for local and GitLab-authored commits
-├── .markdownlint-cli2.jsonc    # markdownlint-cli2 config — Markdown lint rules used by npm run lint:md
-├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
-├── .tooling/                   # Developer/test/lint tool configuration; app runtime config lives under app/conf/
-│   ├── eslint.config.js        # ESLint config — browser globals plus JS tooling/test style rules
-│   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
-│   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
-│   ├── playwright.capture.mobile.config.js  # Playwright config for the mobile UI screenshot capture pipeline
-│   ├── playwright.config.js    # Playwright single-project config for VS Code and focused local debugging
-│   ├── playwright.demo.config.js     # Playwright config for recording the desktop demo video
-│   ├── playwright.demo.mobile.config.js # Playwright config for recording the mobile demo video
-│   ├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments
-│   ├── playwright.shared.js    # Shared Playwright server-builder helpers used by both configs
-│   ├── playwright.visual.contracts.js # Shared desktop/mobile visual contract values for demo and capture Playwright flows
-│   ├── pytest.ini              # pytest config — keeps collection scoped away from bind-mounted data and dependency directories
-│   ├── ruff.toml               # Ruff config — Python lint rules and local per-file ignores
-│   ├── stylelint.config.mjs    # stylelint config — CSS syntax and safety lint rules
-│   ├── vitest.config.js        # Vitest unit test config (jsdom environment)
-│   └── yamllint.yml            # yamllint config — relaxed line length, no document-start requirement
-├── ARCHITECTURE.md            # Current system structure, diagrams, runtime layers, persistence, and app internals
-├── CHANGELOG.md               # Release-by-release change log organised by version (Added / Changed / Fixed / Removed)
-├── CONFIGURATION.md           # Operator config reference for app/conf, .env, Compose overlays, storage, and production tuning
-├── CONTRIBUTING.md            # Contributor setup, local workflow, and merge request guidance
-├── CONTRIBUTORS.md            # Project contributors
-├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
-├── DOC_STANDARDS.md          # Documentation structure, preferred templates, and review rules for ongoing doc updates
-├── Dockerfile                  # Shared development/production image with scanner toolchain and bundled /app runtime
-├── FEATURES.md                # User-facing feature catalog with screenshots and highlights
-├── LICENSE                    # GNU AGPLv3 terms for darklab_shell's original source code and documentation
-├── README.md                  # This file — top-level overview and project structure map
-├── THEME.md                   # Theme authoring/reference guide and runtime token behavior
-├── TODO.md                    # Internal task list, known issues, and product ideas
-├── app/
-│   ├── app.py                  # Local development entrypoint that boots the runtime and starts Flask
-│   ├── app_factory.py          # Generic Flask constructor used behind app.create_app()
-│   ├── blueprints/
-│   │   ├── api_v1.py           # Shared /api/v1 blueprint, helpers, and route registration
-│   │   ├── api_v1_notifications.py # API notification channel and event routes
-│   │   ├── api_v1_read.py      # API health, OpenAPI, history, output, Atlas, and project read routes
-│   │   ├── api_v1_runs.py      # API run start, status, wait, stream, cancel, and AI routes
-│   │   ├── api_v1_schedules.py # API schedule list, create, update, delete, and fire routes
-│   │   ├── api_v1_streaming.py # API run SSE-to-NDJSON stream adapter helpers
-│   │   ├── api_v1_teams.py     # API team create, list, member, invite, and recovery routes
-│   │   ├── api_v1_watchers.py  # API watcher list, create, update, delete, and run-now routes
-│   │   ├── assets.py           # Shared assets blueprint, client logs, vendor files, health, and status routes
-│   │   ├── assets_audit.py     # IP-gated diagnostics audit log and export routes
-│   │   ├── assets_diag.py      # IP-gated diagnostics, classifier, AI-test, and metrics routes
-│   │   ├── atlas.py           # Shared Atlas blueprint, import, saved-view, and route registration
-│   │   ├── atlas_mutations.py # Atlas cleanup, suppression, delete, intel refresh, and project-link routes
-│   │   ├── atlas_read.py      # Atlas run, entity, finding, detail, and export read routes
-│   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
-│   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
-│   │   ├── history_compare_requests.py # Owner-scoped History and Project comparison request resolution
-│   │   ├── notifications.py    # /session/notification-channels* browser notification-channel CRUD and test-send routes
-│   │   ├── projects.py         # Shared project blueprint, helpers, and route registration
-│   │   ├── projects_artifacts.py # Project artifact list, preview, download, and download-ticket routes
-│   │   ├── projects_auto_promote.py # Project auto-promote rule preview, apply, and management routes
-│   │   ├── projects_core.py    # Project list, create, active-project, overview, activity, run, and entity routes
-│   │   ├── projects_findings.py # Project finding list, review, run finding, and triage routes
-│   │   ├── projects_links.py   # Project link and run-entity relationship routes
-│   │   ├── projects_metadata.py # Atlas/project entity label, note, and metadata routes
-│   │   ├── projects_monitoring.py # Project monitoring, alert acknowledgment, and digest settings routes
-│   │   ├── projects_packages.py # Project evidence package create, download, job, and delete routes
-│   │   ├── projects_report.py  # Project report draft, preview, export job, and download-ticket routes
-│   │   ├── projects_targets.py # Project target list, create, update, and delete routes
-│   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
-│   │   ├── run_broker.py       # Brokered /runs start, replay, and SSE stream routes
-│   │   ├── run_client.py       # Browser-owned built-in run persistence route
-│   │   ├── run_kill.py         # /kill route for active command and PTY runs
-│   │   ├── run_pty.py          # Interactive PTY run start, stream, snapshot, input, and resize routes
-│   │   ├── run_support.py      # Shared run-route helpers for scope, ownership, limits, and capability checks
-│   │   ├── schedules.py        # /schedules* browser scheduled-run CRUD and manual fire routes
-│   │   ├── secrets.py          # /session/secrets* encrypted personal/team secret metadata and write routes
-│   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
-│   │   ├── teams.py            # /session/teams* browser team, invite, member, and recovery routes
-│   │   ├── watchers.py         # /watchers* browser watcher CRUD, fire audit, run-now, and baseline routes
-│   │   ├── workflows.py        # /workflow-executions* durable workflow start, status, and cancel routes
-│   │   └── workspace.py        # /workspace/files* app-managed personal/team file routes
-│   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
-│   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
-│   │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
-│   │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
-│   │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
-│   │   ├── commands.yaml           # Structured command registry for catalog grouping, autocomplete hints, runtime adaptations, and smoke-test examples
-│   │   ├── config.yaml             # Application configuration (see CONFIGURATION.md)
-│   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
-│   │   ├── package_presets.yaml    # Evidence package preset catalog used by the package wizard
-│   │   ├── report_templates.yaml   # Engagement report template catalog used by Project reports
-│   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
-│   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
-│   │   ├── themes/                 # Built-in theme definitions (one YAML per theme — apricot_sand, charcoal_amber, darklab_obsidian, etc.)
-│   │   ├── tour.yaml               # Versioned onboarding tour chapters shared by the tour command and visual tour
-│   │   ├── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
-│   │   ├── wordlists.yaml          # Curated SecLists catalog categories used by the wordlist command and autocomplete
-│   │   └── workflows.yaml          # Guided workflows panel definitions (multi-step diagnostic command sequences)
-│   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
-│   ├── config_paths.py         # Shared shipped-config and operator-overlay path resolver
-│   ├── core/
-│   │   ├── __init__.py         # Core helper package marker
-│   │   ├── database.py         # DB connection, schema init, retention pruning
-│   │   ├── database_access.py  # Lazy database backend/connect accessors for service modules
-│   │   ├── database_backend.py # Backend enum, dialect helpers, pool setup, and storage diagnostics boundary
-│   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
-│   │   ├── http_rate_limit.py  # Baseline dynamic-route throttle for scanner-resistant request handling
-│   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
-│   │   ├── migrations/         # SQLite/Postgres schema migration registry and runner
-│   │   │   ├── __init__.py     # Ordered app migration list
-│   │   │   ├── baseline.py     # Frozen SQLite/Postgres fresh-install schema baseline
-│   │   │   ├── reconciliation.py # SQLite/Postgres migration reconciliation and stamping helpers
-│   │   │   ├── runner.py       # Backend-aware migration runner and ledger helper
-│   │   │   ├── v0001_postgres_baseline.py # Legacy Postgres baseline ledger entry
-│   │   │   ├── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
-│   │   │   ├── v0003_postgres_atlas_search.py # Trigram-backed Postgres Atlas search indexes
-│   │   │   ├── v0004_postgres_atlas_detail_indexes.py # Postgres Atlas detail lookup indexes
-│   │   │   ├── v0005_postgres_project_findings_indexes.py # Postgres Project Findings paging indexes
-│   │   │   ├── v0006_postgres_atlas_suppression.py # Postgres Atlas suppression columns and indexes
-│   │   │   ├── v0007_postgres_atlas_metadata_search.py # Postgres Atlas label/note search indexes
-│   │   │   ├── v0008_postgres_session_token_last_seen.py # Postgres API token last-seen column
-│   │   │   ├── v0009_notification_channels.py # Postgres outbound notification channel and event tables
-│   │   │   ├── v0010_schedules.py # Postgres scheduled-run and watcher-owned schedule tables
-│   │   │   ├── v0011_watchers.py # Postgres watcher state and fire-audit tables
-│   │   │   ├── v0012_run_output_summary.py # Postgres structured output summary table for fast output filters
-│   │   │   ├── v0013_ai_run_assists.py # Postgres AI assist queue/cache and suggestion validation tables
-│   │   │   ├── v0014_ai_assist_progress.py # Postgres in-flight AI assist progress column
-│   │   │   ├── v0015_teams.py # Postgres team-mode base tables
-│   │   │   ├── v0016_team_scope_runs.py # Postgres team ownership for runs, snapshots, and recent values
-│   │   │   ├── v0017_team_scope_projects.py # Postgres team ownership for Projects
-│   │   │   ├── v0018_team_scope_automation.py # Postgres team ownership for schedules and watchers
-│   │   │   ├── v0019_team_scope_notifications.py # Postgres team ownership for notification channels and events
-│   │   │   ├── v0020_team_scope_ai_assists.py # Postgres team ownership for AI assist queue/cache rows
-│   │   │   ├── v0021_team_scope_workflows.py # Postgres team ownership for saved workflows
-│   │   │   ├── v0022_project_slug_scope.py # Postgres personal/team Project slug uniqueness
-│   │   │   ├── v0023_team_code_hash_uniqueness.py # Postgres global uniqueness for team invite/recovery codes
-│   │   │   ├── v0024_team_scope_atlas.py # Postgres team-owned Atlas entity/finding deduplication
-│   │   │   ├── v0025_team_scope_workspace_metadata.py # Postgres team-owned workspace-file metadata
-│   │   │   ├── v0026_project_auto_promote_rules.py # Postgres Project auto-promote rules
-│   │   │   ├── v0027_atlas_import_sources.py # Postgres Atlas import draft, batch, and source-link tables
-│   │   │   ├── v0028_finding_triage_details.py # Postgres finding remediation and verification table
-│   │   │   ├── v0029_project_reports.py # Postgres Project report draft table
-│   │   │   ├── v0030_audit_events.py # Postgres audit event table and indexes
-│   │   │   ├── v0031_run_output_summary_status.py # Postgres run-output summary backfill status markers
-│   │   │   ├── v0032_watcher_monitoring_phase0.py # Postgres watcher monitoring project-link and fire-triage schema
-│   │   │   ├── v0033_watcher_monitoring_policy.py # Postgres watcher monitoring policy controls
-│   │   │   ├── v0034_project_digest_settings.py # Postgres Project digest settings table
-│   │   │   ├── v0035_project_digest_schedule_dispatch.py # Postgres Project digest schedule and notification constraints
-│   │   │   ├── v0036_atlas_port_entity_metadata.py # Postgres Atlas port relationship and metadata columns
-│   │   │   ├── v0037_scan_target_observations.py # Postgres app-native scan target observation records
-│   │   │   ├── v0038_url_host_entity_links.py # Postgres URL-to-host Atlas relationship marker
-│   │   │   ├── v0039_unified_schema_baseline.py # SQLite/Postgres unified schema baseline marker
-│   │   │   ├── v0040_personal_scope_team_id_normalization.py # Personal-scope team-id normalization for partial indexes
-│   │   │   ├── v0041_project_atlas_sort_indexes.py # Project and Atlas sort-order indexes
-│   │   │   ├── v0042_run_artifact_lookup_indexes.py # Run artifact lookup indexes
-│   │   │   ├── v0043_workflow_executions.py # Durable workflow definition version and execution tables
-│   │   │   └── v0044_finding_occurrence_comparison.py # Per-run finding severity and comparison identity snapshots
-│   │   ├── output_entities.py  # Generic IP, domain, URL, hash, CVE, and ANSI-normalization helpers
-│   │   ├── output_port_entities.py # Scanner port entity and port-skip logging helpers
-│   │   ├── output_shodan.py    # Shodan DNS/text-row signal helpers
-│   │   ├── output_signals.py   # Server-side output signal classifier and scanner-specific entity shaping
-│   │   ├── output_structured_signals.py # JSON and structured scanner signal/entity helpers
-│   │   ├── output_targets.py   # Command root and target extraction helpers
-│   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and single-worker fallback guard
-│   │   ├── process_redis.py    # Shared Redis client proxy for process-state consumers
-│   │   ├── redaction.py        # Snapshot-share redaction helpers and built-in rule application
-│   │   ├── schema_manifest.py  # SQLite/Postgres schema inventory helpers for migration unification checks
-│   │   └── startup_logging.py  # Import-time config log buffering and safe fatal fallback
-│   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to factory construction)
-│   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
-│   ├── requirements.txt        # Python runtime dependencies
-│   ├── runtime_bootstrap.py    # Explicit web/worker startup for logging, metrics, Redis, and DB init
-│   ├── services/
-│   │   ├── __init__.py         # Service package marker
-│   │   ├── ai/
-│   │   │   ├── __init__.py     # Optional AI assist config helper
-│   │   │   ├── assists.py      # Shared browser/API AI assist enqueue and listing helpers
-│   │   │   ├── client.py       # OpenAI-compatible provider client, JSON parsing, and private-endpoint guard
-│   │   │   ├── context.py      # Redacted run-context assembly, caps, and deterministic hashing
-│   │   │   ├── coordination.py # Redis-backed AI rate limits, enqueue locks, and worker concurrency slots
-│   │   │   ├── diagnostics.py  # /diag AI provider probe and test-prompt helpers
-│   │   │   ├── next_commands.py # Next-command assist provider orchestration and validation handoff
-│   │   │   ├── prompts.py      # Versioned AI prompt text and prompt-boundary helpers
-│   │   │   ├── schemas.py      # Pinned AI response schemas and validators
-│   │   │   ├── storage.py      # AI assist queue/cache storage helpers
-│   │   │   ├── suggestions.py  # AI next-command validation, target checks, and audit shaping
-│   │   │   ├── summarize.py    # Summary assist provider orchestration and deterministic signal repairs
-│   │   │   └── worker.py       # Dedicated AI worker entrypoint
-│   │   ├── api_v1/
-│   │   │   ├── __init__.py     # Headless API service package marker
-│   │   │   ├── auth.py         # /api/v1 token authentication and JSON error helpers
-│   │   │   ├── openapi.py      # OpenAPI source-of-truth dictionary for /api/v1
-│   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
-│   │   ├── assets/
-│   │   │   ├── __init__.py     # Asset service package marker
-│   │   │   ├── client_log.py   # Browser log sanitizing and detail allowlist helpers
-│   │   │   └── diagnostics.py  # Asset manifest and frontend bundle diagnostics helpers
-│   │   ├── atlas/
-│   │   │   ├── __init__.py     # Atlas service package marker
-│   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
-│   │   │   ├── import_analysis.py # Atlas import option, duplicate, and apply-count analysis helpers
-│   │   │   ├── import_helpers.py # Safe Atlas import text, hash, count, and log helpers
-│   │   │   ├── import_limits.py # Atlas import limit configuration and safe workflow errors
-│   │   │   ├── import_parser.py # Atlas import file parsing and normalization helpers
-│   │   │   ├── import_sources.py # Atlas import draft, batch, and provenance storage helpers
-│   │   │   ├── import_workflow.py # Atlas import preview/apply workflow helpers
-│   │   │   ├── intel_bridge.py # Atlas entity intel refresh and snapshot persistence helpers
-│   │   │   ├── intel_summary.py # Atlas intel snapshot shaping and highlights
-│   │   │   ├── lookup.py       # Session entity summary, list, and detail queries
-│   │   │   ├── lookup_export.py # Atlas entity export queries and CSV/JSONL rendering helpers
-│   │   │   ├── lookup_filters.py # Atlas list/search orphan, suppression, and run-filter SQL helpers
-│   │   │   ├── lookup_metadata.py # Atlas metadata and import-source shaping helpers
-│   │   │   ├── lookup_mutations.py # Atlas entity and finding suppression/review mutation helpers
-│   │   │   ├── lookup_runs.py # Atlas source-run list and count query helpers
-│   │   │   ├── lookup_search.py # Shared Atlas text and metadata search SQL helpers
-│   │   │   ├── materializer.py # Run-output entity materialization into the Atlas tables
-│   │   │   ├── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
-│   │   │   ├── schema.py       # Atlas entity type registry
-│   │   │   └── scope.py        # Shared Atlas owner and source-scope predicates
-│   │   ├── audit/
-│   │   │   ├── __init__.py     # Audit event service package exports
-│   │   │   ├── automation.py   # Shared schedule and watcher audit-event helpers
-│   │   │   ├── context.py      # Request, scope, and actor context helpers for audit rows
-│   │   │   ├── models.py       # Audit event types, target types, and recording-mode registry
-│   │   │   ├── queries.py      # Audit event filtering and row serialization helpers
-│   │   │   ├── recorder.py     # Bounded audit recorder with hashed session identity
-│   │   │   └── retention.py    # Audit retention pruning and disabled-state startup warning
-│   │   ├── cleanup_reasons.py  # Shared cleanup preview reason labels, bucket summaries, and sample helpers
-│   │   ├── commands/
-│   │   │   ├── __init__.py     # Command service package marker
-│   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar
-│   │   │   ├── builtins.py     # App-owned built-in shell helpers handled before external process spawn
-│   │   │   ├── builtins_catalog.py # Static built-in command help, shortcut, and special-command data
-│   │   │   ├── builtins_discovery.py # Help, FAQ, command catalog, man, type, and which built-in handlers
-│   │   │   ├── builtins_format.py # Shared formatting, ANSI styling, and output-line helpers for built-ins
-│   │   │   ├── builtins_intel.py # External intel lookup built-in command handler
-│   │   │   ├── builtins_misc.py # Miscellaneous and guardrail-flavored built-in command handlers
-│   │   │   ├── builtins_notify.py # Outbound notification channel built-in command family
-│   │   │   ├── builtins_project.py # Project workspace built-in command family and project target helpers
-│   │   │   ├── builtins_runtime.py # Runtime/history/status built-in command handlers
-│   │   │   ├── builtins_schedule.py # Scheduled-run built-in command family
-│   │   │   ├── builtins_secrets.py # Encrypted personal/team secret built-in command handlers
-│   │   │   ├── builtins_session.py # Session token status and session variable built-in command handlers
-│   │   │   ├── builtins_shortcuts.py # Keyboard shortcut reference and shortcuts built-in command handler
-│   │   │   ├── builtins_system.py # Small system-style built-in command handlers
-│   │   │   ├── builtins_team.py # Team management built-in command family
-│   │   │   ├── builtins_watch.py # Watcher built-in command family
-│   │   │   ├── builtins_wordlist.py # Wordlist built-in command handler backed by the SecLists catalog service
-│   │   │   ├── builtins_workspace.py # Session file built-in command family and workspace aliases
-│   │   │   ├── features.py     # Shared command discovery and autocomplete feature gates
-│   │   │   ├── postfilters.py  # Synthetic pipe-helper post-filter parser for app-native pipelines
-│   │   │   ├── raw_packets.py  # Raw-packet scanner readiness, policy, diagnostics, and transport helpers
-│   │   │   ├── registry.py     # Public command-registry surface for loading, autocomplete, validation, and rewrites
-│   │   │   ├── registry_adaptations.py # Shared normalization and gates for declarative runtime adaptations
-│   │   │   ├── registry_autocomplete.py # Autocomplete context normalization, merging, and feature filtering
-│   │   │   ├── registry_cache.py # Read-only containers for cached command registry data
-│   │   │   ├── registry_catalog.py # Command catalog, secret-consumer, and interactive PTY registry shaping
-│   │   │   ├── registry_content.py # Workflow, welcome, tour, ASCII art, and hint content loaders
-│   │   │   ├── registry_faq.py # Built-in/custom FAQ entries and FAQ markup rendering helpers
-│   │   │   ├── registry_loader.py # Command registry YAML loading, normalization, and overlay merging
-│   │   │   ├── registry_runtime.py # Runtime command adaptation helpers for registry entries
-│   │   │   ├── registry_smoke.py # Command-registry driven smoke-test command corpus helpers
-│   │   │   ├── registry_targets.py # Typed command-input and restricted-target helpers
-│   │   │   ├── registry_validate.py # High-level command validation orchestration
-│   │   │   ├── registry_validation.py # Command tokenization, policy matching, deny checks, and runtime-command detection
-│   │   │   ├── registry_workspace.py # Workspace flag/path rewriting and file-target validation helpers
-│   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
-│   │   ├── diagnostics/
-│   │   │   ├── __init__.py     # Diagnostics service package marker
-│   │   │   ├── classifier_drift.py # Recent-output classifier drift sampler for /diag
-│   │   │   └── storage.py      # Shared cached database storage snapshot for /diag and Prometheus
-│   │   ├── diff/
-│   │   │   ├── __init__.py     # Shared diff service package marker
-│   │   │   ├── classifiers/
-│   │   │   │   ├── __init__.py # Shared tool-aware diff classifier registry and priority ordering
-│   │   │   │   ├── common.py   # Shared parser, host, line-index, and bounded-list helpers
-│   │   │   │   ├── findings.py # Structured finding fingerprint diff classifier
-│   │   │   │   ├── hosts.py    # Host and subdomain list diff classifier
-│   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
-│   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
-│   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
-│   │   │   ├── models.py       # Shared diff result dataclass and diff-kind constants
-│   │   │   └── rollups.py      # Watcher-fire severity and top-signal rollups for dashboards and digests
-│   │   ├── download_tickets.py # Short-lived signed URL helpers for browser-native downloads
-│   │   ├── history/
-│   │   │   ├── __init__.py     # History service package marker
-│   │   │   ├── api_queries.py  # Headless API run status, history search, and artifact query helpers
-│   │   │   ├── cleanup_logging.py # Structured cleanup fields for History INFO and audit events
-│   │   │   ├── comparison_logging.py # Bounded lifecycle logging for completed and partial run comparisons
-│   │   │   ├── comparison_queries.py # Owner-scoped comparison candidates, run rows, and object loading
-│   │   │   ├── insights.py     # History activity, command-mix, and run-constellation insight helpers
-│   │   │   ├── mutations.py    # History run delete and bulk-export mutation helpers
-│   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
-│   │   │   ├── queries.py      # History list, search, run metadata, and compare query helpers
-│   │   │   ├── run_metadata.py # Shared run-history metadata, artifact, count, and table-introspection helpers
-│   │   │   ├── search.py       # Backend-aware run-history search SQL helpers
-│   │   │   └── snapshots.py    # Snapshot create, lookup, and delete persistence helpers
-│   │   ├── intel/
-│   │   │   ├── __init__.py     # External intel service package marker
-│   │   │   ├── abuseipdb.py    # AbuseIPDB provider normalization
-│   │   │   ├── audit.py        # Structured audit events for external intel provider lookups
-│   │   │   ├── base.py         # Provider base classes, result objects, and provider exceptions
-│   │   │   ├── cache.py        # Redis-backed normalized intel response and quota backoff cache helpers
-│   │   │   ├── canonical.py    # Canonical IP, domain, URL, hash, and CVE key helpers
-│   │   │   ├── censys.py       # Censys Platform host provider normalization
-│   │   │   ├── clients.py      # HTTP/DNS clients for app-native intel providers
-│   │   │   ├── crtsh.py        # crt.sh certificate-transparency provider normalization
-│   │   │   ├── fofa.py         # FOFA search provider normalization
-│   │   │   ├── greynoise.py    # GreyNoise provider normalization
-│   │   │   ├── hibp.py         # HIBP Pwned Passwords provider normalization
-│   │   │   ├── ipinfo.py       # IPinfo provider normalization
-│   │   │   ├── lookup.py       # Provider fan-out, cache, rate-limit, and lookup orchestration
-│   │   │   ├── nvd.py          # NVD CVE provider normalization
-│   │   │   ├── otx.py          # AlienVault OTX provider normalization
-│   │   │   ├── rate_limiter.py # Per-session provider token-bucket helpers
-│   │   │   ├── registry.py     # External intel provider metadata and secret-consumer registry
-│   │   │   ├── routeviews.py   # RouteViews BGP/RPKI provider normalization
-│   │   │   ├── schema.py       # Normalized provider response shapes
-│   │   │   ├── securitytrails.py # SecurityTrails DNS/WHOIS/subdomain provider normalization
-│   │   │   ├── shodan.py       # Shodan provider normalization
-│   │   │   ├── shodan_internetdb.py # Shodan InternetDB provider normalization
-│   │   │   ├── teamcymru.py    # Team Cymru IP-to-ASN provider normalization
-│   │   │   ├── threatfox.py    # ThreatFox IOC and hash provider normalization
-│   │   │   ├── tls_certificate.py # Live TLS certificate provider normalization
-│   │   │   ├── urlhaus.py      # URLhaus URL/host/payload provider normalization
-│   │   │   ├── urlscan.py      # urlscan.io read/search provider normalization
-│   │   │   ├── virustotal.py   # VirusTotal provider normalization
-│   │   │   ├── vulners.py      # Vulners CVE provider normalization
-│   │   │   └── zoomeye.py      # ZoomEye search provider normalization
-│   │   ├── metrics/
-│   │   │   ├── __init__.py     # Prometheus metric definitions, label normalizers, and render helpers
-│   │   │   ├── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
-│   │   │   └── workflows.py    # Value-free durable workflow outcome, duration, capture, cancel, and recovery metrics
-│   │   ├── metrics_environment.py # Prometheus multiprocess environment setup helper
-│   │   ├── metrics_lazy.py     # Lazy Prometheus metrics proxy for import-pure modules
-│   │   ├── notifications/
-│   │   │   ├── __init__.py     # Outbound notification service package marker and config helper
-│   │   │   ├── base.py         # Registerable notification channel base class and registry
-│   │   │   ├── channels/
-│   │   │   │   ├── __init__.py # Built-in outbound notification channel registrations
-│   │   │   │   ├── _format.py  # Shared chat and push notification payload formatters
-│   │   │   │   ├── _http.py    # Shared HTTP POST helper for outbound notification channels
-│   │   │   │   ├── discord.py  # Discord incoming-webhook notification channel
-│   │   │   │   ├── email.py    # SMTP email notification channel
-│   │   │   │   ├── pushover.py # Pushover message notification channel
-│   │   │   │   ├── slack.py    # Slack incoming-webhook notification channel
-│   │   │   │   ├── telegram.py # Telegram Bot API notification channel
-│   │   │   │   └── webhook.py  # Generic JSON webhook notification channel
-│   │   │   ├── channels_store.py # Session-owned notification channel validation, masking, CRUD, and test-send helpers
-│   │   │   ├── dispatcher.py   # Notification event enqueue, claim, retry, and synchronous delivery helpers
-│   │   │   ├── hooks.py        # Application event hooks that enqueue notification payloads
-│   │   │   ├── models.py       # Notification channel/event dataclasses and constants
-│   │   │   ├── payloads.py     # Stable payload builders for notification triggers
-│   │   │   ├── secrets.py      # Notification-channel secret references backed by the existing vault
-│   │   │   └── worker.py       # Dedicated notification delivery worker entrypoint
-│   │   ├── nuclei/
-│   │   │   ├── __init__.py     # Nuclei integration helper package marker
-│   │   │   └── provenance.py   # Template-source provenance helpers for Nuclei output and packages
-│   │   ├── projects/
-│   │   │   ├── __init__.py     # Project service package marker
-│   │   │   ├── active.py       # Active project preference and lookup helpers
-│   │   │   ├── actors.py       # Team actor display helpers for project payloads
-│   │   │   ├── artifact_queries.py # Project artifact page, detail, and target-filter query helpers
-│   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
-│   │   │   ├── auto_promote.py # Project Atlas auto-promote rule matching and apply helpers
-│   │   │   ├── cleanup_logging.py # Structured cleanup fields for Project unlink INFO and audit events
-│   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
-│   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes
-│   │   │   ├── crud.py         # Project create, update, delete, and cleanup helpers
-│   │   │   ├── digests.py      # Project attack-surface digest settings and delivery join-key helpers
-│   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
-│   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
-│   │   │   ├── list_metrics.py # Project list count and finding-summary query helpers
-│   │   │   ├── list_queries.py # Project list and paged-list query helpers
-│   │   │   ├── list_switcher.py # Project switcher query helpers
-│   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
-│   │   │   ├── migration.py    # Project workspace session migration helpers
-│   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
-│   │   │   ├── monitoring.py   # Project Monitoring tab payload, watcher status cards, and fire timeline helpers
-│   │   │   ├── overview.py     # Project overview payload assembly, target identity, and status helpers
-│   │   │   ├── overview_app.py # Project overview app-scan, app-port, URL-host, and provenance helpers
-│   │   │   ├── overview_intel.py # Project overview intel extraction and certificate status helpers
-│   │   │   ├── owner_clauses.py # Shared project owner predicates for list and summary queries
-│   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
-│   │   │   ├── package_jobs.py # Evidence package archive build job state and polling helpers
-│   │   │   ├── package_presets.py # Config-backed evidence package preset catalog loader
-│   │   │   ├── package_queries.py # Evidence package list/detail read helpers
-│   │   │   ├── package_rendering.py # Evidence package HTML, Markdown, JSON, and transcript export helpers
-│   │   │   ├── packages.py     # Evidence package payload, manifest, redaction, and archive-name helpers
-│   │   │   ├── preferences.py  # Project-related session preference helpers
-│   │   │   ├── provenance.py   # Safe project-link provenance shaping helpers
-│   │   │   ├── queries.py      # Project summary, run, and entity query helpers
-│   │   │   ├── scope.py        # Project personal/team owner-scope SQL helpers
-│   │   │   ├── slugs.py        # Project slug normalization and allocation helpers
-│   │   │   ├── targets.py      # Project target validation, discovery, and mutation helpers
-│   │   │   ├── utils.py        # Shared project IDs, timestamps, quotas, and text helpers
-│   │   │   └── workspace.py    # Compatibility exports for project workspace helpers
-│   │   ├── pty/
-│   │   │   ├── __init__.py     # PTY service package marker
-│   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
-│   │   │   ├── runtime.py      # Low-level PTY process, sizing, environment, and termination helpers
-│   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
-│   │   │   ├── settings.py     # Interactive PTY default limits and bounded config helpers
-│   │   │   ├── snapshots.py    # PTY snapshot payload shaping helpers
-│   │   │   ├── state.py        # Redis-backed PTY metadata, cleanup, scope, and snapshot reload helpers
-│   │   │   ├── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
-│   │   │   └── wire.py         # PTY Redis key, event-id, and payload decode helpers
-│   │   ├── query_debug.py      # Debug-only query timing log helper
-│   │   ├── reports/
-│   │   │   ├── __init__.py     # Public report helper exports
-│   │   │   ├── composition.py  # Report composition context helpers
-│   │   │   ├── export.py       # Report archive bundle helpers
-│   │   │   ├── jobs.py         # Async report archive export job helpers
-│   │   │   ├── models.py       # Report draft, section, selection, and export preference models
-│   │   │   ├── redaction.py    # Report redaction-rule wrapper
-│   │   │   ├── rendering.py    # Report Markdown and HTML rendering helpers
-│   │   │   ├── storage.py      # Owner-scoped report draft persistence helpers
-│   │   │   └── templates.py    # Config-backed report template catalog loader
-│   │   ├── runs/
-│   │   │   ├── __init__.py     # Run service package marker
-│   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
-│   │   │   ├── broker_worker.py # Brokered synthetic and subprocess worker output publishing
-│   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
-│   │   │   ├── comparison_derived.py # Discovered-host and TLS comparison adapters
-│   │   │   ├── comparison_findings.py # Finding comparison identity, loading, and changed-severity pairing
-│   │   │   ├── contracts.py    # Shared run-start exception contracts
-│   │   │   ├── finalization.py # Completed-run capture, Atlas/finding/project hooks, and PTY persistence
-│   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
-│   │   │   ├── lifecycle.py    # Command preparation and process spawn helpers
-│   │   │   ├── output_model.py # Typed run-output line-event schema plus legacy wire compatibility helpers
-│   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
-│   │   │   ├── persistence.py  # Completed-run save, artifact, Atlas, finding, and project-link persistence helpers
-│   │   │   ├── postfilters.py  # Synthetic jq/workspace/trufflehog output filters used by run streaming
-│   │   │   ├── private_data.py # Private command-value redaction, secret injection, and safe metadata helpers
-│   │   │   ├── process_control.py # Process-group signaling and scanner PID freshness helpers
-│   │   │   ├── project_notices.py # Project-related run notice formatting helpers
-│   │   │   ├── scope.py        # Run scope visibility and command-validation owner helpers
-│   │   │   ├── start.py        # Shared brokered run-start orchestration for browser and API routes
-│   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
-│   │   │   ├── structured_filters.py # Structured output filter parsing and summary-backed history clauses
-│   │   │   ├── structured_summary.py # Run-level kind, role, and signal summary counters for output filters
-│   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
-│   │   ├── scheduler/
-│   │   │   ├── __init__.py     # Scheduled-run service package marker and config helper
-│   │   │   ├── api_operations.py # Headless API schedule create, update, delete, and run-now helpers
-│   │   │   ├── commands.py     # Shared scheduled-command validation helpers
-│   │   │   ├── cron.py         # Strict cron, cadence preset, timezone, and next-fire helpers
-│   │   │   ├── dispatch.py     # Schedule fire dispatch, broker launch, skip handling, and fire audit rows
-│   │   │   ├── models.py       # Schedule and schedule-fire dataclasses, constants, and allowed values
-│   │   │   ├── recovery.py     # Scheduler startup recovery for missed fire windows
-│   │   │   ├── route_helpers.py # Shared browser/API schedule and watcher route normalization helpers
-│   │   │   ├── serialization.py # Shared schedule payload shaping and ownership lookup helpers
-│   │   │   ├── service.py      # Backend-agnostic schedule CRUD, due-row, and fire-audit helpers
-│   │   │   └── worker.py       # Dedicated scheduler worker entrypoint and deployment-wide lock
-│   │   ├── secrets/
-│   │   │   ├── __init__.py     # Secrets service package marker
-│   │   │   ├── audit.py        # Structured audit events for secret metadata operations
-│   │   │   ├── storage.py      # Metadata and ciphertext row helpers for encrypted personal/team secrets
-│   │   │   └── vault.py        # Master-key loading, HKDF derivation, and AES-GCM wrap/unwrap helpers
-│   │   ├── session/
-│   │   │   ├── __init__.py     # Session service package marker
-│   │   │   ├── storage.py      # Session token, preference, recent-value, and migration storage helpers
-│   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
-│   │   ├── storage/
-│   │   │   ├── __init__.py     # Shared file-backed storage package marker
-│   │   │   ├── body_store.py   # Compressed large-body offload helpers for DB text columns
-│   │   │   └── transactions.py # Shared service-layer read and transaction wrappers
-│   │   ├── teams/
-│   │   │   ├── __init__.py     # Team-mode service package exports
-│   │   │   ├── api_operations.py # Headless API team, invite, member, and recovery-code helpers
-│   │   │   ├── capabilities.py # Team role-to-capability matrix and enforcement helper
-│   │   │   ├── contracts.py    # Team-mode constants and exception classes
-│   │   │   ├── request_scope.py # Request-local personal/team active-scope resolver
-│   │   │   ├── scope.py        # Personal/team owner-context and query predicate helpers
-│   │   │   └── storage.py      # Team, member, invite, and recovery-code storage helpers
-│   │   ├── watchers/
-│   │   │   ├── __init__.py     # Watcher change-detection service package marker
-│   │   │   ├── api_operations.py # Headless API watcher create, update, fire, and baseline helpers
-│   │   │   ├── classifiers/
-│   │   │   │   ├── __init__.py # Compatibility exports for the shared diff classifier registry
-│   │   │   │   ├── common.py   # Compatibility exports for shared diff classifier helpers
-│   │   │   │   ├── findings.py # Compatibility wrapper for the shared findings classifier
-│   │   │   │   ├── hosts.py    # Compatibility wrapper for the shared hosts classifier
-│   │   │   │   ├── ports.py    # Compatibility wrapper for the shared ports classifier
-│   │   │   │   ├── textual.py  # Compatibility wrapper for the shared textual classifier
-│   │   │   │   └── tls.py      # Compatibility wrapper for the shared TLS classifier
-│   │   │   ├── diff.py         # Watcher diff wrapper over shared run-comparison helpers
-│   │   │   ├── finalize.py     # Completed watcher-run diff, state transition, and notification hook
-│   │   │   ├── models.py       # Watcher, watcher-fire, and watcher-diff dataclasses and constants
-│   │   │   ├── runner.py       # Scheduler hook that starts watcher runs and records pending fire rows
-│   │   │   ├── serialization.py # Shared watcher and watcher-fire payload shaping helpers
-│   │   │   └── service.py      # Watcher CRUD, state changes, option validation, quota, and fire-audit helpers
-│   │   ├── workflows/
-│   │   │   ├── __init__.py     # Workflow service package marker
-│   │   │   ├── captures.py     # Bounded normalized-output capture selectors
-│   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers
-│   │   │   ├── compiler.py     # V2 definition graph, typed input, and shell-safe rendering validation
-│   │   │   ├── contracts.py    # Workflow execution service errors
-│   │   │   ├── events.py       # Bounded value-free execution event replay payloads
-│   │   │   ├── executions.py   # Server-owned launch, finalization, permission, and recovery orchestration
-│   │   │   ├── hooks.py        # Failure-isolated shared run-finalization hook
-│   │   │   ├── storage.py      # Durable execution and step state transitions
-│   │   │   └── user_workflows.py # Personal/team workflow storage, validation, and serialization helpers
-│   │   └── workspace/
-│   │       ├── __init__.py     # Workspace service package marker
-│   │       ├── files.py        # App-mediated personal/team workspace quota, permission, and file helpers
-│   │       ├── maintenance.py  # Workspace migration and inactive-cleanup helpers
-│   │       ├── metadata.py     # Workspace file label, note, artifact, and project metadata queries
-│   │       ├── models.py       # Workspace exception, settings, usage, and operation-result models
-│   │       ├── modes.py        # Workspace filesystem mode constants
-│   │       ├── paths.py        # Workspace directory, validation, symlink, and path-resolution helpers
-│   │       └── settings.py     # Workspace settings and owner directory naming helpers
-│   ├── static/
-│   │   ├── build/             # Committed generated bundles, precompressed siblings, manifest, fonts, lazy modules, favicon, and vendor copies; regenerate with npm run assets:sync
-│   │   ├── css/
-│   │   │   ├── core/
-│   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
-│   │   │   │   └── fonts.css   # @font-face declarations for vendored local fonts
-│   │   │   ├── diag.css        # Diagnostics-page-specific layout and responsive chrome
-│   │   │   ├── features/       # Feature-owned styles split out of shared shell/component stylesheets
-│   │   │   │   ├── atlas-mobile.css # Mobile Session Entity Atlas list/detail shell, filters, and action bars
-│   │   │   │   ├── atlas.css # Session Entity Atlas overlay, tabs, entity rows, and detail side sheet
-│   │   │   │   ├── command-registry.css # Command Registry modal and command catalog detail modal
-│   │   │   │   ├── faq-shortcuts.css # FAQ content, command chips, visual-tour entry, and shortcuts overlay
-│   │   │   │   ├── history.css # History drawer, history rows, Run Details modal, and history actions
-│   │   │   │   ├── projects.css # Projects modal, mobile project workspace, entity editors, compare picker, and package wizard
-│   │   │   │   ├── run-comparison.css # Run Comparison modal, split-view, controls, transcript diff, and mobile compare layout
-│   │   │   │   ├── schedules.css # Schedules modal, recurring-run editor, and schedule-fire audit rows
-│   │   │   │   ├── status-monitor.css # Status Monitor modal, visual cards, active-run rows, and mobile sheet layout
-│   │   │   │   ├── watchers.css # Watchers modal, diff summary, cadence editor, and fire-audit rows
-│   │   │   │   ├── workflows.css # Workflows workspace, catalog/detail layout, editor, and execution views
-│   │   │   │   └── workspace.css # Files modal, file viewer/editor, workspace rows, and workspace metadata chips
-│   │   │   ├── mobile-chrome.css # Mobile sheet handles, drag affordances, and pull-to-refresh suppression hooks
-│   │   │   ├── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
-│   │   │   ├── primitives/
-│   │   │   │   └── components.css # Tabs, search UI, permalink surfaces, toast, and shared menu components
-│   │   │   ├── shell-chrome.css # Desktop shell: left rail, tabbar row, and bottom HUD bar
-│   │   │   ├── shell.css       # Terminal shell frame, panels, generic modal foundations, and utility buttons
-│   │   │   ├── styles.css      # Compatibility CSS entrypoint; templates link modular CSS files directly
-│   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
-│   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
-│   │   ├── favicon.ico         # Site favicon
-│   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
-│   │   ├── fragments/
-│   │   │   ├── atlas_overlay.html # First-use Atlas modal shell
-│   │   │   └── project_workspace.html # First-use Projects modal shell and nested editors
-│   │   └── js/
-│   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
-│   │       ├── autocomplete.js # Command autocomplete dropdown
-│   │       ├── controller.js   # Initialization and event wiring imported by shell_bootstrap.entry.js
-│   │       ├── controller_action_bridge.js # Controller action bridge for ESM-loaded runtime helpers
-│   │       ├── core/
-│   │       │   ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
-│   │       │   ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
-│   │       │   ├── config.js   # APP_CONFIG bootstrap reader
-│   │       │   ├── dom.js      # Shared DOM element references
-│   │       │   ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
-│   │       │   ├── lazy_assets.js # Small loader for rarely-used scripts and modules
-│   │       │   ├── output_core.js # Pure output prompt/signal helpers shared by output.js and unit harnesses
-│   │       │   ├── run_output_model.js # Browser-side typed run-output line-event schema and legacy compatibility helpers
-│   │       │   ├── runner_core.js # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
-│   │       │   ├── search_core.js # Pure search labels/counts/summary helpers shared by search.js and unit harnesses
-│   │       │   ├── session_core.js # Pure session identity helpers shared by session.js and unit harnesses
-│   │       │   ├── state.js    # Shared app-state store/accessors
-│   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
-│   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
-│   │       ├── e2e_test_hooks.js # Test-only browser hooks used by Playwright and unit harnesses
-│   │       ├── e2e_test_hooks_loader.js # Tiny Playwright-only hook loader that keeps test globals out of normal startup
-│   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
-│   │       ├── export_html_bridge.js # Lightweight export HTML bridge for lazy styled HTML/PDF exports
-│   │       ├── export_pdf.js   # Lazy-loaded shared PDF export module
-│   │       ├── features/
-│   │       │   ├── atlas/
-│   │       │   │   ├── atlas_bridge.js # Atlas ESM bridge for lazy overlay modules
-│   │       │   │   ├── atlas_entity_detail.js # Lazy-loaded Session Entity Atlas entity detail rendering helpers
-│   │       │   │   ├── atlas_entity_row.js # Lazy-loaded shared Atlas entity rows used by Atlas and Projects
-│   │       │   │   ├── atlas_mobile.js # Lazy-loaded mobile Session Entity Atlas list/detail, filters, and action-sheet controller
-│   │       │   │   ├── atlas_mobile_bridge.js # Atlas mobile ESM bridge for lazy mobile views
-│   │       │   │   ├── atlas_overlay.js # Lazy-loaded Session Entity Atlas overlay controller and route wiring
-│   │       │   │   └── atlas_tabs.js # Session Entity Atlas tab metadata and count helpers
-│   │       │   ├── autocomplete/
-│   │       │   │   ├── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
-│   │       │   │   └── suggestions.js # Command autocomplete suggestion resolution, recent values, and value-slot application
-│   │       │   ├── command-registry/
-│   │       │   │   ├── command_registry.js # Lazy-loaded Command Registry and Command Catalog modal logic
-│   │       │   │   ├── command_registry_bridge.js # Command registry ESM bridge for lazy command catalog UI
-│   │       │   │   └── faq_helpers.js # FAQ command chips, allowed-command summary, and limits rendering
-│   │       │   ├── findings/
-│   │       │   │   ├── finding_triage_bridge.js # Lightweight finding-triage bridge for lazy remediation controls
-│   │       │   │   ├── finding_triage_editor.js # Shared finding remediation and verification editor
-│   │       │   │   ├── findings_board_bridge.js # Lightweight Findings Board bridge for Atlas and lazy modal launches
-│   │       │   │   └── findings_board_modal.js # Lazy-loaded Findings Board modal and drag/drop review updates
-│   │       │   ├── history/
-│   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
-│   │       │   │   ├── history_links.js # History run permalink and snapshot link helpers
-│   │       │   │   ├── history_mutations.js # History delete/clear confirmations and loading overlay helpers
-│   │       │   │   ├── history_panel_bridge.js # History panel ESM bridge for lazy history UI wiring
-│   │       │   │   ├── history_project_actions.js # History project filter options and add-run-to-project flows
-│   │       │   │   ├── history_recall.js # Command recall history and prompt navigation helpers
-│   │       │   │   ├── history_recall_bridge.js # Command recall ESM bridge for shared UI helpers
-│   │       │   │   ├── history_restore.js # Restoring saved runs into terminal tabs and source-line highlighting
-│   │       │   │   ├── history_restore_bridge.js # History restore ESM bridge for saved-session hydration
-│   │       │   │   ├── history_rows.js # History drawer run/snapshot rows, metadata badges, and row action menus
-│   │       │   │   ├── history_run_details.js # Lazy-loaded Run Details modal rendering, tabs, loading, and actions
-│   │       │   │   ├── history_run_modal_state_bridge.js # History modal-state ESM bridge for run-detail views
-│   │       │   │   └── history_search.js # Ctrl+R reverse-history search dropdown and keyboard handling
-│   │       │   ├── mobile/
-│   │       │   │   ├── mobile_menu_actions.js # Mobile hamburger menu action dispatch
-│   │       │   │   ├── mobile_running_indicator.js # Mobile background-running tab chip and tab-edge glow behavior
-│   │       │   │   ├── mobile_shell_layout.js # Mobile shell DOM reparenting, viewport mode, and keyboard state
-│   │       │   │   └── mobile_shell_layout_bridge.js # Mobile shell-layout ESM bridge for lazy mobile chrome
-│   │       │   ├── preferences/
-│   │       │   │   ├── notification_channels.js # Options modal outbound notification channel list, editor, mute, delete, and test-send helpers
-│   │       │   │   ├── preferences.js # Session preference loading, persistence, and Options modal control syncing
-│   │       │   │   ├── secrets_bridge.js # Secrets preference-panel ESM bridge
-│   │       │   │   ├── secrets_panel.js # Options modal encrypted secret list, replace, delete, and terminal value prompt helpers
-│   │       │   │   ├── session_token_bridge.js # Session-token preference-panel ESM bridge
-│   │       │   │   ├── session_token_controls.js # Options modal session token generation, migration, and clearing controls
-│   │       │   │   └── teams_panel.js # Options modal team creation, members, invites, recovery, and scope actions
-│   │       │   ├── projects/
-│   │       │   │   ├── project_active_context.js # Active Project HUD context, refresh, and target discovery helpers
-│   │       │   │   ├── project_activity.js # Lazy-loaded Project Activity tab filters, paging, rows, and safe audit details
-│   │       │   │   ├── project_artifacts.js # Lazy-loaded Project Artifacts rows, status badges, preview, and download helpers
-│   │       │   │   ├── project_context_bridge.js # Project context ESM bridge for workspace-aware actions
-│   │       │   │   ├── project_details.js # Project Details labels, notes autosave, and target section rendering
-│   │       │   │   ├── project_entities.js # Project Entities rows, rules, picker, export, and Atlas handoff helpers
-│   │       │   │   ├── project_entity_editor.js # Project metadata editor lifecycle and save flow
-│   │       │   │   ├── project_filters.js # Project workspace filter state, dropdowns, chips, and filtered view helpers
-│   │       │   │   ├── project_findings.js # Project Findings rows, bulk review toolbar, and review controls
-│   │       │   │   ├── project_findings_board.js # Project Findings board columns, cards, and card actions
-│   │       │   │   ├── project_findings_data.js # Project Findings cache, filtered results, and loading helpers
-│   │       │   │   ├── project_hud_bridge.js # Project HUD ESM bridge for lazy workspace status UI
-│   │       │   │   ├── project_list.js # Project list/sidebar ordering, sections, and desktop/mobile row rendering
-│   │       │   │   ├── project_mobile_compare.js # Project mobile run comparison sheet
-│   │       │   │   ├── project_mobile_detail.js # Project mobile detail tab bodies, rows, and action sheets
-│   │       │   │   ├── project_mobile_shell.js # Project mobile view state, create form, and project list composition
-│   │       │   │   ├── project_monitoring.js # Lazy-loaded Project Monitoring filters, grouped cards, policy chips, timeline, run actions, and triage controls
-│   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
-│   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
-│   │       │   │   ├── project_overview.js # Lazy-loaded Project Overview rollups, provider freshness, tempo, deliverables, activity, and deep-link actions
-│   │       │   │   ├── project_packages.js # Lazy-loaded evidence package rows, manifest preview, wizard, and download helpers
-│   │       │   │   ├── project_report.js # Lazy-loaded Project Report tab editor, preview, export, and print/PDF helpers
-│   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
-│   │       │   │   ├── project_shared_ui.js # Shared Project formatting, metadata chips, rows, and button helpers
-│   │       │   │   ├── project_target_validation.js # Project target editor copy and value validation helpers
-│   │       │   │   ├── project_targets.js # Project target editor save flow, target rows, and target metadata controls
-│   │       │   │   ├── project_workspace_actions.js # Project confirmations, link-last-run, and metadata sync helpers
-│   │       │   │   ├── project_workspace_bootstrap.js # Project workspace form, modal, dismissible, and mobile-sheet bindings
-│   │       │   │   ├── project_workspace_constants.js # Project workspace timing, filter, rank, and broadcast constants
-│   │       │   │   ├── project_workspace_events.js # Project workspace modal event routing and action handling
-│   │       │   │   ├── project_workspace_lifecycle.js # Project workspace loading, summaries, and selected-project lifecycle
-│   │       │   │   ├── project_workspace_renderer.js # Project workspace explorer, mobile/list composition, and tab cycling
-│   │       │   │   ├── project_workspace_shell.js # Project workspace modal shell, messages, request, and refresh broadcast helpers
-│   │       │   │   └── project_workspace_state.js # Project workspace browser state holder
-│   │       │   ├── run-comparison/
-│   │       │   │   ├── history_compare_bridge.js # Run comparison ESM bridge for lazy compare overlays
-│   │       │   │   ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
-│   │       │   │   ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers
-│   │       │   │   ├── history_compare_launcher.js # Run Comparison candidate picker and manual run-search flow
-│   │       │   │   ├── history_compare_navigation.js # Run Comparison row targeting, minimap, and previous/next-change controls
-│   │       │   │   ├── history_compare_overlay.js # Run Comparison modal shell, close handling, and initial focus lifecycle
-│   │       │   │   └── history_compare_renderer.js # Run Comparison transcript hunk renderer, object diff sections, restore actions, and compare fetch flow
-│   │       │   ├── runner/
-│   │       │   │   ├── runner_active_restore.js # Detached active-run restore markers shared by tabs, PTY, and runner reload recovery
-│   │       │   │   ├── runner_persistence.js # Client-side saved-run persistence for local runner commands
-│   │       │   │   └── runner_workspace.js # Workspace-terminal command parsing and path helpers
-│   │       │   ├── schedules/
-│   │       │   │   └── schedules_modal.js # Lazy-loaded Schedules modal state, cadence preview, schedule actions, and run handoffs
-│   │       │   ├── shortcuts/
-│   │       │   │   ├── global_shortcuts.js # Global tab/action/chrome shortcut matching and dispatch
-│   │       │   │   └── shortcuts_key_handler.js # Global ? keyboard shortcut for the shortcuts overlay
-│   │       │   ├── status-monitor/
-│   │       │   │   ├── status_monitor_core.js # Lazy-loaded Status Monitor formatting, date, hashing, and telemetry helpers
-│   │       │   │   ├── status_monitor_data.js # Lazy-loaded Status Monitor endpoint loading and dashboard data aggregation
-│   │       │   │   └── status_monitor_resources.js # Lazy-loaded Status Monitor CPU/memory resource sampling and sparkline helpers
-│   │       │   ├── tabs/
-│   │       │   │   ├── share_redaction_bridge.js # Share-redaction ESM bridge for tab export flows
-│   │       │   │   ├── tab_close_lifecycle.js # Tab close, detach, kill-confirmation, and deferred-removal helpers
-│   │       │   │   ├── tab_drag_reorder.js # Tab pointer/touch drag reordering behavior
-│   │       │   │   ├── tab_exports.js # Tab transcript copy, export, and permalink actions
-│   │       │   │   └── tab_session_state.js # Tab session persistence and restore after reload
-│   │       │   ├── team_scope.js # Active personal/team scope menu, selector, and cross-surface refresh wiring
-│   │       │   ├── terminal/
-│   │       │   │   ├── composer_controller.js # Terminal composer paste, focus, autocomplete input, and keyboard handling
-│   │       │   │   ├── composer_editing.js # Terminal composer caret, selection, and word-boundary helpers
-│   │       │   │   ├── composer_prompt_bridge.js # Composer prompt ESM bridge for terminal prompt rendering
-│   │       │   │   ├── local_commands.js # Terminal-native theme/config command handlers and shared local-command helpers
-│   │       │   │   └── mobile_composer_keyboard.js # Mobile composer keyboard, viewport-height, and submit listeners
-│   │       │   ├── theme/
-│   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
-│   │       │   ├── tour/
-│   │       │   │   ├── tour_cli.js # Terminal-guided onboarding tour command
-│   │       │   │   └── tour_cli_bridge.js # Lightweight terminal tour bridge that loads the full tour command on first use
-│   │       │   ├── watchers/
-│   │       │   │   └── watchers_modal.js # Lazy-loaded Watchers modal state, policy controls, diff summary, cadence preview, fire audit, and run handoffs
-│   │       │   ├── workflows/
-│   │       │   │   ├── workflow_catalog.js # Searchable source-grouped workflow catalog and selection UI
-│   │       │   │   ├── workflow_editor.js # Typed parameter, stable step, transition, and validation editor
-│   │       │   │   ├── workflow_executions.js # Durable workflow requests and Executions-tab UI
-│   │       │   │   ├── workflow_parameters.js # Parameter value controls, remembered form state, and command previews
-│   │       │   │   ├── workflows.js # Workflows workspace, terminal command, and runtime autocomplete support
-│   │       │   │   └── workflows_bridge.js # Workflows ESM bridge for lazy workflow panels
-│   │       │   └── workspace/
-│   │       │       ├── workspace_autocomplete_cache.js # Files autocomplete cache refresh and path hint helpers
-│   │       │       ├── workspace_drag_drop.js # Files browser drag/drop move behavior
-│   │       │       └── workspace_viewer_formats.js # Files viewer format detection and preview payload shaping
-│   │       ├── history.js      # Command history chips, drawer rows, filters, and compare entry points
-│   │       ├── mobile_chrome.js # Mobile shell chrome — peek/menu routing, viewport mode, pull-to-refresh suppression
-│   │       ├── output.js       # ANSI rendering and line management
-│   │       ├── output_bridge.js # Output ESM bridge for terminal output helpers
-│   │       ├── output_mode_bridge.js # Output-mode ESM bridge for display toggles
-│   │       ├── permalink.entry.js # Module entry for the permalink page bundle
-│   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
-│   │       ├── pty.js          # Lazy-loaded interactive PTY controller backed by xterm.js
-│   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
-│   │       ├── runner_bridge.js # Runner ESM bridge for command execution helpers
-│   │       ├── runtime_bridge.js # Runtime ESM bridge for shared browser compatibility APIs
-│   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
-│   │       ├── search_bridge.js # Search ESM bridge for tab lifecycle updates
-│   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
-│   │       ├── shell_bootstrap.entry.js # Module entry for shell bootstrap controllers
-│   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller
-│   │       ├── status_monitor.js  # Lazy-loaded Status Monitor modal/sheet controller
-│   │       ├── tabs.js         # Tab lifecycle management
-│   │       ├── tabs_bridge.js # Tabs ESM bridge for tab lifecycle helpers
-│   │       ├── tour_modal.js   # Lazy-loaded desktop visual onboarding tour carousel
-│   │       ├── ui/
-│   │       │   ├── cleanup_reasons.js # Shared cleanup-preview reason copy and sample details for History, Project, and Atlas confirmations
-│   │       │   ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
-│   │       │   ├── overlay_actions_bridge.js # Overlay action ESM bridge for shared overlay controls
-│   │       │   ├── ui_action_sheet.js # Shared mobile action-sheet primitive for contextual row/detail actions
-│   │       │   ├── ui_confirm.js # showConfirm primitive — shared confirmation-dialog surface
-│   │       │   ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel lifecycle
-│   │       │   ├── ui_dismissible.js # bindDismissible helper — modal/sheet/panel dismissal contract
-│   │       │   ├── ui_entity_metadata.js # Shared labels/notes client helpers for history, projects, packages, and Files
-│   │       │   ├── ui_focus_trap.js # bindFocusTrap helper for modal keyboard focus
-│   │       │   ├── ui_helpers.js # DOM-facing helpers and visibility setters
-│   │       │   ├── ui_outside_click.js # Ambient outside-click dismissal helper
-│   │       │   ├── ui_pressable.js # Unified pointer/click/keyboard activation contract
-│   │       │   └── ui_tab_strip_edges.js # Shared horizontal tab-strip overflow edge indicators
-│   │       ├── vendor/         # Committed browser vendor builds — generated by scripts/build_vendor.mjs
-│   │       │   ├── ansi_up.js          # ANSI-to-HTML (ansi_up v6, ESM-only — wrapped as IIFE browser global)
-│   │       │   ├── jspdf.umd.min.js    # PDF generation (jsPDF UMD build, copied as-is from npm)
-│   │       │   ├── xterm-addon-fit.js  # xterm fit addon for interactive PTY sizing
-│   │       │   ├── xterm.css           # xterm stylesheet for interactive PTY tabs
-│   │       │   └── xterm.js            # xterm browser terminal for interactive PTY tabs
-│   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
-│   │       ├── welcome_bridge.js # Welcome ESM bridge for welcome-screen actions
-│   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
-│   │       └── workspace_bridge.js # Files panel ESM bridge for lazy open/close and file actions
-│   ├── templates/
-│       ├── app_stylesheets.html # Shared CSS bundle helper for shell, permalink, and diagnostics pages
-│       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
-│       ├── diag_audit.html     # Operator audit-log viewer and export links (IP-gated)
-│       ├── index.html          # Frontend HTML shell rendered by Flask
-│       ├── permalink.html      # Live permalink page template
-│       ├── permalink_base.html # Shared shell for permalink pages
-│       ├── permalink_error.html # Missing/expired permalink template
-│       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
-│       └── theme_vars_style.html # Injected CSS variable block for the active theme
-│   └── wsgi.py                 # Gunicorn WSGI entrypoint that calls bootstrap()
-├── assets.config.json         # Frontend asset bundle membership/order for scripts/build_assets.mjs
-├── assets/                     # README media assets (demo videos)
-├── deploy/
-│   ├── THIRD_PARTY_NOTICES.txt # Operator-facing summary of licenses and special terms for bundled tools, libraries, and fonts
-│   ├── compose.yaml           # Repository-free production stack pinned to the public Docker Hub release
-│   ├── config-local.yaml.dist # Comment-only source for the installed conf/config.local.yaml placeholder
-│   ├── container-licenses.json # Machine-checked release inventory of bundled third-party sources, terms, and notice paths
-│   ├── darklab-deploy.sh.in   # Installed lifecycle command template for status, backup, restore, upgrade, migration, and removal
-│   ├── dockerhub-overview.txt # Tracked Docker Hub overview with independent Cosign issuer and identity verification details
-│   ├── setup.sh.in            # Exact-release POSIX installer template rendered with the archive URL and checksum
-│   ├── third-party-licenses/
-│   │   ├── Nmap-7.95-NPSL-0.95.txt # Reviewed Nmap Public Source License text shipped with the image
-│   │   ├── OFL-1.1.txt        # SIL Open Font License and copyright notices for vendored fonts
-│   │   ├── WPScan-4.0.1.txt   # Unmodified WPScan Public Source License required for redistribution
-│   │   └── frontend-runtime.txt # MIT notices for browser libraries copied into the app bundle
-│   └── verify-release-image.sh # Confirms a pulled production image matches both recorded registry digests
-├── docker-compose.yml          # Local Compose stack with Redis, optional Postgres, optional local AI providers, and the shell app
-├── docs/
-│   ├── ai-privacy.md          # Optional AI assist privacy posture and operator checks
-│   ├── api-v1-openapi.json    # Checked-in OpenAPI snapshot for /api/v1
-│   ├── api.md                 # Headless API and bundled CLI usage guide
-│   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
-│   ├── notifications.md       # Outbound notification channels, payloads, retries, and setup guide
-│   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-│   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
-│   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-│   ├── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
-│   └── workflows.md           # Workflow playbook parameters, transitions, captures, execution state, and operator YAML
-├── entrypoint.sh               # Container startup script — fixes writable dirs, starts optional workers, drops to appuser
-├── examples/
-│   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
-│   ├── grafana/
-│   │   └── darklab-overview.json # Starter Grafana dashboard for the Prometheus /metrics endpoint
-│   └── run_local.sh             # Script to run without Docker using Python directly
-├── frontend-globals.allowlist.json # Intentional browser global allowlist for frontend module inventory checks
-├── package-lock.json           # npm dependency lockfile (auto-generated by npm install)
-├── package.json                # JS dev dependencies and test scripts
-├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
-├── requirements-dev.txt        # Dev-only dependencies for tests, lint, audits, and package checks
-├── scripts/
-│   ├── backup_system.py       # Cron-friendly source and managed-deployment backup helper for SQLite/Postgres, data, config, secrets, and workspaces
-│   ├── benchmark_output_signals.py # Manual synthetic-output benchmark for backend signal classification performance
-│   ├── build_assets.mjs       # Generates committed minified frontend bundles in app/static/build/ (run via npm run assets:sync)
-│   ├── build_release_evidence.py # Binds build inputs, images, SBOM, scan, source, and pipeline into release evidence
-│   ├── build_release_payload.py # Generates the deterministic exact-version deployment archive, setup script, and SHA-256 manifests
-│   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
-│   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
-│   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
-│   ├── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs, manifests, and a review index to /tmp/darklab_shell-ui-capture/
-│   ├── check_container_licenses.py # Blocks release when Dockerfile tools drift from the reviewed license/notice inventory
-│   ├── check_source_licenses.py # Enforces SPDX notices on project-owned source while excluding generated and third-party files
-│   ├── check_versions.sh       # Dependency drift report plus offline app/Docker/Compose/release version consistency gate
-│   ├── container_smoke_test.sh # Reuses or force-builds the smoke cache image, runs the shared smoke corpus through /runs, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
-│   ├── generate_api_openapi.py # Regenerates docs/api-v1-openapi.json from the Python /api/v1 spec
-│   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
-│   ├── hooks/
-│   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
-│   ├── inventory_frontend_modules.mjs # Reports/checks frontend globals, publish paths, and cross-file reads
-│   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
-│   ├── migrate_sqlite_to_postgres.py # Offline SQLite-to-Postgres cutover helper with row-count and file-reference validation
-│   ├── obs_recording.mjs       # Minimal OBS WebSocket helper used by the demo recording wrappers
-│   ├── playwright/
-│   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
-│   │   └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
-│   ├── publish_release_artifacts.sh # Publishes immutable release images and installer payloads with retry/conflict checks
-│   ├── record_demo.sh          # Records the desktop demo through OBS while Playwright drives the browser
-│   ├── record_demo_mobile.sh   # Records the mobile demo through OBS with the in-page keyboard overlay
-│   ├── restore_system.py      # Verifies and restores managed SQLite/Postgres deployment backups inside the release image
-│   ├── run_playwright.sh       # Local Playwright wrapper — quiet by default, clears ports, and passes through specs/grep/config
-│   ├── run_postgres_tests.sh   # Opt-in Postgres pytest lane with disposable container, host DSN, and Compose-network modes
-│   ├── run_pytest.sh           # Local pytest wrapper — pins repo config/rootdir and keeps collection scoped
-│   ├── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
-│   ├── verify_bundled_tools.sh # Executes the packaged scanner toolchain as the unprivileged scanner user on a native target architecture
-│   ├── verify_repository_free_image.sh # Starts a released image with the production bind layout and checks architecture, capabilities, persistence, and health
-│   └── verify_repository_free_postgres.sh # Installs a release payload and round-trips API state through bundled-Postgres backup and restore
-├── tests/
-│   ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
-│   ├── js/
-│   │   ├── e2e/                # Playwright end-to-end tests (require running Flask server)
-│   │   │   ├── autocomplete.spec.js # autocomplete dropdown coverage — context-aware suggestions, pipe-stage hints, accept paths
-│   │   │   ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
-│   │   │   ├── commands.spec.js # command execution, denial, and status rendering
-│   │   │   ├── compare.spec.js # History, Project, active-tab, mobile, and findings-only comparison flows
-│   │   │   ├── demo.mobile.spec.js # Mobile demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
-│   │   │   ├── demo.spec.js    # Desktop demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
-│   │   │   ├── failure-paths.spec.js  # /runs denial/rate limit, share/history failure toasts
-│   │   │   ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
-│   │   │   ├── helpers.js      # runCommand/openHistory helpers
-│   │   │   ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup
-│   │   │   ├── interaction-contract.spec.js # end-to-end verification of the UI Interaction Helper contract against real chrome surfaces
-│   │   │   ├── kill.spec.js    # kill confirmation and running-tab stop behavior
-│   │   │   ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
-│   │   │   ├── output.spec.js  # copy/clear/save/export behavior
-│   │   │   ├── project-overview.spec.js # Project Overview desktop/mobile smoke and target deep-link coverage
-│   │   │   ├── rate-limit.spec.js # per-session /runs rate limiting
-│   │   │   ├── runner-stall.spec.js   # SSE stall recovery
-│   │   │   ├── search.spec.js  # search/highlight/navigation behavior
-│   │   │   ├── session-token.spec.js # session-token lifecycle, migration, and cross-session persistence
-│   │   │   ├── share.spec.js   # snapshot permalinks and clipboard behavior
-│   │   │   ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
-│   │   │   ├── source-lazy-smoke.spec.js # Source-mode lazy shell surface smoke coverage
-│   │   │   ├── tabs.spec.js    # tab lifecycle, rename, reorder, and new-tab behavior
-│   │   │   ├── team-mode.spec.js # team creation, invite redemption, active scope switching, and shared team history
-│   │   │   ├── theme-audit.spec.js # walks all built-in themes to catch colour leaks and unstyled surfaces
-│   │   │   ├── timestamps.spec.js # timestamp and line-number toggle behavior
-│   │   │   ├── ui-capture.desktop.capture.js # Desktop UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
-│   │   │   ├── ui-capture.mobile.capture.js  # Mobile UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
-│   │   │   ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
-│   │   │   ├── ui_capture_shared.js # Shared scene registry for the UI screenshot capture pipeline (desktop + mobile)
-│   │   │   ├── visual_guardrails.js # Shared demo/capture startup assertions for viewport, health, token, and seeded-history parity
-│   │   │   ├── visual_history_fixture.js # Shared paginated /history fixture payload used by desktop and mobile demo recordings
-│   │   │   ├── welcome-context.spec.js # welcome persistence across tabs and mobile context coverage
-│   │   │   ├── welcome-interactions.spec.js # welcome command/badge interaction coverage
-│   │   │   ├── welcome.helpers.js # shared welcome-route fixtures and setup for split welcome specs
-│   │   │   └── welcome.spec.js # welcome animation and settle-path coverage
-│   │   ├── fixtures/           # Shared unit-test fixture data
-│   │   │   └── button_primitive_allowlist.json # Exception selectors for button_primitives_allowlist.test.js
-│   │   └── unit/               # Vitest unit tests for browser-module logic
-│   │       ├── app.test.js         # bootstrap wiring, session-preference hydration, mobile shell/run-button regressions, prompt/composer boundaries, and modal controls
-│   │       ├── atlas.test.js       # Session Entity Atlas overlay, detail rendering, project-filter, export, and active-project link coverage
-│   │       ├── atlas_mobile.test.js # Mobile Session Entity Atlas list/detail, filters, action-sheet, select-mode, and deep-link coverage
-│   │       ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
-│   │       ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
-│   │       ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
-│   │       ├── button_primitives_runtime.test.js # runtime contract — mounts JS-rendered history/mobile pagination controls and verifies they still use shared button primitives
-│   │       ├── command_registry.test.js # Command Registry modal knowledge-section and pipe-helper rendering coverage
-│   │       ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
-│   │       ├── core_esm_exports.test.js # Vitest coverage for core ESM export contracts
-│   │       ├── diag_audit.test.js  # diagnostics audit viewer filter, row, details, and empty-state coverage
-│   │       ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
-│   │       ├── finding_triage_editor.test.js # Finding remediation and verification editor load/save coverage
-│   │       ├── frontend_inventory.test.js # Vitest coverage for frontend global inventory contracts
-│   │       ├── grep_output_suggestions.test.js # output-token autocomplete suggestions for safe grep pipe contexts
-│   │       ├── helpers/
-│   │       │   ├── app_harness.js # Shared jsdom harness for app/controller tests, including Options/mobile shell globals
-│   │       │   ├── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│   │       │   ├── session_harness.js # Shared session.js localStorage/fetch harness
-│   │       │   └── workspace_harness.js # Shared Files/workspace modal harness and response helpers
-│   │       ├── history.test.js     # starring, clipboard, delete/clear failures, mobile chip behavior, draft restore
-│   │       ├── history_compare_split.test.js # split-pane run comparison renderer, lazy hunk expansion, and copy-summary coverage
-│   │       ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
-│   │       ├── notification_channels.test.js # Options Notifications tab refresh, editor validation, and channel action coverage
-│   │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
-│   │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
-│   │       ├── permalink_module.test.js # Native import smoke for the permalink module entry
-│   │       ├── project_active_context.test.js # Active Project context request sharing and reload behavior
-│   │       ├── project_activity.test.js # Project Activity tab filters, empty states, details, and mobile row coverage
-│   │       ├── project_monitoring.test.js # Project Monitoring tab filters, status, timeline, run-action, and triage coverage
-│   │       ├── project_overview.test.js # Project Overview rollups, provider caveats, tempo, deliverables, activity, cert badges, and deep-link coverage
-│   │       ├── project_report.test.js # Project report editor, draft, selection, and preview/export coverage
-│   │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
-│   │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage
-│   │       ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery
-│   │       ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
-│   │       ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
-│   │       ├── shell_chrome.test.js  # Desktop HUD status/Redis pill behavior
-│   │       ├── shell_entry_module.test.js # Native shell ES module startup smoke test
-│   │       ├── state.test.js       # composer state store accessors and reset behavior
-│   │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
-│   │       ├── tabbar_chrome_collapse.test.js # tab-bar chrome auto-collapse behavior and persisted pinning coverage
-│   │       ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
-│   │       ├── team_scope.test.js  # active personal/team scope menu/selector storage, refresh, and reload edge cases
-│   │       ├── teams_panel.test.js # Options Teams role/capability UI and failed mutation coverage
-│   │       ├── tour_modal.test.js  # desktop visual onboarding tour renderer, navigation, sample-chip, and dismissal coverage
-│   │       ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
-│   │       ├── ui_disclosure.test.js # bindDisclosure helper coverage — aria-expanded sync, panel class lifecycle, onToggle emission rules, imperative handle API
-│   │       ├── ui_dismissible.test.js # bindDismissible helper coverage — backdrop-click semantics, close buttons, handle API, closeTopmostDismissible dispatcher priority
-│   │       ├── ui_focus_helpers.test.js # focusElement + blurActiveElement helper coverage — preventScroll fallback, no-op guards, activeElement blur path
-│   │       ├── ui_focus_trap.test.js # bindFocusTrap helper coverage — Tab/Shift+Tab boundary wrapping, middle-of-list passthrough, idempotency, disposal, hidden-focusable skip
-│   │       ├── ui_outside_click.test.js # bindOutsideClickClose helper coverage — guards, outside-click dismissal, trigger exemption, exempt selectors, scope override
-│   │       ├── ui_pressable.test.js # bindPressable helper coverage — activation paths, press-style clearing, focus-theft prevention, idempotency
-│   │       ├── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
-│   │       ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
-│   │       └── workspace.test.js    # Files panel rendering and route-call helpers
-│   ├── py/                     # Python / pytest tests
-│   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
-│   │   ├── fixtures/
-│   │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
-│   │   │   ├── container_smoke_test-interactive-expectations.json # Interactive PTY smoke fixtures
-│   │   │   ├── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
-│   │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
-│   │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
-│   │   ├── test_architecture.py # Architecture boundary guards for blueprint persistence access
-│   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
-│   │   ├── test_backup_system.py # Operator backup script coverage for SQLite/Postgres, config extras, and workspace sources
-│   │   ├── test_check_versions.py # Dependency version-check helper coverage
-│   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
-│   │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
-│   │   ├── test_logging.py     # Structured logging: formatters, config startup replay, and event coverage
-│   │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
-│   │   ├── test_notifications_channels.py # Slack, Discord, Telegram, and Pushover notification channel coverage
-│   │   ├── test_notifications_email.py # SMTP email notification channel coverage
-│   │   ├── test_notifications_hooks.py # Notification hook fan-out, skip-rule, and redaction coverage
-│   │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
-│   │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
-│   │   ├── test_output_signals_against_line_signal.py # Output signal scope coverage for the typed line-event signal enum
-│   │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
-│   │   ├── test_production_install.py # Production Compose, deterministic release payload, managed lifecycle, and security-first installer coverage
-│   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
-│   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
-│   │   ├── test_run_comparison_enhancements.py # Run comparison severity, adapters, scope, route, and migration coverage
-│   │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
-│   │   ├── test_run_output_model.py # Typed run-output line-event schema, legacy compatibility, and entity normalization coverage
-│   │   ├── test_run_output_model_parity.py # Python/browser enum parity coverage for the run-output line-event schema
-│   │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
-│   │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
-│   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
-│   │   ├── test_watchers_classifiers.py # Watcher findings, ports, hosts, TLS, textual fallback, and classifier registry coverage
-│   │   └── test_workflows_v2.py # Workflow v2 compilation, execution, recovery, and API coverage
-│   └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
-└── tools/
-    └── darklab_cli/
-        ├── LICENSE             # GNU AGPLv3 terms included with the installable CLI distribution
-        ├── pyproject.toml      # Installable in-repo darklab CLI package metadata
-        └── src/
-            └── darklab_cli/
-                ├── __init__.py # CLI package marker
-                ├── __main__.py # darklab command parser and command dispatch
-                └── client.py   # urllib-based /api/v1 client, config loading, SSE parsing, and downloads
-```
+| Directory | Purpose |
+| --- | --- |
+| `.gitlab/` | GitLab CI and merge request templates |
+| `.tooling/` | Test, lint, and build-tool configuration |
+| `app/` | Flask application, templates, static assets, and runtime configuration |
+| `deploy/` | Production Compose, setup, and release artifacts |
+| `docs/` | Focused user, operator, and contributor guides |
+| `scripts/` | Development, release, maintenance, and test helpers |
+| `tests/` | Backend, browser-unit, end-to-end, and visual-review coverage |

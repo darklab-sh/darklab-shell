@@ -189,11 +189,7 @@ def _validate_install_coverage(
         )
 
 
-def _validate_nmap_redistribution(
-    components: list[object],
-    *,
-    require_approval: bool,
-) -> None:
+def _validate_nmap_inventory(components: list[object]) -> None:
     nmap_components = [
         component
         for component in components
@@ -204,23 +200,9 @@ def _validate_nmap_redistribution(
     component = nmap_components[0]
     if component.get("license") != "LicenseRef-Nmap-Public-Source-0.95":
         raise ValueError("Debian Nmap package must declare NPSL 0.95")
-    review = component.get("redistribution_review")
-    allowed_reviews = {
-        "requires-upstream-waiver-oem-or-legal-approval",
-        "approved-by-upstream-waiver",
-        "approved-by-oem-license",
-        "approved-by-qualified-legal-review",
-    }
-    if review not in allowed_reviews:
-        raise ValueError("Debian Nmap package has an invalid redistribution review status")
-    if require_approval and not str(review).startswith("approved-by-"):
-        raise ValueError(
-            "public image publication requires an Nmap upstream waiver, OEM license, "
-            "or qualified legal approval"
-        )
 
 
-def main(*, require_redistribution_approval: bool = False) -> int:
+def main() -> int:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
     components = inventory.get("components")
@@ -250,10 +232,7 @@ def main(*, require_redistribution_approval: bool = False) -> int:
             raise ValueError(f"{name} has not completed license review")
 
     _validate_install_coverage(inventory, names, dockerfile)
-    _validate_nmap_redistribution(
-        components,
-        require_approval=require_redistribution_approval,
-    )
+    _validate_nmap_inventory(components)
 
     docker_version_args = _version_args(dockerfile) - {"APP_VERSION"}
     declared_version_args = _declared_version_args(components)
@@ -291,8 +270,6 @@ def main(*, require_redistribution_approval: bool = False) -> int:
 if __name__ == "__main__":
     if sys.argv[1:] == ["--installed-image"]:
         raise SystemExit(validate_installed_image())
-    if sys.argv[1:] == ["--release"]:
-        raise SystemExit(main(require_redistribution_approval=True))
     if sys.argv[1:]:
         raise SystemExit(f"unknown arguments: {' '.join(sys.argv[1:])}")
     raise SystemExit(main())

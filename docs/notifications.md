@@ -211,25 +211,8 @@ The SMTP password is read from the environment variable named by `notifications.
 
 ## Related Docs
 
-- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](../FEATURES.md) - full per-feature reference
-- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
-- [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-- [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [docs/workflows.md](workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [schedules.md](schedules.md) - scheduled-run notification triggers
+- [watchers.md](watchers.md) - change-detection notification triggers
+- [workflows.md](workflows.md) - workflow completion notifications
+- [../CONFIGURATION.md](../CONFIGURATION.md) - delivery and worker settings
+- [api.md](api.md) - notification API usage

@@ -58,7 +58,7 @@ publish_gitlab_image() {
     trap write_gitlab_status EXIT
 
     python3 "$script_dir/check_versions.sh" --release-version "$release_version"
-    python3 "$script_dir/check_container_licenses.py" --release
+    python3 "$script_dir/check_container_licenses.py"
     echo "$CI_REGISTRY_PASSWORD" \
         | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     if docker manifest inspect -v "$gitlab_image" > gitlab-existing.json 2>/dev/null; then

@@ -23,7 +23,7 @@ Config events are captured while the files and environment are being resolved, t
 
 Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, and `project_digests` merge by field. A local file can override one nested value without restating the whole section.
 
-The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#development-workflow).
+The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
 ### Schema Contract
 
@@ -398,6 +398,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `tour_enabled` | `true` | Enables the app tour entry points. When disabled, the welcome tour prompt, visual tour links, and `tour` built-in command are hidden |
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG` |
 | `log_format` | `text` | Log output format. Options: `text` for human-readable logs or `gelf` for GELF 1.1 JSON |
+
+See [Logging Reference](docs/logging.md) for level semantics, event names, fields, redaction rules, formats, and troubleshooting.
 
 ---
 
@@ -972,6 +974,24 @@ The Postgres test lane creates isolated schemas and keeps normal local developme
 
 ---
 
+## Supported Runtimes
+
+This is the canonical current support matrix. The README keeps short prerequisites where operators need them, while feature and architecture docs link here or explain their own user and design context. Changelog entries record the support statement for a specific release and are not a second current-state matrix.
+
+| Runtime surface | Current support |
+|-----------------|-----------------|
+| Production operating system | Linux |
+| Production architecture | AMD64 (`linux/amd64`) |
+| Container orchestration | Docker Compose 2.20.0 or newer |
+| Native ARM64 | Not advertised; compatibility gate disabled by default |
+| SELinux-enforcing Docker | Not advertised; compatibility gate disabled by default |
+| Rootless Podman | Not advertised; compatibility gate disabled by default |
+| Other Podman deployments | Best effort |
+
+The production Compose file pins the release image to `linux/amd64`, and the installer enforces the minimum Compose version before it writes a deployment. Native ARM64, SELinux-enforcing Docker, and rootless Podman have dedicated release gates, but a gate does not broaden this matrix until it is enabled, passes release images consistently, and the published support contract is deliberately updated.
+
+---
+
 ## Docker Compose Files
 
 The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls the Linux AMD64 image `docker.io/darklabsh/darklab-shell:2.6.0` and doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on `127.0.0.1` by default, and omits fixed container names so separate Compose project directories don't collide.
@@ -988,7 +1008,7 @@ SQLite and Redis start by default. The installer generates a private Postgres pa
 
 `/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files workspaces stay under tmpfs unless `.env` sets `WORKSPACE_ROOT=/workspaces` and `conf/config.local.yaml` enables the `volume` workspace backend. The production Compose file already maps `./workspaces` to that path.
 
-For SELinux-enforcing hosts, add a local Compose override with private relabeling such as `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z`. Rootless Docker and Podman can reject scanner capabilities even when the YAML is otherwise compatible; Docker Compose 2.20.0 or newer on Linux is the supported runtime.
+For SELinux-enforcing hosts, add a local Compose override with private relabeling such as `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z`. Rootless Docker and Podman can reject scanner capabilities even when the YAML is otherwise compatible. See [Supported Runtimes](#supported-runtimes) for the current production matrix.
 
 After `docker compose pull`, run `./verify-release-image.sh` before starting the stack. It requires the GitLab and Docker Hub digests in `release-manifest.json` to agree, confirms `.env` still selects that reviewed release image, and checks the pulled image's repository digest. A mismatch stops with a named error instead of starting an unverified image.
 
@@ -1443,26 +1463,8 @@ Use these names under `app/conf/` for source deployments or installed `conf/` fo
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](FEATURES.md) - full per-feature reference
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [docs/workflows.md](docs/workflows.md) - workflow playbook parameters, transitions, captures, execution state, and operator YAML
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [README.md](README.md#quick-start) - initial setup and first run
+- [FEATURES.md](FEATURES.md) - user-facing behavior behind the settings
+- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime and security contracts
+- [docs/storage-scaling.md](docs/storage-scaling.md) - storage planning and database growth
+- [docs/postgres-migration.md](docs/postgres-migration.md) - SQLite-to-Postgres migration
