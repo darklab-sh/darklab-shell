@@ -53,6 +53,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Release history:** the root changelog keeps the active release plus the two newest dated releases, with older entries preserved intact in major-version archives.
   - **Validation:** offline link and heading checks, table-of-contents checks, published-release integrity hashes, support-matrix executable-contract checks, and focused durability guards protect the new structure.
 
+### Fixed
+
+- **Protected release smoke tests verify the exact image they pull** — The normal AMD64 lane keeps the GitLab registry digest attached through repository-free and bundled-tool checks instead of relying on a tag alias that a digest-qualified pull doesn't create locally.
+
 ---
 
 ## [2.5.0] - 2026-07-11

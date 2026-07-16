@@ -382,8 +382,8 @@ release-image-smoke:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
-    - sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
-    - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE" amd64
+    - sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" amd64
 
 release-image-arm64-smoke:
   stage: verify

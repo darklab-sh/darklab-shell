@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.1"
+RELEASE_VERSION = "2.6.0-rc.2"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.2"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.3"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -1164,8 +1164,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     amd64_smoke_script = "\n".join(parsed_ci["release-image-smoke"]["script"])
-    assert "verify_repository_free_image.sh" in amd64_smoke_script
-    assert 'verify_bundled_tools.sh "$GITLAB_IMAGE" amd64' in amd64_smoke_script
+    digest_pinned_gitlab_image = '"$GITLAB_IMAGE@$GITLAB_DIGEST"'
+    assert f"docker pull {digest_pinned_gitlab_image}" in amd64_smoke_script
+    assert f"verify_repository_free_image.sh {digest_pinned_gitlab_image}" in amd64_smoke_script
+    assert f"verify_bundled_tools.sh {digest_pinned_gitlab_image} amd64" in amd64_smoke_script
     arm64_job = parsed_ci["release-image-arm64-smoke"]
     assert arm64_job["stage"] == "verify"
     assert arm64_job["tags"] == ["saas-linux-small-arm64"]
