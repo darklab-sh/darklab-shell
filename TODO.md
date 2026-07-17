@@ -81,6 +81,7 @@ Keep one runtime image. Separate published runtime containers would complicate c
 
 - [ ] Record the AMD64 and ARM64 clean-build time, repeated-build time, cache import/export time, image pull time, and time to the first actionable image failure. Use `--progress=plain` or equivalent retained logs so cache-manifest imports and `CACHED` steps are visible.
 - [ ] Confirm the AMD64 release builder consistently imports and exports its registry-backed `mode=max` cache. Use architecture- and release-line-scoped cache references so unrelated or concurrent writers don't overwrite the same cache location.
+- [ ] Keep the native ARM64 release smoke uncached on the current 30 GB hosted runner. Restore a portable ARM64 cache only after a larger runner or a smaller image provides enough headroom for cache import, export, and runtime verification in one job.
 - [ ] Record when a refreshed Python base-image platform digest invalidates the complete image. Keep security-driven base refreshes intentional and visible rather than hiding them to preserve an old cache.
 - [ ] Measure registry layer caching and `RUN --mount=type=cache` separately. Cross-runner acceptance depends on exported layer-cache hits from stable stages and pinned inputs; cache mounts are builder-local acceleration and must not be counted as portable reuse on a fresh DinD daemon or another runner.
 
@@ -93,7 +94,7 @@ Keep one runtime image. Separate published runtime containers would complicate c
 
 #### End-state acceptance criteria
 
-- [ ] Two consecutive RC-equivalent builds with unchanged pinned toolchain inputs visibly reuse exported AMD64 and ARM64 layer caches across fresh builders instead of recompiling the scanner suite; builder-local cache mounts aren't evidence for this criterion.
+- [ ] Two consecutive RC-equivalent AMD64 builds with unchanged pinned toolchain inputs visibly reuse the exported layer cache across fresh builders instead of recompiling the scanner suite; builder-local cache mounts aren't evidence for this criterion. Apply the same criterion to ARM64 only after that job has enough storage for a portable cache.
 - [ ] The measured repeated-pipeline feedback time is materially lower than the current 80–90-minute loop, and the retained logs make remaining cache misses and pull/build costs attributable.
 
 ## Known Issues

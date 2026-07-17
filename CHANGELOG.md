@@ -55,13 +55,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Protected release builds report image failures sooner and reuse portable caches** — Tag pipelines keep one self-contained runtime image while shortening repeated build and verification paths.
   - **Smaller runtime:** independent Go, native, Ruby, and large-asset builder stages leave compilers, development packages, Go caches, apt indexes, build source trees, and local configuration overlays out of the shipped image while copying reviewed notices to durable runtime paths. VirusTotal CLI, Nikto, and SecLists now use reviewed immutable inputs.
-  - **Portable rebuilds:** AMD64 and native ARM64 builds import and export serialized, architecture- and release-line-scoped registry caches with scheduled native warmers. Plain build logs expose cache imports and reused stages.
+  - **Portable rebuilds:** AMD64 builds import and export a serialized, release-line-scoped registry cache with scheduled warmers. Native ARM64 compatibility builds stay uncached on the storage-constrained hosted runner.
   - **Earlier feedback:** ordinary branch images receive the fixed-Critical scan before tagging. Protected tags start the canonical Syft/Grype gate beside runtime compatibility checks, reuse its retained files for evidence and signing, and measure pull time and installed size in the existing smoke pull instead of delaying every downstream job with an extra repull.
   - **Targeted retries:** a manual digest recheck reruns repository-free startup, bundled-tool execution, and vulnerability scanning without rebuilding or republishing the image, while safe long-running branch and cache-warmer builds can be canceled when a newer pipeline replaces them.
 
 ### Fixed
 
-- **Hosted ARM64 builds stay within the runner's storage budget** — The release smoke and scheduled cache-warmer jobs use a final-image-only portable cache with a supported containerized BuildKit builder. The smoke build writes one compressed archive, removes the builder's storage before loading the candidate, and keeps the explicit DinD readiness check. SecLists is staged at its final runtime path so the large wordlist layer isn't exported under two directory layouts.
+- **Hosted ARM64 builds stay within the runner's storage budget** — The native release smoke returns to the direct, uncached Docker build that passed before registry caching was introduced, while keeping the explicit DinD readiness check and current runtime verification. The unused ARM cache warmer is removed, and SecLists remains staged at its final runtime path.
 
 - **Run comparisons start only one full comparison request** — The ESM bridge is checked for an installed handler instead of treating the renderer's normal void return as a missing handler, preventing a slower duplicate response from collapsing newly expanded unchanged lines.
 
