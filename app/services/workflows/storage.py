@@ -360,20 +360,23 @@ def active_execution_page_for_recovery(
     after_created: str = "",
     after_id: str = "",
 ) -> list[tuple[str, str]]:
+    page_limit = max(1, min(int(limit or 100), 500))
     with get_db_connect()() as conn:
-        rows = conn.execute(
-            "SELECT id, created FROM workflow_executions "
-            "WHERE status IN ('queued', 'running', 'canceling') "
-            "AND (? = '' OR created > ? OR (created = ? AND id > ?)) "
-            "ORDER BY created ASC, id ASC LIMIT ?",
-            (
-                after_created,
-                after_created,
-                after_created,
-                after_id,
-                max(1, min(int(limit or 100), 500)),
-            ),
-        ).fetchall()
+        if after_created:
+            rows = conn.execute(
+                "SELECT id, created FROM workflow_executions "
+                "WHERE status IN ('queued', 'running', 'canceling') "
+                "AND (created > ? OR (created = ? AND id > ?)) "
+                "ORDER BY created ASC, id ASC LIMIT ?",
+                (after_created, after_created, after_id, page_limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, created FROM workflow_executions "
+                "WHERE status IN ('queued', 'running', 'canceling') "
+                "ORDER BY created ASC, id ASC LIMIT ?",
+                (page_limit,),
+            ).fetchall()
     return [(str(row["id"]), str(row["created"] or "")) for row in rows]
 
 

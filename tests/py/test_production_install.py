@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.16"
+RELEASE_VERSION = "2.6.0-rc.17"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -1480,8 +1480,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert '"http://127.0.0.1:${smoke_port}/session/preferences"' in postgres_verifier
     assert 'session_id="00000000-0000-4000-8000-000000000001"' in postgres_verifier
     assert 'session_id="release-postgres-${suffix}"' not in postgres_verifier
-    assert 'darklab-deploy" backup' in postgres_verifier
-    assert 'darklab-deploy" restore' in postgres_verifier
+    assert "backup_output=$(deploy backup)" in postgres_verifier
+    assert 'deploy restore "$backup_path"' in postgres_verifier
+    assert 'docker inspect "$HOSTNAME"' in postgres_verifier
+    assert 'DARKLAB_DEPLOY_DOCKER_ROOT="$deployment_docker_root"' in postgres_verifier
     assert 'pref_theme_name == "theme_light_blue"' in postgres_verifier
     assert '--gitlab-cli-image "$CI_GITLAB_CLI_IMAGE"' in supply_chain_script
     assert "cosign sign-blob" in publisher
@@ -2561,7 +2563,11 @@ def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path)
     install_dir = tmp_path / "managed deployment"
     installed = _run_setup(payload, install_dir, tmp_path / "setup-run")
     assert installed.returncode == 0, installed.stderr
-    backup = _build_verified_backup(tmp_path / "backup-source")
+    backup_source = _build_verified_backup(tmp_path / "backup-source")
+    backup = install_dir / "backups" / "restore-test.tar.gz"
+    shutil.copy2(backup_source, backup)
+    daemon_install_dir = tmp_path / "daemon-visible-deployment"
+    daemon_install_dir.symlink_to(install_dir, target_is_directory=True)
     lifecycle_dir = tmp_path / "lifecycle"
     lifecycle_dir.mkdir()
     bin_dir, log_path = _fake_docker(lifecycle_dir)
@@ -2570,6 +2576,7 @@ def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path)
         "FAKE_BACKUP_ARCHIVE": str(backup),
         "FAKE_DOCKER_LOG": str(log_path),
         "FAKE_RESTORE_EXIT": "7",
+        "DARKLAB_DEPLOY_DOCKER_ROOT": str(daemon_install_dir),
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
     })
 
@@ -2590,6 +2597,13 @@ def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path)
     assert "/app/tools/restore_system.py" in docker_log
     assert f"--output-uid {os.getuid()}" in docker_log
     assert f"--output-gid {os.getgid()}" in docker_log
+    assert f"--volume {daemon_install_dir}:/deployment:ro" in docker_log
+    assert f"--volume {daemon_install_dir}/backups:/backups" in docker_log
+    assert f"--volume {daemon_install_dir}:/deployment" in docker_log
+    assert (
+        f"--volume {daemon_install_dir}/backups/{backup.name}:"
+        "/restore/backup.tar.gz:ro"
+    ) in docker_log
     assert " up -d shell" not in docker_log
 
 

@@ -61,7 +61,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Repository-free release gates exercise production identity and configuration paths correctly** — The bundled-Postgres backup/restore smoke uses a valid anonymous UUID for authenticated preference writes, while the public Docker Hub smoke transfers the installed private configuration into a daemon-managed volume before layering it onto the shipped Compose file. The public marker also stays within the app-name length contract.
+- **Postgres workflow recovery starts without invalid cursor values** — The first recovery page omits its timestamp cursor predicate until a real cursor exists, so fresh Postgres workers no longer bind an empty string into a `timestamptz` comparison. Postgres integration coverage exercises both the initial page and its follow-up cursor.
+
+- **Repository-free release gates exercise production identity and configuration paths correctly** — The bundled-Postgres backup/restore smoke uses a valid anonymous UUID for authenticated preference writes and translates its Docker-executor workspace to the host daemon's real mount source before lifecycle helper containers read or restore deployment files. The public Docker Hub smoke transfers the installed private configuration into a daemon-managed volume before layering it onto the shipped Compose file, and its marker stays within the app-name length contract.
 
 - **Hosted ARM64 builds stay within the runner's storage budget** — The native release smoke returns to the direct, uncached Docker build that passed before registry caching was introduced, while keeping the explicit DinD readiness check and current runtime verification. The unused ARM cache warmer is removed, and SecLists remains staged at its final runtime path.
 

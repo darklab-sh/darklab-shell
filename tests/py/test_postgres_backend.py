@@ -1724,6 +1724,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     from app import create_app
     from blueprints import workflows as workflow_routes
     from services.workflows.storage import (
+        active_execution_page_for_recovery,
         bind_step_run,
         claim_step_for_launch,
         create_execution,
@@ -1851,6 +1852,12 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         json={"workflow_id": playbook["id"], "inputs": {"target": "darklab.sh"}},
     )
     execution = json.loads(execution_resp.data)["execution"]
+    initial_recovery_page = active_execution_page_for_recovery()
+    assert [item[0] for item in initial_recovery_page] == [execution["id"]]
+    assert active_execution_page_for_recovery(
+        after_created=initial_recovery_page[0][1],
+        after_id=execution["id"],
+    ) == []
     execution_run_id = "run-pg-workflow-resolve-" + uuid.uuid4().hex
     inspect_run_id = "run-pg-workflow-inspect-" + uuid.uuid4().hex
     assert claim_step_for_launch(execution["id"], "resolve") is not None

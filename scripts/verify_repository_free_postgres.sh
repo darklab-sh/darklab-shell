@@ -110,14 +110,46 @@ get_preferences() {
         "http://127.0.0.1:${smoke_port}/session/preferences"
 }
 
+resolve_deployment_docker_root() {
+    candidate=$install_dir
+    if [ -n "${HOSTNAME:-}" ]; then
+        resolved=$(docker inspect "$HOSTNAME" 2>/dev/null | jq -r \
+            --arg path "$install_dir" '
+                [.[0].Mounts[]?
+                 | select(.Destination as $destination
+                   | $path == $destination
+                     or ($path | startswith($destination + "/")))]
+                | sort_by(.Destination | length)
+                | last as $mount
+                | if $mount == null then ""
+                  else $mount.Source + $path[($mount.Destination | length):]
+                  end
+            ') || resolved=""
+        [ -z "$resolved" ] || candidate=$resolved
+    fi
+    release_image=$(sed -n 's/^DARKLAB_IMAGE=//p' "$install_dir/.env" | tail -n 1)
+    [ -n "$release_image" ] || fail "installed .env does not define DARKLAB_IMAGE"
+    docker run --rm --entrypoint test \
+        -v "$candidate:/deployment:ro" \
+        "$release_image" -f /deployment/.env \
+        || fail "Docker daemon cannot read the installed deployment at $candidate"
+    printf '%s\n' "$candidate"
+}
+
+deploy() {
+    DARKLAB_DEPLOY_DOCKER_ROOT="$deployment_docker_root" \
+        "$install_dir/darklab-deploy" "$@"
+}
+
 original_preferences='{"preferences":{"pref_theme_name":"theme_light_blue"}}'
 mutated_preferences='{"preferences":{"pref_theme_name":"darklab_obsidian"}}'
+deployment_docker_root=$(resolve_deployment_docker_root)
 post_preferences "$original_preferences" > "$install_dir/postgres-original.json"
 jq -e '.preferences.pref_theme_name == "theme_light_blue"' \
     "$install_dir/postgres-original.json" >/dev/null \
     || fail "initial Postgres-backed preference was not saved"
 
-backup_output=$("$install_dir/darklab-deploy" backup)
+backup_output=$(deploy backup)
 backup_path=$(printf '%s\n' "$backup_output" | sed -n 's/^Backup written to //p')
 if [ -z "$backup_path" ] || [ ! -f "$backup_path" ]; then
     fail "darklab-deploy did not produce a verified Postgres backup"
@@ -128,7 +160,7 @@ jq -e '.preferences.pref_theme_name == "darklab_obsidian"' \
     "$install_dir/postgres-mutated.json" >/dev/null \
     || fail "Postgres-backed preference mutation was not saved"
 
-"$install_dir/darklab-deploy" restore "$backup_path"
+deploy restore "$backup_path"
 wait_for_health || fail "app did not become healthy after Postgres restore"
 get_preferences > "$install_dir/postgres-restored.json"
 jq -e '.preferences.pref_theme_name == "theme_light_blue"' \

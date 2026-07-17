@@ -39,6 +39,26 @@ fail() {
     exit 1
 }
 
+# CI Docker executors can run this client inside a container while talking to a
+# host daemon. Normal installs use script_dir; the release smoke supplies the
+# equivalent daemon-visible source path for child backup and restore mounts.
+deployment_docker_root=${DARKLAB_DEPLOY_DOCKER_ROOT:-$script_dir}
+case "$deployment_docker_root" in
+    /*) ;;
+    *) fail "Docker deployment root must be an absolute path" ;;
+esac
+
+docker_source_path() {
+    source_path=$1
+    case "$source_path" in
+        "$script_dir") printf '%s\n' "$deployment_docker_root" ;;
+        "$script_dir"/*)
+            printf '%s/%s\n' "${deployment_docker_root%/}" "${source_path#"$script_dir"/}"
+            ;;
+        *) printf '%s\n' "$source_path" ;;
+    esac
+}
+
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | sed 's/[[:space:]].*$//'
@@ -364,6 +384,8 @@ create_repository_free_backup() {
     backup_verify_stage=$(mktemp -d "${TMPDIR:-/tmp}/darklab-backup-verify.XXXXXX")
     host_uid=$(id -u)
     host_gid=$(id -g)
+    deployment_mount_source=$(docker_source_path "$script_dir")
+    backup_mount_source=$(docker_source_path "$script_dir/backups")
     workspace_root=$(sed -n 's/^WORKSPACE_ROOT=//p' "$script_dir/.env")
     set -- \
         --repository-free \
@@ -400,8 +422,8 @@ create_repository_free_backup() {
     backup_failed=false
     if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
         run --rm --no-deps --user 0:0 --entrypoint python3 \
-        --volume "$script_dir:/deployment:ro" \
-        --volume "$script_dir/backups:/backups" \
+        --volume "$deployment_mount_source:/deployment:ro" \
+        --volume "$backup_mount_source:/backups" \
         --env DARKLAB_BACKUP_ROOT=/deployment \
         --env DARKLAB_BACKUP_APP_DIR=/app \
         --env "DARKLAB_BACKUP_OUTPUT_UID=$host_uid" \
@@ -475,12 +497,14 @@ restore_command() {
     safety_backup=$(create_repository_free_backup "" path)
     host_uid=$(id -u)
     host_gid=$(id -g)
+    deployment_mount_source=$(docker_source_path "$script_dir")
+    restore_archive_mount_source=$(docker_source_path "$restore_archive")
     docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell \
         || fail "could not stop the app before restore"
     if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
         run --rm --no-deps --user 0:0 --entrypoint python3 \
-        --volume "$script_dir:/deployment" \
-        --volume "$restore_archive:/restore/backup.tar.gz:ro" \
+        --volume "$deployment_mount_source:/deployment" \
+        --volume "$restore_archive_mount_source:/restore/backup.tar.gz:ro" \
         shell /app/tools/restore_system.py \
         --archive /restore/backup.tar.gz \
         --data-dir /data \
