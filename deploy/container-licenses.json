@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.6.0-rc.18",
+  "reviewed_for_release": "2.6.0-rc.19",
   "reviewed_on": "2026-07-16",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
@@ -32,7 +32,7 @@
     "apt:nmap": "Debian Nmap package",
     "apt:perl": "Python container base and Debian packages",
     "apt:procps": "Python container base and Debian packages",
-    "apt:postgresql-client": "Python container base and Debian packages",
+    "apt:postgresql-client-${POSTGRESQL_CLIENT_VERSION}": "PostgreSQL 18 client",
     "apt:python3-requests": "Python container base and Debian packages",
     "apt:ruby-dev": "Python container base and Debian packages",
     "apt:ruby": "Python container base and Debian packages",
@@ -67,6 +67,13 @@
       "source": "https://github.com/docker-library/python/tree/3.14/slim-trixie",
       "license": "mixed-open-source",
       "notice_location": "/usr/share/doc/*/copyright and /usr/local/lib/python3.14/site-packages/*-info/licenses"
+    },
+    {
+      "name": "PostgreSQL 18 client",
+      "version_arg": "POSTGRESQL_CLIENT_VERSION",
+      "source": "https://apt.postgresql.org/pub/repos/apt/",
+      "license": "PostgreSQL",
+      "notice_location": "/usr/share/doc/postgresql-client-18/copyright"
     },
     {
       "name": "Debian Nmap package",

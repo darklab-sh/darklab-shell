@@ -1164,7 +1164,7 @@ workspace_backend: volume
 
 ## Operator Backups
 
-Repository-free installs include the backup and restore path in `darklab-deploy`. It runs the image's backup helper in a one-off Compose container, so the host only needs Docker and Compose:
+Repository-free installs include the backup and restore path in `darklab-deploy`. It runs the image's backup helper in a one-off Compose container, so the host only needs Docker and Compose. The release image includes the PostgreSQL 18 client used with the bundled PostgreSQL 18 service:
 
 ```bash
 ./darklab-deploy backup --keep-days 14
@@ -1188,7 +1188,7 @@ python scripts/backup_system.py \
 
 Run the script as a host user that can read every physical source it needs to copy. On Linux Docker hosts, production bind mounts commonly require root because `/data` and `/workspaces` are owned by the container's numeric app users and are not world-readable. Docker group access is still useful for Compose Postgres dumps, Docker volume exports, and container-only sources, but it does not grant read access to locked-down host bind-mount directories.
 
-For SQLite, the script writes a consistent `database/history.db` snapshot with SQLite's online backup API, then copies the rest of `data_dir` while leaving the live `history.db`, `history.db-wal`, and `history.db-shm` files out of the copied `data/` directory. When the script runs from the Docker host, it keeps the app's logical `data_dir` separate from the physical backup source, so the bundled `/data` mount resolves to the host `./data` directory declared in Compose. For Postgres, it writes `database/postgres.dump` with `pg_dump --format=custom --no-owner --no-acl`. Compose-managed Postgres backups run `pg_dump` inside the Postgres container with `docker compose exec -T`, so the host does not need `pg_dump` installed. Local host `pg_dump` is used only for host-reachable database URLs or when `--postgres-dump-mode local` is set.
+For SQLite, the script writes a consistent `database/history.db` snapshot with SQLite's online backup API, then copies the rest of `data_dir` while leaving the live `history.db`, `history.db-wal`, and `history.db-shm` files out of the copied `data/` directory. When the script runs from the Docker host, it keeps the app's logical `data_dir` separate from the physical backup source, so the bundled `/data` mount resolves to the host `./data` directory declared in Compose. For Postgres, it writes `database/postgres.dump` with `pg_dump --format=custom --no-owner --no-acl`. Direct script runs against Compose use `pg_dump` inside the Postgres container with `docker compose exec -T`, so the host does not need `pg_dump` installed. Repository-free backups use the matching PostgreSQL 18 client in their one-off release-image container. Local host `pg_dump` is used only for other host-reachable database URLs or when `--postgres-dump-mode local` is set.
 
 The backup includes:
 

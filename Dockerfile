@@ -46,7 +46,9 @@ ARG SECLISTS_COMMIT=190c6f7bd58c847ceadfe57d9853592737f059e8
 ARG NIKTO_VERSION=2.6.0
 ARG NIKTO_COMMIT=69681e2e4213c15b85a90c53b2169ecb2a88fb01
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.18
+ARG POSTGRESQL_CLIENT_VERSION=18
+ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
+ARG APP_VERSION=2.6.0-rc.19
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -337,10 +339,27 @@ ARG PYTHON_VERSION
 ARG SETUPTOOLS_VERSION
 ARG SSLYZE_VERSION
 ARG WAFW00F_VERSION
+ARG POSTGRESQL_CLIENT_VERSION
+ARG POSTGRESQL_APT_KEY_SHA256
 
 # Install runtime packages only. Compilers and development headers remain in
 # builder stages, and apt indexes are not retained in the release image.
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    install -d /usr/share/postgresql-common/pgdg && \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    printf "%s  %s\n" "${POSTGRESQL_APT_KEY_SHA256}" \
+        /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        > /tmp/postgresql-apt-key.sha256 && \
+    sha256sum -c /tmp/postgresql-apt-key.sha256 && \
+    rm /tmp/postgresql-apt-key.sha256 && \
+    . /etc/os-release && \
+    architecture=$(dpkg --print-architecture) && \
+    printf "Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nArchitectures: %s\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n" \
+        "$VERSION_CODENAME" "$architecture" \
+        > /etc/apt/sources.list.d/pgdg.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
@@ -348,7 +367,8 @@ RUN rm -f /etc/dpkg/dpkg.cfg.d/docker && \
         libnet-ssleay-perl rubygems ruby libxml-writer-perl libjson-perl fping \
         python3-requests fierce dnsenum libcap2-bin sudo groff-base \
         bsdextrautils iptables masscan libpcap0.8 ca-certificates perl \
-        postgresql-client zlib1g unzip inetutils-telnet httping && \
+        postgresql-client-${POSTGRESQL_CLIENT_VERSION} zlib1g unzip \
+        inetutils-telnet httping && \
     rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /usr/share/doc/darklab-shell/licenses
 

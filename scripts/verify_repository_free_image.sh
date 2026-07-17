@@ -206,6 +206,12 @@ container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$ima
         || image_check_failed pg_dump available missing
     command -v pg_restore >/dev/null 2>&1 \
         || image_check_failed pg_restore available missing
+    pg_dump_version=$(pg_dump --version 2>&1)
+    printf "%s\n" "$pg_dump_version" | grep -Eq "^pg_dump \(PostgreSQL\) 18\." \
+        || image_check_failed pg_dump_version "PostgreSQL 18" "$pg_dump_version"
+    pg_restore_version=$(pg_restore --version 2>&1)
+    printf "%s\n" "$pg_restore_version" | grep -Eq "^pg_restore \(PostgreSQL\) 18\." \
+        || image_check_failed pg_restore_version "PostgreSQL 18" "$pg_restore_version"
     test ! -e /app/conf/config.local.yaml \
         || image_check_failed local_overlay_absent absent present
     if [ -n "$EXPECTED_VERSION" ]; then

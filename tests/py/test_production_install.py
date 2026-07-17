@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.18"
+RELEASE_VERSION = "2.6.0-rc.19"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -693,7 +693,16 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "deploy/third-party-licenses/" in dockerfile
     assert "org.opencontainers.image.licenses=\"AGPL-3.0-only\"" in dockerfile
     assert "COPY LICENSE /usr/share/doc/darklab-shell/LICENSE" in dockerfile
-    assert "postgresql-client" in dockerfile
+    assert "ARG POSTGRESQL_CLIENT_VERSION=18" in dockerfile
+    assert (
+        "ARG POSTGRESQL_APT_KEY_SHA256="
+        "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76"
+    ) in dockerfile
+    assert "https://apt.postgresql.org/pub/repos/apt" in dockerfile
+    assert "postgresql-client-${POSTGRESQL_CLIENT_VERSION}" in dockerfile
+    assert "expected PostgreSQL 18 client" in bundled_tool_smoke
+    assert 'pg_dump_version "PostgreSQL 18"' in image_smoke
+    assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert "COPY scripts/backup_system.py scripts/restore_system.py /app/tools/" in dockerfile
     assert "!scripts/backup_system.py" in dockerignore
     assert "!scripts/install_go_tool.sh" in dockerignore
@@ -965,7 +974,9 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     install_coverage = inventory["dockerfile_install_coverage"]
     assert install_coverage["apt:nmap"] == "Debian Nmap package"
     assert install_coverage["apt:masscan"] == "Debian Masscan package"
-    assert install_coverage["apt:postgresql-client"] == "Python container base and Debian packages"
+    assert install_coverage["apt:postgresql-client-${POSTGRESQL_CLIENT_VERSION}"] == (
+        "PostgreSQL 18 client"
+    )
 
 
 def test_license_checkers_fail_closed_and_preserve_excluded_files(
@@ -1485,6 +1496,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "running_container_ids=$(docker ps -q)" in postgres_verifier
     assert "select(.Config.Hostname == $hostname)" in postgres_verifier
     assert 'DARKLAB_DEPLOY_DOCKER_ROOT="$deployment_docker_root"' in postgres_verifier
+    assert "pg_dump \\(PostgreSQL\\) 18\\." in postgres_verifier
     assert 'pref_theme_name == "theme_light_blue"' in postgres_verifier
     assert '--gitlab-cli-image "$CI_GITLAB_CLI_IMAGE"' in supply_chain_script
     assert "cosign sign-blob" in publisher

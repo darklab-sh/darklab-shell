@@ -105,6 +105,12 @@ probe nmap nmap --version
 probe masscan masscan --version
 probe pg_dump pg_dump --version
 probe pg_restore pg_restore --version
+for postgresql_tool in pg_dump pg_restore; do
+    postgresql_version=$($postgresql_tool --version 2>&1)
+    printf "%s\n" "$postgresql_version" | grep -Eq "^${postgresql_tool} \(PostgreSQL\) 18\." \
+        || verification_failed "$postgresql_tool" \
+            "expected PostgreSQL 18 client, got: $postgresql_version"
+done
 probe python python --version
 probe ruby ruby --version
 probe perl perl -v

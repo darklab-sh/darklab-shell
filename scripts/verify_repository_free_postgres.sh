@@ -79,6 +79,10 @@ compose --profile postgres pull shell redis postgres
 "$install_dir/verify-release-image.sh"
 compose --profile postgres up -d --pull never --wait
 wait_for_health || fail "app did not become healthy against bundled Postgres"
+postgres_client_version=$(compose exec -T shell pg_dump --version 2>&1) \
+    || fail "release image could not run pg_dump"
+printf '%s\n' "$postgres_client_version" | grep -Eq '^pg_dump \(PostgreSQL\) 18\.' \
+    || fail "release image must provide PostgreSQL 18 pg_dump; found: $postgres_client_version"
 
 attempt=0
 while [ "$attempt" -lt 60 ]; do
