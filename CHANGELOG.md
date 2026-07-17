@@ -61,6 +61,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Repository-free release gates exercise production identity and configuration paths correctly** — The bundled-Postgres backup/restore smoke uses a valid anonymous UUID for authenticated preference writes, while the public Docker Hub smoke transfers the installed private configuration into a daemon-managed volume before layering it onto the shipped Compose file. The public marker also stays within the app-name length contract.
+
 - **Hosted ARM64 builds stay within the runner's storage budget** — The native release smoke returns to the direct, uncached Docker build that passed before registry caching was introduced, while keeping the explicit DinD readiness check and current runtime verification. The unused ARM cache warmer is removed, and SecLists remains staged at its final runtime path.
 
 - **Run comparisons start only one full comparison request** — The ESM bridge is checked for an installed handler instead of treating the renderer's normal void return as a missing handler, preventing a slower duplicate response from collapsing newly expanded unchanged lines.

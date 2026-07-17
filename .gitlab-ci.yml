@@ -957,12 +957,16 @@ release-public-smoke:
       require_nonempty() {
         [ -n "$3" ] || release_check_failed "$1" "$2" nonempty empty
       }
-      release_shell_container() {
+      release_compose() {
         docker compose \
           --project-name "$smoke_project" \
           --env-file "$CI_PROJECT_DIR/release-install/.env" \
           -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
-          ps -q shell
+          -f "$smoke_override" \
+          "$@"
+      }
+      release_shell_container() {
+        release_compose ps -q shell
       }
       wait_for_release_health() {
         attempt=0
@@ -1023,22 +1027,34 @@ release-public-smoke:
         config --quiet
       smoke_project="darklab-release-${CI_JOB_ID}"
       smoke_probe="darklab-release-probe-${CI_JOB_ID}"
+      smoke_config_volume="darklab-release-conf-${CI_JOB_ID}"
+      smoke_override="$CI_PROJECT_DIR/release-compose-smoke.override.yaml"
       smoke_port=$((20000 + CI_JOB_ID % 10000))
       printf '\nAPP_PORT=%s\nWEB_CONCURRENCY=1\nWEB_THREADS=2\nNOTIFICATION_WORKER_ENABLED=0\nSCHEDULER_ENABLED=0\n' \
         "$smoke_port" >> "$CI_PROJECT_DIR/release-install/.env"
-      printf '\napp_name: release-compose-smoke\n' \
+      printf '\napp_name: release-compose\n' \
         >> "$CI_PROJECT_DIR/release-install/conf/config.local.yaml"
-      docker compose \
-        --project-name "$smoke_project" \
-        --env-file "$CI_PROJECT_DIR/release-install/.env" \
-        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
-        pull shell redis
+      docker volume create "$smoke_config_volume" >/dev/null
+      tar -C "$CI_PROJECT_DIR/release-install/conf" -cf - . \
+        | docker run --rm -i --entrypoint sh \
+            -v "$smoke_config_volume:/config" \
+            "$DOCKERHUB_RELEASE_IMAGE" -c 'tar -xf - -C /config'
+      cat > "$smoke_override" <<EOF
+      services:
+        shell:
+          volumes:
+            - type: volume
+              source: release-smoke-config
+              target: /config
+              read_only: true
+      volumes:
+        release-smoke-config:
+          external: true
+          name: $smoke_config_volume
+      EOF
+      release_compose pull shell redis
       "$CI_PROJECT_DIR/release-install/verify-release-image.sh"
-      docker compose \
-        --project-name "$smoke_project" \
-        --env-file "$CI_PROJECT_DIR/release-install/.env" \
-        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
-        up -d --pull never
+      release_compose up -d --pull never
       docker run -d \
         --name "$smoke_probe" \
         --network host \
@@ -1062,16 +1078,12 @@ release-public-smoke:
       fi
       if ! docker exec "$smoke_probe" \
         curl -fsS "http://127.0.0.1:${smoke_port}/config" \
-        | jq -e '.app_name == "release-compose-smoke"' >/dev/null; then
-        release_check_failed public_compose_runtime app_name release-compose-smoke mismatch
+        | jq -e '.app_name == "release-compose"' >/dev/null; then
+        release_check_failed public_compose_runtime app_name release-compose mismatch
       fi
       docker exec "$shell_container" sh -c \
         'printf "%s\n" release-compose-restart > /data/release-compose-restart-marker'
-      docker compose \
-        --project-name "$smoke_project" \
-        --env-file "$CI_PROJECT_DIR/release-install/.env" \
-        -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
-        restart shell
+      release_compose restart shell
       wait_for_release_health
       shell_container=$(release_shell_container)
       docker exec "$shell_container" test -f /data/release-compose-restart-marker \
@@ -1080,17 +1092,26 @@ release-public-smoke:
     - |
       docker rm -f "darklab-release-probe-${CI_JOB_ID}" >/dev/null 2>&1 || true
       if [ -f "$CI_PROJECT_DIR/release-install/compose.yaml" ]; then
-        docker compose \
-          --project-name "darklab-release-${CI_JOB_ID}" \
-          --env-file "$CI_PROJECT_DIR/release-install/.env" \
-          -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
-          logs --no-color > release-compose.log 2>&1 || true
-        docker compose \
-          --project-name "darklab-release-${CI_JOB_ID}" \
-          --env-file "$CI_PROJECT_DIR/release-install/.env" \
-          -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
-          down -v --remove-orphans || true
+        cleanup_compose() {
+          if [ -f "$CI_PROJECT_DIR/release-compose-smoke.override.yaml" ]; then
+            docker compose \
+              --project-name "darklab-release-${CI_JOB_ID}" \
+              --env-file "$CI_PROJECT_DIR/release-install/.env" \
+              -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+              -f "$CI_PROJECT_DIR/release-compose-smoke.override.yaml" \
+              "$@"
+          else
+            docker compose \
+              --project-name "darklab-release-${CI_JOB_ID}" \
+              --env-file "$CI_PROJECT_DIR/release-install/.env" \
+              -f "$CI_PROJECT_DIR/release-install/compose.yaml" \
+              "$@"
+          fi
+        }
+        cleanup_compose logs --no-color > release-compose.log 2>&1 || true
+        cleanup_compose down -v --remove-orphans || true
       fi
+      docker volume rm "darklab-release-conf-${CI_JOB_ID}" >/dev/null 2>&1 || true
   artifacts:
     when: always
     paths:

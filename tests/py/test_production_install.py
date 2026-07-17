@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.15"
+RELEASE_VERSION = "2.6.0-rc.16"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -1478,6 +1478,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "SCHEDULER_WORKER_STARTED" in postgres_verifier
     assert '"http://127.0.0.1:${smoke_port}/health"' in postgres_verifier
     assert '"http://127.0.0.1:${smoke_port}/session/preferences"' in postgres_verifier
+    assert 'session_id="00000000-0000-4000-8000-000000000001"' in postgres_verifier
+    assert 'session_id="release-postgres-${suffix}"' not in postgres_verifier
     assert 'darklab-deploy" backup' in postgres_verifier
     assert 'darklab-deploy" restore' in postgres_verifier
     assert 'pref_theme_name == "theme_light_blue"' in postgres_verifier
@@ -1492,6 +1494,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "release-build-inputs.json" in public_smoke_script
     assert "dockerhub-repository.json" in public_smoke_script
     assert "signing_identity_regexp" in public_smoke_script
+    assert 'smoke_config_volume="darklab-release-conf-${CI_JOB_ID}"' in public_smoke_script
+    assert 'tar -C "$CI_PROJECT_DIR/release-install/conf" -cf - .' in public_smoke_script
+    assert '-f "$smoke_override"' in public_smoke_script
+    assert 'app_name: release-compose' in public_smoke_script
+    assert 'app_name: release-compose-smoke' not in public_smoke_script
     public_smoke_needs = {
         need["job"]: need for need in parsed_ci["release-public-smoke"]["needs"]
     }
