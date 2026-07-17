@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.12"
+RELEASE_VERSION = "2.6.0-rc.13"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -1366,6 +1366,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
             "alias": "docker",
             "command": [
                 "--mtu=1360",
+                "--tls=false",
                 "--feature",
                 "containerd-snapshotter",
             ],
@@ -1374,6 +1375,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert arm64_job["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
     assert arm64_job["variables"]["DOCKER_TLS_CERTDIR"] == ""
     arm64_before_script = "\n".join(arm64_job["before_script"])
+    assert "until docker info" in arm64_before_script
+    assert "did not become ready after 60 seconds" in arm64_before_script
     assert "docker info --format" in arm64_before_script
     assert "io.containerd.snapshotter.v1" in arm64_before_script
     assert "docker buildx create" not in arm64_before_script
@@ -1400,6 +1403,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         arm64_warmer["rules"][0]["if"]
     )
     arm64_warmer_before_script = "\n".join(arm64_warmer["before_script"])
+    assert "until docker info" in arm64_warmer_before_script
+    assert "did not become ready after 60 seconds" in arm64_warmer_before_script
     assert "docker info --format" in arm64_warmer_before_script
     assert "io.containerd.snapshotter.v1" in arm64_warmer_before_script
     assert "docker buildx create" not in arm64_warmer_before_script
