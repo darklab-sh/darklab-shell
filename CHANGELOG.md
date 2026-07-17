@@ -61,7 +61,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Hosted ARM64 builds export their registry cache through BuildKit** — The release smoke and scheduled cache-warmer jobs create a containerized Buildx builder before requesting the registry cache backend, avoiding the default Docker driver's unsupported cache-export path while keeping the candidate image loaded for runtime verification.
+- **Hosted ARM64 builds share one image and cache store** — The release smoke and scheduled cache-warmer jobs enable Docker's containerd image store before using the registry cache backend, avoiding a second BuildKit content store on the space-constrained hosted runner. SecLists is staged at its final runtime path so the large wordlist layer can be shared instead of exported under two directory layouts.
 
 - **Run comparisons start only one full comparison request** — The ESM bridge is checked for an installed handler instead of treating the renderer's normal void return as a missing handler, preventing a slower duplicate response from collapsing newly expanded unchanged lines.
 

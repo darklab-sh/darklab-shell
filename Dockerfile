@@ -46,7 +46,7 @@ ARG SECLISTS_COMMIT=190c6f7bd58c847ceadfe57d9853592737f059e8
 ARG NIKTO_VERSION=2.6.0
 ARG NIKTO_COMMIT=69681e2e4213c15b85a90c53b2169ecb2a88fb01
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.11
+ARG APP_VERSION=2.6.0-rc.12
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -254,13 +254,13 @@ ARG SECLISTS_COMMIT
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates git && \
     rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /out/usr/share/wordlists && \
+RUN mkdir -p /usr/share/wordlists && \
     git clone --depth 1 --branch "${SECLISTS_VERSION}" \
         https://github.com/danielmiessler/SecLists.git \
-        /out/usr/share/wordlists/seclists && \
-    test "$(git -C /out/usr/share/wordlists/seclists rev-parse HEAD)" = \
+        /usr/share/wordlists/seclists && \
+    test "$(git -C /usr/share/wordlists/seclists rev-parse HEAD)" = \
         "${SECLISTS_COMMIT}" && \
-    rm -rf /out/usr/share/wordlists/seclists/.git
+    rm -rf /usr/share/wordlists/seclists/.git
 
 FROM ${PYTHON_BASE_IMAGE} AS script-assets
 ARG NIKTO_VERSION
@@ -355,7 +355,7 @@ RUN mkdir -p /usr/share/doc/darklab-shell/licenses
 COPY --from=go-projectdiscovery /out/ /
 COPY --from=go-other-tools /out/ /
 COPY --from=native-tools /out/ /
-COPY --from=wordlist-assets /out/ /
+COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/seclists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
 COPY --from=ruby-tools /out/ /
