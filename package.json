@@ -1,6 +1,6 @@
 {
   "name": "darklab_shell",
-  "version": "2.6.0-rc.8",
+  "version": "2.6.0-rc.9",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {

@@ -45,7 +45,7 @@ ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.8
+ARG APP_VERSION=2.6.0-rc.9
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -259,7 +259,8 @@ RUN install-go-tool github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION} && \
     test -n "$urlscan_license" && \
     install -m 0644 "$urlscan_license" /usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
 RUN install-go-tool github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION} && \
-    find "$(go env GOMODCACHE)/github.com/!mzack9999" -path '*/jsluice@*/secrets' -type f -delete && \
+    find /root/go/pkg/mod "$(go env GOMODCACHE)" \
+        -path '*/jsluice@*/secrets' -type f -delete && \
     rm -f /usr/local/bin/install-go-tool
 
 

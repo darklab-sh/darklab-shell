@@ -57,7 +57,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Release vulnerability evidence is generated in the CI job workspace** — Syft and Grype now stream the SBOM through the job container instead of writing through Docker-daemon bind paths, so the CycloneDX file is retained with the full scan report. The image updates OpenSSL, compiles `gosu` with the current Go toolchain, and builds bundled Go tools against the fixed `x/crypto` security baseline so actionable Critical findings still fail closed without suppressions.
+- **Release vulnerability evidence is generated in the CI job workspace** — Syft and Grype now stream the SBOM through the job container instead of writing through Docker-daemon bind paths, so the CycloneDX file is retained with the full scan report. The image updates OpenSSL, compiles `gosu` with the current Go toolchain, builds bundled Go tools against the fixed `x/crypto` security baseline, and removes a stale executable shipped inside an upstream module cache so actionable Critical findings still fail closed without suppressions.
 
 - **Pre-commit shell checks match the full repository lint scope** — The hook now uses the same ShellCheck command as CI, including deployment shell templates, and the release smoke helper avoids an ambiguous conditional that ShellCheck correctly rejected.
 

@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.8"
+RELEASE_VERSION = "2.6.0-rc.9"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.9"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.10"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -714,6 +714,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "go -C /tmp/gosu build -trimpath -o /usr/sbin/gosu" in dockerfile
     assert " apt-get install -y --no-install-recommends" in dockerfile
     assert " sudo gosu " not in dockerfile
+    assert 'find /root/go/pkg/mod "$(go env GOMODCACHE)"' in dockerfile
     assert "jsluice@*/secrets" in dockerfile
     assert 'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"' in dockerfile
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
