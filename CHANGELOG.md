@@ -53,15 +53,23 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Release history:** the root changelog keeps the active release plus the two newest dated releases, with older entries preserved intact in major-version archives.
   - **Validation:** offline link and heading checks, table-of-contents checks, published-release integrity hashes, support-matrix executable-contract checks, and focused durability guards protect the new structure.
 
-- **Protected release builds reach compatibility verification sooner** — Tag pipelines skip the redundant branch image build, volatile image labels are applied last, and native ARM64 validation builds beside the canonical AMD64 image while the ordinary test, lint, and audit jobs remain unchanged.
+- **Protected release builds report image failures sooner and reuse portable caches** — Tag pipelines keep one self-contained runtime image while shortening repeated build and verification paths.
+  - **Smaller runtime:** independent Go, native, Ruby, and large-asset builder stages leave compilers, development packages, Go caches, apt indexes, build source trees, and local configuration overlays out of the shipped image while copying reviewed notices to durable runtime paths. VirusTotal CLI, Nikto, and SecLists now use reviewed immutable inputs.
+  - **Portable rebuilds:** AMD64 and native ARM64 builds import and export serialized, architecture- and release-line-scoped registry caches with scheduled native warmers. Plain build logs expose cache imports and reused stages.
+  - **Earlier feedback:** ordinary branch images receive the fixed-Critical scan before tagging. Protected tags start the canonical Syft/Grype gate beside runtime compatibility checks, reuse its retained files for evidence and signing, and measure pull time and installed size in the existing smoke pull instead of delaying every downstream job with an extra repull.
+  - **Targeted retries:** a manual digest recheck reruns repository-free startup, bundled-tool execution, and vulnerability scanning without rebuilding or republishing the image, while safe long-running branch and cache-warmer builds can be canceled when a newer pipeline replaces them.
 
 ### Fixed
+
+- **Run comparisons start only one full comparison request** — The ESM bridge is checked for an installed handler instead of treating the renderer's normal void return as a missing handler, preventing a slower duplicate response from collapsing newly expanded unchanged lines.
 
 - **Release vulnerability evidence is generated in the CI job workspace** — Syft and Grype now stream the SBOM through the job container instead of writing through Docker-daemon bind paths, so the CycloneDX file is retained with the full scan report. The image updates OpenSSL, compiles `gosu` with the current Go toolchain, builds bundled Go tools against the fixed `x/crypto` security baseline, and removes a stale executable shipped inside an upstream module cache so actionable Critical findings still fail closed without suppressions.
 
 - **Pre-commit shell checks match the full repository lint scope** — The hook now uses the same ShellCheck command as CI, including deployment shell templates, and the release smoke helper avoids an ambiguous conditional that ShellCheck correctly rejected.
 
-- **Release image smoke checks isolate storage and privileges for each runner** — Docker-socket jobs use daemon-managed scratch volumes, native rootless and SELinux jobs keep bind-mount scratch data outside the checkout and recover stale pre-checkout directories, and bundled-tool verification grants the raw-network capabilities required to execute Naabu on ARM64.
+- **Release image smoke checks isolate storage and privileges for each runner** — Docker-socket jobs, including the anonymous Docker Hub check, use daemon-managed scratch volumes so configuration overlays reach the host daemon. Native rootless and SELinux jobs keep bind-mount scratch data outside the checkout and recover stale pre-checkout directories, while bundled-tool verification grants the raw-network capabilities required to execute Naabu on ARM64.
+
+- **Fresh Postgres starts serialize migration-ledger creation across every process** — Schema branch detection is read-only, leaving the first `schema_migrations` table creation and unified baseline behind the existing transaction-scoped advisory lock when Gunicorn, notification, and scheduler workers start together.
 
 - **Python dependency audits cover development tooling consistently** — The npm audit command now checks both runtime and development requirements, and the development-only setuptools pin moves to the release that fixes its reported advisory while the image keeps the older Shodan-compatible runtime pin.
 

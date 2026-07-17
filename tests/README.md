@@ -268,7 +268,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes.
+GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. Protected tags scan the canonical GitLab image as soon as it is available, in parallel with the runtime compatibility jobs, and pass those retained files to the later evidence/signing job. Maintainers can use the manual `release-image-recheck` job to rerun repository-free startup, bundled tools, and the scan against an existing immutable digest without rebuilding it.
 
 ---
 

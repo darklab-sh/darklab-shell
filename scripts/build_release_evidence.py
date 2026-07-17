@@ -196,7 +196,7 @@ def _build_input_inventory(
             ),
             "limitations": [
                 "Debian repositories and package versions are resolved when the image is built.",
-                "Unpinned direct selectors and transitive Go, Python, and Ruby dependencies can change upstream.",
+                "Allowed Python version ranges and transitive Python and Ruby dependencies can change upstream.",
                 "The first successful publication timestamp is intentionally stored in the OCI image metadata.",
             ],
         },

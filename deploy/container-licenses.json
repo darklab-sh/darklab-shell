@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.6.0-rc.9",
+  "reviewed_for_release": "2.6.0-rc.10",
   "reviewed_on": "2026-07-16",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
@@ -22,6 +22,7 @@
     "apt:libjson-perl": "Python container base and Debian packages",
     "apt:libnet-ssleay-perl": "Python container base and Debian packages",
     "apt:libpcap-dev": "Python container base and Debian packages",
+    "apt:libpcap0.8": "Python container base and Debian packages",
     "apt:libxml-writer-perl": "Python container base and Debian packages",
     "apt:man-db": "Python container base and Debian packages",
     "apt:masscan": "Debian Masscan package",
@@ -34,6 +35,7 @@
     "apt:postgresql-client": "Python container base and Debian packages",
     "apt:python3-requests": "Python container base and Debian packages",
     "apt:ruby-dev": "Python container base and Debian packages",
+    "apt:ruby": "Python container base and Debian packages",
     "apt:rubygems": "Python container base and Debian packages",
     "apt:sudo": "Python container base and Debian packages",
     "apt:tcptraceroute": "Python container base and Debian packages",
@@ -42,6 +44,7 @@
     "apt:wget": "Python container base and Debian packages",
     "apt:whois": "Python container base and Debian packages",
     "apt:zlib1g-dev": "Python container base and Debian packages",
+    "apt:zlib1g": "Python container base and Debian packages",
     "git:https://github.com/blechschmidt/massdns.git": "massdns",
     "git:https://github.com/danielmiessler/SecLists.git": "SecLists",
     "git:https://github.com/rbsec/sslscan.git": "sslscan",
@@ -84,14 +87,14 @@
       "version_arg": "GO_VERSION",
       "source": "https://go.dev/LICENSE",
       "license": "BSD-3-Clause",
-      "notice_location": "/usr/local/go/LICENSE"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/Go-toolchain.txt"
     },
     {
       "name": "Go cryptography module",
       "version_arg": "GO_X_CRYPTO_VERSION",
       "source": "https://pkg.go.dev/golang.org/x/crypto",
       "license": "BSD-3-Clause",
-      "notice_location": "/root/go/pkg/mod/golang.org/x/crypto@v0.52.0/LICENSE"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt"
     },
     {
       "name": "gosu",
@@ -129,42 +132,42 @@
       ],
       "source": "https://github.com/projectdiscovery",
       "license": "MIT",
-      "notice_location": "/root/go/pkg/mod/github.com/projectdiscovery"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/ProjectDiscovery.txt"
     },
     {
       "name": "OWASP Amass",
       "version_arg": "AMASS_VERSION",
       "source": "https://github.com/owasp-amass/amass",
       "license": "Apache-2.0",
-      "notice_location": "/root/go/pkg/mod/github.com/owasp-amass"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/OWASP-Amass.txt"
     },
     {
       "name": "assetfinder",
       "version_arg": "ASSETFINDER_VERSION",
       "source": "https://github.com/tomnomnom/assetfinder",
       "license": "MIT",
-      "notice_location": "/root/go/pkg/mod/github.com/tomnomnom"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/assetfinder.txt"
     },
     {
       "name": "gobuster",
       "version_arg": "GOBUSTER_VERSION",
       "source": "https://github.com/OJ/gobuster",
       "license": "Apache-2.0",
-      "notice_location": "/root/go/pkg/mod/github.com/!o!j"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/gobuster.txt"
     },
     {
       "name": "ffuf",
       "version_arg": "FFUF_VERSION",
       "source": "https://github.com/ffuf/ffuf",
       "license": "MIT",
-      "notice_location": "/root/go/pkg/mod/github.com/ffuf"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/ffuf.txt"
     },
     {
       "name": "tcping",
       "version_arg": "TCPING_VERSION",
       "source": "https://github.com/pouriyajamshidi/tcping",
       "license": "MIT",
-      "notice_location": "/root/go/pkg/mod/github.com/pouriyajamshidi"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/tcping.txt"
     },
     {
       "name": "TruffleHog",
@@ -185,10 +188,11 @@
       "version_arg": "PUREDNS_VERSION",
       "source": "https://github.com/d3mondev/puredns",
       "license": "GPL-3.0",
-      "notice_location": "/root/go/pkg/mod/github.com/d3mondev"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/puredns.txt"
     },
     {
       "name": "SecLists",
+      "version_arg": "SECLISTS_VERSION",
       "source": "https://github.com/danielmiessler/SecLists",
       "license": "MIT",
       "notice_location": "/usr/share/wordlists/seclists/LICENSE"
@@ -202,6 +206,7 @@
     },
     {
       "name": "Nikto",
+      "version_arg": "NIKTO_VERSION",
       "source": "https://github.com/sullo/Nikto",
       "license": "GPL-2.0",
       "notice_location": "/opt/Nikto/COPYING and /opt/Nikto/COPYING.LibWhisker"

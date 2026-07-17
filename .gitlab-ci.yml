@@ -19,6 +19,7 @@ variables:
   RELEASE_ARM64_COMPATIBILITY_ENABLED: "0"
   RELEASE_SELINUX_COMPATIBILITY_ENABLED: "0"
   RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED: "0"
+  RELEASE_CACHE_SCOPE: "v2-6"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -279,6 +280,7 @@ container-smoke-test:
 docker-build:
   stage: build
   image: $CI_DOCKER_IMAGE
+  interruptible: true
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
@@ -306,11 +308,35 @@ docker-build:
     - when: manual
       allow_failure: true
   script:
-    - docker build -t darklab_shell:$CI_COMMIT_SHA .
+    - docker build --progress=plain -t darklab_shell:$CI_COMMIT_SHA .
+    - docker pull "$SYFT_IMAGE"
+    - docker pull "$GRYPE_IMAGE"
+    - mkdir -p branch-image-evidence
+    - >-
+      docker run --rm
+      --user 0:0
+      -v /var/run/docker.sock:/var/run/docker.sock
+      "$SYFT_IMAGE"
+      "docker:darklab_shell:$CI_COMMIT_SHA"
+      -o cyclonedx-json
+      > branch-image-evidence/darklab-shell.cdx.json
+    - >-
+      cat branch-image-evidence/darklab-shell.cdx.json |
+      docker run --rm -i
+      "$GRYPE_IMAGE"
+      --only-fixed --fail-on critical -o json
+      > branch-image-evidence/vulnerability-report.json
+  artifacts:
+    when: always
+    paths:
+      - branch-image-evidence/darklab-shell.cdx.json
+      - branch-image-evidence/vulnerability-report.json
+    expire_in: 1 week
 
 .scheduled-docker-build:
   stage: build
   image: $CI_DOCKER_IMAGE
+  interruptible: true
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
@@ -320,12 +346,35 @@ docker-build:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
     - when: never
   script:
-    - docker build -t darklab_shell:$CI_COMMIT_SHA .
+    - docker build --progress=plain -t darklab_shell:$CI_COMMIT_SHA .
 
 docker-build-bael:
   extends: .scheduled-docker-build
   tags:
     - bael
+  resource_group: "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - |
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      docker buildx imagetools inspect --raw "$python_base_image" > python-base-index.json
+      python_base_digest=$(jq -r '
+        [.manifests[]
+          | select(.platform.os == "linux" and .platform.architecture == "amd64")
+          | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+        ][0].digest // empty
+      ' python-base-index.json)
+      printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64-${RELEASE_CACHE_SCOPE}"
+      docker buildx build --pull --platform linux/amd64 --provenance=false \
+        --progress=plain \
+        --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+        --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --cache-from "type=registry,ref=${cache_image}" \
+        --cache-to "type=registry,ref=${cache_image},mode=max" \
+        --output type=cacheonly .
 
 docker-build-bune:
   extends: .scheduled-docker-build
@@ -336,6 +385,47 @@ docker-build-botis:
   extends: .scheduled-docker-build
   tags:
     - botis
+
+docker-build-arm64-cache:
+  extends: .scheduled-docker-build
+  services:
+    - name: "${CI_DOCKER_IMAGE}-dind"
+      alias: docker
+      command:
+        - "--mtu=1360"
+  tags:
+    - saas-linux-small-arm64
+  resource_group: "release-cache-arm64-${RELEASE_CACHE_SCOPE}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1" && $RELEASE_ARM64_COMPATIBILITY_ENABLED == "1"'
+    - when: never
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - test "$(uname -m)" = "aarch64"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - |
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      docker buildx imagetools inspect --raw "$python_base_image" > arm64-python-base-index.json
+      python_base_digest=$(jq -r '
+        [.manifests[]
+          | select(.platform.os == "linux" and .platform.architecture == "arm64")
+          | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+        ][0].digest // empty
+      ' arm64-python-base-index.json)
+      printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      cache_image="${CI_REGISTRY_IMAGE}:buildcache-arm64-${RELEASE_CACHE_SCOPE}"
+      docker buildx build --pull --platform linux/arm64 --provenance=false \
+        --progress=plain \
+        --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+        --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --cache-from "type=registry,ref=${cache_image}" \
+        --cache-to "type=registry,ref=${cache_image},mode=max" \
+        --output type=cacheonly .
 
 .protected-release-tag:
   rules:
@@ -355,6 +445,7 @@ release-image-gitlab:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
+  resource_group: "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
   before_script:
     - apk add --no-cache jq python3
   script:
@@ -366,7 +457,6 @@ release-image-gitlab:
     paths:
       - gitlab-manifest.json
       - release-build-metadata.json
-      - release-image-metrics.txt
       - release-image-status.txt
       - python-base-resolution.json
     expire_in: 1 week
@@ -384,9 +474,120 @@ release-image-smoke:
   before_script: []
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - |
+      pull_started=$(date +%s)
+      docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+      pull_seconds=$(($(date +%s) - pull_started))
+      unpacked_bytes=$(docker image inspect --format '{{.Size}}' "$GITLAB_IMAGE@$GITLAB_DIGEST")
+      case "$unpacked_bytes" in
+        ''|*[!0-9]*|0) echo "Release image unpacked size is missing or malformed" >&2; exit 1 ;;
+      esac
+      printf 'compressed_bytes=%s\nunpacked_bytes=%s\npull_seconds=%s\n' \
+        "$GITLAB_COMPRESSED_BYTES" "$unpacked_bytes" "$pull_seconds" \
+        > release-image-metrics.txt
+      printf 'GITLAB_UNPACKED_BYTES=%s\nGITLAB_PULL_SECONDS=%s\n' \
+        "$unpacked_bytes" "$pull_seconds" > release-image-measurements.env
     - CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
     - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" amd64
+  artifacts:
+    when: always
+    reports:
+      dotenv: release-image-measurements.env
+    paths:
+      - release-image-metrics.txt
+    expire_in: 1 week
+
+release-image-vulnerability-scan:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  extends: .protected-release-tag
+  needs:
+    - job: release-image-gitlab
+      artifacts: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script: []
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
+    - docker pull "$SYFT_IMAGE"
+    - docker pull "$GRYPE_IMAGE"
+    - mkdir -p release-evidence-input
+    - >-
+      docker run --rm
+      --user 0:0
+      -v /var/run/docker.sock:/var/run/docker.sock
+      "$SYFT_IMAGE"
+      "docker:${GITLAB_IMAGE}@${GITLAB_DIGEST}"
+      -o cyclonedx-json
+      > release-evidence-input/darklab-shell.cdx.json
+    - >-
+      cat release-evidence-input/darklab-shell.cdx.json |
+      docker run --rm -i
+      "$GRYPE_IMAGE"
+      --only-fixed --fail-on critical -o json
+      > release-evidence-input/vulnerability-report.json
+  artifacts:
+    when: always
+    paths:
+      - release-evidence-input/darklab-shell.cdx.json
+      - release-evidence-input/vulnerability-report.json
+    expire_in: 1 week
+
+release-image-recheck:
+  stage: verify
+  image: $CI_DOCKER_IMAGE
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+      allow_failure: true
+    - when: never
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+    RECHECK_ARCHITECTURE: "amd64"
+  before_script: []
+  script:
+    - test -n "$RECHECK_IMAGE"
+    - printf '%s' "$RECHECK_IMAGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+    - test -n "$RECHECK_VERSION"
+    - printf '%s' "$RECHECK_REVISION" | grep -Eq '^[0-9a-f]{40,64}$'
+    - printf '%s' "$RECHECK_PYTHON_BASE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker pull "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST"
+    - >-
+      CONTAINER_MOUNT_MODE=volume
+      sh scripts/verify_repository_free_image.sh
+      "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST"
+      "$RECHECK_VERSION"
+      "$RECHECK_REVISION"
+      "$RECHECK_PYTHON_BASE_DIGEST"
+      "$RECHECK_ARCHITECTURE"
+    - sh scripts/verify_bundled_tools.sh "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST" "$RECHECK_ARCHITECTURE"
+    - docker pull "$SYFT_IMAGE"
+    - docker pull "$GRYPE_IMAGE"
+    - mkdir -p recheck-evidence
+    - >-
+      docker run --rm
+      --user 0:0
+      -v /var/run/docker.sock:/var/run/docker.sock
+      "$SYFT_IMAGE"
+      "docker:${RECHECK_IMAGE}@${RECHECK_IMAGE_DIGEST}"
+      -o cyclonedx-json
+      > recheck-evidence/darklab-shell.cdx.json
+    - >-
+      cat recheck-evidence/darklab-shell.cdx.json |
+      docker run --rm -i
+      "$GRYPE_IMAGE"
+      --only-fixed --fail-on critical -o json
+      > recheck-evidence/vulnerability-report.json
+  artifacts:
+    when: always
+    paths:
+      - recheck-evidence/darklab-shell.cdx.json
+      - recheck-evidence/vulnerability-report.json
+    expire_in: 1 week
 
 release-image-arm64-smoke:
   stage: publish
@@ -398,6 +599,7 @@ release-image-arm64-smoke:
         - "--mtu=1360"
   tags:
     - saas-linux-small-arm64
+  resource_group: "release-cache-arm64-${RELEASE_CACHE_SCOPE}"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ARM64_COMPATIBILITY_ENABLED == "1"'
     - when: never
@@ -415,6 +617,8 @@ release-image-arm64-smoke:
       }
       release_version=${CI_COMMIT_TAG#v}
       candidate_image="darklab-shell-arm64-candidate:${CI_COMMIT_SHA}"
+      cache_image="${CI_REGISTRY_IMAGE}:buildcache-arm64-${RELEASE_CACHE_SCOPE}"
+      echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
       python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
       docker buildx imagetools inspect --raw "$python_base_image" > arm64-python-base-index.json
       python_base_digest=$(jq -r '
@@ -427,13 +631,16 @@ release-image-arm64-smoke:
         echo "ARM64 Python base manifest digest is missing or malformed" >&2
         exit 1
       }
-      docker build --pull --platform linux/arm64 \
+      docker buildx build --pull --platform linux/arm64 --provenance=false \
+        --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
         --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
         --build-arg "APP_VERSION=${release_version}" \
         --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
         --build-arg "BUILD_DATE=${CI_PIPELINE_CREATED_AT}" \
-        --tag "$candidate_image" .
+        --cache-from "type=registry,ref=${cache_image}" \
+        --cache-to "type=registry,ref=${cache_image},mode=max" \
+        --tag "$candidate_image" --load .
       docker image inspect "$candidate_image" > arm64-image-inspect.json
       sh scripts/verify_repository_free_image.sh \
         "$candidate_image" "$release_version" "$CI_COMMIT_SHA" "$python_base_digest" arm64
@@ -527,6 +734,7 @@ release-image-dockerhub:
     - job: release-image-gitlab
       artifacts: true
     - job: release-image-smoke
+    - job: release-image-vulnerability-scan
     - job: release-image-arm64-smoke
       optional: true
     - job: release-image-selinux-smoke
@@ -557,6 +765,8 @@ release-supply-chain:
   needs:
     - job: release-image-gitlab
       artifacts: true
+    - job: release-image-vulnerability-scan
+      artifacts: true
     - job: release-image-dockerhub
       artifacts: true
   id_tokens:
@@ -571,24 +781,6 @@ release-supply-chain:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
-    - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
-    - docker pull "$SYFT_IMAGE"
-    - docker pull "$GRYPE_IMAGE"
-    - mkdir release-evidence-input
-    - >-
-      docker run --rm
-      --user 0:0
-      -v /var/run/docker.sock:/var/run/docker.sock
-      "$SYFT_IMAGE"
-      "docker:${GITLAB_IMAGE}@${GITLAB_DIGEST}"
-      -o cyclonedx-json
-      > release-evidence-input/darklab-shell.cdx.json
-    - >-
-      cat release-evidence-input/darklab-shell.cdx.json |
-      docker run --rm -i
-      "$GRYPE_IMAGE"
-      --only-fixed --fail-on critical -o json
-      > release-evidence-input/vulnerability-report.json
     - >-
       python3 scripts/build_release_evidence.py
       --version "$RELEASE_VERSION"
@@ -623,8 +815,6 @@ release-supply-chain:
   artifacts:
     when: always
     paths:
-      - release-evidence-input/darklab-shell.cdx.json
-      - release-evidence-input/vulnerability-report.json
       - release-evidence/
     expire_in: 1 week
 
@@ -634,6 +824,8 @@ release-payload-upload:
   extends: .protected-release-tag
   needs:
     - job: release-image-gitlab
+      artifacts: true
+    - job: release-image-smoke
       artifacts: true
     - job: release-image-dockerhub
       artifacts: true
@@ -787,7 +979,7 @@ release-public-smoke:
         '^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
         "$dockerhub_overview"
     - docker pull "$DOCKERHUB_RELEASE_IMAGE"
-    - sh scripts/verify_repository_free_image.sh "$DOCKERHUB_RELEASE_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh "$DOCKERHUB_RELEASE_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
     - |
       release_check_failed() {
         actual=$(printf '%s' "$4" | tr '\r\n\t' '   ')

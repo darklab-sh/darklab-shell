@@ -372,8 +372,8 @@
       "hash": "6de9d8af97429a412db5d2db361852e5239361aaabb918206e0aedc7c915703f"
     },
     "/static/js/features/history/history_run_details.js": {
-      "path": "/static/build/static-history-run-details.93a76835e1e1.js",
-      "hash": "e33720bb89fb9e62aa0b7943b93962998ed4eed4fc7bf21fb51b862633430595"
+      "path": "/static/build/static-history-run-details.a2eb15ae9f41.js",
+      "hash": "e6b309042f6fcd362ffd989845918294d890269a2e36f3fe3e2dc2c8944f8bac"
     },
     "/static/js/features/mobile/mobile_running_indicator.js": {
       "path": "/static/build/static-mobile-running-indicator.7ecd30596050.js",
@@ -512,8 +512,8 @@
       "hash": "cd2b4e5f02840cefb21e633da2f07352cc96608974a91c4a2e8ad55724884864"
     },
     "/static/js/features/run-comparison/history_compare_launcher.js": {
-      "path": "/static/build/static-history-compare-launcher.4546da3160f7.js",
-      "hash": "311a6840ae25e5fd9b05694685cb74da128e373761dd35304ac5dfc3aba2195d"
+      "path": "/static/build/static-history-compare-launcher.ee59831f5f75.js",
+      "hash": "ac1c1d2ac81e69f51f2d0796e7f752827f7790c34965d7869fddc3db47980324"
     },
     "/static/js/features/run-comparison/history_compare_navigation.js": {
       "path": "/static/build/static-history-compare-navigation.40d0027fc4e5.js",
@@ -524,12 +524,12 @@
       "hash": "2cafab2125008c4658c061684aa948e809bdb671a99dbd77072a7973b81daae5"
     },
     "/static/js/features/run-comparison/history_compare_renderer.js": {
-      "path": "/static/build/static-history-compare-renderer.362b42a16156.js",
-      "hash": "53d14fcc43f4dfdd163383b5e9e0473c3cb38b44bcaff161485f0a35a2076a05"
+      "path": "/static/build/static-history-compare-renderer.9aa61b303ba9.js",
+      "hash": "4345400abb1e164a9de9aa438d7f176be0ed568bf56ac82a7e3f2a16a000f46a"
     },
     "/static/js/features/schedules/schedules_modal.js": {
-      "path": "/static/build/static-schedules-modal.919a2dfeae46.js",
-      "hash": "d716eb7d0bf086dadd17fb1f286972e1c222fbefa5182dc2fba401aa0ec98bec"
+      "path": "/static/build/static-schedules-modal.b8202479cf57.js",
+      "hash": "eadba647bea30dd947f6fb2ee40023b7be390c35751b948a5cc1d82039563358"
     },
     "/static/js/features/status-monitor/status_monitor_core.js": {
       "path": "/static/build/static-status-monitor-core.e22499bccd7f.js",
@@ -548,8 +548,8 @@
       "hash": "ea6c7a61c020d6c34275c894ca458bc020f254342655a40c632d30f2255d0a4b"
     },
     "/static/js/features/watchers/watchers_modal.js": {
-      "path": "/static/build/static-watchers-modal.a53a9963bf33.js",
-      "hash": "8a81484ac08b8eca712c9918b26f4eaee1a428204bc026184101bf9342b27158"
+      "path": "/static/build/static-watchers-modal.c95164afe011.js",
+      "hash": "0c7e78750bb2f9b6f581ae16899bfd7e6e3087ddc75f719177d0db503c2ab16f"
     },
     "/static/js/features/workflows/workflow_catalog.js": {
       "path": "/static/build/static-workflow-catalog.c024e8c1f901.js",

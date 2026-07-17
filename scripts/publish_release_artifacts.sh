@@ -45,7 +45,8 @@ publish_gitlab_image() {
     require_nonempty gitlab_image_preflight commit_sha "${CI_COMMIT_SHA:-}"
     release_version=${CI_COMMIT_TAG#v}
     gitlab_image="${CI_REGISTRY_IMAGE}:${release_version}"
-    cache_image="${CI_REGISTRY_IMAGE}:buildcache"
+    cache_scope=${RELEASE_CACHE_SCOPE:-v2-6}
+    cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64-${cache_scope}"
     python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' "$repo_root/Dockerfile")
     require_nonempty gitlab_image_preflight python_base_image "$python_base_image"
     printf 'RELEASE_IMAGE_JOB_STATUS=failed\n' > release-image.env
@@ -94,6 +95,7 @@ publish_gitlab_image() {
         ' python-base-index.json)
         require_digest gitlab_image_build python_base_digest "$python_base_digest"
         docker buildx build --pull --platform linux/amd64 --provenance=false \
+            --progress=plain \
             --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
             --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
             --build-arg "APP_VERSION=${release_version}" \
@@ -116,20 +118,11 @@ publish_gitlab_image() {
     docker buildx imagetools inspect --raw "$gitlab_image" > gitlab-manifest.json
     compressed_bytes=$(jq -r 'if .layers then [.layers[].size] | add else 0 end' gitlab-manifest.json)
     require_positive_integer gitlab_image_measurement compressed_bytes "$compressed_bytes"
-    docker image rm "$gitlab_image" >/dev/null 2>&1 || true
-    pull_started=$(date +%s)
-    docker pull "$gitlab_image"
-    pull_seconds=$(($(date +%s) - pull_started))
-    unpacked_bytes=$(docker image inspect --format '{{.Size}}' "$gitlab_image")
-    require_positive_integer gitlab_image_measurement unpacked_bytes "$unpacked_bytes"
-    printf 'compressed_bytes=%s\nunpacked_bytes=%s\npull_seconds=%s\n' \
-        "$compressed_bytes" "$unpacked_bytes" "$pull_seconds" > release-image-metrics.txt
     printf '%s\n' \
         "RELEASE_VERSION=${release_version}" \
         "GITLAB_IMAGE=${gitlab_image}" \
         "GITLAB_DIGEST=${gitlab_digest}" \
         "GITLAB_COMPRESSED_BYTES=${compressed_bytes}" \
-        "GITLAB_UNPACKED_BYTES=${unpacked_bytes}" \
         "PYTHON_BASE_IMAGE=${python_base_image}" \
         "PYTHON_BASE_DIGEST=${python_base_digest}" \
         "RELEASE_BUILD_DATE=${build_date}" \

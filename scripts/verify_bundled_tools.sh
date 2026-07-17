@@ -47,7 +47,7 @@ verification_failed() {
 }
 
 for tool in \
-    go openssl sslscan nuclei subfinder httpx dnsx naabu katana tlsx cdncheck \
+    openssl sslscan nuclei subfinder httpx dnsx naabu katana tlsx cdncheck \
     amass assetfinder gobuster ffuf tcping trufflehog massdns puredns testssl \
     nikto sslyze wafw00f rustscan wpscan vt ipinfo urlscan-cli chaos nmap \
     masscan pg_dump pg_restore python ruby perl; do
@@ -72,8 +72,8 @@ probe() {
     fi
 }
 
-probe go go version
 probe openssl openssl version
+probe openssl-legacy-provider openssl list -providers -provider legacy
 probe sslscan sslscan --version
 probe nuclei nuclei -version
 probe subfinder subfinder -version

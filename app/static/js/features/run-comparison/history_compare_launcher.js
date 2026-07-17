@@ -137,10 +137,13 @@ function _historyCompareLauncherLogRequestFailure(context, event, error, sourceR
 }
 
 function _historyCompareLauncherFetchAndRender(leftId, rightId, options) {
-  const bridged = typeof importedFetchAndRenderHistoryComparison === 'function'
-    ? importedFetchAndRenderHistoryComparison(leftId, rightId, options)
-    : undefined;
-  if (bridged !== undefined) return bridged;
+  if (typeof importedFetchAndRenderHistoryComparison === 'function') {
+    const hasBridgeHandler = typeof importedFetchAndRenderHistoryComparison.hasHandler !== 'function'
+      || importedFetchAndRenderHistoryComparison.hasHandler();
+    if (hasBridgeHandler) {
+      return importedFetchAndRenderHistoryComparison(leftId, rightId, options);
+    }
+  }
   const globalFetchAndRender = HISTORY_COMPARE_LAUNCHER_GLOBAL.fetchAndRenderHistoryComparison;
   return typeof globalFetchAndRender === 'function'
     ? globalFetchAndRender(leftId, rightId, options)

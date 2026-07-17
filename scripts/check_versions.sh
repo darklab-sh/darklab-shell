@@ -45,7 +45,7 @@ ARG_PATTERN = re.compile(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$")
 DOCKER_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 GO_TOOLCHAIN_PATTERN = re.compile(r"go(\d+\.\d+(?:\.\d+)?)\.linux-")
 GO_INSTALL_PATTERN = re.compile(
-    r"(?:go install(?:\s+-v)?|install-go-tool)\s+([^\s@]+)@([^\s\\]+)"
+    r'(?:go install(?:\s+-v)?|install-go-tool)\s+"?([^"\s@]+)@([^"\s\\]+)"?'
 )
 PIP_INSTALL_PATTERN = re.compile(r"pip install(?:\s+--[A-Za-z0-9_.=-]+)*\s+([A-Za-z0-9_.\-\[\]]+)==([^\s\\]+)")
 GEM_INSTALL_PATTERN = re.compile(r"gem install\s+([A-Za-z0-9_.-]+)\s+-v\s+([^\s\\]+)")
@@ -84,6 +84,28 @@ def _read_lines(path: pathlib.Path) -> list[str]:
     if not path.exists():
         return []
     return path.read_text().splitlines()
+
+
+def _dockerfile_instructions() -> list[tuple[int, str]]:
+    """Return logical Dockerfile instructions with their starting line."""
+    instructions: list[tuple[int, str]] = []
+    parts: list[str] = []
+    start_line = 0
+    for lineno, raw in enumerate(_read_lines(DOCKERFILE), start=1):
+        stripped = raw.strip()
+        if not parts and (not stripped or stripped.startswith("#")):
+            continue
+        if not parts:
+            start_line = lineno
+        continued = stripped.endswith("\\")
+        parts.append(stripped[:-1].rstrip() if continued else stripped)
+        if continued:
+            continue
+        instructions.append((start_line, " ".join(part for part in parts if part)))
+        parts = []
+    if parts:
+        instructions.append((start_line, " ".join(part for part in parts if part)))
+    return instructions
 
 
 def _latest_python_version(package: str) -> str:
@@ -526,8 +548,8 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
         return
     pins: list[tuple[int, str, str, str, str]] = []
     docker_args = _dockerfile_args()
-    for lineno, raw in enumerate(_read_lines(DOCKERFILE), start=1):
-        line = _expand_docker_vars(raw.strip(), docker_args)
+    for lineno, raw in _dockerfile_instructions():
+        line = _expand_docker_vars(raw, docker_args)
         if not line or line.startswith("#"):
             continue
         if labels is None or "go-toolchain" in labels:

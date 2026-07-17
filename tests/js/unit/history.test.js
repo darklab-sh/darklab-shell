@@ -4023,6 +4023,9 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
 
+    expect(apiFetch.mock.calls.filter(([url]) => (
+      url === '/history/compare?left=run-old&right=run-new'
+    ))).toHaveLength(1)
     expect(document.querySelector('#history-compare-subtitle')?.textContent)
       .toBe('2 lines · 0 unchanged · 1 changed · 1 added · 1 removed')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:22 UTC')

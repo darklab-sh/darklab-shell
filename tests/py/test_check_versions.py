@@ -67,3 +67,27 @@ def test_generic_go_lookup_still_uses_module_proxy(monkeypatch):
 
     assert latest == "v0.2.0"
     assert requested_urls == ["https://proxy.golang.org/github.com/example/tool/@v/list"]
+
+
+def test_dockerfile_pin_report_reads_multiline_clone_instructions(monkeypatch, tmp_path, capsys):
+    module = _load_check_versions_module()
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join(
+            [
+                "ARG NIKTO_VERSION=2.6.0",
+                "FROM python:3.14-slim",
+                "RUN git clone --depth 1 --branch \"${NIKTO_VERSION}\" \\",
+                "    https://github.com/sullo/Nikto.git /out/opt/Nikto",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "DOCKERFILE", dockerfile)
+    monkeypatch.setattr(module, "_latest_github_release_version", lambda owner, repo: "2.6.0")
+
+    module._print_dockerfile_pins(labels={"github"})
+
+    output = capsys.readouterr().out
+    assert "sullo/Nikto" in output
+    assert "pinned=2.6.0" in output

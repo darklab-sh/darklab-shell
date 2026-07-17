@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.9"
+RELEASE_VERSION = "2.6.0-rc.10"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.10"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -688,6 +688,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         'sh.darklab.image.architecture="${TARGETARCH}"'
     )
     assert "*.local.*" in dockerignore.splitlines()
+    assert "**/*.local.*" in dockerignore.splitlines()
     assert "deploy/THIRD_PARTY_NOTICES.txt" in dockerfile
     assert "deploy/third-party-licenses/" in dockerfile
     assert "org.opencontainers.image.licenses=\"AGPL-3.0-only\"" in dockerfile
@@ -707,15 +708,45 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
-    assert "install-go-tool github.com/projectdiscovery/chaos-client" in dockerfile
+    assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
     assert "go get \"golang.org/x/crypto@${GO_X_CRYPTO_VERSION}\"" in (
         ROOT / "scripts" / "install_go_tool.sh"
     ).read_text(encoding="utf-8")
-    assert "go -C /tmp/gosu build -trimpath -o /usr/sbin/gosu" in dockerfile
+    assert "go -C /tmp/gosu build -trimpath -o /out/usr/sbin/gosu" in dockerfile
     assert " apt-get install -y --no-install-recommends" in dockerfile
     assert " sudo gosu " not in dockerfile
-    assert 'find /root/go/pkg/mod "$(go env GOMODCACHE)"' in dockerfile
-    assert "jsluice@*/secrets" in dockerfile
+    assert "FROM go-builder-base AS go-projectdiscovery" in dockerfile
+    assert "FROM go-builder-base AS go-other-tools" in dockerfile
+    assert "FROM ${PYTHON_BASE_IMAGE} AS native-tools" in dockerfile
+    assert "FROM ${PYTHON_BASE_IMAGE} AS runtime" in dockerfile
+    assert "WORKDIR /app" in dockerfile
+    assert "COPY --from=go-projectdiscovery /out/ /" in dockerfile
+    assert "COPY --from=go-other-tools /out/ /" in dockerfile
+    go_builder_stage = dockerfile.split(
+        "FROM ${PYTHON_BASE_IMAGE} AS go-builder-base", 1
+    )[1].split("FROM go-builder-base AS go-projectdiscovery", 1)[0]
+    projectdiscovery_stage = dockerfile.split(
+        "FROM go-builder-base AS go-projectdiscovery", 1
+    )[1].split("FROM go-builder-base AS go-other-tools", 1)[0]
+    other_go_stage = dockerfile.split(
+        "FROM go-builder-base AS go-other-tools", 1
+    )[1].split("FROM ${PYTHON_BASE_IMAGE} AS native-tools", 1)[0]
+    assert "ARG NUCLEI_VERSION" not in go_builder_stage
+    assert "ARG GOBUSTER_VERSION" not in go_builder_stage
+    assert "ARG NUCLEI_VERSION" in projectdiscovery_stage
+    assert "ARG GOBUSTER_VERSION" not in projectdiscovery_stage
+    assert "ARG GOBUSTER_VERSION" in other_go_stage
+    assert "ARG NUCLEI_VERSION" not in other_go_stage
+    assert "/usr/share/doc/darklab-shell/licenses/Go-toolchain.txt" in dockerfile
+    assert "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt" in dockerfile
+    assert "rm -rf /var/lib/apt/lists/*" in dockerfile
+    runtime_stage = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS runtime", 1)[1]
+    assert "/usr/local/go" not in runtime_stage
+    assert "/root/go" not in runtime_stage
+    assert "build-essential" not in runtime_stage
+    assert "libpcap-dev" not in runtime_stage
+    assert "ruby-dev" not in runtime_stage
+    assert "zlib1g-dev" not in runtime_stage
     assert 'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"' in dockerfile
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
@@ -761,6 +792,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "--cap-add NET_ADMIN" in bundled_tool_smoke
     assert "expected_architecture=${2:-amd64}" in bundled_tool_smoke
     assert "exec format error" in bundled_tool_smoke
+    assert "probe go go version" not in bundled_tool_smoke
+    assert "probe openssl-legacy-provider openssl list -providers -provider legacy" in (
+        bundled_tool_smoke
+    )
     for tool in ("rustscan", "nuclei", "massdns", "pg_restore", "openssl"):
         assert f"probe {tool} " in bundled_tool_smoke
 
@@ -1197,7 +1232,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     ].decode("utf-8")
     ci_config = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
     publisher = RELEASE_PUBLISHER.read_text(encoding="utf-8")
-    assert "pull_seconds=" in publisher
+    assert "pull_seconds=" in ci_config
+    assert "pull_seconds=" not in publisher
     assert "--pull-seconds" not in ci_config + publisher
     assert "publish_release_artifacts.sh gitlab-image" in ci_config
     assert "publish_release_artifacts.sh dockerhub-image" in ci_config
@@ -1224,6 +1260,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     for job_name in (
         "release-image-gitlab",
         "release-image-smoke",
+        "release-image-vulnerability-scan",
         "release-image-dockerhub",
         "release-supply-chain",
         "release-payload-upload",
@@ -1234,6 +1271,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_ARM64_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_SELINUX_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
+    assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-6"
     docker_build_rules = parsed_ci["docker-build"]["rules"]
     tag_skip_rule = {"if": "$CI_COMMIT_TAG", "when": "never"}
     tag_skip_index = docker_build_rules.index(tag_skip_rule)
@@ -1241,6 +1279,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         index for index, rule in enumerate(docker_build_rules) if "changes" in rule
     )
     assert tag_skip_index < changes_index
+    assert parsed_ci["docker-build"]["interruptible"] is True
+    branch_build_script = "\n".join(parsed_ci["docker-build"]["script"])
+    assert "branch-image-evidence/darklab-shell.cdx.json" in branch_build_script
+    assert "--only-fixed --fail-on critical" in branch_build_script
+    assert parsed_ci["docker-build"]["artifacts"]["when"] == "always"
     pytest_setup = "\n".join(parsed_ci["test-py-pytest"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bcurl\b", pytest_setup)
     assert re.search(r"\bapt-get install\b[^\n]*\bjq\b", pytest_setup)
@@ -1255,6 +1298,26 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "python-base-resolution.json" in (
         parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
     )
+    assert "release-image-metrics.txt" not in (
+        parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
+    )
+    amd64_resource_group = "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
+    arm64_resource_group = "release-cache-arm64-${RELEASE_CACHE_SCOPE}"
+    assert parsed_ci["release-image-gitlab"]["resource_group"] == (
+        amd64_resource_group
+    )
+    amd64_warmer = parsed_ci["docker-build-bael"]
+    assert amd64_warmer["resource_group"] == amd64_resource_group
+    assert parsed_ci[".scheduled-docker-build"]["interruptible"] is True
+    amd64_warmer_script = "\n".join(amd64_warmer["script"])
+    assert "buildcache-amd64-${RELEASE_CACHE_SCOPE}" in amd64_warmer_script
+    assert "--platform linux/amd64" in amd64_warmer_script
+    assert "--cache-from" in amd64_warmer_script
+    assert "--cache-to" in amd64_warmer_script
+    assert "mode=max" in amd64_warmer_script
+    assert "--output type=cacheonly" in amd64_warmer_script
+    assert "buildcache-amd64-${cache_scope}" in publisher
+    assert "--progress=plain" in publisher
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     amd64_smoke_script = "\n".join(parsed_ci["release-image-smoke"]["script"])
     digest_pinned_gitlab_image = '"$GITLAB_IMAGE@$GITLAB_DIGEST"'
@@ -1262,9 +1325,36 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert f"verify_repository_free_image.sh {digest_pinned_gitlab_image}" in amd64_smoke_script
     assert "CONTAINER_MOUNT_MODE=volume" in amd64_smoke_script
     assert f"verify_bundled_tools.sh {digest_pinned_gitlab_image} amd64" in amd64_smoke_script
+    assert "pull_seconds=" in amd64_smoke_script
+    assert "docker image inspect --format '{{.Size}}'" in amd64_smoke_script
+    assert parsed_ci["release-image-smoke"]["artifacts"]["reports"]["dotenv"] == (
+        "release-image-measurements.env"
+    )
+    assert "release-image-metrics.txt" in (
+        parsed_ci["release-image-smoke"]["artifacts"]["paths"]
+    )
+    vulnerability_job = parsed_ci["release-image-vulnerability-scan"]
+    assert vulnerability_job["stage"] == "verify"
+    assert vulnerability_job["artifacts"]["when"] == "always"
+    vulnerability_script = "\n".join(vulnerability_job["script"])
+    assert "--only-fixed --fail-on critical" in vulnerability_script
+    assert "-o cyclonedx-json" in vulnerability_script
+    assert "cat release-evidence-input/darklab-shell.cdx.json |" in (
+        vulnerability_script
+    )
+    assert "--user 0:0" in vulnerability_script
+    recheck_job = parsed_ci["release-image-recheck"]
+    assert recheck_job["stage"] == "verify"
+    assert recheck_job["variables"]["RECHECK_ARCHITECTURE"] == "amd64"
+    recheck_script = "\n".join(recheck_job["script"])
+    assert 'docker pull "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST"' in recheck_script
+    assert "verify_repository_free_image.sh" in recheck_script
+    assert "verify_bundled_tools.sh" in recheck_script
+    assert "--only-fixed --fail-on critical" in recheck_script
     arm64_job = parsed_ci["release-image-arm64-smoke"]
     assert arm64_job["stage"] == "publish"
     assert arm64_job["tags"] == ["saas-linux-small-arm64"]
+    assert arm64_job["resource_group"] == arm64_resource_group
     assert arm64_job["services"] == [
         {
             "name": "${CI_DOCKER_IMAGE}-dind",
@@ -1280,8 +1370,29 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     arm64_script = "\n".join(arm64_job["script"])
     assert '"$(uname -m)" = "aarch64"' in arm64_script
     assert "--platform linux/arm64" in arm64_script
+    assert "docker buildx build" in arm64_script
+    assert "buildcache-arm64-${RELEASE_CACHE_SCOPE}" in arm64_script
+    assert "--cache-from" in arm64_script
+    assert "--cache-to" in arm64_script
+    assert "--load" in arm64_script
     assert "verify_repository_free_image.sh" in arm64_script
     assert "verify_bundled_tools.sh" in arm64_script
+    arm64_warmer = parsed_ci["docker-build-arm64-cache"]
+    assert arm64_warmer["resource_group"] == arm64_resource_group
+    assert arm64_warmer["tags"] == ["saas-linux-small-arm64"]
+    assert arm64_warmer["services"] == arm64_job["services"]
+    assert arm64_warmer["rules"][-1] == {"when": "never"}
+    assert "RELEASE_ARM64_COMPATIBILITY_ENABLED == \"1\"" in (
+        arm64_warmer["rules"][0]["if"]
+    )
+    arm64_warmer_script = "\n".join(arm64_warmer["script"])
+    assert 'test "$(uname -m)" = "aarch64"' in arm64_warmer_script
+    assert "buildcache-arm64-${RELEASE_CACHE_SCOPE}" in arm64_warmer_script
+    assert "--platform linux/arm64" in arm64_warmer_script
+    assert "--cache-from" in arm64_warmer_script
+    assert "--cache-to" in arm64_warmer_script
+    assert "mode=max" in arm64_warmer_script
+    assert "--output type=cacheonly" in arm64_warmer_script
     selinux_job = parsed_ci["release-image-selinux-smoke"]
     assert selinux_job["tags"] == ["selinux", "self-managed", "baku"]
     assert "RELEASE_SELINUX_COMPATIBILITY_ENABLED == \"1\"" in (
@@ -1320,6 +1431,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "release-image-rootless-podman-smoke",
     ):
         assert promotion_needs[compatibility_job]["optional"] is True
+    assert "release-image-vulnerability-scan" in promotion_needs
     supply_chain_job = parsed_ci["release-supply-chain"]
     assert supply_chain_job["stage"] == "attest"
     assert supply_chain_job["artifacts"]["when"] == "always"
@@ -1332,22 +1444,23 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         r"anchore/grype:v[0-9.]+@sha256:[0-9a-f]{64}",
         parsed_ci["variables"]["GRYPE_IMAGE"],
     )
+    supply_chain_needs = {need["job"] for need in supply_chain_job["needs"]}
+    assert "release-image-vulnerability-scan" in supply_chain_needs
     supply_chain_script = "\n".join(supply_chain_job["script"])
-    assert "--only-fixed --fail-on critical" in supply_chain_script
-    assert "-o cyclonedx-json > release-evidence-input/darklab-shell.cdx.json" in (
-        supply_chain_script
-    )
-    assert "cat release-evidence-input/darklab-shell.cdx.json |" in supply_chain_script
-    assert 'release-evidence-input:/evidence' not in supply_chain_script
+    assert "--only-fixed --fail-on critical" not in supply_chain_script
+    assert "-o cyclonedx-json" not in supply_chain_script
     assert '--base-image "$PYTHON_BASE_IMAGE"' in supply_chain_script
     assert '--base-image-digest "$PYTHON_BASE_DIGEST"' in supply_chain_script
     assert '--build-date "$RELEASE_BUILD_DATE"' in supply_chain_script
-    assert "--user 0:0" in supply_chain_script
     assert supply_chain_script.count("cosign sign ") == 2
     assert supply_chain_script.count("cosign verify") == 2
     payload_script = "\n".join(parsed_ci["release-payload-upload"]["script"])
     assert "--evidence-dir release-evidence" in payload_script
     assert "publish_release_artifacts.sh sign-payload release-payload" in payload_script
+    payload_needs = {
+        need["job"]: need for need in parsed_ci["release-payload-upload"]["needs"]
+    }
+    assert payload_needs["release-image-smoke"]["artifacts"] is True
     postgres_job = parsed_ci["release-postgres-smoke"]
     postgres_script = "\n".join(postgres_job["script"])
     assert postgres_job["stage"] == "release"
@@ -1375,6 +1488,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "cosign sign-blob" in publisher
     assert "cosign verify-blob" in publisher
     public_smoke_script = "\n".join(parsed_ci["release-public-smoke"]["script"])
+    assert (
+        'CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh '
+        '"$DOCKERHUB_RELEASE_IMAGE"'
+    ) in public_smoke_script
     assert "release-build-inputs.json" in public_smoke_script
     assert "dockerhub-repository.json" in public_smoke_script
     assert "signing_identity_regexp" in public_smoke_script
@@ -1543,11 +1660,15 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "install-go-tool" in instruction["tools"]
         for instruction in build_inputs["network_build_instructions"]
     )
-    assert {selector["kind"] for selector in build_inputs["moving_selectors"]} >= {
-        "floating_arg",
-        "unversioned_git_clone",
+    assert {selector["kind"] for selector in build_inputs["moving_selectors"]} == {
         "version_range",
     }
+    effective_args = build_inputs["effective_build_args"]
+    assert effective_args["VT_CLI_VERSION"] != "latest"
+    assert effective_args["SECLISTS_VERSION"] == "2026.1"
+    assert re.fullmatch(r"[0-9a-f]{40}", effective_args["SECLISTS_COMMIT"])
+    assert effective_args["NIKTO_VERSION"] == "2.6.0"
+    assert re.fullmatch(r"[0-9a-f]{40}", effective_args["NIKTO_COMMIT"])
     assert evidence_index["build_inputs"]["sha256"] == _sha256(build_inputs_path)
     provenance = json.loads((first_evidence / "provenance.intoto.jsonl").read_text())
     assert provenance["_type"] == "https://in-toto.io/Statement/v1"

@@ -44,3 +44,4 @@ docker-compose*.yml
 
 # Operator-owned configuration must never be baked into a local image build.
 *.local.*
+**/*.local.*

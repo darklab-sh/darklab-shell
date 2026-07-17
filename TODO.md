@@ -8,9 +8,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Repository-free production installation](#repository-free-production-installation)
+  - [Shorten release image builds and failure feedback](#shorten-release-image-builds-and-failure-feedback)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Reduce pytest feedback time without weakening release coverage](#reduce-pytest-feedback-time-without-weakening-release-coverage)
+  - [Organize script entrypoints and implementation helpers](#organize-script-entrypoints-and-implementation-helpers)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -69,6 +71,31 @@ Each remaining milestone is independently releasable and has its own exit criter
 - [ ] GitLab images, Docker Hub mirrors, packages, checksums, SBOM/provenance, signatures, and release links are anonymously accessible and independently verifiable as documented.
 - [ ] Every advertised architecture and container runtime has automated compatibility coverage.
 
+### Shorten release image builds and failure feedback
+
+**Outcome:** Release candidates keep the full image, compatibility, supply-chain, and publication gates, but repeated runs reuse portable architecture-specific caches and report image-content failures as soon as the canonical GitLab image is available. The final runtime image remains self-contained without the toolchains, caches, development packages, apt indexes, or source trees used to build it.
+
+Keep one runtime image. Separate published runtime containers would complicate command execution, networking, Compose, licensing, upgrades, and support.
+
+#### Measure and make cache behavior visible
+
+- [ ] Record the AMD64 and ARM64 clean-build time, repeated-build time, cache import/export time, image pull time, and time to the first actionable image failure. Use `--progress=plain` or equivalent retained logs so cache-manifest imports and `CACHED` steps are visible.
+- [ ] Confirm the AMD64 release builder consistently imports and exports its registry-backed `mode=max` cache. Use architecture- and release-line-scoped cache references so unrelated or concurrent writers don't overwrite the same cache location.
+- [ ] Record when a refreshed Python base-image platform digest invalidates the complete image. Keep security-driven base refreshes intentional and visible rather than hiding them to preserve an old cache.
+- [ ] Measure registry layer caching and `RUN --mount=type=cache` separately. Cross-runner acceptance depends on exported layer-cache hits from stable stages and pinned inputs; cache mounts are builder-local acceleration and must not be counted as portable reuse on a fresh DinD daemon or another runner.
+
+#### Validate and tune the multi-stage build
+
+- [ ] Add BuildKit cache mounts for Go modules and compilation output, apt metadata/packages, pip downloads, and RubyGems only where they provide measured benefit on a persistent builder. Preserve reproducibility, don't let mutable cache contents replace pinned versions or checksum validation, and don't expect cache-mount contents to satisfy cross-runner registry-cache acceptance.
+- [ ] Compare the multi-stage clean build, repeated build, compressed image size, unpacked size, SBOM package count/size, and Critical/High and total fixed-vulnerability counts with the single-stage baseline. Confirm the runtime scan no longer attributes findings to build-only toolchains or caches.
+- [ ] Keep the multi-stage Dockerfile hadolint-clean and run the full container smoke, bundled-tool, license, AMD64, native ARM64, SELinux, rootless Podman, SBOM/vulnerability, and release checks before adopting it.
+- [ ] Consider a separately published, digest-pinned scanner-toolchain base image only if architecture-specific registry caches and multi-stage builds still leave release iteration unacceptably slow. If adopted, give it its own versioning, retention, provenance, SBOM, vulnerability, license, and multi-architecture contracts.
+
+#### End-state acceptance criteria
+
+- [ ] Two consecutive RC-equivalent builds with unchanged pinned toolchain inputs visibly reuse exported AMD64 and ARM64 layer caches across fresh builders instead of recompiling the scanner suite; builder-local cache mounts aren't evidence for this criterion.
+- [ ] The measured repeated-pipeline feedback time is materially lower than the current 80–90-minute loop, and the retained logs make remaining cache misses and pull/build costs attributable.
+
 ## Known Issues
 
 No open Known Issues are currently tracked.
@@ -92,6 +119,22 @@ The backend suite now takes about 150 seconds even though collecting its roughly
 - [ ] Reconsider parallel pytest execution only after mutable application config, SQLite state, logging globals, and extension state are isolated well enough to avoid order-dependent failures.
 
 **Done when:** the documented fast pytest path is materially quicker, the complete suite still covers fresh application factories, production asset output, and release installation, and CI makes future runtime regressions easy to spot.
+
+### Organize script entrypoints and implementation helpers
+
+The `scripts/` directory has 34 tracked files covering operator workflows, test runners, release publication, container construction, generated artifacts, frontend assets, and demo capture. Most still live at the top level, which makes supported commands hard to distinguish from internal helpers.
+
+Keep `scripts/` as the home for executable project tooling, but organize internal files by purpose rather than programming language or whether CI happens to call them. Treat top-level scripts as stable, supported entrypoints and keep commonly documented commands such as `run_playwright.sh`, `run_postgres_tests.sh`, and `run_pytest.sh` at their current paths.
+
+- [ ] Classify each current script as a stable entrypoint or an internal helper. Preserve documented operator and developer commands with their current path or a thin forwarding wrapper; don't create a permanent file-by-file documentation inventory.
+- [ ] Introduce purpose-based directories for `operations/`, `release/`, `container/`, `frontend/`, `generate/`, `development/`, and `test-support/`. Keep `hooks/`, and place Playwright server lifecycle helpers under the test-support boundary while retaining `scripts/run_playwright.sh` as the public runner.
+- [ ] Move scripts one purpose group at a time without renaming them in the same change. Start with release and container internals, then frontend and generators, followed by development, media-capture, and test-support helpers.
+- [ ] Keep backup, restore, and SQLite-to-Postgres migration commands easy for operators to find. If their implementation moves under `operations/`, preserve any documented source-checkout commands with forwarding entrypoints until the documentation and supported command contract deliberately change.
+- [ ] Update `.gitlab-ci.yml`, `package.json`, `Dockerfile`, `.dockerignore`, the pre-commit hook, release-evidence collection, project documentation, and tests after each group moves. Check scripts that derive the repository root from `Path.parents[...]`, `dirname`, or relative `../` paths from their new depth.
+- [ ] Keep script names action-oriented within each directory: `build_*` creates artifacts, `generate_*` refreshes checked-in output, `check_*` performs static validation, `verify_*` exercises built artifacts, and `run_*` remains a user-facing wrapper.
+- [ ] Add focused path and invocation coverage for Docker-only helpers, release jobs, stable wrappers, and generated-artifact commands before removing old paths. Run the full lint, test, container smoke, and release checks after the final cluster moves.
+
+**Done when:** the top level of `scripts/` contains only stable commands and clearly named purpose directories, existing documented command lines still work, internal helpers are easy to locate by responsibility, and local, CI, container-build, and release workflows pass without compatibility shims that no longer serve a supported path.
 
 ---
 

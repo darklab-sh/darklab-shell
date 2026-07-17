@@ -1,11 +1,8 @@
+# syntax=docker/dockerfile:1.7
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
 ARG PYTHON_BASE_IMAGE=python:3.14.6-slim
-FROM ${PYTHON_BASE_IMAGE}
-
-ARG TARGETARCH
-ARG PYTHON_BASE_DIGEST=unresolved
 ARG GO_VERSION=1.26.5
 ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
@@ -40,36 +37,34 @@ ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
 ARG TCPING_VERSION=v2.7.1
 ARG WPSCAN_VERSION=4.0.1
-ARG VT_CLI_VERSION=latest
+ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
+ARG SECLISTS_VERSION=2026.1
+ARG SECLISTS_COMMIT=190c6f7bd58c847ceadfe57d9853592737f059e8
+ARG NIKTO_VERSION=2.6.0
+ARG NIKTO_COMMIT=69681e2e4213c15b85a90c53b2169ecb2a88fb01
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.9
+ARG APP_VERSION=2.6.0-rc.10
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
+ARG PYTHON_BASE_DIGEST=unresolved
 
-# Remove dpkg config that prevents man pages from being installed
-RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
-
-# Ensure all packages are up to date and install dependencies and tools
-RUN apt-get update
-RUN apt-get upgrade -y
-
-RUN apt-get install -y --no-install-recommends \
-                        man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
-                        mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
-                        libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
-                        dnsenum libcap2-bin sudo groff-base bsdextrautils iptables masscan libpcap-dev \
-                        ca-certificates perl postgresql-client zlib1g-dev unzip inetutils-telnet httping
-
-RUN mkdir -p /usr/share/doc/darklab-shell/licenses
-
-# Update the man page database
-RUN mandb -c
-
-# Install the official Go toolchain instead of Debian's lagging golang-go package.
+# The Go builder base is shared by independent tool families. Its module and
+# compilation caches stay in builder layers and never enter the runtime image.
+FROM ${PYTHON_BASE_IMAGE} AS go-builder-base
+ARG TARGETARCH
+ARG GO_VERSION
+ARG GO_LINUX_AMD64_SHA256
+ARG GO_LINUX_ARM64_SHA256
+ARG GO_BUILD_PARALLELISM
+ARG GO_X_CRYPTO_VERSION
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential ca-certificates git libpcap-dev wget && \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 RUN case "${TARGETARCH}" in \
         amd64) go_sha256="${GO_LINUX_AMD64_SHA256}" ;; \
@@ -81,123 +76,223 @@ RUN case "${TARGETARCH}" in \
     sha256sum -c go.tar.gz.sha256 && \
     tar -C /usr/local -xzf go.tar.gz && \
     rm go.tar.gz go.tar.gz.sha256
-
-# Set GOBIN so all Go binaries install directly into /usr/local/bin,
-# world-executable and not owned by root's home directory.
-ENV GOBIN=/usr/local/bin
+ENV GOBIN=/out/usr/local/bin
 ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
-
-# Build gosu with the current Go toolchain instead of shipping Debian's binary,
-# whose embedded Go runtime can lag current standard-library security fixes.
-WORKDIR /tmp
-RUN git clone --depth 1 --branch "${GOSU_VERSION}" https://github.com/tianon/gosu.git /tmp/gosu && \
-    go -C /tmp/gosu build -trimpath -o /usr/sbin/gosu . && \
-    install -m 0644 /tmp/gosu/LICENSE /usr/share/doc/darklab-shell/licenses/gosu.txt && \
-    /usr/sbin/gosu --version && \
-    rm -rf /tmp/gosu
-
-# Versioned Go installs use a short-lived main module so the selected
-# cryptography module can be raised to the reviewed security baseline.
 COPY scripts/install_go_tool.sh /usr/local/bin/install-go-tool
-RUN chmod 0755 /usr/local/bin/install-go-tool
+RUN chmod 0755 /usr/local/bin/install-go-tool && \
+    mkdir -p /out/usr/local/bin /out/usr/sbin \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules && \
+    install -m 0644 /usr/local/go/LICENSE \
+        /out/usr/share/doc/darklab-shell/licenses/Go-toolchain.txt
 
-# Install OpenSSL from source for current TLS tooling.
+FROM go-builder-base AS go-projectdiscovery
+ARG NUCLEI_VERSION
+ARG SUBFINDER_VERSION
+ARG HTTPX_VERSION
+ARG DNSX_VERSION
+ARG NAABU_VERSION
+ARG KATANA_VERSION
+ARG TLSX_VERSION
+ARG CDNCHECK_VERSION
+ARG CHAOS_CLIENT_VERSION
+RUN install-go-tool "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}"
+RUN install-go-tool "github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}"
+RUN projectdiscovery_license=$(find "$(go env GOMODCACHE)/github.com/projectdiscovery" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    test -n "$projectdiscovery_license" && \
+    install -m 0644 "$projectdiscovery_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/ProjectDiscovery.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/golang.org/x/crypto@${GO_X_CRYPTO_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt
+
+FROM go-builder-base AS go-other-tools
+ARG GOSU_VERSION
+ARG AMASS_VERSION
+ARG ASSETFINDER_VERSION
+ARG GOBUSTER_VERSION
+ARG FFUF_VERSION
+ARG TCPING_VERSION
+ARG TRUFFLEHOG_VERSION
+ARG PUREDNS_VERSION
+ARG VT_CLI_VERSION
+ARG IPINFO_CLI_VERSION
+ARG URLSCAN_CLI_VERSION
+RUN CGO_ENABLED=0 install-go-tool "github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}"
+RUN install-go-tool "github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}"
+RUN install-go-tool "github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}"
+RUN install-go-tool "github.com/ffuf/ffuf/v2@${FFUF_VERSION}"
+RUN install-go-tool "github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}"
+RUN install-go-tool "github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}"
+RUN install-go-tool "github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}"
+RUN install-go-tool "github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION}"
+RUN install-go-tool "github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION}"
+RUN git clone --depth 1 --branch "${GOSU_VERSION}" \
+        https://github.com/tianon/gosu.git /tmp/gosu && \
+    go -C /tmp/gosu build -trimpath -o /out/usr/sbin/gosu . && \
+    install -m 0644 /tmp/gosu/LICENSE \
+        /out/usr/share/doc/darklab-shell/licenses/gosu.txt && \
+    /out/usr/sbin/gosu --version && \
+    rm -rf /tmp/gosu
+# hadolint ignore=DL3062
+RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" \
+        https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog && \
+    go -C /tmp/trufflehog install && \
+    install -m 0644 /tmp/trufflehog/LICENSE \
+        /out/usr/share/doc/darklab-shell/licenses/TruffleHog.txt && \
+    rm -rf /tmp/trufflehog
+RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    assetfinder_license=$(find "$(go env GOMODCACHE)/github.com/tomnomnom" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    gobuster_license=$(find "$(go env GOMODCACHE)/github.com/!o!j" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    ffuf_license=$(find "$(go env GOMODCACHE)/github.com/ffuf" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    tcping_license=$(find "$(go env GOMODCACHE)/github.com/pouriyajamshidi" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    puredns_license=$(find "$(go env GOMODCACHE)/github.com/d3mondev" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    vt_license=$(find "$(go env GOMODCACHE)/github.com/!virus!total" \
+        -path '*/vt-cli@*/LICENSE*' -type f -print -quit) && \
+    ipinfo_license=$(find "$(go env GOMODCACHE)/github.com/ipinfo" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    urlscan_license=$(find "$(go env GOMODCACHE)/github.com/urlscan" \
+        -iname 'LICENSE*' -type f -print -quit) && \
+    test -n "$amass_license" && test -n "$assetfinder_license" && \
+    test -n "$gobuster_license" && test -n "$ffuf_license" && \
+    test -n "$tcping_license" && test -n "$puredns_license" && \
+    test -n "$vt_license" && test -n "$ipinfo_license" && \
+    test -n "$urlscan_license" && \
+    install -m 0644 "$amass_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/OWASP-Amass.txt && \
+    install -m 0644 "$assetfinder_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/assetfinder.txt && \
+    install -m 0644 "$gobuster_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/gobuster.txt && \
+    install -m 0644 "$ffuf_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/ffuf.txt && \
+    install -m 0644 "$tcping_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/tcping.txt && \
+    install -m 0644 "$puredns_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/puredns.txt && \
+    install -m 0644 "$vt_license" \
+        /out/usr/share/doc/darklab-shell/licenses/VirusTotal-vt-cli.txt && \
+    install -m 0644 "$ipinfo_license" \
+        /out/usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt && \
+    install -m 0644 "$urlscan_license" \
+        /out/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
+
+FROM ${PYTHON_BASE_IMAGE} AS native-tools
+ARG OPENSSL_VERSION
+ARG OPENSSL_SHA256
+ARG SSLSCAN_VERSION
+ARG MASSDNS_VERSION
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential ca-certificates git libpcap-dev wget zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses
 WORKDIR /tmp
-RUN wget -O openssl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" && \
+RUN wget -O openssl.tar.gz \
+        "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" && \
     printf "%s  openssl.tar.gz\n" "${OPENSSL_SHA256}" > openssl.tar.gz.sha256 && \
     sha256sum -c openssl.tar.gz.sha256 && \
     tar xzf openssl.tar.gz && \
     rm openssl.tar.gz openssl.tar.gz.sha256
 WORKDIR /tmp/openssl-${OPENSSL_VERSION}
-RUN multiarch="$(gcc -print-multiarch)" && \
-    ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir="lib/${multiarch}" shared zlib && \
-    make -j"$(nproc)" && \
+RUN multiarch=$(gcc -print-multiarch) && \
+    ./config --prefix=/usr/local --openssldir=/usr/local/ssl \
+        --libdir="lib/${multiarch}" shared zlib && \
+    make -j"$(nproc)" build_sw && \
     make install_sw install_ssldirs && \
-    install -m 0644 LICENSE.txt /usr/share/doc/darklab-shell/licenses/OpenSSL.txt && \
-    ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
-    ln -sfn /etc/ssl/certs /usr/local/ssl/certs && \
-    ldconfig
-ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+    ldconfig && \
+    mkdir -p "/out/usr/local/lib/${multiarch}" && \
+    cp -a /usr/local/bin/openssl /out/usr/local/bin/ && \
+    cp -a "/usr/local/lib/${multiarch}/libcrypto.so"* \
+        "/usr/local/lib/${multiarch}/libssl.so"* \
+        "/out/usr/local/lib/${multiarch}/" && \
+    cp -a /usr/local/ssl /out/usr/local/ && \
+    install -m 0644 LICENSE.txt \
+        /out/usr/share/doc/darklab-shell/licenses/OpenSSL.txt
+RUN multiarch=$(gcc -print-multiarch) && \
+    test -d "/usr/local/lib/${multiarch}/engines-3" && \
+    test -d "/usr/local/lib/${multiarch}/ossl-modules" && \
+    mkdir -p "/out/usr/local/lib/${multiarch}" && \
+    cp -a "/usr/local/lib/${multiarch}/engines-3" \
+        "/usr/local/lib/${multiarch}/ossl-modules" \
+        "/out/usr/local/lib/${multiarch}/"
 WORKDIR /tmp
-RUN rm -rf "openssl-${OPENSSL_VERSION}"
-
-# Install sslscan from a pinned upstream release against the current OpenSSL.
-WORKDIR /tmp
-RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" https://github.com/rbsec/sslscan.git /tmp/sslscan && \
+RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" \
+        https://github.com/rbsec/sslscan.git /tmp/sslscan && \
     make -C /tmp/sslscan -j"$(nproc)" && \
-    cp /tmp/sslscan/sslscan /usr/local/bin/sslscan && \
-    cp /tmp/sslscan/LICENSE /usr/share/doc/darklab-shell/licenses/sslscan.txt && \
+    install -m 0755 /tmp/sslscan/sslscan /out/usr/local/bin/sslscan && \
+    install -m 0644 /tmp/sslscan/LICENSE \
+        /out/usr/share/doc/darklab-shell/licenses/sslscan.txt && \
     rm -rf /tmp/sslscan
-
-# Install nuclei.
-RUN install-go-tool github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}
-
-# Install the ProjectDiscovery suite via Go.
-RUN install-go-tool github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}
-RUN install-go-tool github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}
-RUN install-go-tool github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}
-RUN install-go-tool github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}
-RUN install-go-tool github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}
-RUN install-go-tool github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}
-RUN install-go-tool github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}
-RUN CGO_ENABLED=0 install-go-tool github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}
-
-# Install additional reconnaissance binaries via Go.
-RUN install-go-tool github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}
-RUN install-go-tool github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
-RUN install-go-tool github.com/ffuf/ffuf/v2@${FFUF_VERSION}
-RUN install-go-tool github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}
-# hadolint ignore=DL3062
-RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog \
-    && go -C /tmp/trufflehog install \
-    && cp /tmp/trufflehog/LICENSE /usr/share/doc/darklab-shell/licenses/TruffleHog.txt \
-    && rm -rf /tmp/trufflehog
-
-# Install massdns from a pinned upstream release for resolver-backed DNS tooling.
-WORKDIR /tmp
-RUN git clone --depth 1 --branch "${MASSDNS_VERSION}" https://github.com/blechschmidt/massdns.git /tmp/massdns && \
+RUN git clone --depth 1 --branch "${MASSDNS_VERSION}" \
+        https://github.com/blechschmidt/massdns.git /tmp/massdns && \
     make -C /tmp/massdns -j"$(nproc)" && \
-    cp /tmp/massdns/bin/massdns /usr/local/bin/massdns && \
-    cp /tmp/massdns/LICENSE /usr/share/doc/darklab-shell/licenses/massdns.txt && \
+    install -m 0755 /tmp/massdns/bin/massdns /out/usr/local/bin/massdns && \
+    install -m 0644 /tmp/massdns/LICENSE \
+        /out/usr/share/doc/darklab-shell/licenses/massdns.txt && \
     rm -rf /tmp/massdns
 
-# Install puredns after massdns so the runtime dependency is available.
-RUN install-go-tool github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}
+FROM ${PYTHON_BASE_IMAGE} AS wordlist-assets
+ARG SECLISTS_VERSION
+ARG SECLISTS_COMMIT
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates git && \
+    rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /out/usr/share/wordlists && \
+    git clone --depth 1 --branch "${SECLISTS_VERSION}" \
+        https://github.com/danielmiessler/SecLists.git \
+        /out/usr/share/wordlists/seclists && \
+    test "$(git -C /out/usr/share/wordlists/seclists rev-parse HEAD)" = \
+        "${SECLISTS_COMMIT}" && \
+    rm -rf /out/usr/share/wordlists/seclists/.git
 
-# Install the SecLists wordlist collection.
-RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/wordlists/seclists && \
-    rm -rf /usr/share/wordlists/seclists/.git
+FROM ${PYTHON_BASE_IMAGE} AS script-assets
+ARG NIKTO_VERSION
+ARG NIKTO_COMMIT
+ARG TESTSSL_VERSION
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates git && \
+    rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /out/opt && \
+    git clone --depth 1 --branch "${NIKTO_VERSION}" \
+        https://github.com/sullo/Nikto.git /out/opt/Nikto && \
+    test "$(git -C /out/opt/Nikto rev-parse HEAD)" = "${NIKTO_COMMIT}" && \
+    rm -rf /out/opt/Nikto/.git && \
+    chmod -R 0755 /out/opt/Nikto
+RUN git clone --depth 1 --branch "${TESTSSL_VERSION}" \
+        https://github.com/testssl/testssl.sh.git /out/opt/testssl.sh && \
+    rm -rf /out/opt/testssl.sh/.git && \
+    chmod 0755 /out/opt/testssl.sh/testssl.sh && \
+    mkdir -p /out/usr/local/bin && \
+    ln -s /opt/Nikto/program/nikto.pl /out/usr/local/bin/nikto && \
+    ln -s /opt/testssl.sh/testssl.sh /out/usr/local/bin/testssl
 
-# Install testssl.sh from a pinned upstream release.
-WORKDIR /opt/
-RUN git clone --depth 1 --branch "${TESTSSL_VERSION}" https://github.com/testssl/testssl.sh.git /opt/testssl.sh && \
-    chmod 755 /opt/testssl.sh/testssl.sh && \
-    ln -s /opt/testssl.sh/testssl.sh /usr/local/bin/testssl
-
-# Point nuclei at /tmp so it works with read_only: true (tmpfs is mounted there)
-ENV NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates
-ENV HOME=/tmp
-
-# Install nikto via git and create a symlink on PATH.
-WORKDIR /opt/
-RUN git clone https://github.com/sullo/Nikto.git
-RUN chmod -R 755 *
-RUN ln -s /opt/Nikto/program/nikto.pl /usr/local/bin/nikto
-
-# Upgrade pip to ensure latest versions of dependencies can be installed
-RUN pip install --upgrade pip
-
-# Install sslyze via pip. Shodan's CLI still imports pkg_resources, so keep a
-# setuptools release that includes that compatibility module.
-RUN pip install --upgrade setuptools==${SETUPTOOLS_VERSION} wheel
-RUN pip install --upgrade sslyze==${SSLYZE_VERSION}
-RUN pip install --upgrade wafw00f==${WAFW00F_VERSION}
-
-# Install rustscan from the official GitHub releases.
+FROM ${PYTHON_BASE_IMAGE} AS rustscan-asset
+ARG TARGETARCH
+ARG RUSTSCAN_VERSION
+ARG RUSTSCAN_LINUX_AMD64_ASSET
+ARG RUSTSCAN_LINUX_AMD64_SHA256
+ARG RUSTSCAN_LINUX_ARM64_ASSET
+ARG RUSTSCAN_LINUX_ARM64_SHA256
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 RUN case "${TARGETARCH}" in \
         amd64) rustscan_asset="${RUSTSCAN_LINUX_AMD64_ASSET}"; rustscan_sha256="${RUSTSCAN_LINUX_AMD64_SHA256}" ;; \
@@ -218,11 +313,57 @@ RUN case "${TARGETARCH}" in \
     if [ "${TARGETARCH}" = "amd64" ]; then \
         tar xzf x86_64-linux-rustscan.tar.gz; \
     fi && \
-    install -m 0755 rustscan /usr/local/bin/rustscan && \
-    rm -f rustscan rustscan.zip rustscan.zip.sha256 x86_64-linux-rustscan.tar.gz
+    mkdir -p /out/usr/local/bin && \
+    install -m 0755 rustscan /out/usr/local/bin/rustscan
 
-# Install wpscan via RubyGems.
-RUN gem install wpscan -v ${WPSCAN_VERSION} && \
+FROM ${PYTHON_BASE_IMAGE} AS ruby-tools
+ARG WPSCAN_VERSION
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential ruby-dev rubygems zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
+    mkdir -p /out/var/lib /out/usr/local/bin && \
+    cp -a /var/lib/gems /out/var/lib/ && \
+    cp -a /usr/local/bin/wpscan /out/usr/local/bin/
+
+FROM ${PYTHON_BASE_IMAGE} AS runtime
+ARG TARGETARCH
+ARG PYTHON_BASE_DIGEST
+ARG APP_VERSION
+ARG VCS_REF
+ARG BUILD_DATE
+ARG PYTHON_VERSION
+ARG SETUPTOOLS_VERSION
+ARG SSLYZE_VERSION
+ARG WAFW00F_VERSION
+
+# Install runtime packages only. Compilers and development headers remain in
+# builder stages, and apt indexes are not retained in the release image.
+RUN rm -f /etc/dpkg/dpkg.cfg.d/docker && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
+        netcat-traditional mtr whois tcptraceroute dnsrecon git \
+        libnet-ssleay-perl rubygems ruby libxml-writer-perl libjson-perl fping \
+        python3-requests fierce dnsenum libcap2-bin sudo groff-base \
+        bsdextrautils iptables masscan libpcap0.8 ca-certificates perl \
+        postgresql-client zlib1g unzip inetutils-telnet httping && \
+    rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /usr/share/doc/darklab-shell/licenses
+
+COPY --from=go-projectdiscovery /out/ /
+COPY --from=go-other-tools /out/ /
+COPY --from=native-tools /out/ /
+COPY --from=wordlist-assets /out/ /
+COPY --from=script-assets /out/ /
+COPY --from=rustscan-asset /out/ /
+COPY --from=ruby-tools /out/ /
+
+RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
+    ln -sfn /etc/ssl/certs /usr/local/ssl/certs && \
+    ldconfig && \
+    mandb -c && \
     ruby -rjson -e '\
       specs = Gem::Specification.to_a.map { |spec| { \
         "name" => spec.name, \
@@ -236,68 +377,42 @@ RUN gem install wpscan -v ${WPSCAN_VERSION} && \
       payload = { "schema_version" => 1, "gems" => specs }; \
       File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", JSON.pretty_generate(payload))'
 
-# Install required Python dependencies from requirements.txt
-WORKDIR /app
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates
+ENV HOME=/tmp
 ENV PYTHONPATH=/app
+WORKDIR /app
 
+# Install Python runtime dependencies after the toolchain layers so ordinary
+# application changes don't invalidate scanner construction.
+RUN pip install --upgrade pip && \
+    pip install --upgrade setuptools==${SETUPTOOLS_VERSION} wheel && \
+    pip install --upgrade sslyze==${SSLYZE_VERSION} && \
+    pip install --upgrade wafw00f==${WAFW00F_VERSION}
 COPY app/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
-
-# Install external-intel CLIs. These are launched through the same command
-# allowlist and vault-backed environment injection path as other scanner tools.
-RUN pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise
-RUN install-go-tool github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION} && \
-    vt_license="$(find "$(go env GOMODCACHE)/github.com/!virus!total" -path '*/vt-cli@*/LICENSE*' -type f -print -quit)" && \
-    test -n "$vt_license" && \
-    install -m 0644 "$vt_license" /usr/share/doc/darklab-shell/licenses/VirusTotal-vt-cli.txt
-RUN install-go-tool github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION} && \
-    ipinfo_license="$(find "$(go env GOMODCACHE)/github.com/ipinfo" -iname 'LICENSE*' -type f -print -quit)" && \
-    test -n "$ipinfo_license" && \
-    install -m 0644 "$ipinfo_license" /usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt
-RUN install-go-tool github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION} && \
-    urlscan_license="$(find "$(go env GOMODCACHE)/github.com/urlscan" -iname 'LICENSE*' -type f -print -quit)" && \
-    test -n "$urlscan_license" && \
-    install -m 0644 "$urlscan_license" /usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
-RUN install-go-tool github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION} && \
-    find /root/go/pkg/mod "$(go env GOMODCACHE)" \
-        -path '*/jsluice@*/secrets' -type f -delete && \
-    rm -f /usr/local/bin/install-go-tool
-
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
+    pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise && \
+    rm -f /tmp/requirements.txt
 
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)
 #   scanner — runs all user-submitted commands, no write access to /data
-# scanner is also launched with the shared appuser run group so validated
-# session workspace files can use group-readable permissions instead of
-# world-readable permissions.
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     groupadd -r scanner && useradd -r -g scanner -G appuser -s /usr/sbin/nologin scanner
 
-# Grant raw socket capabilities to tools that require elevated network access,
-# so the scanner user can use them without full root privileges.
-
-# Keep both sudoers forms: the first permits appuser to run as scanner,
-# while the second also permits the appuser run group for shared workspace files.
-# SETENV lets the app preserve only declared encrypted-secret env vars through
-# sudo without putting values in command arguments.
+# Grant raw socket capabilities to tools that require elevated network access.
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
     setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan && \
     setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu && \
     echo "appuser ALL=(scanner) NOPASSWD: SETENV: ALL" >> /etc/sudoers && \
     echo "appuser ALL=(scanner:appuser) NOPASSWD: SETENV: ALL" >> /etc/sudoers
 
-# Pre-create /data owned by appuser with 700 permissions.
-# scanner user cannot write here. The entrypoint re-applies ownership
-# after the Docker volume mount potentially resets it.
 RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 
-# Keep the application in the final, inexpensive layer so source changes do
-# not invalidate the scanner toolchain. Development Compose mounts ./app over
-# this copy; released images run directly from it.
+# Development Compose mounts ./app over this copy; release images run directly
+# from the checked-in application tree.
 COPY app/ /app/
-
-# Repository-free lifecycle helpers run through one-off Compose containers, so
-# operators do not need Python, pg_dump, or a source checkout on the host.
 COPY scripts/backup_system.py scripts/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
@@ -305,15 +420,11 @@ COPY LICENSE /usr/share/doc/darklab-shell/LICENSE
 COPY deploy/THIRD_PARTY_NOTICES.txt deploy/container-licenses.json /usr/share/doc/darklab-shell/
 COPY deploy/third-party-licenses/ /usr/share/doc/darklab-shell/licenses/
 
-# Copy entrypoint script — runs as root to fix /data ownership after volume
-# mount, then drops to appuser via gosu before starting Gunicorn
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Fallback if built directly with `docker build` outside of Compose (which reads .env).
 ARG APP_PORT=8888
 EXPOSE ${APP_PORT}
-
 ENTRYPOINT ["/entrypoint.sh"]
 
 # Keep volatile release metadata last so changing version, revision, or build date

@@ -2966,6 +2966,23 @@ def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postg
     assert not snapshot_body_path.exists()
 
 
+@pytest.mark.postgres
+def test_postgres_fresh_schema_preflight_leaves_ledger_creation_to_locked_runner(
+    postgres_schema,
+):
+    from core.migrations import MIGRATIONS
+
+    conn = postgres_schema.conn
+
+    branch = core_database._postgres_schema_init_branch(conn, MIGRATIONS)
+    ledger = conn.execute(
+        "SELECT to_regclass('schema_migrations') AS table_name"
+    ).fetchone()
+
+    assert branch == "postgres_fresh_unified_baseline"
+    assert ledger["table_name"] is None
+
+
 def _build_migration_sqlite_fixture(root: Path) -> Path:
     db_path = root / "history.db"
     pointer = _write_body_pointer(root, "snapshot body for darklab.sh", "body-store/snapshots/snap-1.txt.gz")

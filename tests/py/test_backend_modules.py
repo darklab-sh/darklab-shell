@@ -8004,6 +8004,10 @@ class TestPostgresMigrations:
 
         assert fake_conn.committed is True
         assert fake_app_conn.committed is True
+        assert not any(
+            "CREATE TABLE IF NOT EXISTS schema_migrations" in str(sql)
+            for sql, _params in fake_conn.calls
+        )
         migration_runner.assert_called_once_with(fake_conn, database_backend.DatabaseBackend.POSTGRES)
         assert any(call[0] == "SELECT pg_advisory_xact_lock(?)" for call in fake_app_conn.calls)
         prune_retention.assert_called_once_with(fake_app_conn)
@@ -15651,15 +15655,15 @@ class TestEntrypointWorkspaceRepair:
             dockerfile,
             re.MULTILINE,
         )
-        python_from = re.search(
-            r"^FROM \$\{(?P<arg>[A-Z0-9_]+)\}$",
+        python_from_args = re.findall(
+            r"^FROM \$\{(?P<arg>[A-Z0-9_]+)\}(?: AS [A-Za-z0-9_-]+)?$",
             dockerfile,
             re.MULTILINE,
         )
 
         assert python_base_image is not None
-        assert python_from is not None
-        assert python_from.group("arg") == "PYTHON_BASE_IMAGE"
+        assert python_from_args
+        assert set(python_from_args) == {"PYTHON_BASE_IMAGE"}
         assert app_config.APP_VERSION == package_version
         assert f"ARG APP_VERSION={app_config.APP_VERSION}" in dockerfile
         assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}}}"

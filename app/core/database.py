@@ -3,8 +3,7 @@
 
 """
 SQLite persistence — connection helper, schema initialisation, and retention pruning.
-Database lives in the configured data directory. If unset, /data is used when
-writable and /tmp is the local-dev fallback.
+The configured data directory holds the database; otherwise, writable /data or local-dev /tmp is used.
 
 Tables include runs, snapshots, tokens, workflows, automation, Atlas, and Projects.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
@@ -29,6 +28,7 @@ from core.database_backend import (
     connect_postgres_sqlite_compat,
     connect_sqlite,
     postgres_advisory_lock_id,
+    postgres_table_names,
     sqlite_table_exists,
 )
 from core.helpers import get_log_session_id
@@ -891,9 +891,10 @@ def _schema_startup_action(
 
 
 def _postgres_schema_init_branch(conn, migrations) -> str:
-    from core.migrations.runner import applied_versions, ensure_migration_table  # noqa: PLC0415
+    from core.migrations.runner import applied_versions  # noqa: PLC0415
 
-    ensure_migration_table(conn, backend=DatabaseBackend.POSTGRES)
+    if "schema_migrations" not in postgres_table_names(conn):
+        return "postgres_fresh_unified_baseline"
     applied = applied_versions(conn)
     baseline = next((migration for migration in migrations if migration.baseline_apply is not None), None)
     baseline_version = baseline.version if baseline is not None else ""

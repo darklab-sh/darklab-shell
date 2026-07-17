@@ -180,6 +180,28 @@ container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$ima
     require_file nikto_libwhisker_license /opt/Nikto/COPYING.LibWhisker
     require_file testssl_license /opt/testssl.sh/LICENSE
     require_file seclists_license /usr/share/wordlists/seclists/LICENSE
+    for build_path in \
+        /usr/local/go \
+        /root/go \
+        /root/.cache/go-build \
+        /tmp/gosu \
+        /tmp/massdns \
+        /tmp/sslscan \
+        /tmp/trufflehog; do
+        test ! -e "$build_path" \
+            || image_check_failed build_only_path absent "$build_path"
+    done
+    for build_command in go gcc make; do
+        command -v "$build_command" >/dev/null 2>&1 \
+            && image_check_failed build_only_command absent "$build_command"
+    done
+    for build_package in build-essential libpcap-dev ruby-dev zlib1g-dev; do
+        dpkg-query -W -f="\${Status}" "$build_package" 2>/dev/null \
+            | grep -q "ok installed" \
+            && image_check_failed development_package absent "$build_package"
+    done
+    test -z "$(find /var/lib/apt/lists -mindepth 1 -print -quit 2>/dev/null)" \
+        || image_check_failed apt_indexes absent present
     command -v pg_dump >/dev/null 2>&1 \
         || image_check_failed pg_dump available missing
     command -v pg_restore >/dev/null 2>&1 \
