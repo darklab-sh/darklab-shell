@@ -113,9 +113,16 @@ get_preferences() {
 resolve_deployment_docker_root() {
     candidate=$install_dir
     if [ -n "${HOSTNAME:-}" ]; then
-        resolved=$(docker inspect "$HOSTNAME" 2>/dev/null | jq -r \
-            --arg path "$install_dir" '
-                [.[0].Mounts[]?
+        running_container_ids=$(docker ps -q)
+        if [ -n "$running_container_ids" ]; then
+            # Container hostnames are not always valid Docker lookup names, so
+            # inspect the running inventory and select this job by Hostname.
+            # shellcheck disable=SC2086
+            resolved=$(docker inspect $running_container_ids 2>/dev/null | jq -r \
+                --arg hostname "$HOSTNAME" --arg path "$install_dir" '
+                [.[]
+                 | select(.Config.Hostname == $hostname)
+                 | .Mounts[]?
                  | select(.Destination as $destination
                    | $path == $destination
                      or ($path | startswith($destination + "/")))]
@@ -124,7 +131,10 @@ resolve_deployment_docker_root() {
                 | if $mount == null then ""
                   else $mount.Source + $path[($mount.Destination | length):]
                   end
-            ') || resolved=""
+                ') || resolved=""
+        else
+            resolved=""
+        fi
         [ -z "$resolved" ] || candidate=$resolved
     fi
     release_image=$(sed -n 's/^DARKLAB_IMAGE=//p' "$install_dir/.env" | tail -n 1)
