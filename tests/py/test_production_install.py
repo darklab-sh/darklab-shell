@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.10"
+RELEASE_VERSION = "2.6.0-rc.11"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -1364,6 +1364,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     ]
     assert arm64_job["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
     assert arm64_job["variables"]["DOCKER_TLS_CERTDIR"] == ""
+    arm64_before_script = "\n".join(arm64_job["before_script"])
+    assert "docker buildx create" in arm64_before_script
+    assert "--driver docker-container" in arm64_before_script
+    assert "--use --bootstrap" in arm64_before_script
     assert arm64_job["rules"][-1] == {"when": "never"}
     assert "RELEASE_ARM64_COMPATIBILITY_ENABLED == \"1\"" in arm64_job["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in arm64_job["rules"][0]["if"]
@@ -1385,6 +1389,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "RELEASE_ARM64_COMPATIBILITY_ENABLED == \"1\"" in (
         arm64_warmer["rules"][0]["if"]
     )
+    arm64_warmer_before_script = "\n".join(arm64_warmer["before_script"])
+    assert "docker buildx create" in arm64_warmer_before_script
+    assert "--driver docker-container" in arm64_warmer_before_script
+    assert "--use --bootstrap" in arm64_warmer_before_script
     arm64_warmer_script = "\n".join(arm64_warmer["script"])
     assert 'test "$(uname -m)" = "aarch64"' in arm64_warmer_script
     assert "buildcache-arm64-${RELEASE_CACHE_SCOPE}" in arm64_warmer_script

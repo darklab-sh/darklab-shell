@@ -61,6 +61,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Hosted ARM64 builds export their registry cache through BuildKit** — The release smoke and scheduled cache-warmer jobs create a containerized Buildx builder before requesting the registry cache backend, avoiding the default Docker driver's unsupported cache-export path while keeping the candidate image loaded for runtime verification.
+
 - **Run comparisons start only one full comparison request** — The ESM bridge is checked for an installed handler instead of treating the renderer's normal void return as a missing handler, preventing a slower duplicate response from collapsing newly expanded unchanged lines.
 
 - **Release vulnerability evidence is generated in the CI job workspace** — Syft and Grype now stream the SBOM through the job container instead of writing through Docker-daemon bind paths, so the CycloneDX file is retained with the full scan report. The image updates OpenSSL, compiles `gosu` with the current Go toolchain, builds bundled Go tools against the fixed `x/crypto` security baseline, and removes a stale executable shipped inside an upstream module cache so actionable Critical findings still fail closed without suppressions.
