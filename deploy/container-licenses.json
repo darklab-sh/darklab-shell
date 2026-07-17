@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.6.0-rc.7",
-  "reviewed_on": "2026-07-15",
+  "reviewed_for_release": "2.6.0-rc.8",
+  "reviewed_on": "2026-07-16",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -13,7 +13,6 @@
     "apt:fierce": "Python container base and Debian packages",
     "apt:fping": "Python container base and Debian packages",
     "apt:git": "Python container base and Debian packages",
-    "apt:gosu": "Python container base and Debian packages",
     "apt:groff-base": "Python container base and Debian packages",
     "apt:httping": "Python container base and Debian packages",
     "apt:inetutils-telnet": "Python container base and Debian packages",
@@ -48,6 +47,7 @@
     "git:https://github.com/rbsec/sslscan.git": "sslscan",
     "git:https://github.com/sullo/Nikto.git": "Nikto",
     "git:https://github.com/testssl/testssl.sh.git": "testssl.sh",
+    "git:https://github.com/tianon/gosu.git": "gosu",
     "git:https://github.com/trufflesecurity/trufflehog.git": "TruffleHog",
     "pip:greynoise": "Python application and intelligence dependencies",
     "pip:pip": "Python application and intelligence dependencies",
@@ -85,6 +85,20 @@
       "source": "https://go.dev/LICENSE",
       "license": "BSD-3-Clause",
       "notice_location": "/usr/local/go/LICENSE"
+    },
+    {
+      "name": "Go cryptography module",
+      "version_arg": "GO_X_CRYPTO_VERSION",
+      "source": "https://pkg.go.dev/golang.org/x/crypto",
+      "license": "BSD-3-Clause",
+      "notice_location": "/root/go/pkg/mod/golang.org/x/crypto@v0.52.0/LICENSE"
+    },
+    {
+      "name": "gosu",
+      "version_arg": "GOSU_VERSION",
+      "source": "https://github.com/tianon/gosu",
+      "license": "Apache-2.0",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/gosu.txt"
     },
     {
       "name": "OpenSSL",

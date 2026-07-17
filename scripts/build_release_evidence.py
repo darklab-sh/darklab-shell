@@ -35,6 +35,7 @@ BUILD_INPUT_FILES = (
     "app/requirements.txt",
     "deploy/container-licenses.json",
     "entrypoint.sh",
+    "scripts/install_go_tool.sh",
 )
 NETWORK_BUILD_TOOLS = (
     "apt-get",
@@ -42,6 +43,7 @@ NETWORK_BUILD_TOOLS = (
     "gem install",
     "git clone",
     "go install",
+    "install-go-tool",
     "pip install",
     "wget",
 )

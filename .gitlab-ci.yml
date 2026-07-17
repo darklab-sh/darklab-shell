@@ -579,15 +579,14 @@ release-supply-chain:
       docker run --rm
       --user 0:0
       -v /var/run/docker.sock:/var/run/docker.sock
-      -v "$CI_PROJECT_DIR/release-evidence-input:/evidence"
       "$SYFT_IMAGE"
       "docker:${GITLAB_IMAGE}@${GITLAB_DIGEST}"
-      -o cyclonedx-json=/evidence/darklab-shell.cdx.json
+      -o cyclonedx-json
+      > release-evidence-input/darklab-shell.cdx.json
     - >-
-      docker run --rm
-      -v "$CI_PROJECT_DIR/release-evidence-input:/evidence:ro"
+      cat release-evidence-input/darklab-shell.cdx.json |
+      docker run --rm -i
       "$GRYPE_IMAGE"
-      "sbom:/evidence/darklab-shell.cdx.json"
       --only-fixed --fail-on critical -o json
       > release-evidence-input/vulnerability-report.json
     - >-

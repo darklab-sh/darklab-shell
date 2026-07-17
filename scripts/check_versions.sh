@@ -44,7 +44,9 @@ NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
 ARG_PATTERN = re.compile(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$")
 DOCKER_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 GO_TOOLCHAIN_PATTERN = re.compile(r"go(\d+\.\d+(?:\.\d+)?)\.linux-")
-GO_INSTALL_PATTERN = re.compile(r"go install(?:\s+-v)?\s+([^\s@]+)@([^\s\\]+)")
+GO_INSTALL_PATTERN = re.compile(
+    r"(?:go install(?:\s+-v)?|install-go-tool)\s+([^\s@]+)@([^\s\\]+)"
+)
 PIP_INSTALL_PATTERN = re.compile(r"pip install(?:\s+--[A-Za-z0-9_.=-]+)*\s+([A-Za-z0-9_.\-\[\]]+)==([^\s\\]+)")
 GEM_INSTALL_PATTERN = re.compile(r"gem install\s+([A-Za-z0-9_.-]+)\s+-v\s+([^\s\\]+)")
 GITHUB_RELEASE_PATTERN = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/releases/download/([^/\s]+)/")

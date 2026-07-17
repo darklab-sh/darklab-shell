@@ -10,8 +10,10 @@ ARG GO_VERSION=1.26.5
 ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
 ARG GO_BUILD_PARALLELISM=2
-ARG OPENSSL_VERSION=3.6.2
-ARG OPENSSL_SHA256=aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f
+ARG GO_X_CRYPTO_VERSION=v0.52.0
+ARG GOSU_VERSION=1.19
+ARG OPENSSL_VERSION=3.6.3
+ARG OPENSSL_SHA256=243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
 ARG SSLSCAN_VERSION=2.2.2
 ARG NUCLEI_VERSION=v3.11.0
 ARG SUBFINDER_VERSION=v2.14.0
@@ -43,7 +45,7 @@ ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.07.07
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=81.0.0
-ARG APP_VERSION=2.6.0-rc.7
+ARG APP_VERSION=2.6.0-rc.8
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -59,7 +61,7 @@ RUN apt-get install -y --no-install-recommends \
                         man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
-                        dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
+                        dnsenum libcap2-bin sudo groff-base bsdextrautils iptables masscan libpcap-dev \
                         ca-certificates perl postgresql-client zlib1g-dev unzip inetutils-telnet httping
 
 RUN mkdir -p /usr/share/doc/darklab-shell/licenses
@@ -86,6 +88,21 @@ ENV GOBIN=/usr/local/bin
 ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
+ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
+
+# Build gosu with the current Go toolchain instead of shipping Debian's binary,
+# whose embedded Go runtime can lag current standard-library security fixes.
+WORKDIR /tmp
+RUN git clone --depth 1 --branch "${GOSU_VERSION}" https://github.com/tianon/gosu.git /tmp/gosu && \
+    go -C /tmp/gosu build -trimpath -o /usr/sbin/gosu . && \
+    install -m 0644 /tmp/gosu/LICENSE /usr/share/doc/darklab-shell/licenses/gosu.txt && \
+    /usr/sbin/gosu --version && \
+    rm -rf /tmp/gosu
+
+# Versioned Go installs use a short-lived main module so the selected
+# cryptography module can be raised to the reviewed security baseline.
+COPY scripts/install_go_tool.sh /usr/local/bin/install-go-tool
+RUN chmod 0755 /usr/local/bin/install-go-tool
 
 # Install OpenSSL from source for current TLS tooling.
 WORKDIR /tmp
@@ -117,23 +134,23 @@ RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" https://github.com/rbsec/s
     rm -rf /tmp/sslscan
 
 # Install nuclei.
-RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}
+RUN install-go-tool github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}
 
 # Install the ProjectDiscovery suite via Go.
-RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}
-RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}
-RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}
-RUN go install -v github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}
-RUN go install -v github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}
-RUN go install -v github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}
-RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}
+RUN install-go-tool github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}
+RUN install-go-tool github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}
+RUN install-go-tool github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}
+RUN install-go-tool github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}
+RUN install-go-tool github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}
+RUN install-go-tool github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}
+RUN install-go-tool github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}
+RUN CGO_ENABLED=0 install-go-tool github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}
 
 # Install additional reconnaissance binaries via Go.
-RUN go install github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}
-RUN go install github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
-RUN go install github.com/ffuf/ffuf/v2@${FFUF_VERSION}
-RUN go install github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}
+RUN install-go-tool github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}
+RUN install-go-tool github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
+RUN install-go-tool github.com/ffuf/ffuf/v2@${FFUF_VERSION}
+RUN install-go-tool github.com/pouriyajamshidi/tcping/v2@${TCPING_VERSION}
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog \
     && go -C /tmp/trufflehog install \
@@ -149,7 +166,7 @@ RUN git clone --depth 1 --branch "${MASSDNS_VERSION}" https://github.com/blechsc
     rm -rf /tmp/massdns
 
 # Install puredns after massdns so the runtime dependency is available.
-RUN go install -v github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}
+RUN install-go-tool github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}
 
 # Install the SecLists wordlist collection.
 RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/wordlists/seclists && \
@@ -229,19 +246,21 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Install external-intel CLIs. These are launched through the same command
 # allowlist and vault-backed environment injection path as other scanner tools.
 RUN pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise
-RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION} && \
+RUN install-go-tool github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION} && \
     vt_license="$(find "$(go env GOMODCACHE)/github.com/!virus!total" -path '*/vt-cli@*/LICENSE*' -type f -print -quit)" && \
     test -n "$vt_license" && \
     install -m 0644 "$vt_license" /usr/share/doc/darklab-shell/licenses/VirusTotal-vt-cli.txt
-RUN go install -v github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION} && \
+RUN install-go-tool github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION} && \
     ipinfo_license="$(find "$(go env GOMODCACHE)/github.com/ipinfo" -iname 'LICENSE*' -type f -print -quit)" && \
     test -n "$ipinfo_license" && \
     install -m 0644 "$ipinfo_license" /usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt
-RUN go install -v github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION} && \
+RUN install-go-tool github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION} && \
     urlscan_license="$(find "$(go env GOMODCACHE)/github.com/urlscan" -iname 'LICENSE*' -type f -print -quit)" && \
     test -n "$urlscan_license" && \
     install -m 0644 "$urlscan_license" /usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
-RUN go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}
+RUN install-go-tool github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION} && \
+    find "$(go env GOMODCACHE)/github.com/!mzack9999" -path '*/jsluice@*/secrets' -type f -delete && \
+    rm -f /usr/local/bin/install-go-tool
 
 
 # Create two unprivileged users:

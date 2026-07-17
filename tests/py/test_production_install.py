@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.7"
+RELEASE_VERSION = "2.6.0-rc.8"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.8"
+NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.9"
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -695,6 +695,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "postgresql-client" in dockerfile
     assert "COPY scripts/backup_system.py scripts/restore_system.py /app/tools/" in dockerfile
     assert "!scripts/backup_system.py" in dockerignore
+    assert "!scripts/install_go_tool.sh" in dockerignore
     assert "!scripts/restore_system.py" in dockerignore
     assert "wpscan-ruby-gems.json" in dockerfile
     assert (
@@ -703,6 +704,17 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
     assert "ARG PYTHON_BASE_IMAGE=python:3.14.6-slim" in dockerfile
+    assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
+    assert "ARG GOSU_VERSION=1.19" in dockerfile
+    assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
+    assert "install-go-tool github.com/projectdiscovery/chaos-client" in dockerfile
+    assert "go get \"golang.org/x/crypto@${GO_X_CRYPTO_VERSION}\"" in (
+        ROOT / "scripts" / "install_go_tool.sh"
+    ).read_text(encoding="utf-8")
+    assert "go -C /tmp/gosu build -trimpath -o /usr/sbin/gosu" in dockerfile
+    assert " apt-get install -y --no-install-recommends" in dockerfile
+    assert " sudo gosu " not in dockerfile
+    assert "jsluice@*/secrets" in dockerfile
     assert 'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"' in dockerfile
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
@@ -889,6 +901,7 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     assert "redistribution_review" not in nmap_component
     assert "runs the bundled Nmap executable as an external command" in nmap_component["usage_note"]
     durable_go_notices = {
+        "gosu": "gosu.txt",
         "VirusTotal CLI": "VirusTotal-vt-cli.txt",
         "IPinfo CLI": "IPinfo-cli.txt",
         "urlscan CLI": "urlscan-cli.txt",
@@ -1320,6 +1333,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     supply_chain_script = "\n".join(supply_chain_job["script"])
     assert "--only-fixed --fail-on critical" in supply_chain_script
+    assert "-o cyclonedx-json > release-evidence-input/darklab-shell.cdx.json" in (
+        supply_chain_script
+    )
+    assert "cat release-evidence-input/darklab-shell.cdx.json |" in supply_chain_script
+    assert 'release-evidence-input:/evidence' not in supply_chain_script
     assert '--base-image "$PYTHON_BASE_IMAGE"' in supply_chain_script
     assert '--base-image-digest "$PYTHON_BASE_DIGEST"' in supply_chain_script
     assert '--build-date "$RELEASE_BUILD_DATE"' in supply_chain_script
@@ -1513,10 +1531,15 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert build_inputs["reproducibility"]["container_image_byte_reproducible"] is False
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
     assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
+    assert "scripts/install_go_tool.sh" in build_inputs["source"]["files"]
     assert build_inputs["release_tool_images"] == {"gitlab_cli": GITLAB_CLI_IMAGE}
     assert evidence_index["release_tools"] == {"gitlab_cli_image": GITLAB_CLI_IMAGE}
     assert any(
         "apt-get" in instruction["tools"]
+        for instruction in build_inputs["network_build_instructions"]
+    )
+    assert any(
+        "install-go-tool" in instruction["tools"]
         for instruction in build_inputs["network_build_instructions"]
     )
     assert {selector["kind"] for selector in build_inputs["moving_selectors"]} >= {

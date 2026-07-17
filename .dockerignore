@@ -24,6 +24,7 @@ examples/
 assets/
 scripts/*
 !scripts/backup_system.py
+!scripts/install_go_tool.sh
 !scripts/restore_system.py
 config/
 data/

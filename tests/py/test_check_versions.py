@@ -37,6 +37,14 @@ def test_urlscan_cli_uses_github_releases_for_calendar_versions(monkeypatch):
 
 def test_generic_go_lookup_still_uses_module_proxy(monkeypatch):
     module = _load_check_versions_module()
+    helper_install = module.GO_INSTALL_PATTERN.search(
+        "RUN install-go-tool github.com/example/tool/cmd/tool@${TOOL_VERSION}"
+    )
+    assert helper_install is not None
+    assert helper_install.groups() == (
+        "github.com/example/tool/cmd/tool",
+        "${TOOL_VERSION}",
+    )
     requested_urls: list[str] = []
 
     class FakeResponse:
