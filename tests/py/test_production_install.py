@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.13"
+RELEASE_VERSION = "2.6.0-rc.14"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -1367,8 +1367,6 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
             "command": [
                 "--mtu=1360",
                 "--tls=false",
-                "--feature",
-                "containerd-snapshotter",
             ],
         }
     ]
@@ -1377,9 +1375,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     arm64_before_script = "\n".join(arm64_job["before_script"])
     assert "until docker info" in arm64_before_script
     assert "did not become ready after 60 seconds" in arm64_before_script
-    assert "docker info --format" in arm64_before_script
-    assert "io.containerd.snapshotter.v1" in arm64_before_script
-    assert "docker buildx create" not in arm64_before_script
+    assert "docker buildx create" in arm64_before_script
+    assert "--driver docker-container" in arm64_before_script
+    assert "--use --bootstrap" in arm64_before_script
     assert arm64_job["rules"][-1] == {"when": "never"}
     assert "RELEASE_ARM64_COMPATIBILITY_ENABLED == \"1\"" in arm64_job["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in arm64_job["rules"][0]["if"]
@@ -1390,7 +1388,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "buildcache-arm64-${RELEASE_CACHE_SCOPE}" in arm64_script
     assert "--cache-from" in arm64_script
     assert "--cache-to" in arm64_script
-    assert 'cache_candidate="darklab-shell-arm64-cache-warm' not in arm64_script
+    assert "mode=min" in arm64_script
+    assert "type=docker,dest=${candidate_archive}" in arm64_script
+    assert 'docker buildx rm "$builder_name"' in arm64_script
+    assert 'docker load --input "$candidate_archive"' in arm64_script
     assert "--load" not in arm64_script
     assert "verify_repository_free_image.sh" in arm64_script
     assert "verify_bundled_tools.sh" in arm64_script
@@ -1405,21 +1406,17 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     arm64_warmer_before_script = "\n".join(arm64_warmer["before_script"])
     assert "until docker info" in arm64_warmer_before_script
     assert "did not become ready after 60 seconds" in arm64_warmer_before_script
-    assert "docker info --format" in arm64_warmer_before_script
-    assert "io.containerd.snapshotter.v1" in arm64_warmer_before_script
-    assert "docker buildx create" not in arm64_warmer_before_script
+    assert "docker buildx create" in arm64_warmer_before_script
+    assert "--driver docker-container" in arm64_warmer_before_script
+    assert "--use --bootstrap" in arm64_warmer_before_script
     arm64_warmer_script = "\n".join(arm64_warmer["script"])
     assert 'test "$(uname -m)" = "aarch64"' in arm64_warmer_script
     assert "buildcache-arm64-${RELEASE_CACHE_SCOPE}" in arm64_warmer_script
     assert "--platform linux/arm64" in arm64_warmer_script
     assert "--cache-from" in arm64_warmer_script
     assert "--cache-to" in arm64_warmer_script
-    assert "mode=max" in arm64_warmer_script
-    assert 'cache_candidate="darklab-shell-arm64-cache-warm' in (
-        arm64_warmer_script
-    )
-    assert '--tag "$cache_candidate"' in arm64_warmer_script
-    assert "--output type=cacheonly" not in arm64_warmer_script
+    assert "mode=min" in arm64_warmer_script
+    assert "--output type=cacheonly" in arm64_warmer_script
     selinux_job = parsed_ci["release-image-selinux-smoke"]
     assert selinux_job["tags"] == ["selinux", "self-managed", "baku"]
     assert "RELEASE_SELINUX_COMPATIBILITY_ENABLED == \"1\"" in (

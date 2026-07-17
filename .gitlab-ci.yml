@@ -394,8 +394,6 @@ docker-build-arm64-cache:
       command:
         - "--mtu=1360"
         - "--tls=false"
-        - "--feature"
-        - "containerd-snapshotter"
   tags:
     - saas-linux-small-arm64
   resource_group: "release-cache-arm64-${RELEASE_CACHE_SCOPE}"
@@ -418,8 +416,8 @@ docker-build-arm64-cache:
         fi
         sleep 2
       done
-      docker info --format '{{json .DriverStatus}}' |
-        grep -q 'io.containerd.snapshotter.v1'
+      docker buildx create --name "darklab-arm64-${CI_JOB_ID}" \
+        --driver docker-container --use --bootstrap
   script:
     - test "$(uname -m)" = "aarch64"
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
@@ -434,14 +432,13 @@ docker-build-arm64-cache:
       ' arm64-python-base-index.json)
       printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
       cache_image="${CI_REGISTRY_IMAGE}:buildcache-arm64-${RELEASE_CACHE_SCOPE}"
-      cache_candidate="darklab-shell-arm64-cache-warm:${CI_COMMIT_SHA}"
       docker buildx build --pull --platform linux/arm64 --provenance=false \
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
         --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
         --cache-from "type=registry,ref=${cache_image}" \
-        --cache-to "type=registry,ref=${cache_image},mode=max" \
-        --tag "$cache_candidate" .
+        --cache-to "type=registry,ref=${cache_image},mode=min" \
+        --output type=cacheonly .
 
 .protected-release-tag:
   rules:
@@ -614,8 +611,6 @@ release-image-arm64-smoke:
       command:
         - "--mtu=1360"
         - "--tls=false"
-        - "--feature"
-        - "containerd-snapshotter"
   tags:
     - saas-linux-small-arm64
   resource_group: "release-cache-arm64-${RELEASE_CACHE_SCOPE}"
@@ -638,8 +633,8 @@ release-image-arm64-smoke:
         fi
         sleep 2
       done
-      docker info --format '{{json .DriverStatus}}' |
-        grep -q 'io.containerd.snapshotter.v1'
+      docker buildx create --name "darklab-arm64-${CI_JOB_ID}" \
+        --driver docker-container --use --bootstrap
   script:
     - |
       [ "$(uname -m)" = "aarch64" ] || {
@@ -648,7 +643,14 @@ release-image-arm64-smoke:
       }
       release_version=${CI_COMMIT_TAG#v}
       candidate_image="darklab-shell-arm64-candidate:${CI_COMMIT_SHA}"
+      candidate_archive="${CI_PROJECT_DIR}/arm64-candidate.tar"
+      builder_name="darklab-arm64-${CI_JOB_ID}"
       cache_image="${CI_REGISTRY_IMAGE}:buildcache-arm64-${RELEASE_CACHE_SCOPE}"
+      cleanup_arm64_build() {
+        docker buildx rm "$builder_name" >/dev/null 2>&1 || true
+        rm -f "$candidate_archive"
+      }
+      trap cleanup_arm64_build EXIT
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
       python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
       docker buildx imagetools inspect --raw "$python_base_image" > arm64-python-base-index.json
@@ -670,8 +672,12 @@ release-image-arm64-smoke:
         --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
         --build-arg "BUILD_DATE=${CI_PIPELINE_CREATED_AT}" \
         --cache-from "type=registry,ref=${cache_image}" \
-        --cache-to "type=registry,ref=${cache_image},mode=max" \
-        --tag "$candidate_image" .
+        --cache-to "type=registry,ref=${cache_image},mode=min" \
+        --tag "$candidate_image" \
+        --output "type=docker,dest=${candidate_archive}" .
+      docker buildx rm "$builder_name"
+      docker load --input "$candidate_archive"
+      rm -f "$candidate_archive"
       docker image inspect "$candidate_image" > arm64-image-inspect.json
       sh scripts/verify_repository_free_image.sh \
         "$candidate_image" "$release_version" "$CI_COMMIT_SHA" "$python_base_digest" arm64

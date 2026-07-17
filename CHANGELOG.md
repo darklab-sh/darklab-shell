@@ -61,7 +61,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Hosted ARM64 builds share one image and cache store** — The release smoke and scheduled cache-warmer jobs enable Docker's containerd image store before using the registry cache backend, avoiding a second BuildKit content store on the space-constrained hosted runner. DinD starts with explicit TLS-disabled intent and a bounded readiness check, while SecLists is staged at its final runtime path so the large wordlist layer can be shared instead of exported under two directory layouts.
+- **Hosted ARM64 builds stay within the runner's storage budget** — The release smoke and scheduled cache-warmer jobs use a final-image-only portable cache with a supported containerized BuildKit builder. The smoke build writes one compressed archive, removes the builder's storage before loading the candidate, and keeps the explicit DinD readiness check. SecLists is staged at its final runtime path so the large wordlist layer isn't exported under two directory layouts.
 
 - **Run comparisons start only one full comparison request** — The ESM bridge is checked for an installed handler instead of treating the renderer's normal void return as a missing handler, preventing a slower duplicate response from collapsing newly expanded unchanged lines.
 
