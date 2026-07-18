@@ -26,7 +26,7 @@ Configure the minimum emitted level with `log_level`. Applications and browser c
 
 ## Output Formats
 
-The logging layer supports two output formats selected by `log_format` in `config.yaml`:
+The logging layer supports two output formats selected by `log_format` in installed `conf/config.local.yaml`. Source development uses `app/conf/config.local.yaml` instead:
 
 - `text`
   - human-readable single-line logs for local development and plain `docker compose logs`
@@ -39,7 +39,7 @@ The logging layer supports two output formats selected by `log_format` in `confi
   - event context is emitted as `_`-prefixed additional fields such as `_ip`, `_run_id`, and `_cmd`
   - this makes the application logs directly indexable by a GELF-aware backend without extra parsing rules
 
-The Docker logging driver and the application formatter are intentionally separate controls. The production Compose override can ship container stdout over Docker GELF transport, while `log_format: gelf` controls whether the application itself emits GELF-shaped records or plain text.
+The Docker logging driver and the application formatter are intentionally separate controls. A repository-free operator can create an installation-directory [Compose override](../CONFIGURATION.md#repository-free-local-compose-overrides) to ship container stdout over Docker GELF transport, while `log_format: gelf` controls whether the application itself emits GELF-shaped records or plain text. The checkout-only `examples/docker-compose.prod.yml` file is a source-development/custom-deployment reference, not part of the installed production stack.
 
 ## Log Event Inventory
 

@@ -52,7 +52,7 @@ The lead should tell the reader what the section is about before the details beg
 
 - Keep tables of contents and heading anchors stable when possible.
 - If a doc is covered by a documentation contract test, structural changes must still satisfy that contract or replace it with a more durable check first.
-- Keep permanent navigation focused on maintained project docs. Release and merge-request drafts stay out of canonical indexes, but their local links must still resolve while they exist.
+- Keep permanent navigation focused on maintained project docs. Release drafts, merge-request drafts, and pre-merge review findings stay out of canonical indexes, but their local links must still resolve while they exist.
 
 ### When in doubt, leave as prose
 
@@ -349,7 +349,7 @@ Must keep:
 
 - Merge-request drafts must keep the required MR section contract.
 - Release-note drafts should stay user- and operator-facing, not turn into engineering change logs.
-- Keep drafts out of the permanent Documentation Map and changelog archives.
+- Keep drafts and pre-merge review findings out of the permanent Documentation Map and changelog archives.
 - Validate repository-relative links and heading fragments while drafts exist.
 
 ### Focused guides under `docs/`

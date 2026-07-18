@@ -29,10 +29,16 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.23"
+RELEASE_VERSION = "2.6.0-rc.24"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
-NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
+RC_TWO_VERSION = f"{FINAL_VERSION}-rc.2"
+_CURRENT_RC_NUMBER = RELEASE_VERSION.partition("-rc.")[2]
+NEXT_RC_VERSION = (
+    f"{FINAL_VERSION}-rc.{int(_CURRENT_RC_NUMBER) + 1}"
+    if _CURRENT_RC_NUMBER
+    else RC_TWO_VERSION
+)
 NEXT_VERSION = "2.6.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
@@ -647,7 +653,8 @@ fi
 
 
 def test_production_compose_uses_pinned_public_image_and_no_source_mount():
-    compose = yaml.safe_load((ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8"))
+    compose_text = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
+    compose = yaml.safe_load(compose_text)
     development_compose = yaml.safe_load(
         (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     )
@@ -676,6 +683,12 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["INTERACTIVE_PTY_ENABLED"] == (
         "${INTERACTIVE_PTY_ENABLED:-false}"
     )
+    assert "ulimits" not in shell
+    assert "sysctls" not in shell
+    assert "compose.operator.yaml" in compose_text
+    assert "# ulimits:" in compose_text
+    assert "# sysctls:" in compose_text
+    assert "SELinux-enforcing Docker and rootless Docker or Podman" in compose_text
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "HOST_BIND_ADDRESS=0.0.0.0" in env_example
     assert "# WORKSPACE_ENABLED=true" in env_example
@@ -3406,7 +3419,8 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     )
 
     rc_one_version = RC_ONE_VERSION
-    rc_two_version = NEXT_RC_VERSION
+    rc_two_version = RC_TWO_VERSION
+    assert len({rc_one_version, rc_two_version, FINAL_VERSION}) == 3
     rc_one_payload = _build_payload_for_version(
         tmp_path / "rc-one-fixture",
         rc_one_version,

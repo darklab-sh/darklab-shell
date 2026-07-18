@@ -41,7 +41,7 @@ On a Linux AMD64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`
 # Change this if you want to install darklab_shell somewhere else.
 DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
 
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.23/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.24/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
 cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
@@ -199,8 +199,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.23/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.23/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.24/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.24/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -208,11 +208,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.23/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.23/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.24/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.24/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.23" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.24" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```
@@ -312,7 +312,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and application internals
 - [CHANGELOG.md](CHANGELOG.md) - Release-by-release change log organised by version
-- [CONFIGURATION.md](CONFIGURATION.md) - Operator configuration reference for `app/conf/`, `.env`, Compose overlays, workspace storage, and production tuning
+- [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for repository-free `.env` and `conf/` settings, source-development overrides, Compose customization, storage, and host tuning
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](CONTRIBUTORS.md) - Contributor and acknowledgement notes
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes

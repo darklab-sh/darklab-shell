@@ -1,6 +1,6 @@
 # Configuration
 
-This is the operator-facing configuration reference for darklab_shell. It covers the application config files under `app/conf/`, local override files, Docker Compose settings, `.env`, production overlays, and common deployment recipes.
+This is the operator-facing configuration reference for darklab_shell. Repository-free production installs use `.env`, local files under `conf/`, and optional Compose overrides beside the installed `compose.yaml`. Source checkouts keep their development overrides under `app/conf/`.
 
 For feature behavior, start with [FEATURES.md](FEATURES.md). For internal configuration flow between Flask and the browser, see [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces).
 
@@ -8,7 +8,7 @@ For feature behavior, start with [FEATURES.md](FEATURES.md). For internal config
 
 ## Configuration Model
 
-Application settings live in `app/conf/config.yaml`. The checked-in file acts as the deployment override layer on top of built-in defaults from `app/config.py`.
+Shipped application settings live in `app/conf/config.yaml` inside the release image and source checkout. Repository-free operators normally leave that file immutable and put YAML overrides in the installed `conf/config.local.yaml`. Source development uses `app/conf/config.local.yaml` instead. The shipped config acts as the deployment layer on top of built-in defaults from `app/config.py`.
 
 Resolution order for the main app config is:
 
@@ -56,20 +56,20 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support `*.lo
 
 The installer keeps the host overlay tree at `0700` with files at `0600`. Container startup rejects symlinks and special files, then stages the tree into a private `appuser`-owned runtime directory before dropping privileges. Restart the shell container after editing a production host overlay so it stages a fresh snapshot. `CONFIG_LOADED` reports the shipped and local roots, while DEBUG diagnostics can list safe relative names for present supported overlays; neither log includes file contents. Missing and comment-only optional overlays are normal and don't produce warnings.
 
-| Base file | Local overlay | Behavior |
-|-----------|---------------|----------|
-| `app/conf/config.yaml` | `app/conf/config.local.yaml` | Overrides any subset of app settings |
-| `app/conf/commands.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
-| `app/conf/faq.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
-| `app/conf/welcome.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
-| `app/conf/workflows.yaml` | `app/conf/workflows.local.yaml` | Appends local guided workflows |
-| `app/conf/ascii.txt` | `app/conf/ascii.local.txt` | Replaces desktop banner art |
-| `app/conf/ascii_mobile.txt` | `app/conf/ascii_mobile.local.txt` | Replaces mobile banner art |
-| `app/conf/app_hints.txt` | `app/conf/app_hints.local.txt` | Appends desktop hints |
-| `app/conf/app_hints_mobile.txt` | `app/conf/app_hints_mobile.local.txt` | Appends mobile hints |
-| `app/conf/themes/<theme>.yaml` | `app/conf/themes/<theme>.local.yaml` | Overlays one named theme |
+| Shipped base | Repository-free local overlay | Source-development overlay | Behavior |
+|--------------|-------------------------------|----------------------------|----------|
+| `app/conf/config.yaml` | `conf/config.local.yaml` | `app/conf/config.local.yaml` | Overrides any subset of app settings |
+| `app/conf/commands.yaml` | `conf/commands.local.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
+| `app/conf/faq.yaml` | `conf/faq.local.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
+| `app/conf/welcome.yaml` | `conf/welcome.local.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
+| `app/conf/workflows.yaml` | `conf/workflows.local.yaml` | `app/conf/workflows.local.yaml` | Appends local guided workflows |
+| `app/conf/ascii.txt` | `conf/ascii.local.txt` | `app/conf/ascii.local.txt` | Replaces desktop banner art |
+| `app/conf/ascii_mobile.txt` | `conf/ascii_mobile.local.txt` | `app/conf/ascii_mobile.local.txt` | Replaces mobile banner art |
+| `app/conf/app_hints.txt` | `conf/app_hints.local.txt` | `app/conf/app_hints.local.txt` | Appends desktop hints |
+| `app/conf/app_hints_mobile.txt` | `conf/app_hints_mobile.local.txt` | `app/conf/app_hints_mobile.local.txt` | Appends mobile hints |
+| `app/conf/themes/<theme>.yaml` | `conf/themes/<theme>.local.yaml` | `app/conf/themes/<theme>.local.yaml` | Overlays one named theme |
 
-In a repository-free deployment, drop the leading `app/` from the local column: for example, use `conf/commands.local.yaml` or `conf/themes/darklab_obsidian.local.yaml`. A theme overlay can change a shipped theme but doesn't create a new theme-selector entry.
+A theme overlay can change a shipped theme but doesn't create a new theme-selector entry.
 
 Malformed shipped or local theme YAML falls back to the valid values that remain. The container logs `THEME_OVERLAY_LOAD_FAILED` with only the bounded path, source type, and parser error type; it never includes theme contents or the raw parser message.
 
@@ -864,9 +864,9 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DATABASE_POSTGRES_JIT` | Flask app | Optional override for `database_postgres_jit`. Leave unset or `false` for lower-latency interactive app queries |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
-| `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
+| `DOCKER_GELF_ADDRESS` | Local Compose override | GELF log destination when an operator-created Compose override enables Docker's GELF logging driver |
 
-If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production overlay currently defaults `WEB_CONCURRENCY` to `8` when that variable is not set. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
+If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The checkout-only example override at `examples/docker-compose.prod.yml` defaults `WEB_CONCURRENCY` to `8`, but the repository-free stack keeps the entrypoint default unless `.env` changes it. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
 ---
 
@@ -902,7 +902,7 @@ An explicit `nmap -sT ...` remains a connect scan even when raw mode is active.
 
 SQLite is the default database backend and remains the recommended local/single-user path. Postgres is the production-scaling path for heavier deployments.
 
-The app reads database settings from `app/conf/config.yaml`, then `app/conf/config.local.yaml`, then environment variables. Environment variables win. In Docker Compose deployments, prefer `.env` for backend selection because Compose uses the same file to decide which services to start.
+The app reads the shipped `app/conf/config.yaml`, then the active local `config.local.yaml`, then environment variables. Repository-free production gets that local file from installed `conf/config.local.yaml`; source development uses `app/conf/config.local.yaml`. Environment variables win. In Docker Compose deployments, prefer `.env` for backend selection because Compose uses the same file to decide which services to start.
 
 For a Compose-managed Postgres deployment, set these values in `.env`:
 
@@ -989,12 +989,12 @@ This is the canonical current support matrix. The README keeps short prerequisit
 | Production operating system | Linux |
 | Production architecture | AMD64 (`linux/amd64`) |
 | Container orchestration | Docker Compose 2.20.0 or newer |
-| Native ARM64 | Not advertised; compatibility gate disabled by default |
-| SELinux-enforcing Docker | Not advertised; compatibility gate disabled by default |
-| Rootless Podman | Not advertised; compatibility gate disabled by default |
+| Native ARM64 | Not advertised; protected release gate passed; disabled by default in checked-in CI |
+| SELinux-enforcing Docker | Not advertised; protected release gate passed; disabled by default in checked-in CI |
+| Rootless Podman | Not advertised; protected release gate passed; disabled by default in checked-in CI |
 | Other Podman deployments | Best effort |
 
-The production Compose file pins the release image to `linux/amd64`, and the installer enforces the minimum Compose version before it writes a deployment. Native ARM64, SELinux-enforcing Docker, and rootless Podman have dedicated release gates, but a gate does not broaden this matrix until it is enabled, passes release images consistently, and the published support contract is deliberately updated.
+The production Compose file pins the release image to `linux/amd64`, and the installer enforces the minimum Compose version before it writes a deployment. Protected project variables enabled the native ARM64, SELinux-enforcing Docker, and rootless Podman gates for the v2.6.0 release candidates, and all three passed. They remain outside the advertised support matrix: the release does not publish an ARM64 production image, while SELinux and rootless Podman need host or runtime-specific setup beyond the standard Docker Compose path.
 
 ---
 
@@ -1022,25 +1022,68 @@ Release assets add publisher identity on top of those digest checks. `SHA256SUMS
 
 Before an upgrade, stop writes and verify a backup of the selected database, `.env`, `conf/`, host `data/`, persistent workspaces, and `release-manifest.json`. The production stack mounts that deployment-directory `./data` path at `/data` inside the container. Run the new installer in a separate empty directory, compare its managed files, preserve operator-owned state, then update `DARKLAB_IMAGE` to the exact new tag and recreate the shell. Startup may apply a forward-only schema migration, and changing the tag back doesn't reverse it.
 
-The repository-backed [docker-compose.yml](docker-compose.yml) remains the local development and custom-deployment stack. It builds the same Dockerfile, then mounts `./app:/app:ro` over the bundled application:
+### Repository-free local Compose overrides
 
-The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for the production backend track:
+The installed `compose.yaml` is release-owned. Its `shell` service includes a commented copy of the optional scanner-tuning settings for discoverability, but don't uncomment them in the managed file. Keep deployment-specific service settings in a separate file beside it so an upgrade can replace the managed stack without overwriting your choices. For example, create `compose.operator.yaml` to add scanner limits and Docker GELF transport:
+
+```yaml
+services:
+  shell:
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    sysctls:
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.tcp_fin_timeout: 15
+      net.ipv4.tcp_max_tw_buckets: 131072
+    logging: &gelf
+      driver: gelf
+      options:
+        gelf-address: "${DOCKER_GELF_ADDRESS:?set DOCKER_GELF_ADDRESS in .env}"
+  redis:
+    logging: *gelf
+  postgres:
+    logging: *gelf
+  llama:
+    logging: *gelf
+```
+
+Set the destination in the installed `.env`, validate the merged stack, and use the same file order whenever you operate it:
+
+```env
+DOCKER_GELF_ADDRESS=udp://loghost.example.internal:12201/
+```
+
+```bash
+docker compose -f compose.yaml -f compose.operator.yaml config --quiet
+docker compose -f compose.yaml -f compose.operator.yaml up -d
+```
+
+`darklab-deploy` manages the release-owned base stack. After an upgrade or restore recreates services, rerun the layered `up -d` command so service-level options from `compose.operator.yaml` are applied again. Keep a private copy of this operator-owned file with your deployment backups; managed backups don't automatically include additional top-level Compose files. Application log format remains separate: set `log_format: gelf` in installed `conf/config.local.yaml` only when the application itself should emit GELF-shaped JSON.
+
+### Source-checkout development and custom examples
+
+The repository-backed [docker-compose.yml](docker-compose.yml) is the local development stack. It builds the same Dockerfile, then mounts `./app:/app:ro` over the bundled application. It isn't the normal production-install path.
+
+The base file starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for backend development and testing:
 
 ```bash
 docker compose --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. Startup runs the app-owned schema migrations for the selected backend, and when `database_backend` is `postgres`, normal app database calls route through the Postgres pool.
+The app keeps using SQLite by default. The optional Postgres service supports source-based backend work and the opt-in Postgres test lane. Startup runs the app-owned schema migrations for the selected backend, and when `database_backend` is `postgres`, normal app database calls route through the Postgres pool.
 
 The bundled Redis service runs with a read-only root filesystem and persistence disabled (`--save ""`, `--appendonly no`). It stores coordination, broker, rate-limit, and cache-like state; durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
-The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
+The checkout-only [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) file is a custom-deployment reference for contributors and operators who intentionally run from source. It isn't included in the repository-free installation payload. Layer it on the development stack with:
 
 ```bash
 docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
 ```
 
-The production overlay adds:
+The source-checkout example adds:
 
 1. Docker GELF log transport for `shell`, `redis`, and the optional `postgres` service
 2. Reverse-proxy environment values such as `VIRTUAL_HOST` and `LETSENCRYPT_HOST`
@@ -1050,7 +1093,7 @@ The production overlay adds:
 6. A persistent `./workspaces:/workspaces` bind mount for session Files
 7. Scanner-friendly `ulimits` and network namespace sysctls
 
-Application log format and Docker log transport are separate controls. To emit GELF-shaped application logs, set `log_format: gelf` in `config.yaml` or `config.local.yaml`. To send container stdout/stderr through Docker's GELF driver, use the production overlay and set `DOCKER_GELF_ADDRESS`.
+Application log format and Docker log transport are separate controls. Source-checkout users can set `log_format: gelf` in `app/conf/config.local.yaml` and use the example override with `DOCKER_GELF_ADDRESS`. Repository-free operators should use installed `conf/config.local.yaml` and a local Compose override such as `compose.operator.yaml` above.
 
 ### Docker Labels
 
@@ -1106,7 +1149,7 @@ Files/workspace storage has three coordinated settings:
 - `WORKSPACE_BACKEND` selects short-lived `tmpfs` storage or persistent `volume` storage.
 - `WORKSPACE_ROOT` is the path the Docker entrypoint prepares before dropping privileges and the app uses at runtime.
 
-Compose deployments can set all three in `.env`. The equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys remain available in `app/conf/config.yaml` or `app/conf/config.local.yaml` for non-Compose runs and file-based configuration.
+Repository-free Compose deployments can set all three in `.env`. The equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys remain available in installed `conf/config.local.yaml` for file-based overrides. Source development uses `app/conf/config.local.yaml`.
 
 Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
 
@@ -1122,7 +1165,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 
 ### Persistent bind mount
 
-The production Compose file already maps `./workspaces:/workspaces`. Select that persistent location in `.env`:
+The repository-free production Compose file already maps `./workspaces:/workspaces`. Select that persistent location in `.env`:
 
 ```env
 WORKSPACE_ENABLED=true
@@ -1214,7 +1257,7 @@ The backup includes:
 
 The script does not always need the app containers to be running. SQLite backups of the bundled Compose stack can run from the host while containers are stopped because `/data` resolves to the host bind mount. Local config files, `.env`, and explicit host paths also do not need running containers. Compose Postgres dumps, `container:name:/path` sources, and `--include-ephemeral-workspaces` do need the relevant container to be running; when it is not available, the script reports that service or container as unavailable instead of treating the logical container path as a host directory. In `--postgres-dump-mode auto`, a `DATABASE_URL` host that matches a Compose service name, such as `postgres`, is treated as a container-network address and dumped through `docker compose exec`. A remote or host-reachable URL keeps using local `pg_dump` even if the supplied stack also has a running Postgres service. The repository-free `darklab-deploy backup` wrapper handles a stopped bundled Postgres service for you: it starts and waits for that service, runs the dump, then stops it again only when it wasn't already running.
 
-When a deployment uses Compose overrides, pass the same Compose files in the same order you use for `docker compose`. The first file supplies the Compose project directory for relative bind mounts, so the production override's `./workspaces:/workspaces` path resolves to repo-root `./workspaces` when you pass `docker-compose.yml` first. The script reads `WORKSPACE_ROOT` from the supplied Compose stack when `--compose-file` is explicit; `--workspace-root` can override the logical app path, and `--workspace-source` can override the physical copy source.
+When a source-backed deployment uses Compose overrides, pass the same Compose files in the same order you use for `docker compose`. The first file supplies the Compose project directory for relative bind mounts, so the checkout-only example override's `./workspaces:/workspaces` path resolves to repo-root `./workspaces` when you pass `docker-compose.yml` first. The script reads `WORKSPACE_ROOT` from the supplied Compose stack when `--compose-file` is explicit; `--workspace-root` can override the logical app path, and `--workspace-source` can override the physical copy source.
 
 Use these flags when auto-detection needs help:
 
@@ -1240,11 +1283,11 @@ Backups contain sensitive material: `.env`, encrypted secret rows, the app-owned
 
 ## Production Host Tuning
 
-Wide scans can open many outbound sockets quickly. The production Compose overlay raises the container's file descriptor limit and sets network namespace sysctls, but a few host-level settings may still matter.
+Wide scans can open many outbound sockets quickly. Repository-free operators can add the container's file descriptor limit and network namespace sysctls with the [local Compose override](#repository-free-local-compose-overrides) above. The checkout-only example override demonstrates the same settings for source-based stacks. A few host-level settings may still matter.
 
 ### Docker daemon file descriptor ceiling
 
-Docker cannot grant a container a `nofile` limit higher than the daemon's own limit. If the daemon is still at a low default, the overlay's `ulimits.nofile` setting may not help.
+Docker cannot grant a container a `nofile` limit higher than the daemon's own limit. If the daemon is still at a low default, the local override's `ulimits.nofile` setting may not help.
 
 ```bash
 sudo systemctl edit docker
@@ -1297,41 +1340,43 @@ sudo sysctl --system
 
 ## Common Recipes
 
+These recipes lead with repository-free production paths. YAML snippets belong in installed `conf/config.local.yaml` unless a different file is named. For source development, use the same YAML under `app/conf/config.local.yaml`.
+
 ### Enable Files
 
 ```env
-# .env for a Compose deployment
+# .env in the repository-free installation directory
 WORKSPACE_ENABLED=true
 WORKSPACE_BACKEND=tmpfs
 WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 ```
 
-For a non-Compose run, set the equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys in `app/conf/config.local.yaml`.
+For a non-Compose source run, set the equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys in `app/conf/config.local.yaml`.
 
 ### Enable Interactive PTY
 
-For a Compose deployment, enable the feature in `.env`:
+For repository-free production, enable the feature in `.env`:
 
 ```env
 INTERACTIVE_PTY_ENABLED=true
 ```
 
-The existing PTY defaults are suitable for most deployments. Fine-tune them in `app/conf/config.local.yaml` when needed:
+The existing PTY defaults are suitable for most deployments. Fine-tune them in installed `conf/config.local.yaml` when needed:
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 interactive_pty_max_runtime_seconds: 900
 interactive_pty_max_concurrent_per_session: 4
 interactive_pty_input_rate_limit_per_second: 10
 interactive_pty_input_rate_limit_per_minute: 500
 ```
 
-Non-Compose runs can set `interactive_pty_enabled: true` in the same YAML file. Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.
+Non-Compose source runs can set `interactive_pty_enabled: true` in `app/conf/config.local.yaml`. Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.
 
 ### Enable Diagnostics
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 diagnostics_allowed_cidrs:
   - 192.0.2.10/32
 trusted_proxy_cidrs:
@@ -1342,7 +1387,7 @@ trusted_proxy_cidrs:
 The same allowlist gates Prometheus metrics:
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 metrics_enabled: true
 prometheus_multiproc_dir: /tmp/darklab_shell-prom
 metrics_histogram_buckets_run_duration: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]
@@ -1368,7 +1413,7 @@ Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI as
 ### Tune Atlas Import Limits
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 atlas_import_max_upload_mb: 10
 atlas_import_max_rows: 5000
 atlas_import_max_findings: 5000
@@ -1384,37 +1429,37 @@ These caps apply to Atlas imports before and during apply, so lowering them can 
 ### Set The Default Theme
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 default_theme: darklab_obsidian.yaml
 ```
 
-Theme files live under `app/conf/themes/`. See [THEME.md](THEME.md) for theme authoring.
+Shipped themes remain under `/app/conf/themes` in the release image. Repository-free theme overlays belong under installed `conf/themes/`. See [THEME.md](THEME.md) for theme authoring.
 
 ### Enable GELF Application Logs
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 log_format: gelf
 log_level: INFO
 ```
 
-Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
+Use an installation-directory [local Compose override](#repository-free-local-compose-overrides) and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
 
 ### Customize Package Presets
 
-Evidence package presets live in `app/conf/package_presets.yaml` by default. Set `package_presets_file` in `config.local.yaml` if you want to keep an operator-managed catalog somewhere else:
+The release image ships its evidence package presets under `/app/conf/package_presets.yaml`. Set `package_presets_file` in installed `conf/config.local.yaml` when you want an operator-managed replacement catalog:
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 package_presets_file: package_presets.local.yaml
 ```
 
-Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so the example works as `app/conf/package_presets.local.yaml` in source deployments and `conf/package_presets.local.yaml` in repository-free deployments. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
+Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so this repository-free example reads `conf/package_presets.local.yaml`; source development uses `app/conf/package_presets.local.yaml`. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
 
 A preset controls the wizard defaults only. Users can still adjust the package before creating it, and package size limits, redaction rules, artifact safety checks, and project link validation still apply.
 
 ```yaml
-# app/conf/package_presets.local.yaml
+# conf/package_presets.local.yaml
 version: 1
 presets:
   - id: customer_handoff
@@ -1449,10 +1494,10 @@ Preset ids must use lowercase letters, numbers, underscores, or hyphens. Keep th
 
 ### Customize Report Templates
 
-Engagement report templates live in `app/conf/report_templates.yaml` by default. Set `report_templates_file` in `config.local.yaml` if you want to keep an operator-managed report template catalog somewhere else:
+The release image ships engagement report templates under `/app/conf/report_templates.yaml`. Set `report_templates_file` in installed `conf/config.local.yaml` when you want an operator-managed replacement catalog:
 
 ```yaml
-# app/conf/config.local.yaml
+# conf/config.local.yaml
 report_templates_file: report_templates.local.yaml
 ```
 
@@ -1469,7 +1514,7 @@ Normal relative paths resolve from the shipped config root. Relative filenames c
 - Add deployment-specific evidence package presets in `package_presets.local.yaml` and point `package_presets_file` at that file.
 - Add deployment-specific report templates in `report_templates.local.yaml` and point `report_templates_file` at that file.
 
-Use these names under `app/conf/` for source deployments or installed `conf/` for repository-free deployments.
+Use these names under installed `conf/` for repository-free deployments or `app/conf/` for source development.
 
 ---
 

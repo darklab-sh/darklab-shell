@@ -8,7 +8,7 @@ Production installation starts from the versioned, checksummed setup files attac
 
 ## Install
 
-Follow the security-first [Quick Start](https://gitlab.com/darklab.sh/darklab_shell/-/blob/main/README.md#quick-start) to download, verify, and run the production Compose bundle. No source checkout or local image build is required.
+Follow the [Quick Start](https://gitlab.com/darklab.sh/darklab_shell/-/blob/main/README.md#quick-start) to download and run the production Compose bundle. No source checkout or local image build is required.
 
 ## Release Candidates
 

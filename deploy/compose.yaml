@@ -74,7 +74,7 @@ services:
       start_period: 30s
 
   shell:
-    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0-rc.23}
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0-rc.24}
     platform: linux/amd64
     labels:
       sh.darklab.config.database_backend: ${DATABASE_BACKEND:-sqlite}
@@ -93,6 +93,24 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    # Optional high-concurrency scanner tuning belongs in an operator-owned
+    # compose.operator.yaml override; don't uncomment it in this release-owned
+    # file because managed-file verification and upgrades expect it unchanged.
+    # Copy the settings you need into the override's shell service, then adjust
+    # them for the host's memory, workload, Docker daemon limits, and kernel.
+    # These example values aren't validated across every environment, including
+    # SELinux-enforcing Docker and rootless Docker or Podman, which may reject
+    # some sysctls. See "Repository-free local Compose overrides" in
+    # CONFIGURATION.md before enabling them.
+    # ulimits:
+    #   nofile:
+    #     soft: 65535
+    #     hard: 65535
+    # sysctls:
+    #   net.ipv4.ip_local_port_range: "1024 65535"
+    #   net.ipv4.tcp_tw_reuse: 1
+    #   net.ipv4.tcp_fin_timeout: 15
+    #   net.ipv4.tcp_max_tw_buckets: 131072
     read_only: true
     restart: unless-stopped
     environment:

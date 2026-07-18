@@ -38,38 +38,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 **Outcome:** Operators can install and run a released darklab_shell stack from a small, versioned deployment directory without cloning the source repository or building the image locally. Developers keep the current source-mounted workflow. CI publishes the canonical self-contained image to the GitLab Container Registry first, then promotes that exact image to Docker Hub for the public, user-facing pull path used by production deployments.
 
-#### Delivery milestones
-
-Each remaining milestone is independently releasable and has its own exit criteria. Milestone 4 improves the initial install path, but it does not block Milestone 1 unless a task is explicitly marked as a first-public-image gate.
-
-##### Milestone 1: Repository-free install
-
-- [ ] Run the protected `v2.6.0` tag pipeline on a native Linux AMD64 runner. Confirm the repository-free image smoke test, exact-tag immutability/retry behavior, license gate, installer payload, and Docker Hub promotion all complete.
-- [ ] Confirm anonymous access to the GitLab image, Docker Hub mirror, setup files, checksums, and notices. Verify both registries report the same digest and a clean Docker host reaches a healthy app from the installed directory.
-- [ ] Record the pipeline's compressed transfer size, unpacked image size, layer composition, and representative cold-pull time. Add those measured expectations to the operator docs and decide whether SecLists or another tool group justifies a later slim image.
-
-**Milestone 1 exit:** A clean Docker host can verify the installer, create a deployment directory, pull the exact public Docker Hub image tag, confirm it matches the canonical GitLab image digest, and reach a healthy app without Git, Python, Node, a local build, or a source checkout. The existing development stack and sibling `config.local.yaml` behavior still work.
-
-##### Milestone 4: Supply-chain and compatibility hardening
-
-- [ ] Copy the reviewed `deploy/dockerhub-overview.txt` into the public Docker Hub repository overview, then confirm the anonymous release check reads the expected issuer and signing-identity pattern.
-- [ ] Enable the three protected compatibility variables and pass the hosted Linux ARM64 build/tool, SELinux-enforcing Docker, and rootless Podman release gates before broadening the published support matrix.
-- [ ] Revisit image composition using the measured pull-size data. Add a slim or separately packaged wordlist/tool variant only when its maintenance and UX costs are justified.
-
-**Milestone 4 exit:** Published artifacts are traceable and independently verifiable, every advertised architecture/runtime has automated coverage, and image-size tradeoffs are documented with measured data.
-
-#### Remaining implementation detail
-
-##### Milestone 4: supply chain and compatibility
-
-- [ ] Set `RELEASE_ARM64_COMPATIBILITY_ENABLED=1`, `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`, and `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1` as protected project variables, then pass all three compatibility jobs on a protected release tag.
-- [ ] Use measured image-size and pull-time data to decide whether a slim or separately packaged wordlist/tool image is worth maintaining.
-- [ ] Update verification docs and the changelog when the hardening work ships, then remove the completed Milestone 4 tasks and this plan.
-
-#### End-state acceptance criteria
-
-- [ ] GitLab images, Docker Hub mirrors, packages, checksums, SBOM/provenance, signatures, and release links are anonymously accessible and independently verifiable as documented.
-- [ ] Every advertised architecture and container runtime has automated compatibility coverage.
+- [ ] Publish the protected `v2.6.0` tag and confirm the final-only `release-create` job plus the complete image, compatibility, supply-chain, installer, bundled-Postgres, and anonymous public smoke chain pass. Verify the final GitLab Release links, matching registry digest, setup files, checksums, signatures, notices, SBOM, provenance, and a healthy clean install, then remove this completed plan.
 
 ### Shorten release image builds and failure feedback
 

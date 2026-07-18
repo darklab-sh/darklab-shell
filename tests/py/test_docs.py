@@ -124,7 +124,7 @@ def _project_markdown_docs() -> list[str]:
     return [
         path for path in sorted(set(_git_tracked_files()) | set(_git_untracked_files()))
         if path.endswith(".md")
-        and not _is_release_draft_path(path)
+        and not _is_transient_doc_path(path)
     ]
 
 
@@ -368,8 +368,11 @@ def _repository_layout_paths() -> list[str]:
     return re.findall(r"^\|\s*`([^`]+/)`\s*\|", match.group("body"), re.M)
 
 
-def _is_release_draft_path(path: str) -> bool:
-    return path.startswith("docs/release-drafts/")
+def _is_transient_doc_path(path: str) -> bool:
+    return (
+        path.startswith("docs/release-drafts/")
+        or path.endswith("_review.md")
+    )
 
 
 def _documented_architecture_routes() -> set[tuple[str, str]]:
