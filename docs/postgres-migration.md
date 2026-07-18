@@ -4,7 +4,7 @@ darklab_shell keeps SQLite as the default backend for local and single-user inst
 
 SQLite and Postgres share the same app-owned schema migration ledger. Fresh databases for either backend are initialized through the same migration runner and the frozen `0039` baseline, with later schema changes applied as versioned migrations. Backend-specific pieces stay explicit: SQLite creates its FTS tables and triggers, and Postgres creates `pg_trgm` plus its trigram indexes. Existing SQLite databases are verified against the current shared schema before they receive migration ledger rows. The supported bridge for pre-ledger SQLite files is `darklab_shell` 2.3.1: start older SQLite databases once with 2.3.1 so its compatibility ladder reaches the current head, then move to this release. Unsupported older shapes fail closed so you can restore from backup or use that bridge path instead of getting a partial rewrite.
 
-Use `scripts/migrate_sqlite_to_postgres.py` when you're ready to copy a stopped SQLite database into a fresh Postgres database.
+Repository-free installs use `./darklab-deploy migrate-to-postgres` to handle the complete cutover. Source checkouts can use `scripts/migrate_sqlite_to_postgres.py` directly when they need a custom Postgres target or Compose layout.
 
 Postgres backend configuration lives in [CONFIGURATION.md](../CONFIGURATION.md#database-backend-selection). Use this guide for SQLite-to-Postgres cutovers and bundled Postgres major-version upgrades, then switch `DATABASE_BACKEND` and `DATABASE_URL` after validation passes.
 
@@ -118,6 +118,31 @@ If `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` differ from the defaul
 
 Use these sections when you're moving an existing SQLite install into a fresh Postgres database.
 
+### Repository-Free Production Install
+
+Run the managed migration from the installation directory:
+
+```bash
+cd "$HOME/darklab-shell"
+./darklab-deploy migrate-to-postgres
+```
+
+The command requires the current backend to be SQLite, the default `data/history.db` location, and the installer-generated connection settings for the bundled Postgres service. The Postgres app tables must not contain existing data.
+
+The command stops SQLite writes and creates a verified complete backup before it changes either database. It then starts bundled Postgres, initializes the current app schema, copies the SQLite rows, verifies referenced output files and row counts, updates `DATABASE_BACKEND` and `COMPOSE_PROFILES` in `.env`, and force-recreates the app with Postgres active. The existing `data/history.db` stays in place as an additional rollback source, and the command prints the verified backup path when it finishes.
+
+If Postgres startup, schema setup, or data copy fails, the command keeps the original SQLite settings and restarts the app on SQLite. It also stops Postgres when it wasn't already running. Review the reported error before retrying; a target that already contains app data must be cleaned or replaced rather than merged accidentally.
+
+After the command succeeds, verify History, Atlas, Projects, Files, Secrets, session preferences, and a new command run. Keep the printed backup and the SQLite file until the Postgres deployment has handled normal use.
+
+To return to the untouched SQLite database before any new Postgres-only writes matter, set `DATABASE_BACKEND=sqlite` in `.env` and recreate the app:
+
+```bash
+docker compose up -d --force-recreate shell
+```
+
+Use `./darklab-deploy restore <backup-path>` when you need to restore the full pre-migration state instead of only changing the active backend.
+
 ### What The Helper Copies
 
 The migration helper:
@@ -153,7 +178,7 @@ Encrypted secrets need special care. The copied ciphertext only works if the Pos
 
 The `--artifact-root` value is the app data root, not the `run-output` folder itself. For the default container layout, use `/data`: the helper reads `history.db` from that root, checks full-run output under `/data/run-output`, and checks large body-store files under `/data/body-store`.
 
-### Run From The Compose Network
+### Source Checkout: Run From The Compose Network
 
 When using the bundled Compose stack, Postgres does not publish `5432` to the host. That's intentional. You do not need to add a temporary `ports:` entry for migration.
 
@@ -183,7 +208,7 @@ docker compose --profile postgres run --rm --no-deps --entrypoint python shell -
   --validate < scripts/migrate_sqlite_to_postgres.py
 ```
 
-The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short migration-runner command applies the app-owned Postgres migrations before data is copied, and the follow-up check should print every migration version from `0001` through the current release. The one-off commands pass `DATABASE_BACKEND` and `DATABASE_URL` directly into the container instead of relying on Compose interpolation, which makes the migration path independent of any stale values in `.env`. These commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
+The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short migration-runner command applies the app-owned Postgres migrations before data is copied, and the follow-up check should print every migration version from `0001` through the current release. The one-off commands pass `DATABASE_BACKEND` and `DATABASE_URL` directly into the container instead of relying on Compose interpolation, which makes the migration path independent of any stale values in `.env`. These commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because source-mounted development doesn't mount `./scripts` into the app container. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
 
 Adjust the username, password, and database name if your `.env` overrides `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`.
 

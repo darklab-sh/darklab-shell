@@ -166,6 +166,7 @@ container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$ima
     require_file base_config /app/conf/config.yaml
     require_file asset_manifest /app/static/build/manifest.json
     require_file backup_helper /app/tools/backup_system.py
+    require_file postgres_migration_helper /app/tools/migrate_sqlite_to_postgres.py
     require_file restore_helper /app/tools/restore_system.py
     require_file project_license /usr/share/doc/darklab-shell/LICENSE
     grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" /usr/share/doc/darklab-shell/LICENSE \
@@ -222,6 +223,9 @@ container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$ima
             || image_check_failed license_inventory_version "$EXPECTED_VERSION" mismatch
     fi
 '
+container run --rm --entrypoint python3 "$image" \
+    /app/tools/migrate_sqlite_to_postgres.py --help >/dev/null \
+    || verification_failed image_filesystem postgres_migration_helper executable failed
 container run --rm -i --entrypoint python "$image" - --installed-image \
     < "$script_dir/check_container_licenses.py"
 

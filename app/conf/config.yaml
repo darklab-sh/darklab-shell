@@ -880,6 +880,7 @@
 # output, input, and resize events can be brokered across workers. Without
 # Redis, this mode is limited to single-worker local/dev deployments.
 # Server default if unset: false
+# In Compose deployments, INTERACTIVE_PTY_ENABLED overrides this value.
 # interactive_pty_enabled: false
 
 # Maximum lifetime for an interactive PTY command before the server terminates

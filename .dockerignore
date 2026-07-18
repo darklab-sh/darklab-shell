@@ -25,6 +25,7 @@ assets/
 scripts/*
 !scripts/backup_system.py
 !scripts/install_go_tool.sh
+!scripts/migrate_sqlite_to_postgres.py
 !scripts/restore_system.py
 config/
 data/

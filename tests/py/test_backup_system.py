@@ -36,6 +36,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "POSTGRES_DB",
         "POSTGRES_USER",
         "POSTGRES_PASSWORD",
+        "WORKSPACE_BACKEND",
+        "WORKSPACE_ENABLED",
         "WORKSPACE_ROOT",
     ):
         monkeypatch.delenv(key, raising=False)

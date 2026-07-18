@@ -48,7 +48,7 @@ ARG NIKTO_COMMIT=69681e2e4213c15b85a90c53b2169ecb2a88fb01
 ARG SETUPTOOLS_VERSION=81.0.0
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
-ARG APP_VERSION=2.6.0-rc.20
+ARG APP_VERSION=2.6.0-rc.21
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
@@ -433,7 +433,7 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # Development Compose mounts ./app over this copy; release images run directly
 # from the checked-in application tree.
 COPY app/ /app/
-COPY scripts/backup_system.py scripts/restore_system.py /app/tools/
+COPY scripts/backup_system.py scripts/migrate_sqlite_to_postgres.py scripts/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE

@@ -272,7 +272,9 @@ def workspace_files_list():
         return error
     assert scope is not None
     try:
-        return jsonify(_workspace_payload(scope))
+        response = jsonify(_workspace_payload(scope))
+        response.headers["Cache-Control"] = "no-store"
+        return response
     except Exception as exc:
         return _workspace_error_response(exc)
 

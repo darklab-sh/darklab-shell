@@ -18,6 +18,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Table of Contents
 - [Quick Start](#quick-start)
+- [Optional Features](#optional-features)
 - [Features](#features)
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Configuration](#configuration)
@@ -40,7 +41,7 @@ On a Linux AMD64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`
 # Change this if you want to install darklab_shell somewhere else.
 DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
 
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.21/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
 cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
@@ -51,6 +52,20 @@ docker compose ps
 Open `http://<server-address>:8888`, using the host's IP address or DNS name. The production stack listens on every host interface by default so remote hosts can connect. darklab_shell doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Want to inspect the installer, confirm its checksum, or verify the release's GitLab identity before running it? Follow [Review and Verify the Installer](#review-and-verify-the-installer) instead of streaming it. You don't need Git, a source checkout, Python, Node, or a local image build for either release-install path.
+
+---
+
+## Optional Features
+
+Fresh installations keep a few capabilities disabled until you choose to enable them. Their high-level switches live near the top of `.env`; detailed limits and readiness requirements stay in [CONFIGURATION.md](CONFIGURATION.md).
+
+| Capability | What it adds | Enable with |
+| --- | --- | --- |
+| [Persistent Files](CONFIGURATION.md#workspace-storage-recipes) | Personal and team inputs, outputs, and evidence that survive container restarts | `WORKSPACE_ENABLED=true`, `WORKSPACE_BACKEND=volume`, and `WORKSPACE_ROOT=/workspaces` |
+| [Interactive PTY](CONFIGURATION.md#enable-interactive-pty) | Real terminal sessions for approved interactive tools | `INTERACTIVE_PTY_ENABLED=true` |
+| [Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) | Capability-backed SYN and other approved raw scanner modes | `RAW_PACKET_SCANNING_ENABLED=true` |
+
+After changing one of these settings, run `docker compose up -d --force-recreate shell`. Interactive PTY uses Redis in normal multi-worker deployments, while raw-packet modes still activate only when their runtime readiness checks pass. Postgres and AI assists are separate optional deployment services covered in [Configuration](CONFIGURATION.md#environment-variables-and-env).
 
 ---
 
@@ -184,8 +199,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.21/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.21/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -193,11 +208,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.21/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.21/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.20" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.21" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```
@@ -224,7 +239,7 @@ The installed `release-manifest.json` records both image references, matching di
 
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
-Use `./darklab-deploy status`, `backup`, `restore`, `upgrade`, `migration-help`, and `remove` for release-managed lifecycle work. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
+Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, `migration-help`, and `remove` for release-managed lifecycle work. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
 ---
 

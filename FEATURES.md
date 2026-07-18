@@ -893,7 +893,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Session file storage is disabled by default and controlled by server-side `workspace_*` config keys.
+- Session file storage is disabled by default. Compose operators can enable it and choose temporary or persistent storage with the adjacent `WORKSPACE_*` settings in `.env`.
 - Each browser/session token gets a hashed session directory under the configured workspace root.
 - Session directories use sticky, setgid, group-scoped permissions and app-created files are group-readable but not world-readable; commands run as the unprivileged `scanner` user with a restrictive umask so tool-created workspace outputs follow the same boundary.
 - Production Files storage uses a host bind mount by default. The current image uses `appuser` `995:995` and `scanner` `994:994`; bind-mount roots should be pre-owned by `995:995`, with the workspace root set to `0730`, owner directories set to `3730`, app-created files set to `0640`, and command-created writable outputs allowed as `0660`.
@@ -913,7 +913,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `wget` downloads default to the active Files folder when Files are enabled. Operators can still choose a subfolder with `-P downloads` or `--directory-prefix=downloads`.
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
-**Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
+**Configuration:** Compose deployments use `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT` in `.env`. Non-Compose deployments use the matching `workspace_*` settings in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
 ---
 
@@ -1081,7 +1081,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Limits:** disabled by default, desktop-only, and restricted to commands that explicitly declare PTY behavior in the command registry. PTY runs have a configured max runtime and per-session concurrency cap. Multi-worker deployments require Redis unless `run_broker_require_redis` is intentionally relaxed for local development.
 
-**Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
+**Configuration:** Compose deployments enable the feature with `INTERACTIVE_PTY_ENABLED=true`; optional fine-tuning remains under the `interactive_pty_*` YAML settings. Each approved command also has an app-owned `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md#enable-interactive-pty).
 
 ---
 
@@ -1327,7 +1327,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Shipped commands, workflows, themes, and other catalogs stay in the image. Matching operator files under `conf/` add to or override those defaults without hiding newer image content.
 - Private host permissions stay intact: container startup validates and stages the complete `conf/` overlay tree into an app-owned runtime copy before the web and worker processes start.
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
-- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, explains clone-to-managed migration, and removes managed files without deleting operator state. Offline archives remain an explicit operator-verified path.
+- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates a managed SQLite install to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, explains clone-to-managed migration, and removes managed files without deleting operator state. Offline archives remain an explicit operator-verified path.
 
 **Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. The app has no user authentication boundary, so the default all-interface listener must be limited to trusted networks with a host or upstream firewall. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
 
@@ -1350,7 +1350,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Large files are checksummed without loading the whole file into memory, and collision-safe output names keep closely timed backups from replacing each other.
 - Dry runs validate requested env and extra-file paths before writing an output directory or lock file.
 - Retention runs record their cutoff and candidate scan in the manifest, then report examined, removed, and failed counts after the new backup is safely published. Unexpected script failures include a traceback for unattended-job diagnosis.
-- Repository-free installs expose the same engine through `./darklab-deploy backup`; the release image supplies Python and a PostgreSQL 18 client that matches the bundled database, while the installed command supplies exact mounts, operator files, and managed release metadata. `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the invoking operator and restart the app; failures leave it stopped with the safety-backup recovery command.
+- Repository-free installs expose the same engine through `./darklab-deploy backup`; the release image supplies Python and a PostgreSQL 18 client that matches the bundled database, while the installed command supplies exact mounts, operator files, and managed release metadata. `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the invoking operator, recreate the app when restored environment settings changed, and wait for it to become healthy; failures leave it stopped with the safety-backup recovery command.
 
 **Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
 

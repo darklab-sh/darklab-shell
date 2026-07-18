@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.20"
+RELEASE_VERSION = "2.6.0-rc.21"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -242,6 +242,17 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    cp \"$FAKE_BACKUP_ARCHIVE\" \"$backup_dir/darklab-backup-auto.tar.gz\"\n"
         "    printf '/backups/darklab-backup-auto.tar.gz\\n'\n"
         "elif printf '%s' \"$*\" | grep -q '/app/tools/restore_system.py'; then\n"
+        "    deployment_dir=\n"
+        "    previous=\n"
+        "    for argument in \"$@\"; do\n"
+        "        if [ \"$previous\" = \"--volume\" ]; then\n"
+        "            case \"$argument\" in *:/deployment) deployment_dir=${argument%:/deployment} ;; esac\n"
+        "        fi\n"
+        "        previous=$argument\n"
+        "    done\n"
+        "    if [ -n \"${FAKE_RESTORE_ENV_APPEND:-}\" ] && [ -n \"$deployment_dir\" ]; then\n"
+        "        printf '%s\\n' \"$FAKE_RESTORE_ENV_APPEND\" >> \"$deployment_dir/.env\"\n"
+        "    fi\n"
         "    exit \"${FAKE_RESTORE_EXIT:-0}\"\n"
         "elif printf '%s' \"$*\" | grep -q ' verify-blob '; then\n"
         "    exit \"${FAKE_COSIGN_VERIFY_EXIT:-0}\"\n"
@@ -652,17 +663,30 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["RAW_PACKET_SCANNING_ENABLED"] == (
         "${RAW_PACKET_SCANNING_ENABLED:-false}"
     )
+    assert shell["environment"]["WORKSPACE_ENABLED"] == "${WORKSPACE_ENABLED:-false}"
+    assert shell["environment"]["WORKSPACE_BACKEND"] == "${WORKSPACE_BACKEND:-tmpfs}"
     assert shell["environment"]["WORKSPACE_ROOT"] == (
         "${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
     )
+    assert shell["environment"]["INTERACTIVE_PTY_ENABLED"] == (
+        "${INTERACTIVE_PTY_ENABLED:-false}"
+    )
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "HOST_BIND_ADDRESS=0.0.0.0" in env_example
+    assert "# WORKSPACE_ENABLED=true" in env_example
+    assert "# WORKSPACE_BACKEND=volume" in env_example
     assert "# WORKSPACE_ROOT=/workspaces" in env_example
+    assert "# INTERACTIVE_PTY_ENABLED=true" in env_example
+    assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
     assert all("container_name" not in service for service in services.values())
     assert development_compose["services"]["shell"]["build"]["context"] == "."
     assert "./app:/app:ro" in development_compose["services"]["shell"]["volumes"]
+    development_environment = development_compose["services"]["shell"]["environment"]
+    assert "WORKSPACE_ENABLED=${WORKSPACE_ENABLED:-false}" in development_environment
+    assert "WORKSPACE_BACKEND=${WORKSPACE_BACKEND:-tmpfs}" in development_environment
+    assert "INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}" in development_environment
 
 
 def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
@@ -704,9 +728,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "expected PostgreSQL 18 client" in bundled_tool_smoke
     assert 'pg_dump_version "PostgreSQL 18"' in image_smoke
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
-    assert "COPY scripts/backup_system.py scripts/restore_system.py /app/tools/" in dockerfile
+    assert (
+        "COPY scripts/backup_system.py scripts/migrate_sqlite_to_postgres.py "
+        "scripts/restore_system.py /app/tools/"
+    ) in dockerfile
     assert "!scripts/backup_system.py" in dockerignore
     assert "!scripts/install_go_tool.sh" in dockerignore
+    assert "!scripts/migrate_sqlite_to_postgres.py" in dockerignore
     assert "!scripts/restore_system.py" in dockerignore
     assert "wpscan-ruby-gems.json" in dockerfile
     assert (
@@ -799,6 +827,8 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'container volume rm "$overlay_volume" "$data_volume"' in image_smoke
     assert 'chmod -R a+rwX /data /workspaces' in image_smoke
     assert "/app/tools/backup_system.py" in image_smoke
+    assert "/app/tools/migrate_sqlite_to_postgres.py" in image_smoke
+    assert "postgres_migration_helper executable failed" in image_smoke
     assert "/app/tools/restore_system.py" in image_smoke
     assert "command -v pg_restore" in image_smoke
     assert "shellcheck disable=SC2317,SC2329" in image_smoke
@@ -1225,6 +1255,75 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert f"/blob/{_release_tag(RELEASE_VERSION)}/CONFIGURATION.md" in archive_files[
         "starters/conf/config.local.yaml"
     ].decode("utf-8")
+    starter_expectations = {
+        "starters/conf/config.local.yaml": (
+            "app/conf/config.yaml",
+            "CONFIGURATION.md",
+            "# workspace_max_file_mb: 10",
+        ),
+        "starters/conf/commands.local.yaml": (
+            "app/conf/commands.yaml",
+            "CONFIGURATION.md#command-registry-autocomplete",
+            "# commands:",
+        ),
+        "starters/conf/faq.local.yaml": (
+            "app/conf/faq.yaml",
+            "CONFIGURATION.md#local-override-files",
+            "# - question:",
+        ),
+        "starters/conf/welcome.local.yaml": (
+            "app/conf/welcome.yaml",
+            "CONFIGURATION.md#local-override-files",
+            "# - cmd:",
+        ),
+        "starters/conf/workflows.local.yaml": (
+            "app/conf/workflows.yaml",
+            "docs/workflows.md#definition-files",
+            "# - version: 2",
+        ),
+        "starters/conf/app_hints.local.txt": (
+            "app/conf/app_hints.txt",
+            "CONFIGURATION.md#local-override-files",
+            "# [workspace]",
+        ),
+        "starters/conf/app_hints_mobile.local.txt": (
+            "app/conf/app_hints_mobile.txt",
+            "CONFIGURATION.md#local-override-files",
+            "# [workspace]",
+        ),
+        "starters/conf/themes/darklab_obsidian.local.yaml": (
+            "app/conf/themes/darklab_obsidian.yaml",
+            "THEME.md#authoring-a-theme",
+            '# green: "#00ff88"',
+        ),
+        "starters/conf/ascii.local.txt.example": (
+            "app/conf/ascii.txt",
+            "CONFIGURATION.md#local-override-files",
+            "replaces the shipped banner",
+        ),
+        "starters/conf/ascii_mobile.local.txt.example": (
+            "app/conf/ascii_mobile.txt",
+            "CONFIGURATION.md#local-override-files",
+            "replaces the shipped banner",
+        ),
+        "starters/conf/package_presets.local.yaml.example": (
+            "app/conf/package_presets.yaml",
+            "CONFIGURATION.md#customize-package-presets",
+            "# package_presets_file: package_presets.local.yaml",
+        ),
+        "starters/conf/report_templates.local.yaml.example": (
+            "app/conf/report_templates.yaml",
+            "CONFIGURATION.md#customize-report-templates",
+            "# report_templates_file: report_templates.local.yaml",
+        ),
+    }
+    release_blob_root = f"/blob/{_release_tag(RELEASE_VERSION)}/"
+    for relative_path, (source_path, guide_path, example) in starter_expectations.items():
+        starter_text = archive_files[relative_path].decode("utf-8")
+        assert f"{release_blob_root}{source_path}" in starter_text
+        assert f"{release_blob_root}{guide_path}" in starter_text
+        assert example in starter_text
+    assert "compatible with app/conf/" not in all_text
     manifest = json.loads(archive_files["release-manifest.json"])
     assert manifest["format"] == "darklab_shell.deployment.v1"
     assert "conf/config.local.yaml" not in manifest["managed_files"]
@@ -2098,6 +2197,13 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert "./darklab-deploy status" in result.stdout
     assert "http://<server-address>:8888" in result.stdout
     assert "HOST_BIND_ADDRESS=127.0.0.1" in result.stdout
+    assert "Optional Files, Interactive PTY, and raw-packet scanning" in result.stdout
+    config_starter = (target / "conf" / "config.local.yaml").read_text(encoding="utf-8")
+    assert "Common optional feature switches" in config_starter
+    assert "INTERACTIVE_PTY_ENABLED" in config_starter
+    assert f"/blob/{_release_tag(RELEASE_VERSION)}/app/conf/config.yaml" in config_starter
+    assert "YAML settings use `key: value`, not `key = value`" in config_starter
+    assert "# workspace_max_file_mb: 10" in config_starter
     image_smoke = (ROOT / "scripts" / "verify_repository_free_image.sh").read_text(
         encoding="utf-8"
     )
@@ -2128,6 +2234,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     )
     assert lifecycle_help.returncode == 0, lifecycle_help.stderr
     assert "install --bundle DIR --target DIR" in lifecycle_help.stdout
+    assert "migrate-to-postgres" in lifecycle_help.stdout
     assert "used internally by setup.sh" in lifecycle_help.stdout
     (target / "conf" / "config.local.yaml").write_text("# operator edit\n", encoding="utf-8")
     operator_edit_status = subprocess.run(
@@ -2574,7 +2681,7 @@ def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
     assert not [path for path in restore_target.iterdir() if ".restore-" in path.name]
 
 
-def test_restore_wrapper_accepts_relative_archive_and_leaves_app_stopped_after_helper_failure(
+def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_failure(
     tmp_path: Path,
 ):
     payload = _build_payload(tmp_path)
@@ -2593,11 +2700,31 @@ def test_restore_wrapper_accepts_relative_archive_and_leaves_app_stopped_after_h
     env.update({
         "FAKE_BACKUP_ARCHIVE": str(backup),
         "FAKE_DOCKER_LOG": str(log_path),
-        "FAKE_RESTORE_EXIT": "7",
+        "FAKE_RESTORE_ENV_APPEND": "RESTORED_SETTING=changed",
         "DARKLAB_DEPLOY_DOCKER_ROOT": str(daemon_install_dir),
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
     })
 
+    recreated = subprocess.run(
+        [
+            str(install_dir / "darklab-deploy"),
+            "restore",
+            backup.relative_to(install_dir).as_posix(),
+        ],
+        cwd=install_dir,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert recreated.returncode == 0, recreated.stderr
+    assert "environment settings changed" in recreated.stdout
+    assert " up -d --wait --force-recreate shell" in log_path.read_text(encoding="utf-8")
+
+    log_path.unlink()
+    env.pop("FAKE_RESTORE_ENV_APPEND")
+    env["FAKE_RESTORE_EXIT"] = "7"
     restored = subprocess.run(
         [
             str(install_dir / "darklab-deploy"),
@@ -2626,7 +2753,30 @@ def test_restore_wrapper_accepts_relative_archive_and_leaves_app_stopped_after_h
         f"--volume {daemon_install_dir}/backups/{backup.name}:"
         "/restore/backup.tar.gz:ro"
     ) in docker_log
-    assert " up -d shell" not in docker_log
+    assert " up -d --wait" not in docker_log
+
+    log_path.unlink()
+    env.pop("FAKE_RESTORE_EXIT")
+    (install_dir / "data" / "history.db").write_bytes(b"sqlite database placeholder")
+    migrated = subprocess.run(
+        [str(install_dir / "darklab-deploy"), "migrate-to-postgres"],
+        cwd=install_dir,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert migrated.returncode == 0, migrated.stderr
+    assert "SQLite-to-Postgres migration complete" in migrated.stdout
+    migrated_env = (install_dir / ".env").read_text(encoding="utf-8")
+    assert "DATABASE_BACKEND=postgres" in migrated_env
+    assert "COMPOSE_PROFILES=postgres" in migrated_env
+    migration_log = log_path.read_text(encoding="utf-8")
+    assert " up -d --wait postgres" in migration_log
+    assert "/app/tools/migrate_sqlite_to_postgres.py" in migration_log
+    assert "--confirm-secrets-key --validate" in migration_log
+    assert " up -d --wait --force-recreate shell" in migration_log
 
 
 def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_path: Path):

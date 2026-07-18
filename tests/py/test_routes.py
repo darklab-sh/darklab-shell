@@ -17561,7 +17561,9 @@ class TestWorkspaceRoutes:
             assert created_data["file"] == {"path": file_path, "size": 11}
             assert created_data["workspace"]["usage"]["bytes_used"] == 11
 
-            listed = json.loads(client.get("/workspace/files", headers={"X-Session-ID": session}).data)
+            listed_response = client.get("/workspace/files", headers={"X-Session-ID": session})
+            assert listed_response.headers["Cache-Control"] == "no-store"
+            listed = json.loads(listed_response.data)
             assert listed["files"][0]["path"] == file_path
             assert listed["limits"]["max_files"] == 10
 

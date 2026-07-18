@@ -2358,21 +2358,27 @@ class TestSplitChainedCommands:
 
 
 class TestLoadConfig:
-    def test_database_env_overrides_yaml_backend_settings(self):
+    def test_environment_overrides_yaml_backend_and_workspace_settings(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
             "DATABASE_BACKEND": "postgres",
             "DATABASE_URL": "postgresql://darklab:secret@postgres:5432/darklab_shell",
             "DATABASE_POOL_MIN": "2",
             "DATABASE_POOL_MAX": "4",
             "DATABASE_POSTGRES_JIT": "true",
+            "WORKSPACE_ENABLED": "true",
+            "WORKSPACE_BACKEND": "volume",
             "WORKSPACE_ROOT": "/env/workspaces",
+            "INTERACTIVE_PTY_ENABLED": "true",
             "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
             "RAW_PACKET_SCANNING_ENABLED": "true",
             "AI_BASE_URL_ALLOWED_CIDRS": "192.0.2.0/24,not-a-cidr",
         }):
             with open(os.path.join(tmp, "config.yaml"), "w") as f:
                 f.write(
+                    "workspace_enabled: false\n"
+                    "workspace_backend: tmpfs\n"
                     "workspace_root: /yaml/workspaces\n"
+                    "interactive_pty_enabled: false\n"
                     "prometheus_multiproc_dir: /yaml/prometheus\n"
                 )
             with mock.patch.object(app_config.log, "warning") as warning:
@@ -2383,7 +2389,10 @@ class TestLoadConfig:
         assert cfg["database_pool_min"] == 2
         assert cfg["database_pool_max"] == 4
         assert cfg["database_postgres_jit"] is True
+        assert cfg["workspace_enabled"] is True
+        assert cfg["workspace_backend"] == "volume"
         assert cfg["workspace_root"] == "/env/workspaces"
+        assert cfg["interactive_pty_enabled"] is True
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
         assert cfg["raw_packet_scanning_enabled"] is True
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
@@ -12320,6 +12329,7 @@ class TestPostgresMigrationHelper:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+                conn.execute("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)")
                 conn.execute("CREATE VIRTUAL TABLE runs_fts USING fts5(command)")
                 conn.execute("INSERT INTO runs (id, command) VALUES ('run-1', 'host darklab.sh')")
 
@@ -12329,6 +12339,7 @@ class TestPostgresMigrationHelper:
 
         assert [table.name for table in tables] == ["runs"]
         assert set(skipped) >= {
+            "schema_migrations",
             "runs_fts",
             "runs_fts_data",
             "runs_fts_idx",

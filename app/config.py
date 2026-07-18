@@ -23,7 +23,7 @@ from core.startup_logging import configure_config_log_fallback, install_config_l
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 CONFIG_LOAD_SUMMARY: dict[str, Any] = {}
 
-APP_VERSION = "2.6.0-rc.20"
+APP_VERSION = "2.6.0-rc.21"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
@@ -464,6 +464,8 @@ class ProjectDigestsConfig(_ConfigModel):
 
 
 _FORGIVING_BOOL_KEYS = {
+    "workspace_enabled",
+    "interactive_pty_enabled",
     "raw_packet_scanning_enabled",
     "database_postgres_jit",
     "audit_log_enabled",
@@ -475,6 +477,8 @@ _FORGIVING_BOOL_KEYS = {
     "ai_feature_run_suggestions",
 }
 _FORGIVING_BOOL_DEFAULTS = {
+    "workspace_enabled": False,
+    "interactive_pty_enabled": False,
     "raw_packet_scanning_enabled": False,
     "database_postgres_jit": False,
     "audit_log_enabled": True,
@@ -1357,10 +1361,40 @@ def load_config(conf_dir=None, local_conf_dir=None):
             },
         )
     applied_env_names: list[str] = []
+    env_workspace_enabled = str(os.environ.get("WORKSPACE_ENABLED") or "").strip()
+    if env_workspace_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "workspace_enabled",
+            env_workspace_enabled,
+            "WORKSPACE_ENABLED",
+        )
+        applied_env_names.append("WORKSPACE_ENABLED")
+    env_workspace_backend = str(os.environ.get("WORKSPACE_BACKEND") or "").strip()
+    if env_workspace_backend:
+        _set_config_value(
+            defaults,
+            provenance,
+            "workspace_backend",
+            env_workspace_backend,
+            "WORKSPACE_BACKEND",
+        )
+        applied_env_names.append("WORKSPACE_BACKEND")
     env_workspace_root = str(os.environ.get("WORKSPACE_ROOT") or "").strip()
     if env_workspace_root:
         _set_config_value(defaults, provenance, "workspace_root", env_workspace_root, "WORKSPACE_ROOT")
         applied_env_names.append("WORKSPACE_ROOT")
+    env_interactive_pty_enabled = str(os.environ.get("INTERACTIVE_PTY_ENABLED") or "").strip()
+    if env_interactive_pty_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "interactive_pty_enabled",
+            env_interactive_pty_enabled,
+            "INTERACTIVE_PTY_ENABLED",
+        )
+        applied_env_names.append("INTERACTIVE_PTY_ENABLED")
     env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
     if env_prometheus_multiproc_dir:
         _set_config_value(

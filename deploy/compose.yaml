@@ -74,7 +74,7 @@ services:
       start_period: 30s
 
   shell:
-    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0-rc.20}
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0-rc.21}
     platform: linux/amd64
     labels:
       sh.darklab.config.database_backend: ${DATABASE_BACKEND:-sqlite}
@@ -85,8 +85,8 @@ services:
     volumes:
       - ./conf:/config:ro
       - ./data:/data
-      # Ready for opt-in durable Files storage; the default root remains tmpfs.
-      # Set WORKSPACE_ROOT=/workspaces in .env to use this host directory.
+      # Ready for opt-in durable Files storage. Enable the volume backend and
+      # select /workspaces with the adjacent WORKSPACE_* settings in .env.
       - ./workspaces:/workspaces
     tmpfs:
       - /tmp
@@ -128,7 +128,10 @@ services:
       AI_FEATURE_SUMMARY: ${AI_FEATURE_SUMMARY:-false}
       AI_FEATURE_NEXT_COMMANDS: ${AI_FEATURE_NEXT_COMMANDS:-false}
       AI_FEATURE_RUN_SUGGESTIONS: ${AI_FEATURE_RUN_SUGGESTIONS:-false}
+      WORKSPACE_ENABLED: ${WORKSPACE_ENABLED:-false}
+      WORKSPACE_BACKEND: ${WORKSPACE_BACKEND:-tmpfs}
       WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
+      INTERACTIVE_PTY_ENABLED: ${INTERACTIVE_PTY_ENABLED:-false}
       RESTRICTED_COMMAND_INPUT_CIDRS: ${RESTRICTED_COMMAND_INPUT_CIDRS:-}
       RAW_PACKET_SCANNING_ENABLED: ${RAW_PACKET_SCANNING_ENABLED:-false}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}

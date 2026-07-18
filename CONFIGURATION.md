@@ -33,7 +33,7 @@ The application settings table below is the operator reference. The schema contr
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
 | Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
-| Forgiving booleans | `raw_packet_scanning_enabled`, `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
+| Forgiving booleans | `workspace_enabled`, `interactive_pty_enabled`, `raw_packet_scanning_enabled`, `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
 | Normalized lists | CIDR lists and `output_entity_extra_domain_suffixes` drop invalid entries with key/source warning logs. Redaction rules are normalized through the same snapshot-share rule validator used at runtime |
@@ -775,7 +775,10 @@ cp .env.example .env
 # APP_PORT=8888
 # HOST_BIND_ADDRESS=0.0.0.0
 # DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0
+# WORKSPACE_ENABLED=false
+# WORKSPACE_BACKEND=tmpfs
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
+# INTERACTIVE_PTY_ENABLED=false
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
 # WEB_CONCURRENCY=4
@@ -830,7 +833,10 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
 | `DARKLAB_IMAGE` | Repository-free production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
 | `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
-| `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
+| `WORKSPACE_ENABLED` | Docker Compose, Flask app | Enables or disables personal and team Files. When set, it overrides `workspace_enabled` in app config |
+| `WORKSPACE_BACKEND` | Docker Compose, Flask app | Selects `tmpfs` for short-lived Files or `volume` for persistent mounted storage. When set, it overrides `workspace_backend` in app config |
+| `WORKSPACE_ROOT` | Docker entrypoint, Docker Compose, Flask app | Path prepared by the container before dropping privileges. When set, it overrides `workspace_root` in app config |
+| `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools. When set, it overrides `interactive_pty_enabled` in app config; detailed PTY limits remain in YAML |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
@@ -952,7 +958,7 @@ Postgres connection notes:
 - The bundled Postgres service uses the Postgres 18 Docker image layout and mounts `postgres-data` at `/var/lib/postgresql`. If you have an older darklab_shell `postgres-data` volume created under Postgres 17's `/var/lib/postgresql/data` layout, export it before upgrading and restore into a fresh Postgres 18 volume. See [docs/postgres-migration.md](docs/postgres-migration.md#bundled-postgres-major-upgrades).
 - Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
 
-For an existing SQLite install, run the offline migration before switching the app over. See [docs/postgres-migration.md](docs/postgres-migration.md).
+For an existing repository-free SQLite install, run `./darklab-deploy migrate-to-postgres` from the installation directory. It creates a verified backup, copies and validates the stopped SQLite database, updates the managed environment, and recreates the app on bundled Postgres. Source checkouts and custom Postgres targets use the manual helper flow in [docs/postgres-migration.md](docs/postgres-migration.md).
 
 Back up the SQLite data directory before migration and keep that snapshot until the Postgres deployment has been validated under real use. Rollback is switching the app config back to SQLite and restoring the untouched data directory snapshot if anything looks wrong after cutover.
 
@@ -1006,7 +1012,7 @@ docker compose restart shell
 
 SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama` profile is independent and can be combined as `COMPOSE_PROFILES=postgres,llama`.
 
-`/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files workspaces stay under tmpfs unless `.env` sets `WORKSPACE_ROOT=/workspaces` and `conf/config.local.yaml` enables the `volume` workspace backend. The production Compose file already maps `./workspaces` to that path.
+`/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files are disabled by default. Set `WORKSPACE_ENABLED=true`, `WORKSPACE_BACKEND=volume`, and `WORKSPACE_ROOT=/workspaces` in `.env` for persistent Files. The production Compose file already maps `./workspaces` to that path.
 
 For SELinux-enforcing hosts, add a local Compose override with private relabeling such as `./conf:/config:ro,Z`, `./data:/data:Z`, and `./workspaces:/workspaces:Z`. Rootless Docker and Podman can reject scanner capabilities even when the YAML is otherwise compatible. See [Supported Runtimes](#supported-runtimes) for the current production matrix.
 
@@ -1094,10 +1100,13 @@ docker inspect darklab_shell \
 
 ## Workspace Storage Recipes
 
-Files/workspace storage has two coordinated settings:
+Files/workspace storage has three coordinated settings:
 
-- `WORKSPACE_ROOT` in Compose is the path the Docker entrypoint prepares before dropping privileges. The app also treats it as the runtime `workspace_root` override, so Compose deployments only need this setting.
-- `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
+- `WORKSPACE_ENABLED` turns personal and team Files on or off.
+- `WORKSPACE_BACKEND` selects short-lived `tmpfs` storage or persistent `volume` storage.
+- `WORKSPACE_ROOT` is the path the Docker entrypoint prepares before dropping privileges and the app uses at runtime.
+
+Compose deployments can set all three in `.env`. The equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys remain available in `app/conf/config.yaml` or `app/conf/config.local.yaml` for non-Compose runs and file-based configuration.
 
 Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
 
@@ -1105,28 +1114,20 @@ Team Files use the same root as personal Files. Personal directories are named `
 
 ### Short-lived tmpfs storage
 
-```yaml
-# app/conf/config.local.yaml
-workspace_enabled: true
-workspace_backend: tmpfs
-```
-
-```yaml
-# docker-compose.yml or an override
-services:
-  shell:
-    environment:
-      - WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
+```env
+WORKSPACE_ENABLED=true
+WORKSPACE_BACKEND=tmpfs
+WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 ```
 
 ### Persistent bind mount
 
-The production Compose override uses `./workspaces:/workspaces` plus `WORKSPACE_ROOT=/workspaces`. Pair that with the volume backend in app config:
+The production Compose file already maps `./workspaces:/workspaces`. Select that persistent location in `.env`:
 
-```yaml
-# app/conf/config.local.yaml
-workspace_enabled: true
-workspace_backend: volume
+```env
+WORKSPACE_ENABLED=true
+WORKSPACE_BACKEND=volume
+WORKSPACE_ROOT=/workspaces
 ```
 
 Prepare the host bind-mount directory with the numeric UID/GID used by `appuser` inside the built image, not a host username. The current image creates `appuser` as `995:995` and `scanner` as `994:994`; scanner commands use the shared `appuser` run group when they access validated workspace files:
@@ -1145,19 +1146,14 @@ Existing `sess_*` directories should be owned by `995:995` with mode `3730`. Exi
 services:
   shell:
     environment:
+      - WORKSPACE_ENABLED=true
+      - WORKSPACE_BACKEND=volume
       - WORKSPACE_ROOT=/workspaces
     volumes:
       - darklab_shell_workspaces:/workspaces
 
 volumes:
   darklab_shell_workspaces:
-```
-
-Use the same app config as the bind-mount example:
-
-```yaml
-workspace_enabled: true
-workspace_backend: volume
 ```
 
 ---
@@ -1171,7 +1167,7 @@ Repository-free installs include the backup and restore path in `darklab-deploy`
 ./darklab-deploy restore backups/darklab-backup-<timestamp>.tar.gz
 ```
 
-Managed backups include the SQLite snapshot or Postgres dump, `.env`, `conf/`, `/data` including `.secrets_master_key`, durable `/workspaces` when `WORKSPACE_ROOT=/workspaces`, release metadata, a redacted manifest, restore notes, and checksums. The archive stays under the private `backups/` directory and is owned by the host user who ran the command. Restore verifies the archive and creates another verified backup before it stops the app or writes any state. Files are staged inside their destination mounts, and Postgres uses one transaction before staged files are committed. The target deployment keeps its database backend, URL, Postgres credentials, and current image; restored host files return to the UID/GID that invoked the command. A failed restore leaves the app stopped and prints the safety-backup recovery command, so it never deliberately starts against partially restored state.
+Managed backups include the SQLite snapshot or Postgres dump, `.env`, `conf/`, `/data` including `.secrets_master_key`, durable `/workspaces` when `WORKSPACE_ROOT=/workspaces`, release metadata, a redacted manifest, restore notes, and checksums. The archive stays under the private `backups/` directory and is owned by the host user who ran the command. Restore verifies the archive and creates another verified backup before it stops the app or writes any state. Files are staged inside their destination mounts, and Postgres uses one transaction before staged files are committed. The target deployment keeps its database backend, URL, Postgres credentials, and current image; restored host files return to the UID/GID that invoked the command. When restored `.env` content changes, the wrapper force-recreates the app container so the restored values take effect, and every successful restore waits for app health before returning. A failed restore leaves the app stopped and prints the safety-backup recovery command, so it never deliberately starts against partially restored state.
 
 `./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, or the pre-upgrade backup fails. Every archive must produce a complete readable listing, and each member path is checked before anything is extracted. Online upgrades verify the release's signed `SHA256SUMS` with a digest-pinned Cosign container and the exact GitLab tag identity before downloading the archive. A supplied `--backup /path/to/archive` must pass the same checksum verification. `--archive /path/to/archive` is an operator-trusted offline path: the command checks the adjacent `.sha256` file, but you must verify the publisher's `SHA256SUMS.sigstore.json` separately. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. When a release adds keys to `.env.example`, the command prints only their names and asks you to review the installed example before restarting. It doesn't append defaults, replace existing values, or print values from either file. Afterward, run the printed pull, image-verification, and restart commands. Changing an image tag never reverses a database migration.
 
@@ -1295,26 +1291,34 @@ sudo sysctl --system
 
 ### Enable Files
 
-```yaml
-# app/conf/config.local.yaml
-workspace_enabled: true
-workspace_backend: tmpfs
+```env
+# .env for a Compose deployment
+WORKSPACE_ENABLED=true
+WORKSPACE_BACKEND=tmpfs
+WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 ```
 
-For Compose runs, set `WORKSPACE_ROOT` when you want a path other than the default. The app uses that environment value as the runtime workspace root.
+For a non-Compose run, set the equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys in `app/conf/config.local.yaml`.
 
 ### Enable Interactive PTY
 
+For a Compose deployment, enable the feature in `.env`:
+
+```env
+INTERACTIVE_PTY_ENABLED=true
+```
+
+The existing PTY defaults are suitable for most deployments. Fine-tune them in `app/conf/config.local.yaml` when needed:
+
 ```yaml
 # app/conf/config.local.yaml
-interactive_pty_enabled: true
 interactive_pty_max_runtime_seconds: 900
 interactive_pty_max_concurrent_per_session: 4
 interactive_pty_input_rate_limit_per_second: 10
 interactive_pty_input_rate_limit_per_minute: 500
 ```
 
-Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.
+Non-Compose runs can set `interactive_pty_enabled: true` in the same YAML file. Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.
 
 ### Enable Diagnostics
 

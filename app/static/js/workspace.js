@@ -1346,7 +1346,7 @@ async function loadWorkspaceFilesPayload(options = {}) {
   if (!isWorkspaceEnabled()) throw new Error('Files are disabled on this instance');
   if (_workspaceFilesLoadPromise && options.force !== true) return _workspaceFilesLoadPromise;
   const request = (async () => {
-    const resp = await _workspaceApiFetch()('/workspace/files');
+    const resp = await _workspaceApiFetch()('/workspace/files', { cache: 'no-store' });
     const data = await _workspaceJson(resp);
     renderWorkspaceFiles(data);
     return data;

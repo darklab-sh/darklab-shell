@@ -3072,7 +3072,16 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (session_token, name)
             );
+            CREATE TABLE schema_migrations (
+                version TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );
             """
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES (?, ?, ?)",
+            ("0039", "unified_schema_baseline", "2026-05-16T00:00:00Z"),
         )
         conn.execute(
             """
@@ -3188,6 +3197,7 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert report.copied_rows["entity_intel_snapshots"] == 1
     assert report.verified_files == 2
     assert "runs_fts" in report.skipped_tables
+    assert "schema_migrations" in report.skipped_tables
 
     conn = postgres_schema.conn
     conn.execute(f"SET search_path TO {_quote_ident(postgres_schema.schema)}")

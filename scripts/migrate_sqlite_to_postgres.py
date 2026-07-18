@@ -40,12 +40,14 @@ import sys
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+APP_ROOT = ROOT if (ROOT / "core").is_dir() else ROOT / "app"
+sys.path.insert(0, str(APP_ROOT))
 
 from core.migrations import MIGRATIONS  # noqa: E402
 from core.database_backend import postgres_jsonb_param  # noqa: E402
 
 FTS_TABLE_PREFIXES = ("runs_fts",)
+MIGRATION_LEDGER_TABLES = frozenset({"schema_migrations"})
 BODY_POINTER_KEY = "__darklab_body_store__"
 BODY_POINTER_VERSION = 1
 JSON_COLUMNS = frozenset({
@@ -145,7 +147,11 @@ def discover_migration_tables(conn: sqlite3.Connection) -> tuple[list[TableInfo]
     tables: list[TableInfo] = []
     skipped: list[str] = []
     for name, create_sql in _sqlite_table_names(conn):
-        if name.startswith(FTS_TABLE_PREFIXES) or "CREATE VIRTUAL TABLE" in create_sql.upper():
+        if (
+            name in MIGRATION_LEDGER_TABLES
+            or name.startswith(FTS_TABLE_PREFIXES)
+            or "CREATE VIRTUAL TABLE" in create_sql.upper()
+        ):
             skipped.append(name)
             continue
         column_rows = conn.execute(f"PRAGMA table_info({_quote_ident(name)})").fetchall()
@@ -665,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
     if report.copied_files:
         print(f"referenced files copied: {report.copied_files}")
     if report.skipped_tables:
-        print("skipped SQLite-only tables: " + ", ".join(report.skipped_tables))
+        print("skipped non-data tables: " + ", ".join(report.skipped_tables))
     if report.deduplicated_rows:
         details = ", ".join(
             f"{table}={count}"

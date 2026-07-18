@@ -22,6 +22,7 @@ Commands:
   status                         Validate managed files and show the installed release
   backup [--keep-days DAYS]      Create and verify a SQLite or Postgres backup
   restore BACKUP                 Restore a verified backup after taking a safety backup
+  migrate-to-postgres            Move this managed install from SQLite to bundled Postgres
   upgrade VERSION [OPTIONS]      Install an exact newer release after verifying a backup
   migration-help                 Show how to move from a repository-backed deployment
   remove --yes                   Remove release-managed files and leave operator data
@@ -284,16 +285,44 @@ managed_status() {
         "$installed_version" "$installed_image"
 }
 
-uses_bundled_postgres() {
-    database_backend=$(sed -n 's/^DATABASE_BACKEND=//p' "$script_dir/.env" | tail -n 1)
-    [ "$database_backend" = "postgres" ] || return 1
-    database_url=$(sed -n 's/^DATABASE_URL=//p' "$script_dir/.env" | tail -n 1)
+env_value() {
+    env_name=$1
+    sed -n "s/^${env_name}=//p" "$script_dir/.env" | tail -n 1
+}
+
+set_env_value() {
+    env_path=$1
+    env_name=$2
+    env_value_next=$3
+    env_temp="${env_path}.next.$$"
+    awk -v key="$env_name" -v value="$env_value_next" '
+        BEGIN { found = 0; prefix = key "=" }
+        index($0, prefix) == 1 {
+            if (!found) print prefix value
+            found = 1
+            next
+        }
+        { print }
+        END { if (!found) print prefix value }
+    ' "$env_path" > "$env_temp"
+    chmod 600 "$env_temp"
+    mv "$env_temp" "$env_path"
+}
+
+database_url_uses_bundled_postgres() {
+    database_url=$(env_value DATABASE_URL)
     case "$database_url" in
         postgresql://postgres:*|postgresql://postgres/*|postgresql://*@postgres:*|postgresql://*@postgres/*)
             return 0
             ;;
         *) return 1 ;;
     esac
+}
+
+uses_bundled_postgres() {
+    database_backend=$(env_value DATABASE_BACKEND)
+    [ "$database_backend" = "postgres" ] || return 1
+    database_url_uses_bundled_postgres
 }
 
 version_is_newer() {
@@ -496,6 +525,7 @@ restore_command() {
         || fail "backup archive directory does not exist: $restore_archive_dir"
     restore_archive="${restore_archive_dir%/}/$restore_archive_name"
     managed_status >/dev/null
+    env_digest_before=$(sha256_file "$script_dir/.env")
     restore_verify_stage=$(mktemp -d "${TMPDIR:-/tmp}/darklab-restore-verify.XXXXXX")
     verify_backup_archive "$restore_archive" "$restore_verify_stage"
     rm -rf "$restore_verify_stage"
@@ -520,9 +550,113 @@ restore_command() {
         --output-gid "$host_gid"; then
         fail "restore failed; the app remains stopped. Recover with: ./darklab-deploy restore \"$safety_backup\""
     fi
-    docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" up -d shell \
-        || fail "restore completed but the app could not be restarted"
+    env_digest_after=$(sha256_file "$script_dir/.env")
+    if [ "$env_digest_before" = "$env_digest_after" ]; then
+        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" up -d --wait shell \
+            || fail "restore completed but the app could not be restarted"
+    else
+        printf '%s\n' 'Restored environment settings changed; recreating the app container.'
+        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            up -d --wait --force-recreate shell \
+            || fail "restore completed but the app could not be recreated with the restored environment"
+    fi
     printf 'Restore complete. The pre-restore safety backup is %s.\n' "$safety_backup"
+}
+
+migrate_to_postgres() {
+    [ "$#" -eq 0 ] || fail "migrate-to-postgres does not accept options"
+    managed_status >/dev/null
+    database_backend=$(env_value DATABASE_BACKEND)
+    [ "${database_backend:-sqlite}" = "sqlite" ] \
+        || fail "migrate-to-postgres requires the current backend to be SQLite"
+    database_url_uses_bundled_postgres \
+        || fail "migrate-to-postgres requires the installer-generated DATABASE_URL for the bundled Postgres service"
+    [ -n "$(env_value POSTGRES_PASSWORD)" ] \
+        || fail "migrate-to-postgres requires POSTGRES_PASSWORD in .env"
+    [ -f "$script_dir/data/history.db" ] \
+        || fail "SQLite database does not exist: $script_dir/data/history.db"
+
+    postgres_was_running=false
+    if docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        ps --status running --services postgres | grep -qx 'postgres'; then
+        postgres_was_running=true
+    fi
+
+    migration_original_env=$(mktemp "$script_dir/.env.sqlite.XXXXXX")
+    migration_next_env=$(mktemp "$script_dir/.env.postgres.XXXXXX")
+    cp "$script_dir/.env" "$migration_original_env"
+    cp "$script_dir/.env" "$migration_next_env"
+    chmod 600 "$migration_original_env" "$migration_next_env"
+    set_env_value "$migration_next_env" DATABASE_BACKEND postgres
+    compose_profiles=$(sed -n 's/^COMPOSE_PROFILES=//p' "$migration_next_env" | tail -n 1 | tr -d '[:space:]')
+    case ",$compose_profiles," in
+        *,postgres,*) ;;
+        ,,) compose_profiles=postgres ;;
+        *) compose_profiles="${compose_profiles},postgres" ;;
+    esac
+    set_env_value "$migration_next_env" COMPOSE_PROFILES "$compose_profiles"
+    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" config --quiet; then
+        rm -f "$migration_original_env" "$migration_next_env"
+        fail "Postgres Compose configuration is invalid; SQLite remains active"
+    fi
+
+    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell; then
+        rm -f "$migration_original_env" "$migration_next_env"
+        fail "could not stop the app before migration"
+    fi
+    if ! safety_backup=$(create_repository_free_backup "" path); then
+        rm -f "$migration_original_env" "$migration_next_env"
+        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            up -d shell >/dev/null 2>&1 \
+            || fail "the pre-migration backup failed and the SQLite app could not be restarted"
+        fail "the pre-migration backup failed; SQLite was restarted without changes"
+    fi
+
+    recover_sqlite_migration() {
+        migration_failure=$1
+        cp "$migration_original_env" "$script_dir/.env"
+        chmod 600 "$script_dir/.env"
+        if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            up -d --force-recreate shell; then
+            fail "$migration_failure SQLite data and settings remain intact, but the app could not be restarted. Recover with: ./darklab-deploy restore \"$safety_backup\""
+        fi
+        if [ "$postgres_was_running" = false ]; then
+            docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+                stop postgres >/dev/null 2>&1 || true
+        fi
+        rm -f "$migration_original_env" "$migration_next_env"
+        fail "$migration_failure SQLite data and settings remain active. The verified safety backup is $safety_backup"
+    }
+
+    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
+        up -d --wait postgres; then
+        recover_sqlite_migration "Bundled Postgres could not be started."
+    fi
+
+    migration_runner='from config import CFG; from core.database_backend import connect_postgres; from core.migrations import MIGRATIONS; from core.migrations.runner import run_migrations_with_advisory_lock; ctx = connect_postgres(CFG); conn = ctx.__enter__(); applied = run_migrations_with_advisory_lock(conn, MIGRATIONS); conn.commit(); ctx.__exit__(None, None, None); print(f"postgres migrations initialized; applied={len(applied)}")'
+    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
+        run --rm --no-deps --entrypoint python3 shell -c "$migration_runner"; then
+        recover_sqlite_migration "Postgres schema initialization failed."
+    fi
+    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
+        run --rm --no-deps --entrypoint python3 \
+        shell /app/tools/migrate_sqlite_to_postgres.py \
+        --sqlite-db /data/history.db \
+        --artifact-root /data \
+        --confirm-secrets-key \
+        --validate; then
+        recover_sqlite_migration "SQLite-to-Postgres data migration failed."
+    fi
+
+    mv "$migration_next_env" "$script_dir/.env"
+    chmod 600 "$script_dir/.env"
+    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        up -d --wait --force-recreate shell; then
+        recover_sqlite_migration "Postgres data was copied, but the app did not start after cutover."
+    fi
+    rm -f "$migration_original_env"
+    printf 'SQLite-to-Postgres migration complete. The source history.db remains in data/ for rollback.\n'
+    printf 'The verified pre-migration backup is %s.\n' "$safety_backup"
 }
 
 upgrade_release() {
@@ -771,6 +905,10 @@ case "$command_name" in
     restore)
         require_common_tools
         restore_command "$@"
+        ;;
+    migrate-to-postgres)
+        require_common_tools
+        migrate_to_postgres "$@"
         ;;
     upgrade)
         require_common_tools

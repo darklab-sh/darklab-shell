@@ -80,8 +80,11 @@ def _run_config_startup(
             "APP_LOCAL_CONF_DIR",
             "ASSET_BUNDLE_MODE",
             "PROMETHEUS_MULTIPROC_DIR",
+            "INTERACTIVE_PTY_ENABLED",
             "RAW_PACKET_SCANNING_ENABLED",
             "RESTRICTED_COMMAND_INPUT_CIDRS",
+            "WORKSPACE_BACKEND",
+            "WORKSPACE_ENABLED",
             "WORKSPACE_ROOT",
         }:
             env.pop(name, None)

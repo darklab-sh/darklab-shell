@@ -144,6 +144,9 @@ Review these files before starting:
   ${TARGET_DIR}/conf/
   ${TARGET_DIR}/compose.yaml
 
+Optional Files, Interactive PTY, and raw-packet scanning settings are listed
+near the top of ${TARGET_DIR}/.env.
+
 Then run:
   cd ${TARGET_DIR}
   docker compose pull

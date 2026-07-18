@@ -104,7 +104,7 @@ describe('workspace UI helpers', () => {
     await flushWorkspacePromises()
 
     expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(true)
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', { cache: 'no-store' })
     expect(document.getElementById('workspace-summary').textContent)
       .toBe('Team Reload · 1 / 10 files · 9 B / 1 KB')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('team.txt')
@@ -187,7 +187,7 @@ describe('workspace UI helpers', () => {
 
     await flushWorkspacePromises()
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', { cache: 'no-store' })
     expect(getWorkspaceAutocompleteDirectoryHints().map(item => item.value)).toEqual(['reports', 'reports/empty'])
 
     renderWorkspaceFiles({
@@ -749,7 +749,7 @@ describe('workspace UI helpers', () => {
     await flushWorkspacePromises()
     await flushWorkspacePromises()
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', { cache: 'no-store' })
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
     expect(document.getElementById('workspace-viewer-title').textContent).toBe('targets.txt')
     expect(document.getElementById('workspace-viewer-text').textContent).toContain('updated target')
@@ -1214,14 +1214,14 @@ describe('workspace UI helpers', () => {
 
     await refreshWorkspaceFiles()
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', { cache: 'no-store' })
     expect(document.querySelector('.workspace-file-name').textContent).toBe('urls.txt')
 
     apiFetch.mockClear()
     document.getElementById('workspace-refresh-btn').click()
     await flushWorkspacePromises()
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', { cache: 'no-store' })
     expect(document.getElementById('workspace-refresh-btn').disabled).toBe(false)
     expect(document.getElementById('workspace-refresh-btn').getAttribute('aria-label')).toBe('Refresh files')
   })
