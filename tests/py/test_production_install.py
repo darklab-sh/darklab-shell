@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.22"
+RELEASE_VERSION = "2.6.0-rc.23"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -229,6 +229,11 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    [ \"${FAKE_POSTGRES_RUNNING:-0}\" = \"1\" ] && printf 'postgres\\n'\n"
         "elif printf '%s' \"$*\" | grep -q ' config --quiet$'; then\n"
         "    exit \"${FAKE_COMPOSE_CONFIG_EXIT:-0}\"\n"
+        "elif printf '%s' \"$*\" | grep -q 'SELECT COUNT(\\*) FROM pg_catalog.pg_tables'; then\n"
+        "    [ \"${FAKE_POSTGRES_PREFLIGHT_EXIT:-0}\" = \"0\" ] || exit \"$FAKE_POSTGRES_PREFLIGHT_EXIT\"\n"
+        "    printf '%s\\n' \"${FAKE_POSTGRES_TABLE_COUNT:-0}\"\n"
+        "elif printf '%s' \"$*\" | grep -q 'ALTER ROLE.*role_name.*role_password'; then\n"
+        "    exit \"${FAKE_POSTGRES_PASSWORD_SYNC_EXIT:-0}\"\n"
         "elif printf '%s' \"$*\" | grep -q '/app/tools/backup_system.py'; then\n"
         "    backup_dir=\n"
         "    previous=\n"
@@ -2829,6 +2834,25 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
 
     data_dir.chmod(0)
     try:
+        retained_target = subprocess.run(
+            [str(install_dir / "darklab-deploy"), "migrate-to-postgres"],
+            cwd=install_dir,
+            env={**env, "FAKE_POSTGRES_TABLE_COUNT": "4"},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert retained_target.returncode != 0
+        assert "already contains 4 user tables" in retained_target.stderr
+        assert "not an empty migration target" in retained_target.stderr
+        assert (install_dir / ".env").read_bytes() == env_before_migration
+        retained_target_log = log_path.read_text(encoding="utf-8")
+        assert "SELECT COUNT(*) FROM pg_catalog.pg_tables" in retained_target_log
+        assert "ALTER ROLE" not in retained_target_log
+        assert "/app/tools/migrate_sqlite_to_postgres.py" not in retained_target_log
+        log_path.unlink()
+
         migrated = subprocess.run(
             [str(install_dir / "darklab-deploy"), "migrate-to-postgres"],
             cwd=install_dir,
@@ -2854,6 +2878,8 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
         "run --rm --no-deps --user 0:0 --entrypoint sh shell "
         "-c test -f /data/history.db && test -r /data/history.db"
     ) in migration_log
+    assert "SELECT COUNT(*) FROM pg_catalog.pg_tables" in migration_log
+    assert 'ALTER ROLE :"role_name" WITH PASSWORD' in migration_log
     assert "/app/tools/migrate_sqlite_to_postgres.py" in migration_log
     assert "--confirm-secrets-key --validate" in migration_log
     assert " up -d --wait --force-recreate shell" in migration_log
@@ -2948,6 +2974,8 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     postgres_start = adoption_log.index(" up -d --wait postgres")
     shell_stop = adoption_log.index(" stop shell")
     assert postgres_start < shell_stop
+    assert "SELECT COUNT(*) FROM pg_catalog.pg_tables" in adoption_log
+    assert 'ALTER ROLE :"role_name" WITH PASSWORD' in adoption_log
     assert "--adopt-database-backend postgres" in adoption_log
     assert "--compose-profiles postgres" in adoption_log
     assert " up -d --wait --force-recreate shell" in adoption_log

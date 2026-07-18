@@ -326,6 +326,48 @@ uses_bundled_postgres() {
     database_url_uses_bundled_postgres
 }
 
+prepare_empty_bundled_postgres() {
+    compose_env=$1
+    postgres_table_count_sql="SELECT COUNT(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');"
+    if ! postgres_table_count=$(docker compose --env-file "$compose_env" -f "$script_dir/compose.yaml" \
+        exec -T postgres sh -c '
+            exec psql --no-password --tuples-only --no-align \
+                --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+                --command "$1"
+        ' sh "$postgres_table_count_sql"); then
+        printf '%s\n' \
+            'darklab-deploy: could not inspect bundled Postgres over its local container socket' >&2
+        return 1
+    fi
+    postgres_table_count=$(printf '%s' "$postgres_table_count" | tr -d '[:space:]')
+    case "$postgres_table_count" in
+        ''|*[!0-9]*)
+            printf 'darklab-deploy: bundled Postgres returned an invalid user-table count: %s\n' \
+                "$postgres_table_count" >&2
+            return 1
+            ;;
+    esac
+    if [ "$postgres_table_count" -ne 0 ]; then
+        printf 'darklab-deploy: bundled Postgres already contains %s user tables; refusing to overwrite a possibly retained postgres-data volume\n' \
+            "$postgres_table_count" >&2
+        return 1
+    fi
+
+    postgres_password_sql="ALTER ROLE :\"role_name\" WITH PASSWORD :'role_password';"
+    if ! docker compose --env-file "$compose_env" -f "$script_dir/compose.yaml" \
+        exec -T postgres sh -c '
+            printf "%s\n" "$1" | \
+                psql --no-password --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+                    --set=ON_ERROR_STOP=1 \
+                    --set=role_name="$POSTGRES_USER" \
+                    --set=role_password="$POSTGRES_PASSWORD"
+        ' sh "$postgres_password_sql" >/dev/null; then
+        printf '%s\n' \
+            'darklab-deploy: could not synchronize the empty bundled Postgres role password' >&2
+        return 1
+    fi
+}
+
 version_is_newer() {
     old_version=$1
     new_version=$2
@@ -594,6 +636,14 @@ restore_command() {
             fi
             restore_started_postgres=true
         fi
+        if ! prepare_empty_bundled_postgres "$restore_compose_env"; then
+            if [ "$restore_started_postgres" = true ]; then
+                docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+                    stop postgres >/dev/null 2>&1 || true
+            fi
+            rm -f "$restore_compose_env"
+            fail "bundled Postgres is not an empty adoption target; the target was not changed"
+        fi
     fi
     docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell \
         || {
@@ -717,6 +767,9 @@ migrate_to_postgres() {
     if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
         up -d --wait postgres; then
         recover_sqlite_migration "Bundled Postgres could not be started."
+    fi
+    if ! prepare_empty_bundled_postgres "$migration_next_env"; then
+        recover_sqlite_migration "Bundled Postgres is not an empty migration target."
     fi
 
     migration_runner='from config import CFG; from core.database_backend import connect_postgres; from core.migrations import MIGRATIONS; from core.migrations.runner import run_migrations_with_advisory_lock; ctx = connect_postgres(CFG); conn = ctx.__enter__(); applied = run_migrations_with_advisory_lock(conn, MIGRATIONS); conn.commit(); ctx.__exit__(None, None, None); print(f"postgres migrations initialized; applied={len(applied)}")'

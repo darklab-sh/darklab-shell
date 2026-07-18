@@ -129,7 +129,9 @@ cd "$HOME/darklab-shell"
 
 Run this command as the user who owns the installation, without `sudo`. The app intentionally locks down `data/`, so the host user may not be able to inspect `data/history.db` directly. `darklab-deploy` checks and reads that database through a one-off Docker container instead; using `sudo` would risk replacing operator-owned files such as `.env` with root-owned copies.
 
-The command requires the current backend to be SQLite, the default `data/history.db` location, and the installer-generated connection settings for the bundled Postgres service. The Postgres app tables must not contain existing data.
+The command requires the current backend to be SQLite, the default `data/history.db` location, and the installer-generated connection settings for the bundled Postgres service. The Postgres destination must not contain user tables. Before it connects over the Compose network, the command checks Postgres through the container's local socket and synchronizes the configured role password only when the cluster is empty. This handles an empty `postgres-data` volume retained across a reinstall without weakening the non-empty-destination guard.
+
+Named volumes survive `docker compose down` and deletion of the installation directory. If a retained `postgres-data` volume contains tables from an earlier install, the command refuses to overwrite it. Back up that database if it matters, or intentionally remove only that stale volume before retrying the SQLite migration.
 
 The command stops SQLite writes and creates a verified complete backup before it changes either database. It then starts bundled Postgres, initializes the current app schema, copies the SQLite rows, verifies referenced output files and row counts, updates `DATABASE_BACKEND` and `COMPOSE_PROFILES` in `.env`, and force-recreates the app with Postgres active. The existing `data/history.db` stays in place as an additional rollback source, and the command prints the verified backup path when it finishes.
 

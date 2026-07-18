@@ -66,6 +66,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Managed Postgres cutover no longer fails with repeated authentication errors against an empty retained volume.**
+  - **Root cause:** Compose named volumes survive `docker compose down` and deletion of the installation directory, while each fresh install generates a new Postgres password. Reusing an initialized `postgres-data` cluster could therefore make the first network connection fail even when the current installation had never enabled Postgres.
+  - **Fix:** SQLite migration and fresh-host Postgres adoption inspect the destination through the Postgres container's local socket before network authentication. An empty cluster has its role password synchronized with the current installation; a cluster containing user tables is left untouched and rejected as a possibly retained deployment instead of producing connection-pool retries.
+  - **Tests:** managed lifecycle coverage verifies the local user-table query, non-empty refusal before password or data migration, SQLite recovery, empty-target password synchronization, and ordering before schema initialization and restore.
+
 - **Managed Postgres backups can be restored onto a fresh replacement host.**
   - **Root cause:** restore always preserved the target's database backend and rejected a Postgres archive when a newly installed target still had the default SQLite setting, leaving no safe repository-free path for host replacement.
   - **Fix:** `darklab-deploy restore --adopt-backend BACKUP` keeps the new host's image and generated Postgres credentials, enables and starts bundled Postgres, confirms the destination has no user tables, restores the dump transactionally, adopts the Postgres backend in `.env`, and recreates the app. Ordinary restores keep the backend-mismatch guard and now report the explicit fresh-install command before stopping the app.
