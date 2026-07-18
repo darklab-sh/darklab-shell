@@ -1022,19 +1022,25 @@ def resolve_workspace_source(
     if ctx.args.include_workspaces == "never":
         ctx.excluded.append({"kind": "workspaces", "reason": "disabled-by-operator"})
         return None
+
+    logical_root = _workspace_logical_root(ctx, cfg, compose_files)
+    if ctx.args.workspace_source:
+        if not logical_root:
+            raise BackupError(
+                "--workspace-source requires a logical workspace root from "
+                "--workspace-root, Compose, or app config"
+            )
+        return _parse_workspace_source(ctx.args.workspace_source, logical_root)
+
     if not bool(cfg.get("workspace_enabled")):
         ctx.excluded.append({"kind": "workspaces", "reason": "workspace-disabled"})
         return None
 
-    logical_root = _workspace_logical_root(ctx, cfg, compose_files)
     if not logical_root:
         if ctx.args.include_workspaces == "always":
             raise BackupError("workspace_enabled is true but workspace_root is empty")
         _warn(ctx, "workspace_enabled is true but workspace_root is empty; skipping workspaces")
         return None
-
-    if ctx.args.workspace_source:
-        return _parse_workspace_source(ctx.args.workspace_source, logical_root)
 
     workspace_backend = str(cfg.get("workspace_backend") or "tmpfs").strip().lower()
     if workspace_backend == "tmpfs" and not ctx.args.include_ephemeral_workspaces:

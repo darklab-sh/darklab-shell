@@ -32,6 +32,7 @@ _TARGET_LOCAL_ENV_NAMES = (
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
 )
+_RESTORED_ENV_OUTPUT_ORDER = (*_TARGET_LOCAL_ENV_NAMES, "COMPOSE_PROFILES")
 
 
 def _sha256(path: Path) -> str:
@@ -248,7 +249,7 @@ def _stage_restored_env(
             restored_names.add(name)
             continue
         output.append(line)
-    for name in _TARGET_LOCAL_ENV_NAMES:
+    for name in _RESTORED_ENV_OUTPUT_ORDER:
         if name in preserved_values and name not in restored_names:
             output.append(f"{name}={preserved_values[name]}")
     replacement.stage.write_text("\n".join(output) + "\n", encoding="utf-8")
@@ -257,7 +258,7 @@ def _stage_restored_env(
         os.chown(replacement.stage, *owner, follow_symlinks=False)
 
 
-def _restore_postgres(database_url: str, dump_path: Path) -> None:
+def _postgres_command_context(database_url: str) -> tuple[str, dict[str, str]]:
     if not database_url:
         raise RestoreError("Postgres restore requires DATABASE_URL")
     parsed = urlparse(database_url)
@@ -276,6 +277,46 @@ def _restore_postgres(database_url: str, dump_path: Path) -> None:
     query = parse_qs(parsed.query)
     if query.get("sslmode"):
         restore_env["PGSSLMODE"] = query["sslmode"][-1]
+    return database, restore_env
+
+
+def _require_empty_postgres_target(database_url: str) -> None:
+    database, restore_env = _postgres_command_context(database_url)
+    result = subprocess.run(
+        [
+            "psql",
+            "--tuples-only",
+            "--no-align",
+            "--dbname",
+            database,
+            "--command",
+            (
+                "SELECT COUNT(*) FROM pg_catalog.pg_tables "
+                "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')"
+            ),
+        ],
+        env=restore_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RestoreError(
+            "could not verify that the Postgres adoption target is empty: "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        table_count = int(result.stdout.strip())
+    except ValueError as exc:
+        raise RestoreError("Postgres adoption target returned an invalid table count") from exc
+    if table_count:
+        raise RestoreError(
+            "backend adoption requires a fresh Postgres database with no user tables"
+        )
+
+
+def _restore_postgres(database_url: str, dump_path: Path) -> None:
+    database, restore_env = _postgres_command_context(database_url)
     result = subprocess.run(
         [
             "pg_restore",
@@ -317,10 +358,30 @@ def restore(args: argparse.Namespace) -> None:
         if backend not in {"sqlite", "postgres"}:
             raise RestoreError(f"unsupported database backend in backup: {backend}")
         current_backend = str(current_env.get("DATABASE_BACKEND") or "sqlite").strip().lower()
+        adopt_backend = str(getattr(args, "adopt_database_backend", "") or "").strip().lower()
         if current_backend != backend:
+            if adopt_backend != backend:
+                raise RestoreError(
+                    f"backup database backend {backend!r} does not match target backend "
+                    f"{current_backend!r}"
+                )
+            current_env["DATABASE_BACKEND"] = backend
+            if backend == "postgres":
+                compose_profiles = str(getattr(args, "compose_profiles", "") or "").strip()
+                if "postgres" not in {
+                    profile.strip() for profile in compose_profiles.split(",") if profile.strip()
+                }:
+                    raise RestoreError(
+                        "Postgres backend adoption requires a compose profile containing postgres"
+                    )
+                current_env["COMPOSE_PROFILES"] = compose_profiles
+        elif adopt_backend and adopt_backend != backend:
             raise RestoreError(
-                f"backup database backend {backend!r} does not match target backend {current_backend!r}"
+                f"requested backend adoption {adopt_backend!r} does not match backup backend "
+                f"{backend!r}"
             )
+        if adopt_backend == "postgres":
+            _require_empty_postgres_target(args.database_url)
 
         replacements: list[_DirectoryReplacement | _FileReplacement] = []
         try:
@@ -386,6 +447,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace-dir", default="/workspaces")
     parser.add_argument("--env-file", default="/deployment/.env")
     parser.add_argument("--database-url", default=os.environ.get("DATABASE_URL", ""))
+    parser.add_argument("--adopt-database-backend", choices=("sqlite", "postgres"), default="")
+    parser.add_argument("--compose-profiles", default="")
     parser.add_argument("--output-uid", default=os.environ.get("DARKLAB_RESTORE_OUTPUT_UID", ""))
     parser.add_argument("--output-gid", default=os.environ.get("DARKLAB_RESTORE_OUTPUT_GID", ""))
     return parser.parse_args()

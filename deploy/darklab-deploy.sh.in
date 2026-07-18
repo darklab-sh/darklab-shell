@@ -21,7 +21,8 @@ Commands:
                                  Install a verified bundle (used internally by setup.sh)
   status                         Validate managed files and show the installed release
   backup [--keep-days DAYS]      Create and verify a SQLite or Postgres backup
-  restore BACKUP                 Restore a verified backup after taking a safety backup
+  restore [--adopt-backend] BACKUP
+                                 Restore a backup; adoption allows Postgres on a fresh install
   migrate-to-postgres            Move this managed install from SQLite to bundled Postgres
   upgrade VERSION [OPTIONS]      Install an exact newer release after verifying a backup
   migration-help                 Show how to move from a repository-backed deployment
@@ -415,7 +416,6 @@ create_repository_free_backup() {
     host_gid=$(id -g)
     deployment_mount_source=$(docker_source_path "$script_dir")
     backup_mount_source=$(docker_source_path "$script_dir/backups")
-    workspace_root=$(sed -n 's/^WORKSPACE_ROOT=//p' "$script_dir/.env")
     set -- \
         --repository-free \
         --result-path-only \
@@ -425,14 +425,12 @@ create_repository_free_backup() {
         --local-conf-dir /deployment/conf \
         --compose-file /deployment/compose.yaml \
         --data-source bind:/data \
+        --workspace-root /workspaces \
+        --workspace-source bind:/workspaces \
+        --include-workspaces always \
         --postgres-dump-mode local \
         --extra-file /deployment/release-manifest.json \
         --extra-file /deployment/managed-files.sha256
-    if [ "$workspace_root" = "/workspaces" ]; then
-        set -- "$@" --workspace-root /workspaces --workspace-source bind:/workspaces
-    else
-        set -- "$@" --include-workspaces never
-    fi
     if [ -n "$keep_days" ]; then
         set -- "$@" --keep-days "$keep_days"
     fi
@@ -517,8 +515,14 @@ backup_command() {
 }
 
 restore_command() {
-    [ "$#" -eq 1 ] || fail "restore requires one backup archive path"
-    restore_archive=$1
+    [ -z "${SUDO_UID:-}" ] \
+        || fail "restore must be run without sudo as the deployment owner; Docker handles access to app-owned data"
+    adopt_backend=false
+    case "$#:${1:-}" in
+        1:*) restore_archive=$1 ;;
+        2:--adopt-backend) adopt_backend=true; restore_archive=$2 ;;
+        *) fail "restore requires [--adopt-backend] and one backup archive path" ;;
+    esac
     restore_archive_dir=$(dirname "$restore_archive")
     restore_archive_name=$(basename "$restore_archive")
     restore_archive_dir=$(CDPATH= cd "$restore_archive_dir" 2>/dev/null && pwd -P) \
@@ -528,28 +532,105 @@ restore_command() {
     env_digest_before=$(sha256_file "$script_dir/.env")
     restore_verify_stage=$(mktemp -d "${TMPDIR:-/tmp}/darklab-restore-verify.XXXXXX")
     verify_backup_archive "$restore_archive" "$restore_verify_stage"
+    backup_backend=$(sed -n \
+        's/.*"backend"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "$backup_root/manifest.json")
+    case "$backup_backend" in
+        sqlite|postgres) ;;
+        *)
+            rm -rf "$restore_verify_stage"
+            fail "backup manifest has an unsupported database backend"
+            ;;
+    esac
+    target_backend=$(env_value DATABASE_BACKEND)
+    target_backend=${target_backend:-sqlite}
+    backend_adoption=false
+    if [ "$backup_backend" != "$target_backend" ]; then
+        if [ "$adopt_backend" != true ]; then
+            rm -rf "$restore_verify_stage"
+            fail "backup database backend '$backup_backend' does not match target backend '$target_backend'; use restore --adopt-backend only for a fresh replacement install"
+        fi
+        if [ "$backup_backend" != postgres ] || [ "$target_backend" != sqlite ]; then
+            rm -rf "$restore_verify_stage"
+            fail "backend adoption currently supports a Postgres backup into a fresh SQLite install"
+        fi
+        database_url_uses_bundled_postgres \
+            || { rm -rf "$restore_verify_stage"; fail "backend adoption requires the installer-generated DATABASE_URL for bundled Postgres"; }
+        [ -n "$(env_value POSTGRES_PASSWORD)" ] \
+            || { rm -rf "$restore_verify_stage"; fail "backend adoption requires POSTGRES_PASSWORD in .env"; }
+        backend_adoption=true
+    fi
     rm -rf "$restore_verify_stage"
     safety_backup=$(create_repository_free_backup "" path)
     host_uid=$(id -u)
     host_gid=$(id -g)
     deployment_mount_source=$(docker_source_path "$script_dir")
     restore_archive_mount_source=$(docker_source_path "$restore_archive")
+    restore_compose_env="$script_dir/.env"
+    restore_compose_profiles=""
+    restore_started_postgres=false
+    if [ "$backend_adoption" = true ]; then
+        restore_compose_env=$(mktemp "$script_dir/.env.restore-postgres.XXXXXX")
+        cp "$script_dir/.env" "$restore_compose_env"
+        chmod 600 "$restore_compose_env"
+        set_env_value "$restore_compose_env" DATABASE_BACKEND postgres
+        restore_compose_profiles=$(sed -n 's/^COMPOSE_PROFILES=//p' "$restore_compose_env" | tail -n 1 | tr -d '[:space:]')
+        case ",$restore_compose_profiles," in
+            *,postgres,*) ;;
+            ,,) restore_compose_profiles=postgres ;;
+            *) restore_compose_profiles="${restore_compose_profiles},postgres" ;;
+        esac
+        set_env_value "$restore_compose_env" COMPOSE_PROFILES "$restore_compose_profiles"
+        if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" config --quiet; then
+            rm -f "$restore_compose_env"
+            fail "Postgres Compose configuration is invalid; the target was not changed"
+        fi
+        if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+            ps --status running --services postgres | grep -qx 'postgres'; then
+            if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+                up -d --wait postgres; then
+                rm -f "$restore_compose_env"
+                fail "could not start bundled Postgres for backend adoption; the target was not changed"
+            fi
+            restore_started_postgres=true
+        fi
+    fi
     docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell \
-        || fail "could not stop the app before restore"
-    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
-        run --rm --no-deps --user 0:0 --entrypoint python3 \
-        --volume "$deployment_mount_source:/deployment" \
-        --volume "$restore_archive_mount_source:/restore/backup.tar.gz:ro" \
-        shell /app/tools/restore_system.py \
+        || {
+            if [ "$restore_started_postgres" = true ]; then
+                docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+                    stop postgres >/dev/null 2>&1 || true
+            fi
+            [ "$restore_compose_env" = "$script_dir/.env" ] || rm -f "$restore_compose_env"
+            fail "could not stop the app before restore"
+        }
+    set -- \
         --archive /restore/backup.tar.gz \
         --data-dir /data \
         --local-conf-dir /deployment/conf \
         --workspace-dir /workspaces \
         --env-file /deployment/.env \
         --output-uid "$host_uid" \
-        --output-gid "$host_gid"; then
+        --output-gid "$host_gid"
+    if [ "$backend_adoption" = true ]; then
+        set -- "$@" \
+            --adopt-database-backend postgres \
+            --compose-profiles "$restore_compose_profiles"
+    fi
+    if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+        run --rm --no-deps --user 0:0 --entrypoint python3 \
+        --volume "$deployment_mount_source:/deployment" \
+        --volume "$restore_archive_mount_source:/restore/backup.tar.gz:ro" \
+        shell /app/tools/restore_system.py \
+        "$@"; then
+        if [ "$restore_started_postgres" = true ]; then
+            docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+                stop postgres >/dev/null 2>&1 || true
+        fi
+        [ "$restore_compose_env" = "$script_dir/.env" ] || rm -f "$restore_compose_env"
         fail "restore failed; the app remains stopped. Recover with: ./darklab-deploy restore \"$safety_backup\""
     fi
+    [ "$restore_compose_env" = "$script_dir/.env" ] || rm -f "$restore_compose_env"
     env_digest_after=$(sha256_file "$script_dir/.env")
     if [ "$env_digest_before" = "$env_digest_after" ]; then
         docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" up -d --wait shell \
@@ -565,6 +646,8 @@ restore_command() {
 
 migrate_to_postgres() {
     [ "$#" -eq 0 ] || fail "migrate-to-postgres does not accept options"
+    [ -z "${SUDO_UID:-}" ] \
+        || fail "migrate-to-postgres must be run without sudo as the deployment owner; Docker handles access to app-owned data"
     managed_status >/dev/null
     database_backend=$(env_value DATABASE_BACKEND)
     [ "${database_backend:-sqlite}" = "sqlite" ] \
@@ -573,8 +656,11 @@ migrate_to_postgres() {
         || fail "migrate-to-postgres requires the installer-generated DATABASE_URL for the bundled Postgres service"
     [ -n "$(env_value POSTGRES_PASSWORD)" ] \
         || fail "migrate-to-postgres requires POSTGRES_PASSWORD in .env"
-    [ -f "$script_dir/data/history.db" ] \
-        || fail "SQLite database does not exist: $script_dir/data/history.db"
+    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        run --rm --no-deps --user 0:0 --entrypoint sh shell \
+        -c 'test -f /data/history.db && test -r /data/history.db'; then
+        fail "could not verify the SQLite database inside the managed /data mount"
+    fi
 
     postgres_was_running=false
     if docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \

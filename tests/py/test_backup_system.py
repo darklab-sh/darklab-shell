@@ -445,7 +445,7 @@ def test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit(tmp_path
     conf_dir = tmp_path / "conf-volume"
     _write_config(
         conf_dir,
-        f"data_dir: {data_dir}\nworkspace_enabled: true\nworkspace_backend: volume\nworkspace_root: /workspaces\n",
+        f"data_dir: {data_dir}\nworkspace_enabled: false\nworkspace_backend: volume\nworkspace_root: /workspaces\n",
     )
     output_dir = tmp_path / "backups"
 

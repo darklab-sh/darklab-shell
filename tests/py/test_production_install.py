@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.21"
+RELEASE_VERSION = "2.6.0-rc.22"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -2585,6 +2585,12 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     captured_restore: dict[str, Any] = {}
 
     def capture_pg_restore(command, **kwargs):
+        if command[0] == "psql":
+            return SimpleNamespace(
+                returncode=0,
+                stdout=f"{captured_restore.get('postgres_table_count', 0)}\n",
+                stderr="",
+            )
         captured_restore["command"] = command
         captured_restore["env"] = kwargs["env"]
         return SimpleNamespace(returncode=0, stderr="")
@@ -2625,6 +2631,53 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     assert {(path.stat().st_uid, path.stat().st_gid) for path in restored_paths} == {
         (expected_uid, expected_gid)
     }
+
+    adoption_target = tmp_path / "adoption-target"
+    adoption_data = adoption_target / "data"
+    adoption_conf = adoption_target / "conf"
+    adoption_workspaces = adoption_target / "workspaces"
+    for directory in (adoption_data, adoption_conf, adoption_workspaces):
+        directory.mkdir(parents=True)
+    adoption_env = adoption_target / ".env"
+    adoption_env.write_text(
+        f"DARKLAB_IMAGE={_dockerhub_image(RELEASE_VERSION)}\n"
+        "DATABASE_BACKEND=sqlite\n"
+        f"DATABASE_URL={target_database_url}\n"
+        "POSTGRES_DB=target_db\n"
+        "POSTGRES_USER=target\n"
+        "POSTGRES_PASSWORD=target-password\n",
+        encoding="utf-8",
+    )
+    adoption_args = SimpleNamespace(
+        archive=str(backup),
+        data_dir=str(adoption_data),
+        local_conf_dir=str(adoption_conf),
+        workspace_dir=str(adoption_workspaces),
+        env_file=str(adoption_env),
+        database_url=target_database_url,
+        output_uid=str(expected_uid),
+        output_gid=str(expected_gid),
+        adopt_database_backend="",
+        compose_profiles="",
+    )
+    with pytest.raises(restore_helper.RestoreError, match="does not match target backend"):
+        restore_helper.restore(adoption_args)
+
+    adoption_args.adopt_database_backend = "postgres"
+    adoption_args.compose_profiles = "llama,postgres"
+    captured_restore["postgres_table_count"] = 1
+    with pytest.raises(restore_helper.RestoreError, match="fresh Postgres database"):
+        restore_helper.restore(adoption_args)
+
+    captured_restore["postgres_table_count"] = 0
+    restore_helper.restore(adoption_args)
+
+    adopted_env = adoption_env.read_text(encoding="utf-8")
+    assert "DATABASE_BACKEND=postgres" in adopted_env
+    assert "COMPOSE_PROFILES=llama,postgres" in adopted_env
+    assert f"DATABASE_URL={target_database_url}" in adopted_env
+    assert "POSTGRES_PASSWORD=target-password" in adopted_env
+    assert "source-password" not in adopted_env
 
 
 def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
@@ -2757,26 +2810,148 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
 
     log_path.unlink()
     env.pop("FAKE_RESTORE_EXIT")
-    (install_dir / "data" / "history.db").write_bytes(b"sqlite database placeholder")
-    migrated = subprocess.run(
+    data_dir = install_dir / "data"
+    (data_dir / "history.db").write_bytes(b"sqlite database placeholder")
+    env_before_migration = (install_dir / ".env").read_bytes()
+    sudo_env = {**env, "SUDO_UID": str(os.getuid()), "SUDO_GID": str(os.getgid())}
+    rejected_sudo = subprocess.run(
         [str(install_dir / "darklab-deploy"), "migrate-to-postgres"],
         cwd=install_dir,
-        env=env,
+        env=sudo_env,
         check=False,
         capture_output=True,
         text=True,
     )
+
+    assert rejected_sudo.returncode != 0
+    assert "must be run without sudo as the deployment owner" in rejected_sudo.stderr
+    assert (install_dir / ".env").read_bytes() == env_before_migration
+
+    data_dir.chmod(0)
+    try:
+        migrated = subprocess.run(
+            [str(install_dir / "darklab-deploy"), "migrate-to-postgres"],
+            cwd=install_dir,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        data_dir.chmod(0o700)
 
     assert migrated.returncode == 0, migrated.stderr
     assert "SQLite-to-Postgres migration complete" in migrated.stdout
     migrated_env = (install_dir / ".env").read_text(encoding="utf-8")
     assert "DATABASE_BACKEND=postgres" in migrated_env
     assert "COMPOSE_PROFILES=postgres" in migrated_env
+    migrated_env_stat = (install_dir / ".env").stat()
+    assert migrated_env_stat.st_uid == os.getuid()
+    assert stat.S_IMODE(migrated_env_stat.st_mode) == 0o600
     migration_log = log_path.read_text(encoding="utf-8")
     assert " up -d --wait postgres" in migration_log
+    assert (
+        "run --rm --no-deps --user 0:0 --entrypoint sh shell "
+        "-c test -f /data/history.db && test -r /data/history.db"
+    ) in migration_log
     assert "/app/tools/migrate_sqlite_to_postgres.py" in migration_log
     assert "--confirm-secrets-key --validate" in migration_log
     assert " up -d --wait --force-recreate shell" in migration_log
+
+    adoption_install = tmp_path / "backend adoption deployment"
+    adoption_installed = _run_setup(
+        payload,
+        adoption_install,
+        tmp_path / "backend-adoption-setup",
+    )
+    assert adoption_installed.returncode == 0, adoption_installed.stderr
+    postgres_backup_source = _build_verified_backup(
+        tmp_path / "postgres-backup-source",
+        backend="postgres",
+    )
+    postgres_backup = adoption_install / "backups" / "postgres-restore-test.tar.gz"
+    shutil.copy2(postgres_backup_source, postgres_backup)
+    adoption_daemon_dir = tmp_path / "backend-adoption-daemon"
+    adoption_daemon_dir.symlink_to(adoption_install, target_is_directory=True)
+    adoption_lifecycle_dir = tmp_path / "backend-adoption-lifecycle"
+    adoption_lifecycle_dir.mkdir()
+    adoption_bin_dir, adoption_log_path = _fake_docker(adoption_lifecycle_dir)
+    adoption_env = os.environ.copy()
+    adoption_env.update({
+        "FAKE_BACKUP_ARCHIVE": str(postgres_backup),
+        "FAKE_DOCKER_LOG": str(adoption_log_path),
+        "FAKE_RESTORE_ENV_APPEND": (
+            "DATABASE_BACKEND=postgres\nCOMPOSE_PROFILES=postgres"
+        ),
+        "DARKLAB_DEPLOY_DOCKER_ROOT": str(adoption_daemon_dir),
+        "PATH": f"{adoption_bin_dir}{os.pathsep}{adoption_env['PATH']}",
+    })
+
+    rejected_sudo_restore = subprocess.run(
+        [
+            str(adoption_install / "darklab-deploy"),
+            "restore",
+            "--adopt-backend",
+            postgres_backup.relative_to(adoption_install).as_posix(),
+        ],
+        cwd=adoption_install,
+        env={
+            **adoption_env,
+            "SUDO_UID": str(os.getuid()),
+            "SUDO_GID": str(os.getgid()),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert rejected_sudo_restore.returncode != 0
+    assert "must be run without sudo as the deployment owner" in rejected_sudo_restore.stderr
+    assert not adoption_log_path.exists()
+
+    guarded_restore = subprocess.run(
+        [
+            str(adoption_install / "darklab-deploy"),
+            "restore",
+            postgres_backup.relative_to(adoption_install).as_posix(),
+        ],
+        cwd=adoption_install,
+        env=adoption_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert guarded_restore.returncode != 0
+    assert "use restore --adopt-backend" in guarded_restore.stderr
+    assert not adoption_log_path.exists()
+
+    adopted_restore = subprocess.run(
+        [
+            str(adoption_install / "darklab-deploy"),
+            "restore",
+            "--adopt-backend",
+            postgres_backup.relative_to(adoption_install).as_posix(),
+        ],
+        cwd=adoption_install,
+        env=adoption_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert adopted_restore.returncode == 0, adopted_restore.stderr
+    adopted_install_env = (adoption_install / ".env").read_text(encoding="utf-8")
+    assert "DATABASE_BACKEND=postgres" in adopted_install_env
+    assert "COMPOSE_PROFILES=postgres" in adopted_install_env
+    adoption_log = adoption_log_path.read_text(encoding="utf-8")
+    postgres_start = adoption_log.index(" up -d --wait postgres")
+    shell_stop = adoption_log.index(" stop shell")
+    assert postgres_start < shell_stop
+    assert "--adopt-database-backend postgres" in adoption_log
+    assert "--compose-profiles postgres" in adoption_log
+    assert " up -d --wait --force-recreate shell" in adoption_log
+    assert not list(adoption_install.glob(".env.restore-postgres.*"))
 
 
 def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_path: Path):
@@ -3127,7 +3302,12 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         if relative_path != ".env":
             assert (install_dir / relative_path).read_text(encoding="utf-8") == content
 
-    postgres_env_text = f"{env_text}DATABASE_BACKEND=postgres\n"
+    postgres_env_text = (
+        f"{env_text}DATABASE_BACKEND=postgres\n"
+        " WORKSPACE_ENABLED=true\n"
+        " WORKSPACE_BACKEND=volume\n"
+        " WORKSPACE_ROOT=/workspaces\n"
+    )
     (install_dir / ".env").write_text(postgres_env_text, encoding="utf-8")
     log_path.write_text("", encoding="utf-8")
     stopped_postgres_backup = subprocess.run(
@@ -3148,6 +3328,11 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         index for index, line in enumerate(stopped_postgres_log)
         if "/app/tools/backup_system.py" in line
     )
+    postgres_backup_command = stopped_postgres_log[postgres_backup]
+    assert "--workspace-root /workspaces" in postgres_backup_command
+    assert "--workspace-source bind:/workspaces" in postgres_backup_command
+    assert "--include-workspaces always" in postgres_backup_command
+    assert "--include-workspaces never" not in postgres_backup_command
     postgres_stop = next(
         index for index, line in enumerate(stopped_postgres_log)
         if " stop postgres" in line
